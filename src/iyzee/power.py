@@ -1,20 +1,12 @@
-from base import CH, IP, BaseDevice
+from .base import BaseDevice, CH, IP
 
 
 class PSU(BaseDevice):
-    """
-    This class represents the ROHDE&SCHWARZ power supply HMP4040.
-
-    Manual can be downloaded here:
-    https://scdn.rohde-schwarz.com/ur/pws/dl_downloads/pdm/cl_manuals/user_manual/1178_6833_01/HMPSeries_UserManual_en_05.pdf
-    """
+    """Rohde & Schwarz HMP4040 power-supply controller."""
 
     def open(self):
-        self.port: int = 5025
-        constr = f"TCPIP::{self.ip}::{self.port}::SOCKET"
-        print(constr)
-
-        return self.rm.open_resource(constr)
+        port = 5025
+        return self.rm.open_resource(f"TCPIP::{self.ip}::{port}::SOCKET")
 
     def set_voltage(self, voltage: float, channel: CH):
         self.instrument.write(f"INST:NSEL {channel}")
@@ -36,18 +28,19 @@ class PSU(BaseDevice):
         self.instrument.write("OUTP:GEN 1")
 
     def disable_global_output(self):
-        self.instrument.write("OUTP:GEN 1")
+        self.instrument.write("OUTP:GEN 0")
 
 
 class ShutterControl:
-    def __init__(self, chan=CH.THREE, ip=IP.POWER_SUPPLY):
-        psu = PSU(ip=ip)
+    """Control the optical shutter connected to a PSU channel."""
 
-        # shutter needs at least ~2V to trigger
-        psu.set_voltage(1.7, chan)
-        psu.set_current(0.01, chan)
-        self.psu = psu
+    def __init__(self, chan: CH = CH.THREE, ip: IP = IP.POWER_SUPPLY):
+        self.psu = PSU(ip=ip)
         self.chan = chan
+
+        # Shutter needs at least ~2 V to trigger.
+        self.psu.set_voltage(1.7, chan)
+        self.psu.set_current(0.01, chan)
 
     def open(self):
         self.psu.enable_output(self.chan)
