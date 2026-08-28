@@ -3,7 +3,7 @@ from typing import List, Optional
 
 import pyvisa
 
-from base import IP
+from iyzee import IP
 
 
 class KeysightMXA:
@@ -82,7 +82,7 @@ class KeysightMXA:
 
     def query_binary(
         self, cmd: str, datatype: str = "f", is_big_endian: bool = True
-    ) -> List[float]:
+    ) -> list[float]:
         """
         Query binary IEEE 488.2 block data.
         datatype='f' (float32) or 'd' (float64).
@@ -116,7 +116,7 @@ class KeysightMXA:
         finally:
             self.instr.timeout = old_timeout
 
-    def get_errors(self) -> List[str]:
+    def get_errors(self) -> list[str]:
         """Drain the SCPI error queue."""
         errs = []
         while True:
@@ -157,13 +157,13 @@ class KeysightMXA:
     def set_attenuation_auto(self, state: bool = True):
         self.write(f'POW:ATT:AUTO {"ON" if state else "OFF"}')
 
-    def set_rbw(self, rbw_hz: Optional[float] = None, auto: bool = False):
+    def set_rbw(self, rbw_hz: float | None = None, auto: bool = False):
         if auto or rbw_hz is None:
             self.write("BWID:AUTO ON")
         else:
             self.write(f"BWID {rbw_hz}")
 
-    def set_vbw(self, vbw_hz: Optional[float] = None, auto: bool = False):
+    def set_vbw(self, vbw_hz: float | None = None, auto: bool = False):
         if auto or vbw_hz is None:
             self.write("BWID:VID:AUTO ON")
         else:
@@ -239,7 +239,7 @@ class KeysightMXA:
     #         resp = self.query(f"{trace}:DATA? {trace}")
     #         return [float(x) for x in resp.split(",")]
 
-    def get_frequency_axis(self) -> List[float]:
+    def get_frequency_axis(self) -> list[float]:
         """Return frequency value for each trace point (linear sweep)."""
         start = float(self.query("FREQ:STAR?"))
         stop = float(self.query("FREQ:STOP?"))
@@ -291,7 +291,7 @@ class KeysightMXA:
     # def exchange_traces(self, trace_a: int, trace_b: int):
     #     self.write(f":TRACe{trace_a}:EXCHange TRACe{trace_b}")
     #
-    def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> List[float]:
+    def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> list[float]:
         if binary:
             # TODO: binary currently borken, there is no query binary value method.
             self.write("FORMat:DATA REAL,32")
@@ -426,7 +426,7 @@ class KeysightMXA:
         self,
         center_hz: float,
         span_hz: float,
-        rbw_hz: Optional[float] = None,
+        rbw_hz: float | None = None,
         use_rms: bool = True,
         avg_count: int = 10,
     ):

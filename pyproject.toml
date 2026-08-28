@@ -9,7 +9,13 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "ipython>=9.17.0",
+    "matplotlib>=3.11.1",
+    "numpy>=2.5.2",
+    "pandas>=3.0.5",
     "pip>=26.2.1",
+    "pytest>=9.1.1",
+    "pyvisa>=1.16.2",
+    "tabulate>=0.10.0",
 ]
 
 [project.optional-dependencies]

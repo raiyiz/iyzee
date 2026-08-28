@@ -1,4 +1,4 @@
-from .base import BaseDevice, CH, IP
+from iyzee import CH, IP, BaseDevice
 
 
 class PSU(BaseDevice):

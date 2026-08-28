@@ -1,10 +1,9 @@
 import numpy as np
-
-from main import create_dirs, save_data
+from iyzee.main import create_dirs, save_data
 
 
 def test_save_data_round_trip(tmp_path):
-    data = [(1.0, [1.0, 2.0], [3.0, 4.0])]
+    data = [[1.0, [1.0, 2.0], [3.0, 4.0]]]
     path = save_data(data, tmp_path)
 
     assert path.suffix == ".npz"

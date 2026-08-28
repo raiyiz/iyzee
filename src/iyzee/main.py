@@ -4,11 +4,11 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-
-from base import IP
 from mxa import KeysightMXA
 from power import ShutterControl
 from wavemeter_readout import set_pid_setpoint
+
+from iyzee import IP
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
