@@ -15,7 +15,9 @@ def test_save_data_round_trip(tmp_path):
 
 def test_create_dirs_is_idempotent(tmp_path, monkeypatch):
     monkeypatch.setattr("main.Path", lambda *args: tmp_path)
-    # Exercise the directory behavior directly instead of touching the repo.
-    directory = tmp_path / "data" / "test" / "measurement"
-    directory.mkdir(parents=True, exist_ok=True)
-    assert directory.is_dir()
+
+    first = create_dirs("measurement")
+    second = create_dirs("measurement")
+
+    assert first == second
+    assert first.is_dir()
