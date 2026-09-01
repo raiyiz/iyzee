@@ -75,4 +75,21 @@ jobs:
           cache-dependency-path: docs/requirements.typ
 
       - name: Compile Typst documentation
-        run: typst compile docs/cleanup-summary.typ /tmp/cleanup-summary.pdf
+        run: |
+          set -euo pipefail
+          mkdir -p build/docs
+          for source in docs/*.typ; do
+            case "$source" in
+              docs/requirements.typ) continue ;;
+            esac
+            output="build/docs/$(basename "${source%.typ}").pdf"
+            typst compile "$source" "$output"
+          done
+
+      - name: Upload compiled documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: iyzee-documentation
+          path: build/docs/*.pdf
+          if-no-files-found: error
+          retention-days: 30
