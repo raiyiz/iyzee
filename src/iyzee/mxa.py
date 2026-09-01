@@ -1,12 +1,12 @@
 import time
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import pyvisa
 
-from iyzee import IP
+from iyzee import BaseDevice, IP
 
 
-class KeysightMXA:
+class KeysightMXA(BaseDevice):
     """
     PyVISA controller for Keysight X-Series MXA Signal Analyzers.
     Optimized for noise analysis workflows: trace control, markers,
@@ -44,51 +44,27 @@ class KeysightMXA:
     }
 
     def __init__(self, ip: IP = IP.NOISE_ANALYZER, timeout_ms: int = 5_000, resource_manager=None):
-        self.timeout_ms = timeout_ms
-        self.rm = resource_manager or pyvisa.ResourceManager()
-        self.visa_address = f"TCPIP0::{ip}::inst0::INSTR"
-        self.instr: Any = None
-        self.connect()
-
-    # ------------------------------------------------------------------
-    # Connection Lifecycle
-    # ------------------------------------------------------------------
-    def connect(self) -> None:
-        """Open the VISA resource once; repeated calls reuse it."""
-        if self.instr is not None:
-            return
-        self.instr = self.rm.open_resource(self.visa_address)
-        self.instr.timeout = self.timeout_ms
-        self.instr.read_termination = "\n"
-        self.instr.write_termination = "\n"
-
-    def close(self) -> None:
-        """Close the VISA resource if it is open."""
-        if self.instr is not None:
-            self.instr.close()
-            self.instr = None
+        super().__init__(
+            ip=ip,
+            resource_manager=resource_manager,
+            timeout_ms=timeout_ms,
+            read_termination="\n",
+            write_termination="\n",
+        )
 
     def disconnect(self) -> None:
         """Backward-compatible alias for :meth:`close`."""
         self.close()
 
-    def __enter__(self):
-        self.connect()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-        return False
-
     def write(self, cmd: str):
-        if self.instr is None:
+        if self.instrument is None:
             raise RuntimeError("Instrument not connected")
-        self.instr.write(cmd)
+        self.instrument.write(cmd)
 
     def query(self, cmd: str) -> str:
-        if self.instr is None:
+        if self.instrument is None:
             raise RuntimeError("Instrument not connected")
-        return self.instr.query(cmd)
+        return self.instrument.query(cmd)
 
     def query_binary(
         self, cmd: str, datatype: str = "f", is_big_endian: bool = True
@@ -97,9 +73,9 @@ class KeysightMXA:
         Query binary IEEE 488.2 block data.
         datatype='f' (float32) or 'd' (float64).
         """
-        if self.instr is None:
+        if self.instrument is None:
             raise RuntimeError("Instrument not connected")
-        return self.instr.query_binary_values(
+        return self.instrument.query_binary_values(
             cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
         )
 
@@ -116,15 +92,17 @@ class KeysightMXA:
 
     def wait_opc(self, timeout_sec: float = 30.0) -> bool:
         """Block until *OPC? explicitly returns 1."""
-        old_timeout = self.instr.timeout
-        self.instr.timeout = int(timeout_sec * 1000)
+        if self.instrument is None:
+            raise RuntimeError("Instrument not connected")
+        old_timeout = self.instrument.timeout
+        self.instrument.timeout = int(timeout_sec * 1000)
         try:
             response = self.query("*OPC?").strip()
             return response == "1"
         except pyvisa.errors.VisaIOError:
             return False
         finally:
-            self.instr.timeout = old_timeout
+            self.instrument.timeout = old_timeout
 
     def get_errors(self) -> list[str]:
         """Drain the SCPI error queue."""
@@ -393,7 +371,6 @@ class KeysightMXA:
         - Power averaging
         - Single sweep (caller must re-trigger for each acquisition)
         """
-        # self.reset()
         self.set_center_freq(center_hz)
         self.set_span(span_hz)
         self.set_rbw(rbw_hz, auto=(rbw_hz is None))
@@ -424,7 +401,3 @@ class KeysightMXA:
         self.set_trace_mode(trace_dut, "AVER")
         self.set_average_count(avg_count)
         self.single_sweep_wait()
-
-        # POW = power subtraction (10*log10(10^(T1/10) - 10^(T2/10)))
-        # self.set_trace_math(trace_result, "POW", trace_dut, trace_cal)
-        # self.set_trace_mode(trace_result, "VIEW")
