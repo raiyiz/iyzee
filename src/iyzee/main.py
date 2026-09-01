@@ -1,4 +1,5 @@
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -15,31 +16,33 @@ TRACE_SQZ = 1
 TRACE_SHOT = 2
 
 
-DEFAULT_ANALYZER_PARAMS = {
-    "center_hz": 1e6,
-    "span_hz": 0,
-    "avg_count": 100,
-    "sweep_duration_ms": 10,
-    "res_bw": 10e3,
-    "avg_type": "LOG",
-    "trig_source": "EXT",
-}
+@dataclass(slots=True)
+class AnalyzerConfig:
+    """Typed configuration for an MXA measurement setup."""
+
+    center_hz: float = 1e6
+    span_hz: float = 0
+    avg_count: int = 100
+    sweep_duration_ms: int = 10
+    res_bw_hz: float = 10e3
+    avg_type: str = "LOG"
+    trig_source: str = "EXT"
 
 
-def prepare_analyzer(traces, **overrides):
+def prepare_analyzer(traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
     """Create and configure an MXA for a measurement procedure."""
-    params = {**DEFAULT_ANALYZER_PARAMS, **overrides}
+    config = config or AnalyzerConfig()
     mx = KeysightMXA(ip=IP.NOISE_ANALYZER)
 
-    mx.set_center_freq(params["center_hz"])
-    mx.set_span(params["span_hz"])
-    mx.set_rbw(params["res_bw"])
-    mx.set_vbw(params["res_bw"], auto=True)
+    mx.set_center_freq(config.center_hz)
+    mx.set_span(config.span_hz)
+    mx.set_rbw(config.res_bw_hz)
+    mx.set_vbw(config.res_bw_hz, auto=True)
     mx.set_attenuation_auto(True)
-    mx.set_trigger_source(params["trig_source"])
-    mx.set_sweep_duration(params["sweep_duration_ms"])
-    mx.set_average_count(params["avg_count"])
-    mx.set_average_type(params["avg_type"])
+    mx.set_trigger_source(config.trig_source)
+    mx.set_sweep_duration(config.sweep_duration_ms)
+    mx.set_average_count(config.avg_count)
+    mx.set_average_type(config.avg_type)
 
     for trace in traces:
         mx.set_trace_display(trace, True)
@@ -60,14 +63,14 @@ def acquire_trace(mx, trace_num):
 
 def record_bw_seq():
     """Measure squeezing/shot-noise traces while scanning RBW."""
-    params = {
-        "center_hz": 1.5e6,
-        "span_hz": 1e5,
-        "avg_count": 300,
-        "sweep_duration_ms": 10,
-        "res_bw": 24e3,
-    }
-    mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), **params)
+    config = AnalyzerConfig(
+        center_hz=1.5e6,
+        span_hz=1e5,
+        avg_count=300,
+        sweep_duration_ms=10,
+        res_bw_hz=24e3,
+    )
+    mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), config)
     data = []
 
     try:
@@ -87,18 +90,18 @@ def record_bw_seq():
 
 def record_freq_seq():
     """Measure squeezing/shot-noise traces while scanning laser frequency."""
-    params = {
-        "center_hz": 1.5e6,
-        "span_hz": 0,
-        "avg_count": 150,
-        "sweep_duration_ms": 10,
-        "res_bw": 24e3,
-    }
+    config = AnalyzerConfig(
+        center_hz=1.5e6,
+        span_hz=0,
+        avg_count=150,
+        sweep_duration_ms=10,
+        res_bw_hz=24e3,
+    )
     laser_center_thz = 377.1052067
     wavemeter_channel = 1
-    relax_time_s = params["sweep_duration_ms"] * params["avg_count"] / 1000
+    relax_time_s = config.sweep_duration_ms * config.avg_count / 1000
 
-    mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), **params)
+    mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), config)
     data = []
 
     try:
