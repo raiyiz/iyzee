@@ -1,5 +1,5 @@
-import wavemeter_readout
 import pytest
+import wavemeter_readout
 
 
 class FakeResponse:
