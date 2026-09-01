@@ -43,9 +43,9 @@ class KeysightMXA:
         "FRAM": "Frame",
     }
 
-    def __init__(self, ip: IP.NOISE_ANALYZER, timeout_ms: int = 5_000):
+    def __init__(self, ip: IP.NOISE_ANALYZER, timeout_ms: int = 5_000, resource_manager=None):
         self.timeout_ms = timeout_ms
-        self.rm = pyvisa.ResourceManager()
+        self.rm = resource_manager or pyvisa.ResourceManager()
         self.visa_address = f"TCPIP0::{ip}::inst0::INSTR"
         self.instr = None
         self.connect()
