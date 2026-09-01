@@ -26,9 +26,9 @@ class IP(StrEnum):
 class BaseDevice:
     """Common VISA connection handling for laboratory instruments."""
 
-    def __init__(self, ip: IP | None = None):
+    def __init__(self, ip: IP | None = None, resource_manager=None):
         self.ip = ip
-        self.rm = pyvisa.ResourceManager()
+        self.rm = resource_manager or pyvisa.ResourceManager()
         self.instrument = None
         self.connect()
 
