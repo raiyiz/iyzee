@@ -3,7 +3,7 @@ from typing import ClassVar
 
 import pyvisa
 
-from iyzee import BaseDevice, IP
+from iyzee import IP, BaseDevice
 
 
 class KeysightMXA(BaseDevice):
