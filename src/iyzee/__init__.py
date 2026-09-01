@@ -29,11 +29,18 @@ class BaseDevice:
     def __init__(self, ip: IP | None = None):
         self.ip = ip
         self.rm = pyvisa.ResourceManager()
-        self.instrument = self.open()
-        self.instrument.timeout = 10_000
+        self.instrument = None
+        self.connect()
 
     def open(self):
         return self.rm.open_resource(f"TCPIP0::{self.ip}::inst0::INSTR")
+
+    def connect(self) -> None:
+        """Open the device once; repeated calls reuse the existing resource."""
+        if self.instrument is not None:
+            return
+        self.instrument = self.open()
+        self.instrument.timeout = 10_000
 
     def close(self) -> None:
         """Close the VISA resource, if it is open."""
@@ -43,9 +50,7 @@ class BaseDevice:
 
     def __enter__(self):
         """Return an open device for use in a context manager."""
-        if self.instrument is None:
-            self.instrument = self.open()
-            self.instrument.timeout = 10_000
+        self.connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
