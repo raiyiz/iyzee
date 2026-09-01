@@ -1,5 +1,6 @@
 import pytest
-import wavemeter_readout
+
+import iyzee.wavemeter_readout as wavemeter_readout
 
 
 class FakeResponse:

@@ -1,6 +1,6 @@
 import socket
 import struct  # for unpacking c structs
-from ctypes import Structure, c_int, c_ubyte, sizeof
+from ctypes import Structure, c_int, c_ubyte
 
 import numpy as np
 
@@ -32,8 +32,7 @@ class LeCroy:
     connect(IP) : after initializing to connect
     disconnect() : to end communication
     send(message) : message to device (commands, etc.)
-    readOld() : old implementation of read message back from device, not tested lately
-    readAll() : newer implementation, might not be robust, returns ascii string
+    readAll() : read a full framed response from the device, returns ascii string
 
     getDataBytes(channel="C1", block="DAT1"): binary data download, 8-bit
     getDataWords(channel="C1", block="DAT1"): binary data download, 16-bit
@@ -53,6 +52,22 @@ class LeCroy:
         # In future consider setting blocking connecting for socket
         # socket.socket.setblocking(False) # blocking by select
         # socket.socket.settimeout(SOCK_TIMEOUT)
+
+    @staticmethod
+    def _recv_exact(sock: socket.socket, num_bytes: int) -> bytes:
+        """Read exactly ``num_bytes`` from ``sock``.
+
+        A single ``socket.recv()`` call is not guaranteed to return all the
+        bytes that are available/requested; it may return fewer. Loop until
+        the requested number of bytes has actually been received.
+        """
+        chunks = bytearray()
+        while len(chunks) < num_bytes:
+            chunk = sock.recv(num_bytes - len(chunks))
+            if not chunk:
+                raise ConnectionError(f"Socket closed after {len(chunks)}/{num_bytes} bytes")
+            chunks.extend(chunk)
+        return bytes(chunks)
 
     def connect(self, IP, delayval=3.0):
         """Connect to the IP, using LeCroy.LECROY_SERVER_PORT as port
@@ -92,7 +107,7 @@ class LeCroy:
         )
 
         # write the header first
-        self.s.send(head)
+        self.s.send(bytes(head))
 
         # write the message
         byteindx = 0
@@ -102,50 +117,6 @@ class LeCroy:
             if xferd < 0:
                 raise RuntimeError(f"could not write the data block, returned {xferd}")
             byteindx += xferd
-
-    def readOld(self):
-        """Old implementation of read function which could prove more robust
-        but is untested as of now
-        """
-        if not self.CONNECTED:
-            return -1
-
-        # loop until header gives EOI flag
-        while True:
-            # block here until data is received or times out
-            # ready = select.select([self.s], [], [], self.SOCK_TIMEOUT)
-            # if ready[0]:
-            if True:
-                head = LECROY_TCP_HEADER()
-                data = ""
-                datalen = 0
-                # gather the header
-                while datalen < sizeof(head):
-                    data += self.s.recv(sizeof(head) - datalen)
-                    datalen = len(data)
-                # find the actual data length from header
-                headdata = struct.unpack("B3BI", data)  # get response (header from device)
-                datalen = socket.ntohl(headdata[-1])  # data length to be captured
-                if datalen < 1:
-                    return 0
-
-                # gather the sent data
-                xferd = 0
-                bufbytes = ""
-                # print("got headdata {}".format(headdata[0]))
-                while xferd < datalen:
-                    bufbytes += self.s.recv(datalen - xferd).decode("ascii")
-                    xferd = len(bufbytes)
-                # break
-                # detect if it was last header + transmission
-                # yes: break out of loop
-                # NB! test this with machine before committing!
-                if headdata[0] == (self.LECROY_DATA_FLAG | self.LECROY_EOI_FLAG):
-                    return bufbytes
-
-            else:
-                print("read timed out")
-                return -1
 
     def __translate(self, data):
         """Takes the device header (data) and finds the flag and data length
@@ -163,7 +134,7 @@ class LeCroy:
         Receive a 8-byte header from socket LeCroy.s
         translate it and return the (eofflag, datalen)
         """
-        data = self.s.recv(8)
+        data = self._recv_exact(self.s, 8)
         return self.__translate(data)
 
     def readAll(self):
@@ -176,7 +147,7 @@ class LeCroy:
         dtstr = ""
         while True:
             flg, lnt = self.__getHeader()  # find how
-            dtstr += self.s.recv(lnt).decode("ascii")  # gather data
+            dtstr += self._recv_exact(self.s, lnt).decode("ascii")  # gather data
             if flg != self.LECROY_DATA_FLAG:  # data flag 0x80
                 break
         return flg, dtstr
@@ -192,22 +163,19 @@ class LeCroy:
         self.send("CFMT DEF9,BYTE,BIN")  # by 1 byte, binary
         # gets all the data of specified block on specified channel (waveform)
         self.send(f"{channel}:WF? {block}")
-        self.s.recv(38)  # two data lines with headers 2*(8+11) characters
+        self._recv_exact(self.s, 38)  # two data lines with headers 2*(8+11) characters
         dta = b""
         while True:
-            dta1 = b""
             flg, aln = self.__getHeader()
             if flg != self.LECROY_DATA_FLAG:
-                en = self.s.recv(aln)
+                en = self._recv_exact(self.s, aln)
                 if en != b"\n":
                     print(
                         f"unexpected return, instead newline got {en} \n next length was {aln}, flag {flg}"
                     )
                 break
             # loop until all aln data is transferred
-            while len(dta1) < aln:
-                dta1 += self.s.recv(aln - len(dta1))
-            dta += dta1
+            dta += self._recv_exact(self.s, aln)
         # aa = [struct.unpack("b", ov) for ov in dta]
         aa = [iup for iup in struct.iter_unpack("b", dta)]
         return aa
@@ -231,7 +199,7 @@ class LeCroy:
         # followed by #9 xxxx xxxxx where x are 9 numbers to give len. of bin. blck
         # so ... #9002000004 means 2000004 bytes in binary array
         # or in our (2-byte word) case 1 000 002 numbers
-        rethead = self.s.recv(38)  # two data lines with headers 2*(8+11) characters
+        rethead = self._recv_exact(self.s, 38)  # two data lines with headers 2*(8+11) characters
 
         if rethead[-11:-9] != b"#9":
             # we are not in a correct place, abort!
@@ -245,11 +213,10 @@ class LeCroy:
         # accumulate the data from the socket
         dta = b""  # bytes data accumulator
         while True:
-            dta1 = b""  # local accumulator (smaller chunks)
             flg, alen = self.__getHeader()  # flg=LECROY_DATA_FLAG : more data coming
             if flg != self.LECROY_DATA_FLAG:
                 # no more data expected
-                en = self.s.recv(alen)
+                en = self._recv_exact(self.s, alen)
                 # does it end correctly
                 if en != b"\n":
                     print(
@@ -257,9 +224,7 @@ class LeCroy:
                     )
                 break
             # loop until all alen data is transferred
-            while len(dta1) < alen:
-                dta1 += self.s.recv(alen - len(dta1))
-            dta += dta1  # if the local accum. is done, only then append
+            dta += self._recv_exact(self.s, alen)  # if the local accum. is done, only then append
 
         # we have byte values now
         # check if the length is correct

@@ -182,10 +182,9 @@ def track_frequency(total_time, time_step, save_path, channel, reference_f=0, sa
         try:  # readout laser frequency and plot laser detuning or absolute laser frequency
             ls_frequency = (
                 float(
-                    urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/")
+                    urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=2)
                     .read()
-                    .decode("ascii"),
-                    timeout=2,
+                    .decode("ascii")
                 )
                 - reference_f
             )

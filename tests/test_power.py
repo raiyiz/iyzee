@@ -1,6 +1,5 @@
-from power import PSU
-
 from iyzee import CH, IP
+from iyzee.power import PSU
 
 
 class FakeInstrument:

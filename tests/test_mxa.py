@@ -1,6 +1,7 @@
-import mxa as mxa_module
 import pytest
-from mxa import KeysightMXA
+
+import iyzee.mxa as mxa_module
+from iyzee.mxa import KeysightMXA
 
 
 class FakeInstrument:
