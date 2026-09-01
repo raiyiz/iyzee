@@ -121,14 +121,14 @@ class KeysightMXA:
         errs = []
         while True:
             msg = self.query("SYST:ERR?")
-            if msg.startswith("+0,") or msg.startswith("0,"):
+            if msg.startswith(("+0,", "0,")):
                 break
             errs.append(msg)
         return errs
 
     def set_display_update(self, state: bool):
         """Disable display updates to improve remote measurement speed."""
-        self.write(f'DISP:ENAB {"ON" if state else "OFF"}')
+        self.write(f"DISP:ENAB {'ON' if state else 'OFF'}")
 
     # ------------------------------------------------------------------
     # Frequency / Amplitude / Bandwidth
@@ -155,7 +155,7 @@ class KeysightMXA:
         self.write(f"POW:ATT {att_db}")
 
     def set_attenuation_auto(self, state: bool = True):
-        self.write(f'POW:ATT:AUTO {"ON" if state else "OFF"}')
+        self.write(f"POW:ATT:AUTO {'ON' if state else 'OFF'}")
 
     def set_rbw(self, rbw_hz: float | None = None, auto: bool = False):
         if auto or rbw_hz is None:
@@ -193,7 +193,7 @@ class KeysightMXA:
         return int(self.query("SWE:POIN?"))
 
     def set_continuous_sweep(self, state: bool):
-        self.write(f'INIT:CONT {"ON" if state else "OFF"}')
+        self.write(f"INIT:CONT {'ON' if state else 'OFF'}")
 
     def initiate_sweep(self):
         """Start a sweep immediately (use with INIT:CONT OFF)."""
@@ -249,9 +249,7 @@ class KeysightMXA:
         step = (stop - start) / (pts - 1)
         return [start + i * step for i in range(pts)]
 
-    def _set_trace_math(
-        self, result: str, operation: str, operand1: str, operand2: str
-    ):
+    def _set_trace_math(self, result: str, operation: str, operand1: str, operand2: str):
         """
         Perform trace math (e.g., phase noise cancellation).
         Example: result='TRACE3', operation='POW',
@@ -328,7 +326,7 @@ class KeysightMXA:
     # ------------------------------------------------------------------
     def set_marker_state(self, marker: int, state: bool):
         """marker: 1-12."""
-        self.write(f'CALC:MARK{marker}:STAT {"ON" if state else "OFF"}')
+        self.write(f"CALC:MARK{marker}:STAT {'ON' if state else 'OFF'}")
 
     def set_marker_mode(self, marker: int, mode: str):
         """

@@ -23,7 +23,7 @@ LECROY_REMOTE_FLAG = 0x40
 LECROY_DATA_FLAG = 0x80
 
 
-class LeCroy(object):
+class LeCroy:
     """
     Class for remote control and download of LeCroy oscilloscope data
     tested for WaveSurfer 452
@@ -100,9 +100,7 @@ class LeCroy(object):
         while byteindx < msglen:
             xferd = self.s.send(msgbytes[byteindx:])
             if xferd < 0:
-                raise RuntimeError(
-                    "could not write the data block, returned {}".format(xferd)
-                )
+                raise RuntimeError(f"could not write the data block, returned {xferd}")
             byteindx += xferd
 
     def readOld(self):
@@ -118,7 +116,6 @@ class LeCroy(object):
             # ready = select.select([self.s], [], [], self.SOCK_TIMEOUT)
             # if ready[0]:
             if True:
-
                 head = LECROY_TCP_HEADER()
                 data = ""
                 datalen = 0
@@ -127,9 +124,7 @@ class LeCroy(object):
                     data += self.s.recv(sizeof(head) - datalen)
                     datalen = len(data)
                 # find the actual data length from header
-                headdata = struct.unpack(
-                    "B3BI", data
-                )  # get response (header from device)
+                headdata = struct.unpack("B3BI", data)  # get response (header from device)
                 datalen = socket.ntohl(headdata[-1])  # data length to be captured
                 if datalen < 1:
                     return 0
@@ -196,7 +191,7 @@ class LeCroy(object):
         """
         self.send("CFMT DEF9,BYTE,BIN")  # by 1 byte, binary
         # gets all the data of specified block on specified channel (waveform)
-        self.send("{}:WF? {}".format(channel, block))
+        self.send(f"{channel}:WF? {block}")
         self.s.recv(38)  # two data lines with headers 2*(8+11) characters
         dta = b""
         while True:
@@ -206,9 +201,7 @@ class LeCroy(object):
                 en = self.s.recv(aln)
                 if en != b"\n":
                     print(
-                        "unexpected return, instead newline got {} \n next length was {}, flag {}".format(
-                            en, aln, flg
-                        )
+                        f"unexpected return, instead newline got {en} \n next length was {aln}, flag {flg}"
                     )
                 break
             # loop until all aln data is transferred
@@ -232,9 +225,7 @@ class LeCroy(object):
         """
 
         self.send("CFMT DEF9,WORD,BIN")  # by 2-byte word
-        self.send(
-            "{}:WF? {}".format(channel, block)
-        )  # gets all the data on C2 waveform data
+        self.send(f"{channel}:WF? {block}")  # gets all the data on C2 waveform data
         self.send("CORD LO")  # <LSB><MSB>
         # rethead : first 10 bytes ascii string (like response)
         # followed by #9 xxxx xxxxx where x are 9 numbers to give len. of bin. blck
@@ -262,9 +253,7 @@ class LeCroy(object):
                 # does it end correctly
                 if en != b"\n":
                     print(
-                        "unexpected return, instead newline got {} \n next length was {}, flag {}".format(
-                            en, alen, flg
-                        )
+                        f"unexpected return, instead newline got {en} \n next length was {alen}, flag {flg}"
                     )
                 break
             # loop until all alen data is transferred
@@ -275,10 +264,8 @@ class LeCroy(object):
         # we have byte values now
         # check if the length is correct
         if len(dta) != exp_bytes:
-            raise AssertionError(
-                "Expected {} bytes, got {}".format(exp_bytes, len(dta))
-            )
-        return struct.unpack("<{}h".format(len(dta) // 2), dta)
+            raise AssertionError(f"Expected {exp_bytes} bytes, got {len(dta)}")
+        return struct.unpack(f"<{len(dta) // 2}h", dta)
 
     def getDataFloats(self, channel="C1", block="DAT1"):
         """
@@ -291,16 +278,16 @@ class LeCroy(object):
         """
         word_values = np.array(self.getDataWords(channel=channel, block=block))
         # get vertical offset
-        self.send('{}:INSPECT? "VERTICAL_OFFSET"'.format(channel))
+        self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
         r1, r2 = self.readAll()
         VOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
         # get vertical gain
-        self.send('{}:INSPECT? "VERTICAL_GAIN"'.format(channel))
+        self.send(f'{channel}:INSPECT? "VERTICAL_GAIN"')
         r1, r2 = self.readAll()
         VG = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
         # get vertical unit
-        self.send('{}:INSPECT? "VERTUNIT"'.format(channel))
-        r1, r2 = self.readAll()
+        self.send(f'{channel}:INSPECT? "VERTUNIT"')
+        _r1, r2 = self.readAll()
         VERTUNIT = r2.split("Unit Name = ")[-1].split('"\n')[0]
         # value = VERT_GAIN * data - VERT_OFFSET
         return (VERTUNIT, VG * np.array(word_values, dtype=np.float64) - VOS)
@@ -319,14 +306,14 @@ class LeCroy(object):
                                  seconds b.w. the trig. and 1st data point
         HORIZ_INTERVAL (float) is sampling interal for time domain waveforms
         """
-        self.send('{}:INSPECT? "HORUNIT"'.format(channel))
+        self.send(f'{channel}:INSPECT? "HORUNIT"')
         r1, r2 = self.readAll()
         HORUNIT = r2.split("Unit Name = ")[-1].split('"\n')[0]
-        self.send('{}:INSPECT? "HORIZ_OFFSET"'.format(channel))
+        self.send(f'{channel}:INSPECT? "HORIZ_OFFSET"')
         r1, r2 = self.readAll()
         HOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        self.send('{}:INSPECT? "HORIZ_INTERVAL"'.format(channel))
-        r1, r2 = self.readAll()
+        self.send(f'{channel}:INSPECT? "HORIZ_INTERVAL"')
+        _r1, r2 = self.readAll()
         HInV = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
 
         return (HORUNIT, HOS, HInV)

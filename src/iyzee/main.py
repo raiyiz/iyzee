@@ -4,11 +4,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+from iyzee import IP
+
 from .mxa import KeysightMXA
 from .power import ShutterControl
 from .wavemeter_readout import set_pid_setpoint
-
-from iyzee import IP
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
@@ -57,13 +58,13 @@ def acquire_trace(mx, trace_num):
 
 def record_bw_seq():
     """Measure squeezing/shot-noise traces while scanning RBW."""
-    params = dict(
-        center_hz=1.5e6,
-        span_hz=1e5,
-        avg_count=300,
-        sweep_duration=10,
-        res_bw=24e3,
-    )
+    params = {
+        "center_hz": 1.5e6,
+        "span_hz": 1e5,
+        "avg_count": 300,
+        "sweep_duration": 10,
+        "res_bw": 24e3,
+    }
     mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), **params)
     data = []
 
@@ -85,13 +86,13 @@ def record_bw_seq():
 
 def record_freq_seq():
     """Measure squeezing/shot-noise traces while scanning laser frequency."""
-    params = dict(
-        center_hz=1.5e6,
-        span_hz=0,
-        avg_count=150,
-        sweep_duration=10,
-        res_bw=24e3,
-    )
+    params = {
+        "center_hz": 1.5e6,
+        "span_hz": 0,
+        "avg_count": 150,
+        "sweep_duration": 10,
+        "res_bw": 24e3,
+    }
     laser_center_thz = 377.1052067
     wavemeter_channel = 1
     relax_time = params["sweep_duration"] * params["avg_count"] / 1000
@@ -102,9 +103,7 @@ def record_freq_seq():
 
     try:
         # Scan in 10 MHz steps around the nominal laser frequency.
-        for frequency_thz in (
-            laser_center_thz + i * 10e-6 for i in range(-1, 1)
-        ):
+        for frequency_thz in (laser_center_thz + i * 10e-6 for i in range(-1, 1)):
             set_pid_setpoint(frequency_thz, wavemeter_channel)
             time.sleep(relax_time)
 

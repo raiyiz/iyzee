@@ -13,7 +13,9 @@ Readout of single laser frequency with Wavemeter switch over network
 
 Live plotting and single readout of a channel
 """
-D1_center_85 = 377.107385690  # D1 Rubidium 85 transition frequency vacuum as reference (D.Steck), THz
+D1_center_85 = (
+    377.107385690  # D1 Rubidium 85 transition frequency vacuum as reference (D.Steck), THz
+)
 D2_center_85 = 384.230406373  # D2 Rubidium 85 transition frequency, THz
 
 D1_center_87 = 377.1074635  # D1 Rubidium 87 in THz
@@ -110,9 +112,7 @@ def single_readout(
 
     try:
         ls_frequency = float(
-            urllib.request.urlopen(
-                f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=timeout
-            )
+            urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=timeout)
             .read()
             .decode("ascii")
         )
@@ -157,18 +157,16 @@ def set_pid_setpoint(freq: float, channel: int):
     print(f"[WS-7] Set new PID-setpoint of channel {channel} to be {freq} THz.")
 
 
-def track_frequency(
-    total_time, time_step, save_path, channel, reference_f=0, save_csv=False
-):
+def track_frequency(total_time, time_step, save_path, channel, reference_f=0, save_csv=False):
     # Initialize numpy arrays for time and frequency data
     times = np.array([])
     track_freq = np.array([])
 
     # Turn on interactive mode for live plotting
     plt.ion()
-    fig, ax = plt.subplots(figsize=(4.5, 2.5))
+    _fig, ax = plt.subplots(figsize=(4.5, 2.5))
 
-    (line,) = ax.plot([], [], "b-", label="Laser Frequency (THz)")
+    (_line,) = ax.plot([], [], "b-", label="Laser Frequency (THz)")
     fill_between = ax.fill_between([], [], [], color="blue", alpha=0.3)
 
     start_time = time.time()
@@ -243,11 +241,7 @@ def track_frequency(
 
 
 def monitoring_frequencies(channels, two_photon=True):
-    header = (
-        ["Transition"]
-        + ["Frequencies (THz)"]
-        + [f"Detuning (ch{c}) / GHz" for c in channels]
-    )
+    header = ["Transition"] + ["Frequencies (THz)"] + [f"Detuning (ch{c}) / GHz" for c in channels]
     rows = []
     freqs = [single_readout(c, reference_f=0, printing=False) for c in channels]
 

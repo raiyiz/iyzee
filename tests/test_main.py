@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import numpy as np
-
 from iyzee.main import create_dirs, multiplot, save_data
 
 

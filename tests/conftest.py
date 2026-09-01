@@ -1,6 +1,5 @@
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 # The project uses a src layout while the instrument modules currently use
 # direct local imports. Keep tests runnable from a checkout without hardware.

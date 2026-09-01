@@ -39,4 +39,4 @@ class BaseDevice:
         self.instrument.close()
 
 
-__all__ = ["BaseDevice", "CH", "IP"]
+__all__ = ["CH", "IP", "BaseDevice"]
