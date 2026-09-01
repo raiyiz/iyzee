@@ -1,4 +1,5 @@
 import time
+from typing import ClassVar
 
 import pyvisa
 
@@ -12,8 +13,15 @@ class KeysightMXA:
     triggering synchronization, and binary data transfer.
     """
 
-    TRACE_IDS = ["TRACE1", "TRACE2", "TRACE3", "TRACE4", "TRACE5", "TRACE6"]
-    TRACE_MODES = {
+    TRACE_IDS: ClassVar[list[str]] = [
+        "TRACE1",
+        "TRACE2",
+        "TRACE3",
+        "TRACE4",
+        "TRACE5",
+        "TRACE6",
+    ]
+    TRACE_MODES: ClassVar[dict[str, str]] = {
         "WRIT": "Write",
         "MAXH": "MaxHold",
         "MINH": "MinHold",
@@ -21,13 +29,13 @@ class KeysightMXA:
         "VIEW": "View",
         "BLAN": "Blank",
     }
-    MARKER_MODES = {
+    MARKER_MODES: ClassVar[dict[str, str]] = {
         "POS": "Normal",
         "DELT": "Delta",
         "BAND": "BandPower",
         "NOIS": "Noise",
     }
-    TRIG_SOURCES = {
+    TRIG_SOURCES: ClassVar[dict[str, str]] = {
         "IMM": "FreeRun",
         "VID": "Video",
         "EXT": "External",
