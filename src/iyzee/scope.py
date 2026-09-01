@@ -279,7 +279,7 @@ class LeCroy:
         word_values = np.array(self.getDataWords(channel=channel, block=block))
         # get vertical offset
         self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
-        r1, r2 = self.readAll()
+        _r1, r2 = self.readAll()
         VOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
         # get vertical gain
         self.send(f'{channel}:INSPECT? "VERTICAL_GAIN"')
