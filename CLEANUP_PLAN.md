@@ -27,8 +27,7 @@ For every planned change:
 6. Check CI for the commit just created.
 7. If CI fails, make one or more small follow-up fix commits addressing only those failures.
 8. Re-check CI for the resulting HEAD.
-9. Only once CI is green, proceed to the next planned change.
-10. At every step, retain the commit history; do not squash intermediate commits.
+9. At every step, retain the commit history; do not squash intermediate commits.
 
 Important: CI results are only available after a commit exists. Therefore the next iteration must explicitly inspect the CI result of the previous commit before proceeding. Treat CI as feedback, not as something to predict perfectly in advance.
 
