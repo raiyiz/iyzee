@@ -144,7 +144,7 @@ def multiplot(data):
 
 def create_dirs(name: str = "") -> Path:
     """Create and return today's measurement-data directory."""
-    today = datetime.today().strftime("%Y-%m-%d")
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
     data_dir = Path(__file__).parent / "data" / today / name
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
@@ -152,7 +152,7 @@ def create_dirs(name: str = "") -> Path:
 
 def save_data(data, savedir: Path) -> Path:
     """Save variable-length trace data in a compressed NumPy archive."""
-    timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    timestamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")
     path = savedir / f"{timestamp}.npz"
     np.savez_compressed(path, data=np.asarray(data, dtype=object))
     return path
