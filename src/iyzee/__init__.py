@@ -1,5 +1,5 @@
 """Public package exports for iyzee."""
 
-from .base import BaseDevice, CH, IP
+from .base import CH, IP, BaseDevice
 
 __all__ = ["CH", "IP", "BaseDevice"]
