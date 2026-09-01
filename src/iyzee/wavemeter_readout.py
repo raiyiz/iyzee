@@ -63,6 +63,10 @@ Rb_transitions = [
 ]
 
 
+class WavemeterReadoutError(RuntimeError):
+    """Raised when a wavemeter measurement cannot be obtained or parsed."""
+
+
 def compute_two_photon_detuning(f1: float, f2: float):
     """
     Helper function to compute the two photon detuning
@@ -99,7 +103,7 @@ def single_readout(
     channel: int, reference_f: float = 0, label: str = "", printing: bool = True
 ) -> float:
     """
-    Fetching the laser frequency once from a wavemeter channel with urllib
+    Fetch the laser frequency once from a wavemeter channel with urllib
     and compare to a reference frequency.
 
     Parameters:
@@ -112,13 +116,16 @@ def single_readout(
 
     try:
         ls_frequency = float(
-            urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=timeout)
+            urllib.request.urlopen(
+                f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=timeout
+            )
             .read()
             .decode("ascii")
         )
-    except Exception as e:
-        print(f"Error fetching wavemeter data: {e}")
-        ls_frequency = 0
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise WavemeterReadoutError(
+            f"Failed to read wavemeter channel {channel}"
+        ) from exc
 
     ls_frequency -= reference_f
     if printing:
