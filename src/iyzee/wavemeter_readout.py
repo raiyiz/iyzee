@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from tabulate import tabulate
 
+from iyzee import IP
+
 """
 Readout of single laser frequency with Wavemeter switch over network
 
@@ -90,7 +92,7 @@ def compute_two_photon_detuning(f1: float, f2: float):
     return two_photon_detuning
 
 
-# ls_frequency = float(urllib.request.urlopen(f"http://10.140.1.96:8000/api/{channel}/").read().decode("ascii")) - 377.107385690
+# ls_frequency = float(urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/").read().decode("ascii")) - 377.107385690
 def single_readout(
     channel: int, reference_f: float = 0, label: str = "", printing: bool = True
 ) -> float:
@@ -100,7 +102,7 @@ def single_readout(
 
     Parameters:
         channel (int): Wavemeter channel (0-8 or 0-4 depending on switch)
-        reference_f (float): Reference frequency value which is substracted from the readout. Default is 0.
+        reference_f (float): Reference frequency value which is substracted. Default is 0.
         label (str): Optional labeling of the print
         printing (bool): Enable/Disable printing of the readout
     """
@@ -109,7 +111,7 @@ def single_readout(
     try:
         ls_frequency = float(
             urllib.request.urlopen(
-                f"http://10.140.1.118:8000/api/{channel}/", timeout=timeout
+                f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=timeout
             )
             .read()
             .decode("ascii")
@@ -132,7 +134,7 @@ def fast_readout(ch: int) -> float:
     direct urllib request, without try/except
     """
     return float(
-        urllib.request.urlopen(f"http://10.140.1.118:8000/api/{ch}/", timeout=0.1)
+        urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{ch}/", timeout=0.1)
         .read()
         .decode("ascii")
     )
@@ -149,7 +151,7 @@ def set_pid_setpoint(freq: float, channel: int):
     """
 
     urllib.request.urlopen(
-        "http://10.140.1.118:8000/api/set_pid/",
+        f"http://{IP.WAVEMETER}:8000/api/set_pid/",
         data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
     )
     print(f"[WS-7] Set new PID-setpoint of channel {channel} to be {freq} THz.")
@@ -179,7 +181,7 @@ def track_frequency(
         try:  # readout laser frequency and plot laser detuning or absolute laser frequency
             ls_frequency = (
                 float(
-                    urllib.request.urlopen(f"http://10.140.1.96:8000/api/{channel}/")
+                    urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/")
                     .read()
                     .decode("ascii"),
                     timeout=2,
