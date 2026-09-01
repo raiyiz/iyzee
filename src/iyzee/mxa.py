@@ -39,44 +39,47 @@ class KeysightMXA:
     def __init__(self, ip: IP.NOISE_ANALYZER, timeout_ms: int = 5_000):
         self.timeout_ms = timeout_ms
         self.rm = pyvisa.ResourceManager()
-
-        # if ip is None:  # mock mode
-        #     self.instr = TestDevice()
-        #     return
         self.visa_address = f"TCPIP0::{ip}::inst0::INSTR"
-        self.instr = self.rm.open_resource(self.visa_address)
-        # self.instr = None
+        self.instr = None
+        self.connect()
 
     # ------------------------------------------------------------------
     # Connection Lifecycle
     # ------------------------------------------------------------------
-    def connect(self):
-        """Open VISA resource with standard terminations."""
+    def connect(self) -> None:
+        """Open the VISA resource once; repeated calls reuse it."""
+        if self.instr is not None:
+            return
         self.instr = self.rm.open_resource(self.visa_address)
         self.instr.timeout = self.timeout_ms
         self.instr.read_termination = "\n"
         self.instr.write_termination = "\n"
 
-    def disconnect(self):
-        if self.instr:
+    def close(self) -> None:
+        """Close the VISA resource if it is open."""
+        if self.instr is not None:
             self.instr.close()
             self.instr = None
+
+    def disconnect(self) -> None:
+        """Backward-compatible alias for :meth:`close`."""
+        self.close()
 
     def __enter__(self):
         self.connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.disconnect()
+        self.close()
         return False
 
     def write(self, cmd: str):
-        if not self.instr:
+        if self.instr is None:
             raise RuntimeError("Instrument not connected")
         self.instr.write(cmd)
 
     def query(self, cmd: str) -> str:
-        if not self.instr:
+        if self.instr is None:
             raise RuntimeError("Instrument not connected")
         return self.instr.query(cmd)
 
@@ -87,7 +90,7 @@ class KeysightMXA:
         Query binary IEEE 488.2 block data.
         datatype='f' (float32) or 'd' (float64).
         """
-        if not self.instr:
+        if self.instr is None:
             raise RuntimeError("Instrument not connected")
         return self.instr.query_binary_values(
             cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
@@ -517,12 +520,15 @@ class KeysightMXA:
 #         """
 #         Set the frequency span.
 #
-#         :param span_hz: Span in Hertz
+#         :param span_hz: Frequency span in Hertz
 #         """
 #         self.write(f":SENSe:FREQuency:SPAN {span_hz}")
 #
 #     def get_frequency_span(self):
-#         """Get the frequency span."""
+#         """Get the frequency span.
+#
+#         :return: Frequency span in Hertz
+#         """
 #         return float(self.query(":SENSe:FREQuency:SPAN?"))
 #
 #     def set_frequency_start(self, freq_hz):
@@ -568,10 +574,5 @@ class KeysightMXA:
 #         self.write(":SENSe:POWer:ATTenuation:AUTO ON")
 #
 #     def set_reference_level(self, level_dbm):
-#         """
-#         Set the reference level.
-#
-#         :param level_dbm: Reference level in dBm
-#         """
+#         """Set the reference level."""
 #         self.write(f":DISPlay:WINDow:TRACe:Y:RLEVel {level_dbm}dBm")
-#
