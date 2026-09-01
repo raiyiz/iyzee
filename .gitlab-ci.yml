@@ -1,0 +1,31 @@
+image: python:3.14
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH == "moonshine"'
+
+stages:
+  - test
+  - lint
+  - typecheck
+
+test:
+  stage: test
+  script:
+    - python -m pip install -e '.[test]'
+    - python -m pytest
+
+lint:
+  stage: lint
+  script:
+    - python -m pip install ruff
+    - ruff check .
+    - ruff format --check .
+
+typecheck:
+  stage: typecheck
+  script:
+    - python -m pip install -e . mypy
+    - mypy src tests
