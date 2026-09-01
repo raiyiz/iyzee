@@ -15,6 +15,7 @@ class FakeInstrument:
             "FREQ:STAR?": "100.0",
             "FREQ:STOP?": "200.0",
             "SWE:POIN?": "3",
+            "*OPC?": "1",
             ":TRACe:DATA? TRACe1": "1.0,2.0,3.0",
         }
 
@@ -128,6 +129,22 @@ def test_context_manager_closes_on_exception(monkeypatch):
 
     assert mxa.instr is None
     assert instrument.close_count == 1
+
+
+def test_wait_opc_requires_explicit_completion_response():
+    mxa, instrument = make_mxa()
+    assert mxa.wait_opc() is True
+
+    instrument.responses["*OPC?"] = "0"
+    assert mxa.wait_opc() is False
+
+
+def test_get_errors_drains_scpi_error_queue():
+    mxa, instrument = make_mxa()
+    responses = iter(["-100,Command error", "-200,Execution error", "0,No error"])
+    instrument.query = lambda command: next(responses)
+
+    assert mxa.get_errors() == ["-100,Command error", "-200,Execution error"]
 
 
 def test_frequency_configuration_is_sent_to_instrument():
