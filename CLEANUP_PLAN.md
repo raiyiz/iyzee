@@ -6,6 +6,8 @@ This document is the durable execution plan for the incremental cleanup of the `
 
 Improve correctness, safety, testability, maintainability, and reproducibility without performing a large rewrite. Preserve experimental behavior unless a change is explicitly identified as a bug or safety issue.
 
+**Always strive for improvement, always be humble.** Prefer small, evidence-driven changes; preserve useful knowledge in comments and docstrings, correct information that is wrong or misleading, and remove only code or documentation that is genuinely stale, dead, or redundant.
+
 ## Working branches
 
 - Starting point: `moonshine`
@@ -63,7 +65,7 @@ This is laboratory/instrument-control software.
 adjacent comment reads `# Shutter needs at least ~2 V to trigger.` This is a direct contradiction
 and the comment must be fixed!
 
-The corrent value is 1.7 V
+The correct value is 1.7 V.
 
 
 ## Planned sequence
@@ -142,8 +144,8 @@ change.
 
 `scope.py` had a `readOld()` method that duplicated `readAll()`: unused anywhere in the codebase,
 explicitly documented as "not tested lately," and containing a real bug (mixed `str`/`bytes`
-concatenation that would raise `TypeError` if ever called). Removed, and the class docstring's
-method list updated to match.
+concatenation that would raise `TypeError` if ever called). Removed, and the class docstring's method
+list updated to match.
 
 Still open: `mxa.py`'s `configure_noise_measurement()` and `apply_trace_math_noise_cancel()` still
 contain commented-out lines (`# self.reset()`, `# self.set_trace_math(...)`,
@@ -209,11 +211,10 @@ setup.
 
 ### 17 — Separate acquisition, plotting, and persistence — ✅ done for now
 
-`main.py` already separates `prepare_analyzer()` / `acquire_trace()` / `record_*()` /
-`multiplot()` / `save_data()` into distinct functions, with plotting performed once after all
-traces are acquired. Per the README's own design direction, splitting `main.py` into a
-`measurements/` package should happen once more procedures are added — not needed yet at the
-current size.
+`main.py` already separates `prepare_analyzer()` / `acquire_trace()` / `record_*` /
+`multiplot()` / `save_data()` into distinct functions, with plotting performed once after all traces
+are acquired. Per the README's own design direction, splitting `main.py` into a `measurements/`
+package should happen once more procedures are added — not needed yet at the current size.
 
 ### 18 — Improve measurement persistence — ❌ not started
 
@@ -310,16 +311,13 @@ pushed.
 
 If this work is resumed in a later conversation, start by reading this file and then:
 
-1. Inspect `cleanup-moonshine` HEAD.
-2. Inspect the latest commit and its diff.
-3. Check CI for that exact commit.
-4. If CI is failing, fix those failures first in small commits.
-5. If CI is green, continue with the first unfinished numbered step — currently **step 09**
-   (BaseDevice/MXA unification) or **step 18** (persistence metadata) are the best next
-   candidates, since steps 01–08, 11, 13, 14, 16, and 19 are done or effectively done.
-6. Never assume a previous CI result; fetch it again.
-7. Do not skip steps or combine unrelated planned changes merely to reduce commit count.
-8. Resolve the shutter-voltage contradiction noted above with a human before touching
-   `ShutterControl`'s setpoints.
-
-The objective is a clean, understandable commit-by-commit history where every step leaves the branch in a known state.
+1. Inspect the current branch/HEAD and working tree.
+2. Read this cleanup plan and identify the first unfinished step.
+3. Inspect the relevant implementation and tests before changing anything.
+4. Make one logical change, commit it, push/update the cleanup branch, and wait for CI feedback.
+5. If CI fails, fix the failure before starting the next planned change.
+6. Preserve useful comments/docstrings; correct wrong or misleading information; remove only stale/dead/redundant material.
+7. Never claim local or CI checks were run unless they actually were.
+8. Keep hardware-facing changes small, explicit, and reviewable.
+9. Re-read the safety rules before any change affecting hardware behavior.
+10. Always strive for improvement, always be humble.
