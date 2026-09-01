@@ -17,9 +17,9 @@ def test_single_readout_returns_measured_frequency(monkeypatch):
         lambda *args, **kwargs: FakeResponse("377.123456"),
     )
 
-    assert wavemeter_readout.single_readout(
-        1, reference_f=377.0, printing=False
-    ) == pytest.approx(0.123456)
+    assert wavemeter_readout.single_readout(1, reference_f=377.0, printing=False) == pytest.approx(
+        0.123456
+    )
 
 
 def test_single_readout_raises_on_communication_failure(monkeypatch):

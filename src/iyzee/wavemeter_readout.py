@@ -116,16 +116,12 @@ def single_readout(
 
     try:
         ls_frequency = float(
-            urllib.request.urlopen(
-                f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=timeout
-            )
+            urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=timeout)
             .read()
             .decode("ascii")
         )
     except (OSError, ValueError, UnicodeError) as exc:
-        raise WavemeterReadoutError(
-            f"Failed to read wavemeter channel {channel}"
-        ) from exc
+        raise WavemeterReadoutError(f"Failed to read wavemeter channel {channel}") from exc
 
     ls_frequency -= reference_f
     if printing:
