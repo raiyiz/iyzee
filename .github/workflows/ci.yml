@@ -61,3 +61,18 @@ jobs:
 
       - name: Run mypy
         run: mypy src tests
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Typst
+        uses: typst-community/setup-typst@v5
+        with:
+          typst-version: "0.15.1"
+          cache-dependency-path: docs/requirements.typ
+
+      - name: Compile Typst documentation
+        run: typst compile docs/cleanup-summary.typ /tmp/cleanup-summary.pdf
