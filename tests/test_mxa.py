@@ -51,6 +51,20 @@ def make_mxa():
     return mxa, instrument
 
 
+def test_constructor_accepts_injected_resource_manager():
+    resource_manager = FakeResourceManager()
+
+    mxa = KeysightMXA("10.0.0.1", resource_manager=resource_manager)
+
+    assert mxa.rm is resource_manager
+    assert len(resource_manager.opened) == 1
+    assert mxa.instr is resource_manager.opened[0][1]
+
+    mxa.close()
+    assert mxa.instr is None
+    assert resource_manager.opened[0][1].close_count == 1
+
+
 def test_constructor_opens_exactly_one_connection(monkeypatch):
     resource_manager = FakeResourceManager()
     monkeypatch.setattr(mxa_module.pyvisa, "ResourceManager", lambda: resource_manager)
