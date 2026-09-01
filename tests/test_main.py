@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
+import iyzee.main as main_module
 from iyzee.main import create_dirs, multiplot, save_data
 
 
@@ -43,3 +44,37 @@ def test_multiplot_handles_empty_data(monkeypatch):
     multiplot([])
 
     assert shown
+
+
+def test_record_bw_seq_tracks_vbw_with_rbw(monkeypatch):
+    class FakeMXA:
+        def __init__(self):
+            self.rbw_values = []
+            self.vbw_values = []
+            self.disconnect_called = False
+
+        def set_rbw(self, rbw_hz):
+            self.rbw_values.append(rbw_hz)
+
+        def set_vbw(self, vbw_hz, auto=False):
+            self.vbw_values.append((vbw_hz, auto))
+
+        def disconnect(self):
+            self.disconnect_called = True
+
+    mx = FakeMXA()
+    monkeypatch.setattr(main_module, "prepare_analyzer", lambda *args, **kwargs: mx)
+    monkeypatch.setattr(
+        main_module,
+        "acquire_trace",
+        lambda analyzer, trace_num: [trace_num],
+    )
+
+    data = main_module.record_bw_seq()
+
+    expected_rbw = [20e3 * i for i in range(1, 20)]
+    assert mx.rbw_values == expected_rbw
+    assert mx.vbw_values == [(rbw * 2, False) for rbw in expected_rbw]
+    assert [row[0] for row in data] == expected_rbw
+    assert all(row[1:] == ([1], [2]) for row in data)
+    assert mx.disconnect_called
