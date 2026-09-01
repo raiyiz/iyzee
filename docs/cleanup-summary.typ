@@ -45,9 +45,9 @@ The test suite uses a deliberately fragmenting fake socket. It verifies the beha
 
 The essential invariant is:
 
-$ len(received) = n $
+$ N = n $
 
-before a fixed-length field is interpreted. If the peer closes the connection first, the driver raises `ConnectionError` rather than converting an incomplete transfer into measurement data.
+where $N$ is the number of bytes received for a field that declares length $n$. If the peer closes the connection first, the driver raises `ConnectionError` rather than converting an incomplete transfer into measurement data.
 
 For a measured quantity represented by samples $x_i$, this distinction matters because a transport failure must not silently become a shorter or otherwise plausible vector:
 
