@@ -263,4 +263,10 @@ def monitoring_frequencies(channels, two_photon=True):
     print(tabulate(rows, headers=header, tablefmt="psql", floatfmt="+.7f"))
 
 
-monitoring_frequencies([0, 1])
+def main():
+    """Run the wavemeter frequency monitoring utility."""
+    monitoring_frequencies([0, 1])
+
+
+if __name__ == "__main__":
+    main()
