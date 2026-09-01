@@ -42,6 +42,18 @@ class ShutterControl:
         self.psu.set_voltage(1.7, chan)
         self.psu.set_current(0.01, chan)
 
+    def __enter__(self):
+        """Return the shutter controller for use in a managed context."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Close the shutter and release the underlying PSU connection."""
+        try:
+            self.close()
+        finally:
+            self.psu.close()
+        return False
+
     def open(self):
         self.psu.enable_output(self.chan)
 

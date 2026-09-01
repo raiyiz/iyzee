@@ -36,7 +36,22 @@ class BaseDevice:
         return self.rm.open_resource(f"TCPIP0::{self.ip}::inst0::INSTR")
 
     def close(self) -> None:
-        self.instrument.close()
+        """Close the VISA resource, if it is open."""
+        if self.instrument is not None:
+            self.instrument.close()
+            self.instrument = None
+
+    def __enter__(self):
+        """Return an open device for use in a context manager."""
+        if self.instrument is None:
+            self.instrument = self.open()
+            self.instrument.timeout = 10_000
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Close the VISA resource when leaving the context."""
+        self.close()
+        return False
 
 
 __all__ = ["CH", "IP", "BaseDevice"]

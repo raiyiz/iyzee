@@ -98,28 +98,24 @@ def record_freq_seq():
     relax_time = params["sweep_duration"] * params["avg_count"] / 1000
 
     mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), **params)
-    shutter = ShutterControl()
     data = []
 
     try:
-        # Scan in 10 MHz steps around the nominal laser frequency.
-        for frequency_thz in (laser_center_thz + i * 10e-6 for i in range(-1, 1)):
-            set_pid_setpoint(frequency_thz, wavemeter_channel)
-            time.sleep(relax_time)
+        with ShutterControl() as shutter:
+            for frequency_thz in (laser_center_thz + i * 10e-6 for i in range(-1, 1)):
+                set_pid_setpoint(frequency_thz, wavemeter_channel)
+                time.sleep(relax_time)
 
-            try:
-                shutter.open()
-                squeezing = acquire_trace(mx, TRACE_SQZ)
-            finally:
-                shutter.close()
+                try:
+                    shutter.open()
+                    squeezing = acquire_trace(mx, TRACE_SQZ)
+                finally:
+                    shutter.close()
 
-            shot_noise = acquire_trace(mx, TRACE_SHOT)
-            data.append((frequency_thz, squeezing, shot_noise))
+                shot_noise = acquire_trace(mx, TRACE_SHOT)
+                data.append((frequency_thz, squeezing, shot_noise))
     finally:
-        try:
-            shutter.close()
-        finally:
-            mx.disconnect()
+        mx.disconnect()
 
     return data
 
