@@ -69,13 +69,12 @@ def record_bw_seq():
     data = []
 
     try:
-        # Scan in 200 kHz steps.
+        # Scan in 20 kHz steps.
         for rbw_hz in (2 * i * 1e4 for i in range(1, 20)):
             mx.set_rbw(rbw_hz)
+            # Keep the experimental VBW relationship explicit: VBW = 2 * RBW.
+            mx.set_vbw(rbw_hz * 2, auto=False)
             squeezing = acquire_trace(mx, TRACE_SQZ)
-
-            # Keep the experimental VBW relationship explicit for this procedure.
-            mx.set_vbw(params["res_bw"] * 2, auto=False)
             shot_noise = acquire_trace(mx, TRACE_SHOT)
             data.append((rbw_hz, squeezing, shot_noise))
     finally:
