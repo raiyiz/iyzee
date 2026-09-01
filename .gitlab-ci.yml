@@ -10,6 +10,7 @@ stages:
   - test
   - lint
   - typecheck
+  - docs
 
 test:
   stage: test
@@ -29,3 +30,23 @@ typecheck:
   script:
     - python -m pip install -e . mypy
     - mypy src tests
+
+docs:
+  stage: docs
+  image: ghcr.io/typst/typst:latest
+  script:
+    - set -eu
+    - mkdir -p build/docs
+    - |
+      for source in docs/*.typ; do
+        case "$source" in
+          docs/requirements.typ) continue ;;
+        esac
+        output="build/docs/$(basename "${source%.typ}").pdf"
+        typst compile "$source" "$output"
+      done
+  artifacts:
+    name: iyzee-documentation
+    paths:
+      - build/docs/*.pdf
+    expire_in: 30 days
