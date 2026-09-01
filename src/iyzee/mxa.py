@@ -1,5 +1,4 @@
 import time
-from typing import List, Optional
 
 import pyvisa
 
@@ -216,32 +215,6 @@ class KeysightMXA:
     # ------------------------------------------------------------------
     # Trace Operations
     # ------------------------------------------------------------------
-    # def set_trace_mode(self, trace: str, mode: str):
-    #     """
-    #     trace: TRACE1 ... TRACE6
-    #     mode : WRIT, MAXH, MINH, AVER, VIEW, BLAN
-    #     """
-    #     self.write(f"{trace}:TYPE {mode}")
-    #
-    # def clear_trace(self, trace: str):
-    #     self.write(f"{trace}:CLE")
-    #
-    # def get_trace_data(self, trace: str, binary: bool = True) -> List[float]:
-    #     """
-    #     Retrieve trace amplitude data.
-    #     **Binary transfer (REAL,32)** is strongly recommended for speed.
-    #     """
-    #     # __import__("ipdb").set_trace()
-    #     if binary:
-    #         self.write("FORM:DATA REAL,32")
-    #         self.write("FORM:BORD NORM")  # MSB first (big-endian)
-    #         return self.query_binary(f"{trace}:DATA?", datatype="f", is_big_endian=True)
-    #     else:
-    #         self.write("FORM:DATA ASCii")
-    #         print(f"Getting {trace=}")
-    #         resp = self.query(f"{trace}:DATA? {trace}")
-    #         return [float(x) for x in resp.split(",")]
-
     def get_frequency_axis(self) -> list[float]:
         """Return frequency value for each trace point (linear sweep)."""
         start = float(self.query("FREQ:STAR?"))
@@ -286,43 +259,18 @@ class KeysightMXA:
     def clear_trace(self, trace_num: int):
         self.write(f":TRACe{trace_num}:CLEar")
 
-    # def copy_trace(self, src_num: int, dest_num: int):
-    #     self.write(f":TRACe{src_num}:COPY TRACe{dest_num}")
-    #
-    # def exchange_traces(self, trace_a: int, trace_b: int):
-    #     self.write(f":TRACe{trace_a}:EXCHange TRACe{trace_b}")
-    #
     def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> list[float]:
         if binary:
-            # TODO: binary currently borken, there is no query binary value method.
             self.write("FORMat:DATA REAL,32")
             self.write("FORMat:BORDer NORM")
             return self.query_binary(
-                # f":TRACe{trace_num}:DATA?", datatype="f", is_big_endian=True
                 f":TRACe:DATA? TRACe{trace_num}",
                 datatype="f",
                 is_big_endian=True,
             )
-        else:
-            self.write("FORMat:DATA ASCii")
-            # resp = self.query(f":TRACe{trace_num}:DATA?")
-            resp = self.query(f":TRACe:DATA? TRACe{trace_num}")
-            return [float(x) for x in resp.split(",")]
-
-    # def get_frequency_axis(self) -> List[float]:
-    #     start = float(self.query("FREQ:STAR?"))
-    #     stop = float(self.query("FREQ:STOP?"))
-    #     pts = self.get_sweep_points()
-    #     if pts <= 1:
-    #         return [start]
-    #     step = (stop - start) / (pts - 1)
-    #     return [start + i * step for i in range(pts)]
-    #
-    # def set_average_count(self, count: int):
-    #     self.write(f"AVER:COUN {count}")
-    #
-    # def set_average_type(self, avg_type: str):
-    #     self.write(f"AVER:TYPE {avg_type}")
+        self.write("FORMat:DATA ASCii")
+        resp = self.query(f":TRACe:DATA? TRACe{trace_num}")
+        return [float(x) for x in resp.split(",")]
 
     # ------------------------------------------------------------------
     # Marker Control
@@ -472,102 +420,3 @@ class KeysightMXA:
         # POW = power subtraction (10*log10(10^(T1/10) - 10^(T2/10)))
         # self.set_trace_math(trace_result, "POW", trace_dut, trace_cal)
         # self.set_trace_mode(trace_result, "VIEW")
-
-
-# class SimpleKeysightMXA:
-#     def __init__(self, ip: str = "10.140.1.115", port: int = 5023):
-#         if ip is None:  # mock mode
-#             self.instrument = TestDevice()
-#             return
-#
-#         self.rm = pyvisa.ResourceManager()
-#         self.instrument = self.rm.open_resource(f"TCPIP0::{ip}::inst0::INSTR")
-#
-#     def close(self):
-#         """Close the connection to the instrument."""
-#         self.instrument.close()
-#         self.rm.close()
-#
-#     def query(self, command):
-#         """Send a query command to the instrument."""
-#         return self.instrument.query(command).strip()
-#
-#     def write(self, command):
-#         """Send a write command to the instrument."""
-#         self.instrument.write(command)
-#
-#     def reset(self):
-#         """Reset the instrument to default settings."""
-#         self.write("*instrumentT")
-#
-#     def get_id(self):
-#         """Get instrument identification."""
-#         return self.query("*IDN?")
-#
-#     def set_frequency_center(self, freq_hz):
-#         """
-#         Set the center frequency.
-#
-#         :param freq_hz: Frequency in Hertz
-#         """
-#         self.write(f":SENSe:FREQuency:CENTer {freq_hz}")
-#
-#     def get_frequency_center(self):
-#         """Get the center frequency."""
-#         return float(self.query(":SENSe:FREQuency:CENTer?"))
-#
-#     def set_frequency_span(self, span_hz):
-#         """
-#         Set the frequency span.
-#
-#         :param span_hz: Frequency span in Hertz
-#         """
-#         self.write(f":SENSe:FREQuency:SPAN {span_hz}")
-#
-#     def get_frequency_span(self):
-#         """Get the frequency span."""
-#         return float(self.query(":SENSe:FREQuency:SPAN?"))
-#
-#     def set_frequency_start(self, freq_hz):
-#         """
-#         Set the start frequency.
-#
-#         :param freq_hz: Frequency in Hertz
-#         """
-#         self.write(f":SENSe:FREQuency:STARt {freq_hz}")
-#
-#     def set_frequency_stop(self, freq_hz):
-#         """
-#         Set the stop frequency.
-#         """
-#         self.write(f":SENSe:FREQuency:STOP {freq_hz}")
-#
-#     def get_trace_data(self, trace_num=1):
-#         """
-#         Get trace data from the instrument.
-#
-#         :param trace_num: Trace number (1, 2, 3, or 4)
-#         :return: List of trace data points
-#         """
-#         # Set the data format to ASCII
-#         self.write(":FORMat:TRACe:DATA ASCii")
-#         # Query trace data
-#         data_str = self.query(f":TRACe:DATA? TRACE{trace_num}")
-#         # Convert to list of floats
-#         return [float(x) for x in data_str.split(",")]
-#
-#     def set_attenuation(self, atten_db):
-#         """
-#         Set the input attenuation.
-#
-#         :param atten_db: Attenuation in dB
-#         """
-#         self.write(f":SENSe:POWer:ATTenuation {atten_db}dB")
-#
-#     def auto_attenuation(self):
-#         """Enable automatic attenuation."""
-#         self.write(":SENSe:POWer:ATTenuation:AUTO ON")
-#
-#     def set_reference_level(self, level_dbm):
-#         """Set the reference level."""
-#         self.write(f":DISPlay:WINDow:TRACe:Y:RLEVel {level_dbm}dBm")
