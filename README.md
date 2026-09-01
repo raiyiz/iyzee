@@ -36,7 +36,7 @@ The source is written in Typst and compiled in both CI systems. Each pipeline pu
 - [MXA and measurement guide](docs/mxa-and-measurements.typ) — source
 - [Cleanup summary](docs/cleanup-summary.typ) — source
 - [GitHub Actions documentation artifacts](https://github.com/raiyiz/iyzee/actions/workflows/ci.yml)
-- [GitLab CI documentation artifacts](https://github.com/raiyiz/iyzee/-/pipelines)
+- GitLab CI publishes the same documentation set as pipeline artifacts; the repository does not currently declare its GitLab mirror URL.
 
 For a reproducible measurement, the relevant analyzer settings should travel with the data: frequency range and points, RBW/VBW, detector, averaging, sweep time, attenuation/reference level, trigger state, and calibration context.
 
