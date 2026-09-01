@@ -12,7 +12,12 @@ def test_save_data_round_trip(tmp_path):
     assert path.exists()
     assert path.suffix == ".npz"
     with np.load(path, allow_pickle=True) as archive:
-        np.testing.assert_equal(archive["data"], np.asarray(data, dtype=object))
+        saved = archive["data"]
+
+    assert saved.shape == (1, 3)
+    assert saved[0, 0] == 1.0
+    np.testing.assert_array_equal(saved[0, 1], data[0][1])
+    np.testing.assert_array_equal(saved[0, 2], data[0][2])
 
 
 def test_create_dirs_is_idempotent(tmp_path, monkeypatch):
