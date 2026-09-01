@@ -27,6 +27,19 @@ Current procedures:
 
 `mxa.py` is the hardware abstraction for the Keysight MXA. New MXA capabilities should be implemented there as reusable SCPI/VISA methods; procedures in `main.py` should call those methods rather than contain raw SCPI commands.
 
+## Documentation
+
+The technical documentation connects the measurement physics to the analyzer state, SCPI commands, and Python implementation. The MXA and measurement guide covers the measurement chain, RBW/VBW, detector and averaging semantics, ENBW, synchronization, trace transfer, noise density and band power, analyzer noise cancellation, trigger timing, and the squeezing/shot-noise workflow.
+
+The source is written in Typst and compiled in both CI systems. Each pipeline publishes the compiled PDFs as artifacts for review and download.
+
+- [MXA and measurement guide](docs/mxa-and-measurements.typ) — source
+- [Cleanup summary](docs/cleanup-summary.typ) — source
+- [GitHub Actions documentation artifacts](https://github.com/raiyiz/iyzee/actions/workflows/ci.yml)
+- [GitLab CI documentation artifacts](https://github.com/raiyiz/iyzee/-/pipelines)
+
+For a reproducible measurement, the relevant analyzer settings should travel with the data: frequency range and points, RBW/VBW, detector, averaging, sweep time, attenuation/reference level, trigger state, and calibration context.
+
 ## Design direction
 
 Keep the separation simple while the project is small:
