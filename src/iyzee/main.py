@@ -19,7 +19,7 @@ DEFAULT_ANALYZER_PARAMS = {
     "center_hz": 1e6,
     "span_hz": 0,
     "avg_count": 100,
-    "sweep_duration": 10,
+    "sweep_duration_ms": 10,
     "res_bw": 10e3,
     "avg_type": "LOG",
     "trig_source": "EXT",
@@ -37,7 +37,7 @@ def prepare_analyzer(traces, **overrides):
     mx.set_vbw(params["res_bw"], auto=True)
     mx.set_attenuation_auto(True)
     mx.set_trigger_source(params["trig_source"])
-    mx.set_sweep_duration(params["sweep_duration"])
+    mx.set_sweep_duration(params["sweep_duration_ms"])
     mx.set_average_count(params["avg_count"])
     mx.set_average_type(params["avg_type"])
 
@@ -64,7 +64,7 @@ def record_bw_seq():
         "center_hz": 1.5e6,
         "span_hz": 1e5,
         "avg_count": 300,
-        "sweep_duration": 10,
+        "sweep_duration_ms": 10,
         "res_bw": 24e3,
     }
     mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), **params)
@@ -91,12 +91,12 @@ def record_freq_seq():
         "center_hz": 1.5e6,
         "span_hz": 0,
         "avg_count": 150,
-        "sweep_duration": 10,
+        "sweep_duration_ms": 10,
         "res_bw": 24e3,
     }
     laser_center_thz = 377.1052067
     wavemeter_channel = 1
-    relax_time = params["sweep_duration"] * params["avg_count"] / 1000
+    relax_time_s = params["sweep_duration_ms"] * params["avg_count"] / 1000
 
     mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), **params)
     data = []
@@ -105,7 +105,7 @@ def record_freq_seq():
         with ShutterControl() as shutter:
             for frequency_thz in (laser_center_thz + i * 10e-6 for i in range(-1, 1)):
                 set_pid_setpoint(frequency_thz, wavemeter_channel)
-                time.sleep(relax_time)
+                time.sleep(relax_time_s)
 
                 try:
                     shutter.open()
