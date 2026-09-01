@@ -1,6 +1,5 @@
 import mxa as mxa_module
 import pytest
-
 from mxa import KeysightMXA
 
 
