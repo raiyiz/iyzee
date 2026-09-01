@@ -1,9 +1,9 @@
 import time
-from typing import List, Optional
+from typing import Any, ClassVar
 
 import pyvisa
 
-from base import IP
+from iyzee import IP
 
 
 class KeysightMXA:
@@ -13,8 +13,15 @@ class KeysightMXA:
     triggering synchronization, and binary data transfer.
     """
 
-    TRACE_IDS = ["TRACE1", "TRACE2", "TRACE3", "TRACE4", "TRACE5", "TRACE6"]
-    TRACE_MODES = {
+    TRACE_IDS: ClassVar[list[str]] = [
+        "TRACE1",
+        "TRACE2",
+        "TRACE3",
+        "TRACE4",
+        "TRACE5",
+        "TRACE6",
+    ]
+    TRACE_MODES: ClassVar[dict[str, str]] = {
         "WRIT": "Write",
         "MAXH": "MaxHold",
         "MINH": "MinHold",
@@ -22,13 +29,13 @@ class KeysightMXA:
         "VIEW": "View",
         "BLAN": "Blank",
     }
-    MARKER_MODES = {
+    MARKER_MODES: ClassVar[dict[str, str]] = {
         "POS": "Normal",
         "DELT": "Delta",
         "BAND": "BandPower",
         "NOIS": "Noise",
     }
-    TRIG_SOURCES = {
+    TRIG_SOURCES: ClassVar[dict[str, str]] = {
         "IMM": "FreeRun",
         "VID": "Video",
         "EXT": "External",
@@ -36,58 +43,61 @@ class KeysightMXA:
         "FRAM": "Frame",
     }
 
-    def __init__(self, ip: IP.NOISE_ANALYZER, timeout_ms: int = 5_000):
+    def __init__(self, ip: IP = IP.NOISE_ANALYZER, timeout_ms: int = 5_000, resource_manager=None):
         self.timeout_ms = timeout_ms
-        self.rm = pyvisa.ResourceManager()
-
-        # if ip is None:  # mock mode
-        #     self.instr = TestDevice()
-        #     return
+        self.rm = resource_manager or pyvisa.ResourceManager()
         self.visa_address = f"TCPIP0::{ip}::inst0::INSTR"
-        self.instr = self.rm.open_resource(self.visa_address)
-        # self.instr = None
+        self.instr: Any = None
+        self.connect()
 
     # ------------------------------------------------------------------
     # Connection Lifecycle
     # ------------------------------------------------------------------
-    def connect(self):
-        """Open VISA resource with standard terminations."""
+    def connect(self) -> None:
+        """Open the VISA resource once; repeated calls reuse it."""
+        if self.instr is not None:
+            return
         self.instr = self.rm.open_resource(self.visa_address)
         self.instr.timeout = self.timeout_ms
         self.instr.read_termination = "\n"
         self.instr.write_termination = "\n"
 
-    def disconnect(self):
-        if self.instr:
+    def close(self) -> None:
+        """Close the VISA resource if it is open."""
+        if self.instr is not None:
             self.instr.close()
             self.instr = None
+
+    def disconnect(self) -> None:
+        """Backward-compatible alias for :meth:`close`."""
+        self.close()
 
     def __enter__(self):
         self.connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.disconnect()
+        self.close()
         return False
 
     def write(self, cmd: str):
-        if not self.instr:
+        if self.instr is None:
             raise RuntimeError("Instrument not connected")
         self.instr.write(cmd)
 
     def query(self, cmd: str) -> str:
-        if not self.instr:
+        if self.instr is None:
             raise RuntimeError("Instrument not connected")
         return self.instr.query(cmd)
 
     def query_binary(
         self, cmd: str, datatype: str = "f", is_big_endian: bool = True
-    ) -> List[float]:
+    ) -> list[float]:
         """
         Query binary IEEE 488.2 block data.
         datatype='f' (float32) or 'd' (float64).
         """
-        if not self.instr:
+        if self.instr is None:
             raise RuntimeError("Instrument not connected")
         return self.instr.query_binary_values(
             cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
@@ -105,30 +115,30 @@ class KeysightMXA:
         self.write("*CLS")
 
     def wait_opc(self, timeout_sec: float = 30.0) -> bool:
-        """Block until *OPC? returns 1."""
+        """Block until *OPC? explicitly returns 1."""
         old_timeout = self.instr.timeout
         self.instr.timeout = int(timeout_sec * 1000)
         try:
-            self.query("*OPC?")
-            return True
+            response = self.query("*OPC?").strip()
+            return response == "1"
         except pyvisa.errors.VisaIOError:
             return False
         finally:
             self.instr.timeout = old_timeout
 
-    def get_errors(self) -> List[str]:
+    def get_errors(self) -> list[str]:
         """Drain the SCPI error queue."""
         errs = []
         while True:
             msg = self.query("SYST:ERR?")
-            if msg.startswith("+0,") or msg.startswith("0,"):
+            if msg.startswith(("+0,", "0,")):
                 break
             errs.append(msg)
         return errs
 
     def set_display_update(self, state: bool):
         """Disable display updates to improve remote measurement speed."""
-        self.write(f'DISP:ENAB {"ON" if state else "OFF"}')
+        self.write(f"DISP:ENAB {'ON' if state else 'OFF'}")
 
     # ------------------------------------------------------------------
     # Frequency / Amplitude / Bandwidth
@@ -155,15 +165,15 @@ class KeysightMXA:
         self.write(f"POW:ATT {att_db}")
 
     def set_attenuation_auto(self, state: bool = True):
-        self.write(f'POW:ATT:AUTO {"ON" if state else "OFF"}')
+        self.write(f"POW:ATT:AUTO {'ON' if state else 'OFF'}")
 
-    def set_rbw(self, rbw_hz: Optional[float] = None, auto: bool = False):
+    def set_rbw(self, rbw_hz: float | None = None, auto: bool = False):
         if auto or rbw_hz is None:
             self.write("BWID:AUTO ON")
         else:
             self.write(f"BWID {rbw_hz}")
 
-    def set_vbw(self, vbw_hz: Optional[float] = None, auto: bool = False):
+    def set_vbw(self, vbw_hz: float | None = None, auto: bool = False):
         if auto or vbw_hz is None:
             self.write("BWID:VID:AUTO ON")
         else:
@@ -193,7 +203,7 @@ class KeysightMXA:
         return int(self.query("SWE:POIN?"))
 
     def set_continuous_sweep(self, state: bool):
-        self.write(f'INIT:CONT {"ON" if state else "OFF"}')
+        self.write(f"INIT:CONT {'ON' if state else 'OFF'}")
 
     def initiate_sweep(self):
         """Start a sweep immediately (use with INIT:CONT OFF)."""
@@ -213,33 +223,7 @@ class KeysightMXA:
     # ------------------------------------------------------------------
     # Trace Operations
     # ------------------------------------------------------------------
-    # def set_trace_mode(self, trace: str, mode: str):
-    #     """
-    #     trace: TRACE1 ... TRACE6
-    #     mode : WRIT, MAXH, MINH, AVER, VIEW, BLAN
-    #     """
-    #     self.write(f"{trace}:TYPE {mode}")
-    #
-    # def clear_trace(self, trace: str):
-    #     self.write(f"{trace}:CLE")
-    #
-    # def get_trace_data(self, trace: str, binary: bool = True) -> List[float]:
-    #     """
-    #     Retrieve trace amplitude data.
-    #     **Binary transfer (REAL,32)** is strongly recommended for speed.
-    #     """
-    #     # __import__("ipdb").set_trace()
-    #     if binary:
-    #         self.write("FORM:DATA REAL,32")
-    #         self.write("FORM:BORD NORM")  # MSB first (big-endian)
-    #         return self.query_binary(f"{trace}:DATA?", datatype="f", is_big_endian=True)
-    #     else:
-    #         self.write("FORM:DATA ASCii")
-    #         print(f"Getting {trace=}")
-    #         resp = self.query(f"{trace}:DATA? {trace}")
-    #         return [float(x) for x in resp.split(",")]
-
-    def get_frequency_axis(self) -> List[float]:
+    def get_frequency_axis(self) -> list[float]:
         """Return frequency value for each trace point (linear sweep)."""
         start = float(self.query("FREQ:STAR?"))
         stop = float(self.query("FREQ:STOP?"))
@@ -249,9 +233,7 @@ class KeysightMXA:
         step = (stop - start) / (pts - 1)
         return [start + i * step for i in range(pts)]
 
-    def _set_trace_math(
-        self, result: str, operation: str, operand1: str, operand2: str
-    ):
+    def _set_trace_math(self, result: str, operation: str, operand1: str, operand2: str):
         """
         Perform trace math (e.g., phase noise cancellation).
         Example: result='TRACE3', operation='POW',
@@ -270,7 +252,7 @@ class KeysightMXA:
         self.write(f"AVER:TYPE {avg_type}")
 
     # -- Trace Control (suffix syntax) --------------------------------
-    def set_trace_mode(self, trace_num: int, mode: str):
+    def set_trace_mode(self, trace_num: int | str, mode: str):
         self.write(f":TRACe{trace_num}:TYPE {mode}")
 
     def set_trace_type_average(self, trace_num):
@@ -285,50 +267,25 @@ class KeysightMXA:
     def clear_trace(self, trace_num: int):
         self.write(f":TRACe{trace_num}:CLEar")
 
-    # def copy_trace(self, src_num: int, dest_num: int):
-    #     self.write(f":TRACe{src_num}:COPY TRACe{dest_num}")
-    #
-    # def exchange_traces(self, trace_a: int, trace_b: int):
-    #     self.write(f":TRACe{trace_a}:EXCHange TRACe{trace_b}")
-    #
-    def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> List[float]:
+    def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> list[float]:
         if binary:
-            # TODO: binary currently borken, there is no query binary value method.
             self.write("FORMat:DATA REAL,32")
             self.write("FORMat:BORDer NORM")
             return self.query_binary(
-                # f":TRACe{trace_num}:DATA?", datatype="f", is_big_endian=True
                 f":TRACe:DATA? TRACe{trace_num}",
                 datatype="f",
                 is_big_endian=True,
             )
-        else:
-            self.write("FORMat:DATA ASCii")
-            # resp = self.query(f":TRACe{trace_num}:DATA?")
-            resp = self.query(f":TRACe:DATA? TRACe{trace_num}")
-            return [float(x) for x in resp.split(",")]
-
-    # def get_frequency_axis(self) -> List[float]:
-    #     start = float(self.query("FREQ:STAR?"))
-    #     stop = float(self.query("FREQ:STOP?"))
-    #     pts = self.get_sweep_points()
-    #     if pts <= 1:
-    #         return [start]
-    #     step = (stop - start) / (pts - 1)
-    #     return [start + i * step for i in range(pts)]
-    #
-    # def set_average_count(self, count: int):
-    #     self.write(f"AVER:COUN {count}")
-    #
-    # def set_average_type(self, avg_type: str):
-    #     self.write(f"AVER:TYPE {avg_type}")
+        self.write("FORMat:DATA ASCii")
+        resp = self.query(f":TRACe:DATA? TRACe{trace_num}")
+        return [float(x) for x in resp.split(",")]
 
     # ------------------------------------------------------------------
     # Marker Control
     # ------------------------------------------------------------------
     def set_marker_state(self, marker: int, state: bool):
         """marker: 1-12."""
-        self.write(f'CALC:MARK{marker}:STAT {"ON" if state else "OFF"}')
+        self.write(f"CALC:MARK{marker}:STAT {'ON' if state else 'OFF'}")
 
     def set_marker_mode(self, marker: int, mode: str):
         """
@@ -426,7 +383,7 @@ class KeysightMXA:
         self,
         center_hz: float,
         span_hz: float,
-        rbw_hz: Optional[float] = None,
+        rbw_hz: float | None = None,
         use_rms: bool = True,
         avg_count: int = 10,
     ):
@@ -471,109 +428,3 @@ class KeysightMXA:
         # POW = power subtraction (10*log10(10^(T1/10) - 10^(T2/10)))
         # self.set_trace_math(trace_result, "POW", trace_dut, trace_cal)
         # self.set_trace_mode(trace_result, "VIEW")
-
-
-# class SimpleKeysightMXA:
-#     def __init__(self, ip: str = "10.140.1.115", port: int = 5023):
-#         if ip is None:  # mock mode
-#             self.instrument = TestDevice()
-#             return
-#
-#         self.rm = pyvisa.ResourceManager()
-#         self.instrument = self.rm.open_resource(f"TCPIP0::{ip}::inst0::INSTR")
-#
-#     def close(self):
-#         """Close the connection to the instrument."""
-#         self.instrument.close()
-#         self.rm.close()
-#
-#     def query(self, command):
-#         """Send a query command to the instrument."""
-#         return self.instrument.query(command).strip()
-#
-#     def write(self, command):
-#         """Send a write command to the instrument."""
-#         self.instrument.write(command)
-#
-#     def reset(self):
-#         """Reset the instrument to default settings."""
-#         self.write("*instrumentT")
-#
-#     def get_id(self):
-#         """Get instrument identification."""
-#         return self.query("*IDN?")
-#
-#     def set_frequency_center(self, freq_hz):
-#         """
-#         Set the center frequency.
-#
-#         :param freq_hz: Frequency in Hertz
-#         """
-#         self.write(f":SENSe:FREQuency:CENTer {freq_hz}")
-#
-#     def get_frequency_center(self):
-#         """Get the center frequency."""
-#         return float(self.query(":SENSe:FREQuency:CENTer?"))
-#
-#     def set_frequency_span(self, span_hz):
-#         """
-#         Set the frequency span.
-#
-#         :param span_hz: Span in Hertz
-#         """
-#         self.write(f":SENSe:FREQuency:SPAN {span_hz}")
-#
-#     def get_frequency_span(self):
-#         """Get the frequency span."""
-#         return float(self.query(":SENSe:FREQuency:SPAN?"))
-#
-#     def set_frequency_start(self, freq_hz):
-#         """
-#         Set the start frequency.
-#
-#         :param freq_hz: Frequency in Hertz
-#         """
-#         self.write(f":SENSe:FREQuency:STARt {freq_hz}")
-#
-#     def set_frequency_stop(self, freq_hz):
-#         """
-#         Set the stop frequency.
-#
-#         :param freq_hz: Frequency in Hertz
-#         """
-#         self.write(f":SENSe:FREQuency:STOP {freq_hz}")
-#
-#     def get_trace_data(self, trace_num=1):
-#         """
-#         Get trace data from the instrument.
-#
-#         :param trace_num: Trace number (1, 2, 3, or 4)
-#         :return: List of trace data points
-#         """
-#         # Set the data format to ASCII
-#         self.write(":FORMat:TRACe:DATA ASCii")
-#         # Query trace data
-#         data_str = self.query(f":TRACe:DATA? TRACE{trace_num}")
-#         # Convert to list of floats
-#         return [float(x) for x in data_str.split(",")]
-#
-#     def set_attenuation(self, atten_db):
-#         """
-#         Set the input attenuation.
-#
-#         :param atten_db: Attenuation in dB
-#         """
-#         self.write(f":SENSe:POWer:ATTenuation {atten_db}dB")
-#
-#     def auto_attenuation(self):
-#         """Enable automatic attenuation."""
-#         self.write(":SENSe:POWer:ATTenuation:AUTO ON")
-#
-#     def set_reference_level(self, level_dbm):
-#         """
-#         Set the reference level.
-#
-#         :param level_dbm: Reference level in dBm
-#         """
-#         self.write(f":DISPlay:WINDow:TRACe:Y:RLEVel {level_dbm}dBm")
-#
