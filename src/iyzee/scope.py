@@ -92,7 +92,7 @@ class LeCroy:
         )
 
         # write the header first
-        written = self.s.send(head)
+        self.s.send(head)
 
         # write the message
         byteindx = 0
@@ -283,7 +283,7 @@ class LeCroy:
         VOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
         # get vertical gain
         self.send(f'{channel}:INSPECT? "VERTICAL_GAIN"')
-        r1, r2 = self.readAll()
+        _r1, r2 = self.readAll()
         VG = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
         # get vertical unit
         self.send(f'{channel}:INSPECT? "VERTUNIT"')
@@ -307,10 +307,10 @@ class LeCroy:
         HORIZ_INTERVAL (float) is sampling interal for time domain waveforms
         """
         self.send(f'{channel}:INSPECT? "HORUNIT"')
-        r1, r2 = self.readAll()
+        _r1, r2 = self.readAll()
         HORUNIT = r2.split("Unit Name = ")[-1].split('"\n')[0]
         self.send(f'{channel}:INSPECT? "HORIZ_OFFSET"')
-        r1, r2 = self.readAll()
+        _r1, r2 = self.readAll()
         HOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
         self.send(f'{channel}:INSPECT? "HORIZ_INTERVAL"')
         _r1, r2 = self.readAll()
