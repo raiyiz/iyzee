@@ -20,6 +20,7 @@ class IP(StrEnum):
     POWER_SUPPLY = "10.140.1.42"
     NOISE_ANALYZER = "10.140.1.115"
     SCOPE = "10.140.1.28"
+    WAVEMETER = "10.140.1.118"
 
 
 class BaseDevice:
