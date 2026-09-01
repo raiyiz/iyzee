@@ -38,7 +38,7 @@ class ShutterControl:
         self.psu = PSU(ip=ip)
         self.chan = chan
 
-        # Shutter needs at least ~2 V to trigger.
+        # Shutter trigger voltage is 1.7 V.
         self.psu.set_voltage(1.7, chan)
         self.psu.set_current(0.01, chan)
 
