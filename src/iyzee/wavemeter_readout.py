@@ -174,7 +174,7 @@ def track_frequency(total_time, time_step, save_path, channel, reference_f=0, sa
     _fig, ax = plt.subplots(figsize=(4.5, 2.5))
 
     (_line,) = ax.plot([], [], "b-", label="Laser Frequency (THz)")
-    fill_between = ax.fill_between([], [], [], color="blue", alpha=0.3)
+    ax.fill_between([], [], [], color="blue", alpha=0.3)
 
     start_time = time.time()
 
@@ -193,8 +193,8 @@ def track_frequency(total_time, time_step, save_path, channel, reference_f=0, sa
                 )
                 - reference_f
             )
-        except Exception as e:
-            print(f"Error fetching data: {e}")
+        except (OSError, ValueError, UnicodeError) as exc:
+            print(f"Error fetching data: {exc}")
             return
 
         # Calculate the elapsed time since the start of data collection
