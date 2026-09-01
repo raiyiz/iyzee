@@ -1,6 +1,6 @@
 import pyvisa
 
-from iyzee import BaseDevice, IP
+from iyzee import IP, BaseDevice
 
 
 class FakeInstrument:
