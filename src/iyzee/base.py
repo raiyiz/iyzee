@@ -1,6 +1,7 @@
 """Shared device infrastructure for laboratory instruments."""
 
 from enum import IntEnum, StrEnum
+from typing import Any
 
 import pyvisa
 
@@ -29,7 +30,7 @@ class BaseDevice:
     def __init__(self, ip: IP | None = None, resource_manager=None):
         self.ip = ip
         self.rm = resource_manager or pyvisa.ResourceManager()
-        self.instrument = None
+        self.instrument: Any = None
         self.connect()
 
     def open(self):

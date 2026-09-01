@@ -1,5 +1,5 @@
 import time
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pyvisa
 
@@ -43,11 +43,11 @@ class KeysightMXA:
         "FRAM": "Frame",
     }
 
-    def __init__(self, ip: IP.NOISE_ANALYZER, timeout_ms: int = 5_000, resource_manager=None):
+    def __init__(self, ip: IP = IP.NOISE_ANALYZER, timeout_ms: int = 5_000, resource_manager=None):
         self.timeout_ms = timeout_ms
         self.rm = resource_manager or pyvisa.ResourceManager()
         self.visa_address = f"TCPIP0::{ip}::inst0::INSTR"
-        self.instr = None
+        self.instr: Any = None
         self.connect()
 
     # ------------------------------------------------------------------
@@ -252,7 +252,7 @@ class KeysightMXA:
         self.write(f"AVER:TYPE {avg_type}")
 
     # -- Trace Control (suffix syntax) --------------------------------
-    def set_trace_mode(self, trace_num: int, mode: str):
+    def set_trace_mode(self, trace_num: int | str, mode: str):
         self.write(f":TRACe{trace_num}:TYPE {mode}")
 
     def set_trace_type_average(self, trace_num):
