@@ -1,9 +1,10 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import iyzee.main as main_module
-from iyzee.main import create_dirs, multiplot, save_data
+from iyzee.main import acquire_trace, create_dirs, multiplot, save_data
 
 
 def test_save_data_round_trip(tmp_path):
@@ -44,6 +45,25 @@ def test_multiplot_handles_empty_data(monkeypatch):
     multiplot([])
 
     assert shown
+
+
+def test_acquire_trace_disables_trace_after_failure():
+    class FakeMXA:
+        def __init__(self):
+            self.update_states = []
+
+        def set_trace_update(self, trace_num, state):
+            self.update_states.append((trace_num, state))
+
+        def single_sweep_wait(self):
+            raise RuntimeError("sweep failed")
+
+    mx = FakeMXA()
+
+    with pytest.raises(RuntimeError, match="sweep failed"):
+        acquire_trace(mx, 1)
+
+    assert mx.update_states == [(1, True), (1, False)]
 
 
 def test_record_bw_seq_tracks_vbw_with_rbw(monkeypatch):
