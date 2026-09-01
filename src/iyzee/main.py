@@ -51,9 +51,11 @@ def prepare_analyzer(traces, **overrides):
 def acquire_trace(mx, trace_num):
     """Acquire one trace and return its data."""
     mx.set_trace_update(trace_num, True)
-    mx.single_sweep_wait()
-    mx.set_trace_update(trace_num, False)
-    return mx.get_trace_data(trace_num=trace_num, binary=False)
+    try:
+        mx.single_sweep_wait()
+        return mx.get_trace_data(trace_num=trace_num, binary=False)
+    finally:
+        mx.set_trace_update(trace_num, False)
 
 
 def record_bw_seq():
