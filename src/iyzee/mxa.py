@@ -108,12 +108,12 @@ class KeysightMXA:
         self.write("*CLS")
 
     def wait_opc(self, timeout_sec: float = 30.0) -> bool:
-        """Block until *OPC? returns 1."""
+        """Block until *OPC? explicitly returns 1."""
         old_timeout = self.instr.timeout
         self.instr.timeout = int(timeout_sec * 1000)
         try:
-            self.query("*OPC?")
-            return True
+            response = self.query("*OPC?").strip()
+            return response == "1"
         except pyvisa.errors.VisaIOError:
             return False
         finally:
@@ -525,10 +525,7 @@ class KeysightMXA:
 #         self.write(f":SENSe:FREQuency:SPAN {span_hz}")
 #
 #     def get_frequency_span(self):
-#         """Get the frequency span.
-#
-#         :return: Frequency span in Hertz
-#         """
+#         """Get the frequency span."""
 #         return float(self.query(":SENSe:FREQuency:SPAN?"))
 #
 #     def set_frequency_start(self, freq_hz):
@@ -542,8 +539,6 @@ class KeysightMXA:
 #     def set_frequency_stop(self, freq_hz):
 #         """
 #         Set the stop frequency.
-#
-#         :param freq_hz: Frequency in Hertz
 #         """
 #         self.write(f":SENSe:FREQuency:STOP {freq_hz}")
 #
