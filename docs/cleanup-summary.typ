@@ -76,7 +76,7 @@ where $N$ is the number of bytes received for a field that declares length $n$. 
 
 For a measured quantity represented by samples $x_i$, a transport failure must not silently become a shorter or otherwise plausible vector:
 
-$ x = (x_0, x_1, dots, x_(N-1)) $
+$ x = (x_0, x_1, dots, x_(N - 1)) $
 
 must be complete before downstream analysis treats it as an acquisition.
 
@@ -84,7 +84,7 @@ must be complete before downstream analysis treats it as an acquisition.
 
 The documentation uses `physica` for compact mathematical notation. For example, the gradient of a scalar field $f$ can be written as
 
-$ grad f = (pdv(f,x), pdv(f,y), pdv(f,z)) $
+$ grad f = (pdv(f, x), pdv(f, y), pdv(f, z)) $
 
 This is documentation infrastructure only; it does not introduce a new numerical dependency into the Python package.
 
