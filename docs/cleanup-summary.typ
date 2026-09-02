@@ -59,7 +59,7 @@ The current pass establishes a cleaner separation between experiment orchestrati
   [Synchronization], [`*OPC?` is checked explicitly and the SCPI error queue is drained.],
   [Scope transport], [`_recv_exact()` handles fragmented TCP reads and fails loudly on premature connection closure.],
   [CI], [GitHub Actions runs the test, Ruff, and mypy checks without duplicate push/PR pipelines; GitLab mirrors the same Python checks.],
-  [Documentation], [The technical guides are authored in Typst and compiled in CI, with `physica` pinned for scientific notation.],
+  [Documentation], [The technical guides are authored in Typst and compiled in CI.]
 )
 
 = Oscilloscope transport hardening
@@ -68,25 +68,19 @@ TCP is a byte stream, not a message transport. A request for $n$ bytes does not 
 
 The test suite uses a deliberately fragmenting fake socket. It verifies complete VICP frames, headers split over multiple reads, byte waveforms, 16-bit word waveforms, malformed waveform headers, and truncated payloads.
 
-The essential invariant is:
+The essential invariant is $N = n$, where $N$ is the number of bytes received for a field that declares length $n$. If the peer closes the connection first, the driver raises `ConnectionError` rather than converting an incomplete transfer into measurement data.
 
-$ N = n $
+For samples $x_i$, the transferred vector must be complete before downstream analysis treats it as an acquisition:
 
-where $N$ is the number of bytes received for a field that declares length $n$. If the peer closes the connection first, the driver raises `ConnectionError` rather than converting an incomplete transfer into measurement data.
-
-For a measured quantity represented by samples $x_i$, a transport failure must not silently become a shorter or otherwise plausible vector:
-
-$ x = (x_0, x_1, dots, x_(N - 1)) $
-
-must be complete before downstream analysis treats it as an acquisition.
+$ x = (x_0, x_1, dots.c, x_(N - 1)) $
 
 = Scientific notation
 
-The documentation uses `physica` for compact mathematical notation. For example, the gradient of a scalar field $f$ can be written as
+The documentation uses native Typst math syntax. For the gradient of a scalar field $f$, write
 
-$ grad f = (pdv(f, x), pdv(f, y), pdv(f, z)) $
+$ nabla f = (partial f / partial x, partial f / partial y, partial f / partial z) $
 
-This is documentation infrastructure only; it does not introduce a new numerical dependency into the Python package.
+No package-specific math functions are required for this notation.
 
 = Hardware correctness note
 
@@ -104,7 +98,7 @@ Every cleanup change follows the same loop:
 + make only the necessary follow-up fix;
 + proceed only after the resulting head is green.
 
-The latest code change in the sequence is `test: cover LeCroy waveform socket paths`. The documentation pipeline now compiles the Typst sources as a first-class CI check and publishes the resulting PDFs as artifacts.
+The documentation pipeline compiles the Typst sources as a first-class CI check and publishes the resulting PDFs as artifacts.
 
 = Remaining work
 
