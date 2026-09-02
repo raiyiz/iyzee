@@ -1,6 +1,10 @@
 // iyzee MXA and measurement guide
 
-#set document(title: "iyzee MXA control and measurement model", author: "iyzee")
+#set document(
+  title: "iyzee MXA control and measurement model",
+  author: "iyzee",
+)
+
 #set page(
   margin: (x: 2.2cm, y: 2cm),
   header: context [
@@ -15,6 +19,7 @@
     #counter(page).display("1 / 1", both: true)
   ],
 )
+
 #set par(justify: true, leading: 0.55em)
 #set heading(numbering: "1.")
 #set text(size: 10pt)
@@ -35,7 +40,7 @@
 
 = Purpose and scope
 
-The purpose of this document is not to reproduce the instrument manual. It connects four layers that must agree in a real experiment:
+The purpose of this document is not to reproduce the analyzer manual. It connects the layers that must agree in a real experiment:
 
 $ "physics" -> "measurement method" -> "analyzer state" -> "Python data" $
 
@@ -43,19 +48,19 @@ A value is scientifically useful only when its units, bandwidth, detector, avera
 
 == Reading this document
 
-The Keysight X-Series Programmer's Guide is the general SCPI programming layer: syntax, communication, synchronization, status, and programming techniques. Application-specific command definitions belong to the relevant User's and Programmer's Reference. The Python driver is therefore a small, opinionated interface over selected SCPI operations, not a replacement for the analyzer reference.
+The Keysight X-Series Programmer's Guide provides the general SCPI programming layer: syntax, communication, synchronization, status, and programming techniques. Application-specific command definitions belong to the relevant User's and Programmer's Reference. The Python driver is therefore a small, opinionated interface over selected SCPI operations, not a replacement for the analyzer reference.
 
-A practical rule is: when a method changes analyzer behavior, document the *instrument concept*, the *SCPI command*, and the *physical meaning*. When a method only moves bytes, document the transport separately.
+When a method changes analyzer behavior, document the instrument concept, the SCPI boundary, and the physical meaning. When a method only moves bytes, document the transport separately.
 
 = The measurement chain
 
-For the experiments represented in this repository, the useful mental model is
+The useful mental model is:
 
 $ "DUT / optical system" -> "RF signal" -> "MXA input" -> "attenuation / preamp" -> "mixer / IF" -> "RBW filter" -> "detector" -> "VBW / averaging" -> "trace" -> "export" $
 
-Each stage can alter the measured quantity. In particular, RBW changes the effective measurement bandwidth; the detector changes how the detected samples are formed; VBW and trace averaging reduce variation after detection; analyzer noise adds to the measured power; and reference level/attenuation affect the instrument operating point.
+Each stage can alter the measured quantity. RBW changes effective measurement bandwidth; detector choice changes how samples are combined; VBW and trace averaging reduce variation after detection; analyzer noise contributes to measured power; and reference level and attenuation affect the instrument operating point.
 
-The MXA is therefore not a transparent voltmeter with a frequency axis. It is a signal-processing instrument whose displayed trace is the output of a configured measurement chain.
+The MXA is therefore not a transparent voltmeter with a frequency axis. Its trace is the output of a configured signal-processing chain.
 
 = Driver architecture
 
@@ -84,26 +89,30 @@ The driver exposes:
 
 `get_frequency_axis()` reconstructs a linear axis from the instrument's start frequency, stop frequency, and number of points:
 
-$ f_i = f_start + i (f_stop - f_start) / (N - 1), quad i = 0, ..., N - 1 $
+$ f_i = f_1 + i (f_2 - f_1) / (N - 1) $
 
-This is valid only when the trace is represented on a linear frequency grid. The axis is metadata, not part of the returned trace values, so persisted measurements should save the frequency configuration with the trace.
+Here `f_1` and `f_2` are the start and stop frequencies, `N` is the number of points, and `i` runs from zero through `N - 1`.
 
-A useful consistency check is
+A necessary consistency condition is
 
-$ N >= 2 -> Delta f = (f_stop - f_start) / (N - 1) $
+$ N >= 2 $
 
-The frequency-bin spacing `Delta f` is not the same thing as RBW. RBW describes the analyzer's resolution filter; point spacing describes how densely the resulting trace is sampled/displayed.
+and the frequency-bin spacing is
+
+$ d_f = (f_2 - f_1) / (N - 1) $
+
+The point spacing `d_f` is not the same thing as RBW. RBW describes the analyzer's resolution filter; point spacing describes how densely the resulting trace is sampled.
 
 = Amplitude, reference level, and attenuation
 
-`set_ref_level()` writes the display reference level in dBm. `set_attenuation()` and `set_attenuation_auto()` control the RF input attenuation.
+`set_ref_level()` writes the display reference level in dBm. `set_attenuation()` and `set_attenuation_auto()` control RF input attenuation.
 
 These are not interchangeable:
 
 - *reference level* sets the vertical operating/display reference;
-- *RF attenuation* changes the input attenuation and therefore the signal level presented to later stages.
+- *RF attenuation* changes the attenuation ahead of later stages.
 
-Lower attenuation can improve sensitivity but reduces headroom before overload. Higher attenuation improves protection/headroom but raises the effective input-referred noise contribution. Preamp state, mixer level, and analyzer-specific protection limits remain instrument-level concerns.
+Lower attenuation can improve sensitivity but reduces headroom before overload. Higher attenuation improves headroom but generally raises the input-referred noise contribution. Preamplifier state, mixer level, and analyzer-specific protection limits remain instrument-level concerns.
 
 For reproducible noise measurements, record attenuation and preamplifier state rather than treating the trace as fully specified by center frequency and RBW alone.
 
@@ -111,27 +120,27 @@ For reproducible noise measurements, record attenuation and preamplifier state r
 
 `set_rbw()` emits `BWID` or enables `BWID:AUTO`.
 
-RBW is the analyzer's resolution-bandwidth filter. In a traditional swept measurement it is the IF filter that determines the minimum separation at which two spectral components can be resolved. It also sets how much random noise power is admitted by the measurement filter.
+RBW is the analyzer's resolution-bandwidth filter. In a traditional swept measurement it controls frequency selectivity and the amount of random noise power admitted by the filter.
 
-For approximately white noise, measured noise power scales approximately with the effective noise bandwidth:
+For approximately white noise, measured noise power scales approximately with effective bandwidth:
 
-$ P_"noise" approx S_P dot B_"eff" $
+$ P_n approx S B_e $
 
-so increasing RBW generally increases displayed noise power. Conversely, narrowing RBW lowers both the DUT contribution and the analyzer's own displayed noise.
+Here `P_n` is measured noise power, `S` is noise power density, and `B_e` is the effective noise bandwidth.
 
-RBW is therefore not merely a visual smoothing parameter. It changes the measurement bandwidth and the time required to acquire a swept measurement. Keysight notes that decreasing RBW in swept measurements can increase sweep time by roughly an order of magnitude for the next lower 1--3--10 setting; the exact relationship depends on analyzer architecture, detector, span, and coupling.
+Increasing RBW generally increases displayed noise power. Narrowing RBW lowers both the DUT contribution and the analyzer's own displayed noise.
 
-This gives `record_bw_seq()` a physical interpretation: the experiment is deliberately changing the measurement bandwidth and observing how the reported noise scales with it.
+RBW is not merely a visual smoothing parameter. It affects both measurement bandwidth and swept-acquisition time.
 
 = VBW: post-detection filtering
 
 `set_vbw()` emits `BWID:VID` or enables `BWID:VID:AUTO`.
 
-VBW is a video/post-detection filter. It acts after the spectrum has been detected and mainly reduces the visible variance of a noisy trace; it does not represent a second RF resolution filter in the same sense as RBW.
+VBW is a video/post-detection filter. It acts after detection and mainly reduces visible variation of a noisy trace; it is not a second RF resolution filter in the same sense as RBW.
 
-For noise-like signals, a smaller VBW/RBW ratio can reduce point-to-point fluctuations. This is useful when the scientific goal is a stable estimator, but it must not be described as if the underlying physical noise power had disappeared.
+A smaller VBW/RBW ratio can reduce point-to-point fluctuations. This can be useful for a stable estimator, but it should not be described as though the physical noise power had disappeared.
 
-A useful distinction is
+The distinction is:
 
 $ "RBW" -> "frequency selectivity and noise bandwidth" $
 
@@ -139,7 +148,7 @@ versus
 
 $ "VBW" -> "post-detection smoothing of the measurement statistic" $
 
-The current noise preset uses automatic VBW because exact coupling is analyzer/application dependent. Persisted experiment metadata should therefore record the resolved instrument setting whenever exact reproducibility matters.
+The current noise preset uses automatic VBW because exact coupling is analyzer/application dependent. Persisted experiment metadata should record the resolved setting whenever exact reproducibility matters.
 
 = Detector, averaging, and statistical meaning
 
@@ -147,25 +156,25 @@ The driver exposes `set_detector()`, `set_average_type()`, `set_average_count()`
 
 These operations are related but not equivalent.
 
-*Detector* determines how samples within the sweep are combined around each displayed point. For noise-like signals, Keysight recommends sample/average-style detection rather than peak-oriented detection when estimating noise statistics.
+*Detector* determines how samples within the sweep are combined around each displayed point.
 
 *Trace averaging* averages corresponding trace points from successive sweeps.
 
-*VBW filtering* averages/smooths in the post-detection path.
+*VBW filtering* acts in the post-detection path.
 
-*Average type* determines the domain in which the analyzer averages a measurement. This is critical for logarithmic displays.
+*Average type* determines the domain in which the analyzer averages a measurement. This is important for logarithmic displays.
 
-For a power-like quantity, the physically relevant arithmetic mean is
+For a power-like quantity, let `P_1` and `P_2` be two linear-power samples. Their arithmetic mean is represented by
 
-$ P_"bar" = 1 / N sum_i P_i $
+$ P_m = (P_1 + P_2) / 2 $
 
-but, in general,
+In general,
 
-$ log(P_"bar") != 1 / N sum_i log(P_i) $
+$ log(P_m) != (log(P_1) + log(P_2)) / 2 $
 
 so averaging after conversion to dB is not equivalent to averaging linear power and then converting to dB.
 
-Keysight specifically cautions that logarithmic averaging of noise can introduce a systematic error of up to about `-2.51 dB`; power/RMS averaging is preferred for accurate noise measurements. The code comment associated with `set_average_type()` therefore reflects a measurement principle, not just a UI preference.
+Keysight cautions that logarithmic averaging of noise can introduce a systematic error of about `-2.51 dB`; power/RMS averaging is preferred for accurate noise measurements.
 
 For statistically meaningful noise measurements, document at least RBW, detector, average type, average count, sweep time, and VBW.
 
@@ -175,41 +184,35 @@ For statistically meaningful noise measurements, document at least RBW, detector
 
 Sweep duration controls how long the analyzer spends acquiring a swept trace. It is not synonymous with the duration of the physical experiment or with the number of independent noise samples.
 
-The number of statistically useful samples depends on the analyzer's detection/filtering path and on the noise correlation time. Increasing sweep time, reducing VBW, or increasing trace-average count can reduce variance, but the improvement does not necessarily follow an exact square-root law without a defined statistical model and independence assumption.
+Increasing sweep time, reducing VBW, or increasing trace-average count can reduce estimator variance, but the improvement does not necessarily follow an exact square-root law without a defined statistical model and independence assumption.
 
-The conservative statement is
+The conservative statement is:
 
 $ "more averaging" -> "generally lower estimator variance" $
 
 = Noise density, integrated power, and ENBW
 
-`configure_noise_marker()` selects the analyzer's noise-marker mode. The result is interpreted as a spectral noise density, typically reported in dBm/Hz.
+`configure_noise_marker()` selects the analyzer's noise-marker mode. The result is interpreted as spectral noise density, typically reported in dBm/Hz.
 
 The density and an integrated power are different quantities:
 
-$ S_P(f) : "W/Hz" $
+$ S = P / B_e $
 
-and
+For a white-noise region, an integrated band-power model is
 
-$ P_"band" = integral_(f_1)^(f_2) S_P(f) dif f : "W" $
+$ P = S B_e $
 
-A convenient conversion to dBm is
+The effective noise bandwidth can differ from the displayed RBW. Calibrated conversions should therefore use the effective bandwidth defined for the analyzer/filter rather than blindly equating the two.
 
-$ P_"dBm" = 10 log_10(P / (1 "mW")) $
-
-The effective noise bandwidth may differ from the displayed RBW, so calibrated conversions should use the effective bandwidth defined for the analyzer/filter rather than blindly equating the two.
-
-For white noise, a useful check is
+A useful white-noise check is
 
 $ P_2 / P_1 approx B_2 / B_1 $
 
-where `B_1` and `B_2` denote effective bandwidths of measurements 1 and 2.
+and, in dB,
 
-In dB, the corresponding change is
+$ d_P approx 10 log(B_2 / B_1) $
 
-$ Delta P approx 10 log_10(B_2 / B_1) $
-
-A factor-of-two effective-bandwidth change predicts approximately `3.01 dB`, subject to filter shape, detector behavior, and DUT noise flatness.
+A factor-of-two effective-bandwidth change therefore predicts approximately `3.01 dB`, subject to filter shape, detector behavior, and DUT noise flatness.
 
 = Band-power measurements
 
@@ -217,33 +220,33 @@ A factor-of-two effective-bandwidth change predicts approximately `3.01 dB`, sub
 
 The dimensional chain is
 
-$ "W/Hz" times "Hz" -> "W" $
+$ S B_e -> P $
+
+The dimensional meaning matters: density times bandwidth gives integrated power.
 
 = Analyzer noise floor and noise cancellation
 
-The analyzer contributes its own noise. The measured power is therefore not generally equal to DUT power alone. A simple model is
+The analyzer contributes its own noise. A simple linear-power model is
 
-$ P_"meas" = P_"DUT" + P_"MXA" $
+$ P_m = P_d + P_a $
 
-in linear power units, assuming the contributions are uncorrelated and the measurement chain is otherwise unchanged.
+where `P_m` is measured power, `P_d` is DUT power, and `P_a` is analyzer contribution.
 
-Keysight notes that analyzer noise can both bias the measured power upward and increase result variance, especially near the analyzer noise floor. Reducing RBW reduces both DUT noise and analyzer noise; averaging, VBW reduction, and suitable detectors mainly reduce variance.
+This model assumes the contributions are additive in linear power and that the relevant instrument state is unchanged.
 
-The repository's `apply_trace_math_noise_cancel()` follows the useful calibration pattern “measure background, measure DUT, then combine.” But subtraction is only physically justified when the calibration trace represents the same additive noise contribution under the same relevant instrument state.
+If two traces are represented by logarithmic powers `p_d` and `p_c`, subtracting the displayed dB values is not the same as subtracting linear powers. Convert first:
 
-If two traces are in dBm, subtraction of the displayed values is not power subtraction. Convert first:
+$ P = 10^((p - 30) / 10) $
 
-$ P_W = 10^((P_"dBm" - 30) / 10) $
+Then, where the calibration model justifies it,
 
-then, where the model justifies it,
+$ P_r = P_d - P_c $
 
-$ P_"result" = P_"DUT" - P_"cal" $
+Convert the positive result back to dBm only after the subtraction.
 
-and finally convert the positive result back to dBm.
+A negative linear result is not a negative dBm power. It indicates that the assumed signal/background model is inconsistent with the measured values or that the desired quantity is below the subtraction uncertainty.
 
-A negative linear result is not “negative dBm power”; it means the assumed signal/background model is inconsistent with the measured values or the desired quantity is below the subtraction uncertainty.
-
-This method should therefore remain documented as a specific calibration workflow, not a universal noise-cancellation algorithm.
+The repository's `apply_trace_math_noise_cancel()` should therefore be understood as a contextual calibration workflow, not a universal noise-cancellation algorithm.
 
 = Trace storage and data transfer
 
@@ -254,15 +257,13 @@ The driver models traces as analyzer-side memory/display objects. `set_trace_mod
 - ASCII via `FORMat:DATA ASCii`;
 - binary floating point via `FORMat:DATA REAL,32` and `FORMat:BORDer NORM`.
 
-The binary path uses PyVISA `query_binary_values(..., datatype="f", is_big_endian=True, container=list)`. PyVISA interprets the returned IEEE-style block and converts its elements to Python values. The project explicitly specifies endianness rather than relying on the library default.
+The binary path uses PyVISA `query_binary_values(..., datatype="f", is_big_endian=True, container=list)`. The project explicitly specifies endianness rather than relying on a library default.
 
 The important data path is
 
 $ "trace memory" -> "IEEE 488.2 block" -> "VISA" -> "float32 values" -> "Python array" $
 
-Binary transfer reduces textual conversion and transport overhead for larger traces. ASCII remains useful for debugging because the representation is human-readable.
-
-The numerical values in `get_trace_data()` must still be interpreted using the active analyzer mode and trace semantics. Transport format does not define the physical unit.
+Transport format does not define physical units. The values must still be interpreted using the active analyzer mode and trace semantics.
 
 = What one trace point means
 
@@ -270,13 +271,13 @@ A trace point is a processed measurement result associated with one frequency-ax
 
 A useful abstraction is
 
-$ y_i = cal(M)[x(t); f_i, RBW, detector, VBW, averaging, "sweep state"] $
+$ y_i = M x_i $
 
-where `cal(M)` denotes the analyzer's configured signal-processing chain.
+where `M` denotes the configured analyzer measurement chain and `x_i` is the relevant signal contribution at the point.
 
-This is why changing RBW, detector, averaging mode, or sweep conditions can change the trace even when the DUT does not change.
+The practical point is that changing RBW, detector, averaging mode, or sweep conditions can change the reported trace even when the DUT does not change.
 
-Persisted data should therefore travel with sufficient metadata to reconstruct `cal(M)`: at minimum center/start/stop frequency, points, RBW, VBW, detector, averaging settings, sweep time, attenuation/reference level, trigger configuration, and the experiment state.
+Persisted data should retain enough analyzer metadata to reconstruct the measurement context: frequency range, point count, RBW, VBW, detector, averaging settings, sweep time, attenuation/reference level, trigger configuration, analyzer mode, and experiment state.
 
 = Acquisition and synchronization
 
@@ -285,7 +286,7 @@ The driver separates configuration from measurement start:
 - `set_continuous_sweep(False)` -> `INIT:CONT OFF`
 - `initiate_sweep()` -> `INIT:IMM`
 - `abort_sweep()` -> `ABOR`
-- `single_sweep_wait()` performs single-sweep initiation followed by `*OPC?` synchronization.
+- `single_sweep_wait()` performs single-sweep initiation followed by `*OPC?` synchronization
 
 `wait_opc()` temporarily adjusts the VISA timeout, queries `*OPC?`, and restores the previous timeout.
 
@@ -295,11 +296,11 @@ The software state machine is therefore
 
 $ "configure" -> "arm / initiate" -> "instrument complete" -> "readout" $
 
-while an externally synchronized experiment may require
+An externally synchronized experiment may instead be
 
 $ "prepare" -> "arm" -> "wait-for-event" -> "acquire" -> "OPC" -> "readout" $
 
-Fixed `sleep()` calls are appropriate only when they represent a deliberately characterized physical settling time. They are not substitutes for instrument synchronization.
+Fixed `sleep()` calls are appropriate only when they represent deliberately characterized physical settling time. They are not substitutes for instrument synchronization.
 
 = Triggering and operation status
 
@@ -307,7 +308,7 @@ The driver exposes immediate, video, external, RF-burst, and frame trigger sourc
 
 `wait_for_trigger_ready()` uses the Operation Status Register rather than assuming that a fixed delay is enough to arm the analyzer. It enables the relevant operation-status bit and polls `STAT:OPER:EVEN?` until the instrument reports the expected state.
 
-This matters because trigger readiness, trigger occurrence, acquisition completion, and data availability are different states:
+These are different states:
 
 $ "configuration" -> "armed" -> "event" -> "acquisition" -> "complete" -> "read" $
 
@@ -325,58 +326,57 @@ and
 
 $ "RF analyzer" -> "trigger / acquisition state" $
 
-The orchestration layer must define their ordering explicitly. In `record_freq_seq()`, for example, the laser setpoint is changed, a settling interval is applied, the shutter is opened, the squeezing trace is acquired, the shutter is closed, and the shot-noise trace is then acquired. The meaning of the difference depends on whether those states are physically stationary over the complete sequence.
+The orchestration layer must define their ordering explicitly. In `record_freq_seq()`, the laser setpoint is changed, a settling interval is applied, the shutter is opened, the squeezing trace is acquired, the shutter is closed, and the shot-noise trace is then acquired.
 
-A robust experiment should distinguish *software ordering* from *physical settling*. The latter is an experimentally characterized property of the laser, shutter, DUT, and environment.
+The meaning of the comparison depends on whether the relevant states are physically stationary over the complete sequence. Software ordering and physical settling are different concepts.
 
-= The squeezing / shot-noise comparison
+= Squeezing and shot-noise comparison
 
-The experiment code uses `TRACE_SQZ = 1` and `TRACE_SHOT = 2`, then computes a pointwise difference labelled “Squeezing - shot noise”. This label is useful as an experiment-level description but is not, by itself, a complete physical definition.
+The experiment uses `TRACE_SQZ = 1` and `TRACE_SHOT = 2`, then computes a pointwise difference labelled “Squeezing - shot noise”.
 
 If the trace values are logarithmic powers in dBm, then
 
-$ P_"sqz,dBm" - P_"shot,dBm" = 10 log_10(P_"sqz" / P_"shot") $
+$ p_s - p_b = 10 log(P_s / P_b) $
 
-which is a *power ratio in logarithmic units*, not a linear power difference.
+where `p_s` and `p_b` are the displayed dBm values and `P_s` and `P_b` are the corresponding linear powers.
 
-By contrast, a true residual power requires
+That is a logarithmic power ratio, not a linear power difference.
 
-$ P_"res" = P_"sqz" - P_"shot" $
+A true residual power requires
 
-in linear units before conversion to dB. Whether the experiment should use a difference or a ratio depends on the scientific observable being defined.
+$ P_r = P_s - P_b $
 
-For quantum-noise or squeezing analysis, the documentation should state explicitly whether the reported quantity is:
+in linear units before any conversion to dB.
 
-- absolute noise power;
-- noise power spectral density;
-- a ratio relative to shot noise;
-- or a normalized variance.
-
-That distinction prevents a mathematically valid Python operation from being mistaken for a physically defined observable.
+For quantum-noise or squeezing analysis, the documentation should state whether the reported quantity is absolute noise power, noise power spectral density, a ratio relative to shot noise, or a normalized variance.
 
 = Why `record_bw_seq()` is scientifically useful
 
-`record_bw_seq()` scans RBW while keeping the broad measurement context fixed. For white noise with approximately constant spectral density, integrated noise power should grow with effective bandwidth. A factor-of-two increase therefore predicts approximately `+3.01 dB` in integrated power.
+`record_bw_seq()` scans RBW while keeping the broad measurement context fixed.
 
-The scan is useful because it can expose several non-idealities:
+For white noise with approximately constant spectral density, integrated noise power should grow with effective bandwidth. A factor-of-two increase therefore predicts approximately `3.01 dB`.
 
-- ENBW differs from nominal RBW;
+The scan can expose several non-idealities:
+
+- effective bandwidth differs from nominal RBW;
 - the DUT noise is not spectrally flat;
 - analyzer noise becomes significant;
-- detector/averaging settings bias or broaden the estimator;
-- sweep coupling changes timing and effective statistics.
+- detector or averaging settings bias the estimator;
+- sweep coupling changes timing or effective statistics.
 
 The expected scaling is therefore a diagnostic model, not a command-level invariant.
 
 = Why `record_freq_seq()` is a synchronization experiment
 
-`record_freq_seq()` changes a laser frequency setpoint and waits a configured settling interval before opening the shutter and acquiring data. The relaxation time is currently derived from sweep duration and average count:
+`record_freq_seq()` changes a laser frequency setpoint and waits a configured settling interval before opening the shutter and acquiring data.
 
-$ t_"relax" = t_"sweep" times N_"avg" $
+The relaxation interval is derived from sweep duration and average count:
 
-This is a software estimate of acquisition workload, not a demonstrated physical settling time. It should not be interpreted as a laser time constant unless independently characterized.
+$ t = t_s N_a $
 
-The sequence is best understood as a stateful experiment:
+Here `t_s` is sweep duration and `N_a` is average count. This is a software estimate of acquisition workload, not a demonstrated physical settling time.
+
+The sequence is:
 
 $ "setpoint" -> "settle" -> "shutter open" -> "squeezing acquisition" -> "shutter close" -> "shot-noise acquisition" $
 
@@ -406,7 +406,7 @@ Its validity depends on repeatability of the laser, shutter, detector, analyzer,
 
 = Engineering invariants
 
-A useful measurement driver should preserve a few invariants:
+A useful measurement driver should preserve these invariants:
 
 1. *Units are explicit.* Python boundaries use Hz, ms, dBm, and counts rather than implicit unit conventions.
 2. *Logarithms are not powers.* Never subtract dBm values when a physical power subtraction is intended.
@@ -431,15 +431,16 @@ For every exported trace, the scientific minimum is more than `x` and `y`. Store
 - physical experimental state, such as laser setpoint and shutter state;
 - acquisition timestamp and instrument identity.
 
-The aim is not bureaucratic metadata. Each field corresponds to a variable that can change the numerical meaning of the trace.
+Each field corresponds to a variable that can change the numerical meaning of the trace.
 
 = References
 
-- Keysight, *X-Series Signal Analyzer Programmer's Guide*: general SCPI programming, communication, synchronization, status, and programming techniques.
-- Keysight, *X-Series Spectrum Analyzer Mode Measurement Guide*: RBW, sweep behavior, detectors, and practical measurement setup.
-- Keysight, *Noise Measurements*: detector choice, trace averaging, VBW/RBW behavior, and logarithmic-versus-power averaging.
-- NIST, *Spectrum Amplitude Definition, Generation, and Measurement*, Technical Note 699: bandwidth definitions and equivalent-bandwidth concepts.
-- PyVISA documentation, `query_binary_values()`: binary block decoding, datatype, endianness, and container behavior.
+- Keysight, *X-Series Signal Analyzer Programmer's Guide*: general SCPI programming, communication, synchronization, status, and programming techniques. #link("https://www.keysight.com/us/en/assets/7018-06864/programming-guides/9018-06864.pdf")[Guide]
+- Keysight, *X-Series Spectrum Analyzer Mode Measurement Guide*: RBW, sweep behavior, detectors, and practical measurement setup. #link("https://www.keysight.com/tn/en/assets/9018-04190/user-manuals/9018-04190.pdf")[Measurement guide]
+- Keysight, *Noise Measurements*: detector choice, trace averaging, VBW/RBW behavior, and logarithmic-versus-power averaging. #link("https://helpfiles.keysight.com/csg/89600B/Webhelp/Subsystems/powerspectrum/content/ps_noisemeasurements.htm")[Noise measurements]
+- Keysight, *Using Noise Floor Extension in an X-Series Signal Analyzer*: analyzer noise contribution and variance near the noise floor. #link("https://www.keysight.com/zz/en/assets/7018-02450/application-notes/5990-5340.pdf")[Application note]
+- NIST, *Spectrum Amplitude Definition, Generation, and Measurement*, Technical Note 699: bandwidth definitions and the distinction between nominal and power/equivalent bandwidth concepts. #link("https://www.nist.gov/system/files/documents/calibrations/tn699.pdf")[Technical Note 699]
+- PyVISA documentation, `query_binary_values()`: binary block decoding, datatype, endianness, and container behavior. #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
 - Repository implementation: `src/iyzee/mxa.py`, `src/iyzee/power.py`, `src/iyzee/main.py`, and the associated tests.
 
 = Maintenance rule
