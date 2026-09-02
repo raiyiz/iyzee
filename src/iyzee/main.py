@@ -1,171 +1,21 @@
-import time
-from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
+"""Entry point: run the currently selected measurement procedure.
 
-import matplotlib.pyplot as plt
-import numpy as np
+This module used to hold the measurement procedures themselves. They now
+live in :mod:`iyzee.experiment` as composable ``Step``s, so this file stays
+thin: pick a procedure, plot it, save it.
+"""
 
-from iyzee import IP
-
-from .mxa import KeysightMXA
-from .power import ShutterControl
-from .wavemeter_readout import set_pid_setpoint
-
-TRACE_SQZ = 1
-TRACE_SHOT = 2
-
-
-@dataclass(slots=True)
-class AnalyzerConfig:
-    """Typed configuration for an MXA measurement setup."""
-
-    center_hz: float = 1e6
-    span_hz: float = 0
-    avg_count: int = 100
-    sweep_duration_ms: int = 10
-    res_bw_hz: float = 10e3
-    avg_type: str = "LOG"
-    trig_source: str = "EXT"
-
-
-def prepare_analyzer(traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
-    """Create and configure an MXA for a measurement procedure."""
-    config = config or AnalyzerConfig()
-    mx = KeysightMXA(ip=IP.NOISE_ANALYZER)
-
-    mx.set_center_freq(config.center_hz)
-    mx.set_span(config.span_hz)
-    mx.set_rbw(config.res_bw_hz)
-    mx.set_vbw(config.res_bw_hz, auto=True)
-    mx.set_attenuation_auto(True)
-    mx.set_trigger_source(config.trig_source)
-    mx.set_sweep_duration(config.sweep_duration_ms)
-    mx.set_average_count(config.avg_count)
-    mx.set_average_type(config.avg_type)
-
-    for trace in traces:
-        mx.set_trace_display(trace, True)
-        mx.set_trace_mode(trace, "AVER")
-
-    return mx
-
-
-def acquire_trace(mx, trace_num):
-    """Acquire one trace and return its data."""
-    mx.set_trace_update(trace_num, True)
-    try:
-        mx.single_sweep_wait()
-        return mx.get_trace_data(trace_num=trace_num, binary=False)
-    finally:
-        mx.set_trace_update(trace_num, False)
-
-
-def record_bw_seq():
-    """Measure squeezing/shot-noise traces while scanning RBW."""
-    config = AnalyzerConfig(
-        center_hz=1.5e6,
-        span_hz=1e5,
-        avg_count=300,
-        sweep_duration_ms=10,
-        res_bw_hz=24e3,
-    )
-    mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), config)
-    data = []
-
-    try:
-        # Scan in 20 kHz steps.
-        for rbw_hz in (2 * i * 1e4 for i in range(1, 20)):
-            mx.set_rbw(rbw_hz)
-            # Keep the experimental VBW relationship explicit: VBW = 2 * RBW.
-            mx.set_vbw(rbw_hz * 2, auto=False)
-            squeezing = acquire_trace(mx, TRACE_SQZ)
-            shot_noise = acquire_trace(mx, TRACE_SHOT)
-            data.append((rbw_hz, squeezing, shot_noise))
-    finally:
-        mx.disconnect()
-
-    return data
-
-
-def record_freq_seq():
-    """Measure squeezing/shot-noise traces while scanning laser frequency."""
-    config = AnalyzerConfig(
-        center_hz=1.5e6,
-        span_hz=0,
-        avg_count=150,
-        sweep_duration_ms=10,
-        res_bw_hz=24e3,
-    )
-    laser_center_thz = 377.1052067
-    wavemeter_channel = 1
-    relax_time_s = config.sweep_duration_ms * config.avg_count / 1000
-
-    mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), config)
-    data = []
-
-    try:
-        with ShutterControl() as shutter:
-            for frequency_thz in (laser_center_thz + i * 10e-6 for i in range(-1, 1)):
-                set_pid_setpoint(frequency_thz, wavemeter_channel)
-                time.sleep(relax_time_s)
-
-                try:
-                    shutter.open()
-                    squeezing = acquire_trace(mx, TRACE_SQZ)
-                finally:
-                    shutter.close()
-
-                shot_noise = acquire_trace(mx, TRACE_SHOT)
-                data.append((frequency_thz, squeezing, shot_noise))
-    finally:
-        mx.disconnect()
-
-    return data
-
-
-def multiplot(data):
-    """Plot the squeezing-minus-shot-noise difference for each scan point."""
-    fig, ax = plt.subplots()
-    labels = []
-
-    for x_value, squeezing, shot_noise in data:
-        difference = np.asarray(squeezing) - np.asarray(shot_noise)
-        ax.plot(difference)
-        labels.append(f"value = {x_value}")
-
-    if labels:
-        ax.legend(labels, ncol=4, loc="upper center", bbox_to_anchor=(0.5, 1.1))
-    ax.set_xlabel("Trace point")
-    ax.set_ylabel("Squeezing - shot noise")
-    fig.tight_layout()
-    plt.show()
-
-
-def create_dirs(name: str = "") -> Path:
-    """Create and return today's measurement-data directory."""
-    today = datetime.now().astimezone().strftime("%Y-%m-%d")
-    data_dir = Path(__file__).parent / "data" / today / name
-    data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir
-
-
-def save_data(data, savedir: Path) -> Path:
-    """Save variable-length trace data in a compressed NumPy archive."""
-    timestamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")
-    path = savedir / f"{timestamp}.npz"
-    np.savez_compressed(path, data=np.asarray(data, dtype=object))
-    return path
+from .experiment import create_dirs, multiplot, run_bandwidth_sweep, save_step_results
 
 
 def main():
     """Run the currently selected measurement procedure."""
-    data = record_bw_seq()
-    print(f"{len(data)=}")
-    multiplot(data)
+    results = run_bandwidth_sweep()
+    print(f"{len(results)=}")
+    multiplot(results)
     savedir = create_dirs()
-    save_data(data, savedir)
-    return data
+    save_step_results(results, savedir)
+    return results
 
 
 if __name__ == "__main__":
