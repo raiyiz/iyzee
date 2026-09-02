@@ -1,6 +1,10 @@
 // iyzee cleanup summary
 
-#set document(title: "iyzee moonshine cleanup", author: "iyzee")
+#set document(
+  title: "iyzee moonshine cleanup",
+  author: "iyzee",
+)
+
 #set page(
   margin: (x: 2.2cm, y: 2cm),
   header: context [
@@ -15,6 +19,7 @@
     #counter(page).display("1 / 1", both: true)
   ],
 )
+
 #set par(justify: true, leading: 0.55em)
 #set heading(numbering: "1.")
 #set text(size: 10pt)
@@ -59,7 +64,7 @@ The current pass establishes a cleaner separation between experiment orchestrati
   [Synchronization], [`*OPC?` is checked explicitly and the SCPI error queue is drained.],
   [Scope transport], [`_recv_exact()` handles fragmented TCP reads and fails loudly on premature connection closure.],
   [CI], [GitHub Actions runs the test, Ruff, and mypy checks without duplicate push/PR pipelines; GitLab mirrors the same Python checks.],
-  [Documentation], [The technical guides are authored in Typst and compiled in CI.]
+  [Documentation], [The technical guides are authored in Typst and compiled in CI.],
 )
 
 = Oscilloscope transport hardening
@@ -68,19 +73,17 @@ TCP is a byte stream, not a message transport. A request for $n$ bytes does not 
 
 The test suite uses a deliberately fragmenting fake socket. It verifies complete VICP frames, headers split over multiple reads, byte waveforms, 16-bit word waveforms, malformed waveform headers, and truncated payloads.
 
-The essential invariant is $N = n$, where $N$ is the number of bytes received for a field that declares length $n$. If the peer closes the connection first, the driver raises `ConnectionError` rather than converting an incomplete transfer into measurement data.
+The essential invariant is:
 
-For samples $x_i$, the transferred vector must be complete before downstream analysis treats it as an acquisition:
+$ N = n $
 
-$ x = (x_0, x_1, dots.c, x_(N - 1)) $
+where `N` is the number of bytes received for a field that declares length `n`. If the peer closes the connection first, the driver raises `ConnectionError` rather than converting an incomplete transfer into measurement data.
+
+For samples `x_i`, a transport failure must not silently become a shorter or otherwise plausible vector. The vector must be complete before downstream analysis treats it as an acquisition.
 
 = Scientific notation
 
-The documentation uses native Typst math syntax. For the gradient of a scalar field $f$, write
-
-$ nabla f = (partial f / partial x, partial f / partial y, partial f / partial z) $
-
-No package-specific math functions are required for this notation.
+The documentation uses native Typst math syntax. Package-specific math calls are intentionally avoided so that the technical documents remain independent of auxiliary math packages.
 
 = Hardware correctness note
 
