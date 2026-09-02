@@ -39,7 +39,7 @@
 
 The purpose of this document is not to reproduce the instrument manual. It connects four layers that must agree in a real experiment:
 
-$ physics -> measurement\ method -> analyzer\ state -> Python\ data $
+$ "physics" -> "measurement method" -> "analyzer state" -> "Python data" $
 
 A value is scientifically useful only when its units, bandwidth, detector, averaging, timing, and calibration context are known.
 
@@ -53,7 +53,7 @@ A practical rule is: when a method changes analyzer behavior, document the *inst
 
 For the experiments represented in this repository, the useful mental model is
 
-$ DUT / optical\ system -> RF\ signal -> MXA\ input -> attenuation / preamp -> mixer / IF -> RBW\ filter -> detector -> VBW / averaging -> trace -> export $
+$ "DUT / optical system" -> "RF signal" -> "MXA input" -> "attenuation / preamp" -> "mixer / IF" -> "RBW filter" -> "detector" -> "VBW / averaging" -> "trace" -> "export" $
 
 Each stage can alter the measured quantity. In particular, RBW changes the effective measurement bandwidth; the detector changes how the detected samples are formed; VBW and trace averaging reduce variation after detection; analyzer noise adds to the measured power; and reference level/attenuation affect the instrument operating point.
 
@@ -65,11 +65,11 @@ The MXA is therefore not a transparent voltmeter with a frequency axis. It is a 
 
 The forward control path is
 
-$ application -> KeysightMXA -> PyVISA -> SCPI -> MXA $
+$ "application" -> "KeysightMXA" -> "PyVISA" -> "SCPI" -> "MXA" $
 
 and the measurement path is
 
-$ MXA -> SCPI\ response -> PyVISA -> KeysightMXA -> Python\ value $
+$ "MXA" -> "SCPI response" -> "PyVISA" -> "KeysightMXA" -> "Python value" $
 
 For example, `set_center_freq(2.4e9)` emits `FREQ:CENT 2400000000`; `get_sweep_points()` queries `SWE:POIN?` and converts the response to an integer.
 
@@ -86,13 +86,13 @@ The driver exposes:
 
 `get_frequency_axis()` reconstructs a linear axis from the instrument's start frequency, stop frequency, and number of points:
 
-$ f_i = f_start + i (f_stop - f_start)/(N - 1), quad i in 0, ..., N-1 $
+$ f_i = f_"start" + i (f_"stop" - f_"start") / (N - 1), i = 0, ..., N - 1 $
 
 This is valid only when the trace is represented on a linear frequency grid. The axis is metadata, not part of the returned trace values, so persisted measurements should save the frequency configuration with the trace.
 
 A useful consistency check is
 
-$ N >= 2 -> Delta f = (f_stop - f_start)/(N - 1) $
+$ N >= 2 -> Delta f = (f_"stop" - f_"start") / (N - 1) $
 
 The frequency-bin spacing `Delta f` is not the same thing as RBW. RBW describes the analyzer's resolution filter; point spacing describes how densely the resulting trace is sampled/displayed.
 
@@ -117,7 +117,7 @@ RBW is the analyzer's resolution-bandwidth filter. In a traditional swept measur
 
 For approximately white noise, measured noise power scales approximately with the effective noise bandwidth:
 
-$ P_noise approx S_P \cdot B_eff $
+$ P_"noise" approx S_P dot B_"eff" $
 
 so increasing RBW generally increases displayed noise power. Conversely, narrowing RBW lowers both the DUT contribution and the analyzer's own displayed noise.
 
@@ -135,11 +135,11 @@ For noise-like signals, a smaller VBW/RBW ratio can reduce point-to-point fluctu
 
 A useful distinction is
 
-$ RBW -> frequency\ selectivity\ and\ noise\ bandwidth $
+$ "RBW" -> "frequency selectivity and noise bandwidth" $
 
 versus
 
-$ VBW -> post-detection\ smoothing\ of\ the\ measurement\ statistic $
+$ "VBW" -> "post-detection smoothing of the measurement statistic" $
 
 The current noise preset uses automatic VBW because exact coupling is analyzer/application dependent. Persisted experiment metadata should therefore record the resolved instrument setting whenever exact reproducibility matters.
 
@@ -159,11 +159,11 @@ These operations are related but not equivalent.
 
 For a power-like quantity, the physically relevant arithmetic mean is
 
-$ P_bar = 1/N sum_i P_i $
+$ P_"bar" = 1 / N sum_i P_i $
 
 but, in general,
 
-$ log(P_bar) != 1/N sum_i log(P_i) $
+$ log(P_"bar") != 1 / N sum_i log(P_i) $
 
 so averaging after conversion to dB is not equivalent to averaging linear power and then converting to dB.
 
@@ -181,7 +181,7 @@ The number of statistically useful samples depends on the analyzer's detection/f
 
 Therefore the following statement is safe:
 
-$ more\ averaging -> generally\ lower\ estimator\ variance $
+$ "more averaging" -> "generally lower estimator variance" $
 
 while the stronger statement “`N` averages gives exactly `sqrt(N)` improvement” should not be used without a defined statistical model and independence assumption.
 
@@ -191,15 +191,15 @@ while the stronger statement “`N` averages gives exactly `sqrt(N)` improvement
 
 The quantity is fundamentally different from integrated power:
 
-$ S_P(f) : W/Hz $
+$ S_P(f) : "W/Hz" $
 
 and
 
-$ P_band = integral_(f_1)^(f_2) S_P(f) dif f : W $
+$ P_"band" = integral_(f_1)^(f_2) S_P(f) dif f : "W" $
 
 A convenient logarithmic conversion is
 
-$ P_(dBm) = 10 log_10(P_W / (1 mW)) $
+$ P_"dBm" = 10 log_10(P_W / (1 "mW")) $
 
 while a density expressed in dBm/Hz is referenced to a 1 Hz bandwidth. It must not be subtracted from or added to an integrated dBm result without accounting for bandwidth.
 
@@ -209,11 +209,11 @@ Thus a calibrated conversion of white-noise density and measured channel power s
 
 A useful white-noise check is
 
-$ P_2/P_1 approx B_eff,2/B_eff,1 $
+$ P_2 / P_1 approx B_"eff",2 / B_"eff",1 $
 
 or, in dB,
 
-$ Delta P approx 10 log_10(B_eff,2/B_eff,1) $
+$ Delta P approx 10 log_10(B_"eff",2 / B_"eff",1) $
 
 A factor-of-two bandwidth change therefore gives approximately `3.01 dB`, subject to filter shape, ENBW, detector behavior, and the flatness of the DUT noise spectrum.
 
@@ -228,7 +228,7 @@ This is conceptually different from a noise marker:
 
 The dimensional chain should remain visible in documentation:
 
-$ (W/Hz) times Hz -> W $
+$ "W/Hz" times "Hz" -> "W" $
 
 and only then, if desired, convert to dBm.
 
@@ -236,7 +236,7 @@ and only then, if desired, convert to dBm.
 
 The analyzer contributes its own noise. The measured power is therefore not generally equal to DUT power alone. A simple model is
 
-$ P_meas = P_DUT + P_MXA $
+$ P_"meas" = P_"DUT" + P_"MXA" $
 
 in linear power units, assuming the contributions are uncorrelated and the measurement chain is otherwise unchanged.
 
@@ -246,11 +246,11 @@ The repository's `apply_trace_math_noise_cancel()` follows the useful calibratio
 
 If two traces are in dBm, subtraction of the displayed values is not power subtraction. Convert first:
 
-$ P_W = 10^((P_(dBm) - 30)/10) $
+$ P_W = 10^((P_"dBm" - 30) / 10) $
 
 then, where the model justifies it,
 
-$ P_result = P_DUT - P_cal $
+$ P_"result" = P_"DUT" - P_"cal" $
 
 and finally convert `P_result` back to dBm when positive.
 
@@ -271,7 +271,7 @@ The binary path uses PyVISA `query_binary_values(..., datatype="f", is_big_endia
 
 The important data path is
 
-$ trace\ memory -> IEEE\ 488.2\ block -> VISA -> float32\ values -> Python\ array $
+$ "trace memory" -> "IEEE 488.2 block" -> "VISA" -> "float32 values" -> "Python array" $
 
 Binary transfer reduces textual conversion and transport overhead for larger traces. ASCII remains useful for debugging because the representation is human-readable.
 
@@ -283,13 +283,13 @@ A trace point is a processed measurement result associated with one frequency-ax
 
 A useful abstraction is
 
-$ y_i = mathcal M[x(t); f_i, RBW, detector, VBW, averaging, sweep\ state] $
+$ y_i = cal(M)[x(t); f_i, RBW, detector, VBW, averaging, "sweep state"] $
 
-where `mathcal M` denotes the analyzer's configured signal-processing chain.
+where `cal(M)` denotes the analyzer's configured signal-processing chain.
 
 This is why changing RBW, detector, averaging mode, or sweep conditions can change the trace even when the DUT does not change.
 
-Persisted data should therefore travel with sufficient metadata to reconstruct `mathcal M`: at minimum center/start/stop frequency, points, RBW, VBW, detector, averaging settings, sweep time, attenuation/reference level, trigger configuration, and the experiment state.
+Persisted data should therefore travel with sufficient metadata to reconstruct `cal(M)`: at minimum center/start/stop frequency, points, RBW, VBW, detector, averaging settings, sweep time, attenuation/reference level, trigger configuration, and the experiment state.
 
 = Acquisition and synchronization
 
@@ -306,11 +306,11 @@ The critical distinction is between *command completion* and *physical-event com
 
 The software state machine is therefore
 
-$ configure -> arm / initiate -> instrument\ complete -> readout $
+$ "configure" -> "arm / initiate" -> "instrument complete" -> "readout" $
 
 while an externally synchronized experiment may require
 
-$ prepare -> arm -> wait-for-event -> acquire -> OPC -> readout $
+$ "prepare" -> "arm" -> "wait-for-event" -> "acquire" -> "OPC" -> "readout" $
 
 Fixed `sleep()` calls are appropriate only when they represent a deliberately characterized physical settling time. They are not substitutes for instrument synchronization.
 
@@ -322,7 +322,7 @@ The driver exposes immediate, video, external, RF-burst, and frame trigger sourc
 
 This matters because trigger readiness, trigger occurrence, acquisition completion, and data availability are different states:
 
-$ configuration -> armed -> event -> acquisition -> complete -> read $
+$ "configuration" -> "armed" -> "event" -> "acquisition" -> "complete" -> "read" $
 
 A polling method can establish analyzer state; it cannot by itself prove that the physical source emitted the intended event.
 
@@ -332,11 +332,11 @@ The MXA does not directly control the optical shutter. `ShutterControl` owns a P
 
 The experiment therefore spans two state machines:
 
-$ optical\ source -> shutter\ state $
+$ "optical source" -> "shutter state" $
 
 and
 
-$ RF\ analyzer -> trigger / acquisition\ state $
+$ "RF analyzer" -> "trigger / acquisition state" $
 
 The orchestration layer must define their ordering explicitly. In `record_freq_seq()`, for example, the laser setpoint is changed, a settling interval is applied, the shutter is opened, the squeezing trace is acquired, the shutter is closed, and the shot-noise trace is then acquired. The meaning of the difference depends on whether those states are physically stationary over the complete sequence.
 
@@ -348,13 +348,13 @@ The experiment code uses `TRACE_SQZ = 1` and `TRACE_SHOT = 2`, then computes a p
 
 If the trace values are logarithmic powers in dBm, then
 
-$ P_sqz,dBm - P_shot,dBm = 10 log_10(P_sqz/P_shot) $
+$ P_"sqz,dBm" - P_"shot,dBm" = 10 log_10(P_"sqz" / P_"shot") $
 
 which is a *power ratio in logarithmic units*, not a linear power difference.
 
 By contrast, a true residual power requires
 
-$ P_res = P_sqz - P_shot $
+$ P_"res" = P_"sqz" - P_"shot" $
 
 in linear units before conversion to dB. Whether the experiment should use a difference or a ratio depends on the scientific observable being defined.
 
@@ -385,13 +385,13 @@ The expected scaling is therefore a diagnostic model, not a command-level invari
 
 `record_freq_seq()` changes a laser frequency setpoint and waits a configured settling interval before opening the shutter and acquiring data. The relaxation time is currently derived from sweep duration and average count:
 
-$ t_relax = (t_sweep times N_avg) $
+$ t_"relax" = (t_"sweep" times N_"avg") $
 
 This is a software estimate of acquisition workload, not a demonstrated physical settling time. It should not be interpreted as a laser time constant unless independently characterized.
 
 The sequence is best understood as a stateful experiment:
 
-$ setpoint -> settle -> shutter\ open -> squeezing\ acquisition -> shutter\ close -> shot-noise\ acquisition $
+$ "setpoint" -> "settle" -> "shutter open" -> "squeezing acquisition" -> "shutter close" -> "shot-noise acquisition" $
 
 Its validity depends on repeatability of the laser, shutter, detector, analyzer, and DUT state across those transitions.
 
@@ -401,7 +401,7 @@ Its validity depends on repeatability of the laser, shutter, detector, analyzer,
   columns: (1.25fr, 1.55fr, 2.2fr),
   stroke: 0.5pt,
   inset: 6pt,
-  align: (left, left, left),
+  align: (left, left),
   [*Instrument concept*], [*Project method*], [*SCPI boundary*],
   [Identification], [`idn()`], [`*IDN?`],
   [Reset/status], [`reset()`], [`*RST`, `*CLS`],
@@ -460,7 +460,4 @@ The aim is not bureaucratic metadata. Each field corresponds to a variable that 
 
 This document is a living technical record. When code changes, update the corresponding conceptual mapping if the instrument behavior, SCPI command, units, timing, calibration assumptions, or acquisition semantics change.
 
-#align(center)[
-  #v(1em)
-  *Always strive for improvement, always be humble.*
-]
+*Always strive for improvement, always be humble.*
