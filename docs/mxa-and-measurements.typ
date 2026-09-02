@@ -67,7 +67,7 @@ $ "application" -> "KeysightMXA" -> "PyVISA" -> "SCPI" -> "MXA" $
 
 and the measurement path is
 
-$ "MXA" -> "SCPI response" -> "PyVISA" -> "KeysightMXSA" -> "Python value" $
+$ "MXA" -> "SCPI response" -> "PyVISA" -> "KeysightMXA" -> "Python value" $
 
 For example, `set_center_freq(2.4e9)` emits `FREQ:CENT 2400000000`; `get_sweep_points()` queries `SWE:POIN?` and converts the response to an integer.
 
@@ -242,6 +242,8 @@ $ P_"result" = P_"DUT" - P_"cal" $
 and finally convert the positive result back to dBm.
 
 A negative linear result is not “negative dBm power”; it means the assumed signal/background model is inconsistent with the measured values or the desired quantity is below the subtraction uncertainty.
+
+This method should therefore remain documented as a specific calibration workflow, not a universal noise-cancellation algorithm.
 
 = Trace storage and data transfer
 
