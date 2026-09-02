@@ -1,6 +1,7 @@
 import socket
 import struct
 
+import numpy as np
 import pytest
 
 from iyzee.scope import LeCroy
@@ -67,6 +68,19 @@ def test_read_all_reassembles_fragmented_vicp_frames():
     assert text == "hello world"
 
 
+def test_send_serializes_vicp_header_and_message():
+    scope = LeCroy()
+    scope.s = FragmentingFakeSocket(b"")
+
+    scope.send("C1:VDIV 1.0")
+
+    flag, reserved_1, reserved_2, reserved_3, length = struct.unpack("B3BI", scope.s.sent[:8])
+    assert flag == LeCroy.LECROY_DATA_FLAG | LeCroy.LECROY_EOI_FLAG
+    assert (reserved_1, reserved_2, reserved_3) == (1, 0, 0)
+    assert socket.ntohl(length) == len("C1:VDIV 1.0")
+    assert scope.s.sent[8:] == b"C1:VDIV 1.0"
+
+
 def test_get_data_bytes_reassembles_fragmented_waveform():
     scope = LeCroy()
     preamble = b"x" * 38
@@ -107,3 +121,47 @@ def test_get_data_words_rejects_short_waveform_data():
 
     with pytest.raises(AssertionError, match="Expected 4 bytes, got 2"):
         scope.getDataWords(channel="C1", block="DAT1")
+
+
+def test_get_data_floats_applies_vertical_scaling_and_unit():
+    scope = LeCroy()
+    data = struct.pack("<2h", 100, -50)
+    preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
+    inspect_responses = b"".join(
+        [
+            vicp_frame(0x01, b'VALUE: 2.0"\n'),
+            vicp_frame(0x01, b'Unit Name = V"\n'),
+        ]
+    )
+    # getDataFloats calls getDataWords first, then three inspect queries.
+    responses = (
+        preamble
+        + vicp_frame(0x80, data)
+        + vicp_frame(0x01, b"\n")
+        + vicp_frame(0x01, b'VALUE: 0.25"\n')
+        + inspect_responses
+    )
+    scope.s = FragmentingFakeSocket(responses, chunk_size=2)
+
+    unit, values = scope.getDataFloats(channel="C1", block="DAT1")
+
+    assert unit == "V"
+    np.testing.assert_allclose(values, np.array([197.75, -100.25]))
+
+
+def test_get_horizontal_properties_reads_unit_offset_and_interval():
+    scope = LeCroy()
+    responses = b"".join(
+        [
+            vicp_frame(0x01, b'Unit Name = s"\n'),
+            vicp_frame(0x01, b'VALUE: 0.25"\n'),
+            vicp_frame(0x01, b'VALUE: 0.001"\n'),
+        ]
+    )
+    scope.s = FragmentingFakeSocket(responses, chunk_size=2)
+
+    unit, offset, interval = scope.getHorProperties(channel="C1")
+
+    assert unit == "s"
+    assert offset == pytest.approx(0.25)
+    assert interval == pytest.approx(0.001)
