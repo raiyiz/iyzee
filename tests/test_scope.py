@@ -127,26 +127,20 @@ def test_get_data_floats_applies_vertical_scaling_and_unit():
     scope = LeCroy()
     data = struct.pack("<2h", 100, -50)
     preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
-    inspect_responses = b"".join(
-        [
-            vicp_frame(0x01, b'VALUE: 2.0"\n'),
-            vicp_frame(0x01, b'Unit Name = V"\n'),
-        ]
-    )
-    # getDataFloats calls getDataWords first, then three inspect queries.
     responses = (
         preamble
         + vicp_frame(0x80, data)
         + vicp_frame(0x01, b"\n")
         + vicp_frame(0x01, b'VALUE: 0.25"\n')
-        + inspect_responses
+        + vicp_frame(0x01, b'VALUE: 2.0"\n')
+        + vicp_frame(0x01, b'Unit Name = V"\n')
     )
     scope.s = FragmentingFakeSocket(responses, chunk_size=2)
 
     unit, values = scope.getDataFloats(channel="C1", block="DAT1")
 
     assert unit == "V"
-    np.testing.assert_allclose(values, np.array([197.75, -100.25]))
+    np.testing.assert_allclose(values, np.array([199.75, -100.25]))
 
 
 def test_get_horizontal_properties_reads_unit_offset_and_interval():
