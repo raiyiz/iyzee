@@ -2,14 +2,42 @@
 
 #import "@preview/physica:0.9.8": grad, pdv
 
-#set page(margin: 2.2cm)
+#set document(title: "iyzee MXA control and measurement model", author: "iyzee")
+#set page(
+  margin: (x: 2.2cm, y: 2cm),
+  header: context [
+    #set text(size: 8pt)
+    #smallcaps[iyzee]
+    #h(1fr)
+    MXA & measurements
+  ],
+  footer: context [
+    #set text(size: 8pt)
+    #h(1fr)
+    #counter(page).display("1 / 1", both: true)
+  ],
+)
+#set par(justify: true, leading: 0.55em)
+#set heading(numbering: "1.")
 #set text(size: 10pt)
 
-= MXA control and measurement model
+#align(center)[
+  #text(size: 22pt, weight: "bold")[MXA control and measurement model]
+  #v(0.5em)
+  #text(size: 11pt)[iyzee technical guide]
+]
 
-*Status:* engineering documentation for the current `moonshine` implementation. SCPI relationships below are derived from the Keysight X-Series programming documentation and from the commands actually emitted by `src/iyzee/mxa.py`.
+#v(0.7em)
 
-The purpose of this document is not to reproduce the instrument manual. It is to connect four layers that must agree in a real experiment:
+*Status:* engineering documentation for the current `moonshine` implementation. SCPI relationships below are derived from the Keysight X-Series programming documentation and from the commands emitted by `src/iyzee/mxa.py`.
+
+#align(center)[#outline(title: [Contents], indent: 1.2em)]
+
+#pagebreak()
+
+= Purpose and scope
+
+The purpose of this document is not to reproduce the instrument manual. It connects four layers that must agree in a real experiment:
 
 $ physics -> measurement\ method -> analyzer\ state -> Python\ data $
 
@@ -21,7 +49,7 @@ The Keysight X-Series Programmer's Guide is the general SCPI programming layer: 
 
 A practical rule is: when a method changes analyzer behavior, document the *instrument concept*, the *SCPI command*, and the *physical meaning*. When a method only moves bytes, document the transport separately.
 
-== The measurement chain
+= The measurement chain
 
 For the experiments represented in this repository, the useful mental model is
 
@@ -31,7 +59,7 @@ Each stage can alter the measured quantity. In particular, RBW changes the effec
 
 The MXA is therefore not a transparent voltmeter with a frequency axis. It is a signal-processing instrument whose displayed trace is the output of a configured measurement chain.
 
-== Driver architecture
+= Driver architecture
 
 `KeysightMXA` inherits from `BaseDevice`. The shared base owns the VISA resource manager, address, timeout, terminations, connection, close operation, and context-manager behavior. The MXA layer concentrates on analyzer semantics: frequency, bandwidth, sweep control, traces, markers, triggering, and noise workflows.
 
@@ -47,7 +75,7 @@ For example, `set_center_freq(2.4e9)` emits `FREQ:CENT 2400000000`; `get_sweep_p
 
 Keeping this boundary thin is deliberate: experiment code describes the measurement, while the driver owns protocol details.
 
-== Frequency axis and sweep points
+= Frequency axis and sweep points
 
 The driver exposes:
 
@@ -68,7 +96,7 @@ $ N >= 2 -> Delta f = (f_stop - f_start)/(N - 1) $
 
 The frequency-bin spacing `Delta f` is not the same thing as RBW. RBW describes the analyzer's resolution filter; point spacing describes how densely the resulting trace is sampled/displayed.
 
-== Amplitude, reference level, and attenuation
+= Amplitude, reference level, and attenuation
 
 `set_ref_level()` writes the display reference level in dBm. `set_attenuation()` and `set_attenuation_auto()` control the RF input attenuation.
 
@@ -81,7 +109,7 @@ Lower attenuation can improve sensitivity but reduces headroom before overload. 
 
 For reproducible noise measurements, record attenuation and preamplifier state rather than treating the trace as fully specified by center frequency and RBW alone.
 
-== RBW: resolution is also bandwidth
+= RBW: resolution is also bandwidth
 
 `set_rbw()` emits `BWID` or enables `BWID:AUTO`.
 
@@ -97,7 +125,7 @@ RBW is therefore not merely a visual smoothing parameter. It changes the measure
 
 This gives `record_bw_seq()` a physical interpretation: the experiment is deliberately changing the measurement bandwidth and observing how the reported noise scales with it.
 
-== VBW: post-detection filtering
+= VBW: post-detection filtering
 
 `set_vbw()` emits `BWID:VID` or enables `BWID:VID:AUTO`.
 
@@ -115,7 +143,7 @@ $ VBW -> post-detection\ smoothing\ of\ the\ measurement\ statistic $
 
 The current noise preset uses automatic VBW because exact coupling is analyzer/application dependent. Persisted experiment metadata should therefore record the resolved instrument setting whenever exact reproducibility matters.
 
-== Detector, averaging, and statistical meaning
+= Detector, averaging, and statistical meaning
 
 The driver exposes `set_detector()`, `set_average_type()`, `set_average_count()`, and trace averaging through `set_trace_mode()`.
 
@@ -143,7 +171,7 @@ Keysight specifically cautions that logarithmic averaging of noise can introduce
 
 For statistically meaningful noise measurements, document at least RBW, detector, average type, average count, sweep time, and VBW.
 
-== Sweep time and statistical independence
+= Sweep time and statistical independence
 
 `set_sweep_duration()` emits `SWE:TIME`; `set_sweep_points()` sets the number of trace points.
 
@@ -157,7 +185,7 @@ $ more\ averaging -> generally\ lower\ estimator\ variance $
 
 while the stronger statement “`N` averages gives exactly `sqrt(N)` improvement” should not be used without a defined statistical model and independence assumption.
 
-== Noise density, integrated power, and ENBW
+= Noise density, integrated power, and ENBW
 
 `configure_noise_marker()` selects the analyzer's noise-marker mode. The result is interpreted as a spectral noise density, typically reported in dBm/Hz.
 
@@ -189,7 +217,7 @@ $ Delta P approx 10 log_10(B_eff,2/B_eff,1) $
 
 A factor-of-two bandwidth change therefore gives approximately `3.01 dB`, subject to filter shape, ENBW, detector behavior, and the flatness of the DUT noise spectrum.
 
-== Band-power measurements
+= Band-power measurements
 
 `configure_band_power_marker()` selects the band-power function and programs the center and offsets. `get_band_power()` returns the analyzer's integrated result for that band.
 
@@ -204,7 +232,7 @@ $ (W/Hz) times Hz -> W $
 
 and only then, if desired, convert to dBm.
 
-== Analyzer noise floor and noise cancellation
+= Analyzer noise floor and noise cancellation
 
 The analyzer contributes its own noise. The measured power is therefore not generally equal to DUT power alone. A simple model is
 
@@ -230,7 +258,7 @@ A negative linear result is not “negative dBm power”; it means the assumed s
 
 This method should therefore remain documented as a specific calibration workflow, not a universal noise-cancellation algorithm.
 
-== Trace storage and data transfer
+= Trace storage and data transfer
 
 The driver models traces as analyzer-side memory/display objects. `set_trace_mode()` maps to `:TRACe<n>:TYPE`; `set_trace_update()` controls trace updating; `set_trace_display()` controls display; `clear_trace()` clears instrument-side trace storage.
 
@@ -249,7 +277,7 @@ Binary transfer reduces textual conversion and transport overhead for larger tra
 
 The numerical values in `get_trace_data()` must still be interpreted using the active analyzer mode and trace semantics. Transport format does not define the physical unit.
 
-== What one trace point means
+= What one trace point means
 
 A trace point is a processed measurement result associated with one frequency-axis coordinate. It is not necessarily a single ADC sample.
 
@@ -263,7 +291,7 @@ This is why changing RBW, detector, averaging mode, or sweep conditions can chan
 
 Persisted data should therefore travel with sufficient metadata to reconstruct `mathcal M`: at minimum center/start/stop frequency, points, RBW, VBW, detector, averaging settings, sweep time, attenuation/reference level, trigger configuration, and the experiment state.
 
-== Acquisition and synchronization
+= Acquisition and synchronization
 
 The driver separates configuration from measurement start:
 
@@ -286,7 +314,7 @@ $ prepare -> arm -> wait-for-event -> acquire -> OPC -> readout $
 
 Fixed `sleep()` calls are appropriate only when they represent a deliberately characterized physical settling time. They are not substitutes for instrument synchronization.
 
-== Triggering and operation status
+= Triggering and operation status
 
 The driver exposes immediate, video, external, RF-burst, and frame trigger sources, plus video/external levels and slope selection.
 
@@ -298,7 +326,7 @@ $ configuration -> armed -> event -> acquisition -> complete -> read $
 
 A polling method can establish analyzer state; it cannot by itself prove that the physical source emitted the intended event.
 
-== Optical shutter timing
+= Optical shutter timing
 
 The MXA does not directly control the optical shutter. `ShutterControl` owns a PSU channel and sets the established trigger voltage to `1.7 V` with a `10 mA` current limit. `open()` enables the selected channel; `close()` disables it; context-manager exit closes the shutter and releases the PSU connection.
 
@@ -314,7 +342,7 @@ The orchestration layer must define their ordering explicitly. In `record_freq_s
 
 A robust experiment should distinguish *software ordering* from *physical settling*. The latter is an experimentally characterized property of the laser, shutter, DUT, and environment.
 
-== The squeezing / shot-noise comparison
+= The squeezing / shot-noise comparison
 
 The experiment code uses `TRACE_SQZ = 1` and `TRACE_SHOT = 2`, then computes a pointwise difference labelled “Squeezing - shot noise”. This label is useful as an experiment-level description but is not, by itself, a complete physical definition.
 
@@ -339,7 +367,7 @@ For quantum-noise or squeezing analysis, the documentation should state explicit
 
 That distinction prevents a mathematically valid Python operation from being mistaken for a physically defined observable.
 
-== Why `record_bw_seq()` is scientifically useful
+= Why `record_bw_seq()` is scientifically useful
 
 `record_bw_seq()` scans RBW while keeping the broad measurement context fixed. For white noise with approximately constant spectral density, integrated noise power should grow with effective bandwidth. A factor-of-two increase therefore predicts approximately `+3.01 dB` in integrated power.
 
@@ -353,7 +381,7 @@ The scan is useful because it can expose several non-idealities:
 
 The expected scaling is therefore a diagnostic model, not a command-level invariant.
 
-== Why `record_freq_seq()` is a synchronization experiment
+= Why `record_freq_seq()` is a synchronization experiment
 
 `record_freq_seq()` changes a laser frequency setpoint and waits a configured settling interval before opening the shutter and acquiring data. The relaxation time is currently derived from sweep duration and average count:
 
@@ -367,13 +395,14 @@ $ setpoint -> settle -> shutter\ open -> squeezing\ acquisition -> shutter\ clos
 
 Its validity depends on repeatability of the laser, shutter, detector, analyzer, and DUT state across those transitions.
 
-== SCPI map: concept -> Python -> instrument
+= SCPI map: concept -> Python -> instrument
 
 #table(
   columns: (1.25fr, 1.55fr, 2.2fr),
-  stroke: .5pt,
+  stroke: 0.5pt,
   inset: 6pt,
-  [Instrument concept], [Project method], [SCPI boundary],
+  align: (left, left, left),
+  [*Instrument concept*], [*Project method*], [*SCPI boundary*],
   [Identification], [`idn()`], [`*IDN?`],
   [Reset/status], [`reset()`], [`*RST`, `*CLS`],
   [Synchronization], [`wait_opc()`], [`*OPC?`],
@@ -388,9 +417,7 @@ Its validity depends on repeatability of the laser, shutter, detector, analyzer,
   [Trace math], [`_set_trace_math()`], [`TRAC:MATH`],
 )
 
-This table is intentionally limited to functionality present in the repository. It should grow with the driver and should change whenever a method changes its SCPI behavior or physical interpretation.
-
-== Engineering invariants
+= Engineering invariants
 
 A useful measurement driver should preserve a few invariants:
 
@@ -402,7 +429,7 @@ A useful measurement driver should preserve a few invariants:
 6. *Calibration is contextual.* A background trace is subtractable only when the additive-noise model and instrument state justify it.
 7. *Data needs metadata.* A trace without analyzer state is difficult to reproduce and easy to misinterpret.
 
-== Recommended measurement record
+= Recommended measurement record
 
 For every exported trace, the scientific minimum is more than `x` and `y`. Store, directly or through a structured configuration record:
 
@@ -419,7 +446,7 @@ For every exported trace, the scientific minimum is more than `x` and `y`. Store
 
 The aim is not bureaucratic metadata. Each field corresponds to a variable that can change the numerical meaning of the trace.
 
-== References
+= References
 
 - Keysight, *X-Series Signal Analyzer Programmer's Guide*: general SCPI programming, communication, synchronization, status, and programming techniques. #link("https://www.keysight.com/us/en/assets/7018-06864/programming-guides/9018-06864.pdf")[Guide]
 - Keysight, *X-Series Spectrum Analyzer Mode Measurement Guide*: RBW, sweep behavior, detectors, and practical measurement setup. #link("https://www.keysight.com/tn/en/assets/9018-04190/user-manuals/9018-04190.pdf")[Measurement guide]
@@ -429,8 +456,11 @@ The aim is not bureaucratic metadata. Each field corresponds to a variable that 
 - PyVISA documentation, `query_binary_values()`: binary block decoding, datatype, endianness, and container behavior. #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
 - Repository implementation: `src/iyzee/mxa.py`, `src/iyzee/power.py`, `src/iyzee/main.py`, and the associated tests.
 
-== Maintenance rule
+= Maintenance rule
 
 This document is a living technical record. When code changes, update the corresponding conceptual mapping if the instrument behavior, SCPI command, units, timing, calibration assumptions, or acquisition semantics change.
 
-*Always strive for improvement, always be humble.*
+#align(center)[
+  #v(1em)
+  *Always strive for improvement, always be humble.*
+]
