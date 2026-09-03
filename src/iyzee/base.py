@@ -27,21 +27,36 @@ class IP(StrEnum):
 class BaseDevice:
     """Common VISA connection handling for laboratory instruments."""
 
-    def __init__(self, ip: IP | None = None, resource_manager=None):
+    def __init__(
+        self,
+        ip: IP | None = None,
+        resource_manager=None,
+        timeout_ms: int = 10_000,
+        read_termination: str | None = None,
+        write_termination: str | None = None,
+    ):
         self.ip = ip
+        self.timeout_ms = timeout_ms
+        self.read_termination = read_termination
+        self.write_termination = write_termination
         self.rm = resource_manager or pyvisa.ResourceManager()
         self.instrument: Any = None
+        self.visa_address = f"TCPIP0::{self.ip}::inst0::INSTR"
         self.connect()
 
     def open(self):
-        return self.rm.open_resource(f"TCPIP0::{self.ip}::inst0::INSTR")
+        return self.rm.open_resource(self.visa_address)
 
     def connect(self) -> None:
         """Open the device once; repeated calls reuse the existing resource."""
         if self.instrument is not None:
             return
         self.instrument = self.open()
-        self.instrument.timeout = 10_000
+        self.instrument.timeout = self.timeout_ms
+        if self.read_termination is not None:
+            self.instrument.read_termination = self.read_termination
+        if self.write_termination is not None:
+            self.instrument.write_termination = self.write_termination
 
     def close(self) -> None:
         """Close the VISA resource, if it is open."""
