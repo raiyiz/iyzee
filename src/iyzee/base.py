@@ -42,7 +42,6 @@ class BaseDevice:
         self.rm = resource_manager or pyvisa.ResourceManager()
         self.instrument: Any = None
         self.visa_address = f"TCPIP0::{self.ip}::inst0::INSTR"
-        self.connect()
 
     def open(self):
         return self.rm.open_resource(self.visa_address)
@@ -65,7 +64,7 @@ class BaseDevice:
             self.instrument = None
 
     def __enter__(self):
-        """Return an open device for use in a context manager."""
+        """Open the device at the explicit resource boundary."""
         self.connect()
         return self
 
