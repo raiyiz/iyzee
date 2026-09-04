@@ -3,9 +3,7 @@
 These used to be the hand-written ``record_bw_seq()``/``record_freq_seq()``
 functions in ``main.py``. Each is now a small ``Step`` describing one
 measurement point, plus a factory function that builds the scan and a
-``run_*`` procedure that owns instrument setup/teardown around
-:func:`iyzee.experiment.runner.run_sequence`. Adding a new experiment means
-adding a new ``Step`` + factory, not a new hand-rolled loop.
+``run_*`` procedure that operates on devices owned by the caller.
 """
 
 from __future__ import annotations
@@ -120,8 +118,8 @@ def frequency_sweep_steps(
     ]
 
 
-def run_bandwidth_sweep(rbw_values_hz=None, *, on_error: str = "raise") -> list[StepResult]:
-    """Measure squeezing/shot-noise traces while scanning RBW."""
+def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> list[StepResult]:
+    """Measure squeezing/shot-noise traces using the caller-owned MXA."""
     config = AnalyzerConfig(
         center_hz=1e6,
         span_hz=0,
@@ -129,23 +127,20 @@ def run_bandwidth_sweep(rbw_values_hz=None, *, on_error: str = "raise") -> list[
         sweep_duration_ms=10,
         res_bw_hz=24e3,
     )
-    mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), config)
-    print(f"{mx=}")
+    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
     ctx = ExperimentContext(mx=mx, run_id=uuid.uuid4().hex[:8], config=asdict(config))
-
-    try:
-        return run_sequence(bandwidth_sweep_steps(rbw_values_hz), ctx, on_error=on_error)
-    finally:
-        mx.disconnect()
+    return run_sequence(bandwidth_sweep_steps(rbw_values_hz), ctx, on_error=on_error)
 
 
 def run_frequency_sweep(
+    mx,
+    shutter: ShutterControl,
     laser_center_thz: float = 377.1052067,
     wavemeter_channel: int = 1,
     *,
     on_error: str = "raise",
 ) -> list[StepResult]:
-    """Measure squeezing/shot-noise traces while scanning laser frequency."""
+    """Measure squeezing/shot-noise traces using caller-owned devices."""
     config = AnalyzerConfig(
         center_hz=1.5e6,
         span_hz=0,
@@ -154,21 +149,16 @@ def run_frequency_sweep(
         res_bw_hz=24e3,
     )
     relax_time_s = config.sweep_duration_ms * config.avg_count / 1000
-    mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), config)
-
-    try:
-        with ShutterControl() as shutter:
-            ctx = ExperimentContext(
-                mx=mx,
-                run_id=uuid.uuid4().hex[:8],
-                shutter=shutter,
-                config=asdict(config),
-            )
-            steps = frequency_sweep_steps(
-                laser_center_thz=laser_center_thz,
-                wavemeter_channel=wavemeter_channel,
-                relax_time_s=relax_time_s,
-            )
-            return run_sequence(steps, ctx, on_error=on_error)
-    finally:
-        mx.disconnect()
+    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
+    ctx = ExperimentContext(
+        mx=mx,
+        run_id=uuid.uuid4().hex[:8],
+        shutter=shutter,
+        config=asdict(config),
+    )
+    steps = frequency_sweep_steps(
+        laser_center_thz=laser_center_thz,
+        wavemeter_channel=wavemeter_channel,
+        relax_time_s=relax_time_s,
+    )
+    return run_sequence(steps, ctx, on_error=on_error)
