@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from iyzee import IP
-
 from ..mxa import KeysightMXA
 
 TRACE_SQZ = 1
@@ -25,10 +23,11 @@ class AnalyzerConfig:
     trig_source: str = "EXT"
 
 
-def prepare_analyzer(traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
-    """Create and configure an MXA for a measurement procedure."""
+def prepare_analyzer(
+    mx: KeysightMXA, traces, config: AnalyzerConfig | None = None
+) -> KeysightMXA:
+    """Configure an already-owned MXA for a measurement procedure."""
     config = config or AnalyzerConfig()
-    mx = KeysightMXA(ip=IP.NOISE_ANALYZER)
 
     mx.set_center_freq(config.center_hz)
     mx.set_span(config.span_hz)
