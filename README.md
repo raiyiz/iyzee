@@ -7,44 +7,51 @@ automated noise measurements with a Keysight MXA.
 
 ```text
 src/iyzee/
-├── main.py               # entry point: run a procedure, plot it, save it
+├── main.py               # entry point: own resources, run a procedure, plot, save
 ├── base.py                # shared VISA lifecycle, instrument IPs, PSU channels
-├── mxa.py                  # Keysight MXA SCPI/VISA driver
-├── power.py                 # power supply + optical shutter control
-├── scope.py                  # LeCroy oscilloscope communication
-├── wavemeter_readout.py        # wavemeter / laser setpoint control
-└── experiment/                  # composable measurement procedures
-    ├── step.py                   # Step protocol, ExperimentContext, StepResult
-    ├── runner.py                  # run_sequence(): executes a list of Steps
-    ├── config.py                   # AnalyzerConfig, prepare_analyzer(), acquire_trace()
-    ├── procedures.py                # BandwidthStep, FrequencyStep, run_bandwidth_sweep(), run_frequency_sweep()
-    ├── persistence.py                # create_dirs(), save_data(), save_step_results()
-    └── plotting.py                    # multiplot()
+├── mxa.py                 # Keysight MXA SCPI/VISA driver
+├── power.py               # power supply + optical shutter control
+├── scope.py               # LeCroy oscilloscope communication
+├── wavemeter_readout.py  # wavemeter / laser setpoint control
+└── experiment/            # composable measurement procedures
+    ├── step.py            # Step protocol, ExperimentContext, StepResult
+    ├── runner.py          # run_sequence(): executes a list of Steps
+    ├── config.py          # AnalyzerConfig, prepare_analyzer(), acquire_trace()
+    ├── procedures.py      # BandwidthStep, FrequencyStep, run_*_sweep()
+    ├── persistence.py     # create_dirs(), save_data(), save_step_results()
+    └── plotting.py        # multiplot()
 ```
 
 ## How a measurement runs
 
 A measurement is a sequence of `Step`s run against a shared, already-connected
-`ExperimentContext`:
+`ExperimentContext`. The important ownership boundary is explicit:
 
-1. A `run_*` procedure in `procedures.py` (e.g. `run_bandwidth_sweep()`) builds
-   an `AnalyzerConfig`, connects the MXA via `prepare_analyzer()`, and opens
-   the shutter if the procedure needs one.
-2. It builds a list of `Step`s (e.g. `BandwidthStep`, `FrequencyStep`) — each
-   one describes a single reproducible measurement point.
-3. `run_sequence()` runs each step in order, logging progress and either
+1. `main.py` creates the required hardware objects and owns their lifecycle.
+   For the current bandwidth procedure it enters `KeysightMXA` as a context
+   manager, so the VISA resource is opened there and closed when the procedure
+   finishes or raises.
+2. A `run_*` procedure in `procedures.py` receives those already-owned devices
+   and configures them via `prepare_analyzer()`. It does not create, connect,
+   or disconnect hardware.
+3. The procedure builds a list of `Step`s (e.g. `BandwidthStep`,
+   `FrequencyStep`) — each one describes a single reproducible measurement
+   point.
+4. `run_sequence()` runs each step in order, logging progress and either
    stopping on the first failure (`on_error="raise"`, the default) or skipping
-   a bad point and continuing (`on_error="skip"`, useful for long unattended
-   scans).
-4. Each step returns a `StepResult`: the scan coordinate, its unit, the
-   acquired traces, and any metadata needed to reproduce that point (RBW/VBW,
+   a bad point and continuing (`on_error="skip"`).
+5. Each step returns a `StepResult`: the scan coordinate, its unit, the
+   acquired traces, and metadata needed to reproduce that point (RBW/VBW,
    laser setpoint, etc.).
-5. `multiplot()` plots the results and `save_step_results()` writes them to a
-   compressed `.npz` archive, with per-point metadata embedded alongside the
-   data — the saved file is self-describing, not a bare array of numbers.
+6. After hardware has been released, `multiplot()` plots the results and
+   `save_step_results()` writes them to a compressed `.npz` archive with
+   per-point metadata embedded alongside the data.
 
-`main.py` just wires these four calls together for whichever procedure is
-currently selected; it does not contain measurement logic itself.
+Constructing a device does not connect it. `BaseDevice` opens the VISA resource
+when `connect()` is called, normally through the explicit `with device:`
+boundary in the application entry point. This keeps hardware access out of
+experiment construction and makes procedure tests independent of real
+instruments.
 
 Adding a new experiment means adding a new `Step` subclass and a factory
 function in `procedures.py`, not writing a new hand-rolled loop.
@@ -77,7 +84,6 @@ than in typical application code:
 - Don't change instrument setpoints or SCPI behavior without understanding
   and testing the change — these drive real hardware.
 
-
 ## Documentation
 
 The technical documentation connects the measurement physics to the analyzer
@@ -106,14 +112,15 @@ how that happens in practice.
 
 Keep the separation simple while the project is small:
 
-1. **`experiment/procedures.py` — what to measure:** concrete procedures,
+1. **`main.py` — application boundary:** resource ownership and composition.
+2. **`experiment/procedures.py` — what to measure:** concrete procedures,
    scan parameters, sequencing.
-2. **`experiment/{step,runner,config,persistence,plotting}.py` — the
+3. **`experiment/{step,runner,config,persistence,plotting}.py` — the
    machinery a procedure is built from:** the `Step` abstraction, execution,
    analyzer setup, saving, and plotting.
-3. **`mxa.py` / `power.py` / `scope.py` / `wavemeter_readout.py` — how to
+4. **`mxa.py` / `power.py` / `scope.py` / `wavemeter_readout.py` — how to
    control each instrument:** reusable, hardware-specific operations.
-4. **`base.py` — shared infrastructure:** connection lifecycle, addresses,
+5. **`base.py` — shared infrastructure:** connection lifecycle, addresses,
    channel definitions.
 
 As more procedures are added, split `procedures.py` further rather than
