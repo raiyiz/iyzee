@@ -15,16 +15,12 @@ class FakeMXA:
         self.rbw_values = []
         self.vbw_values = []
         self.trace_calls = []
-        self.disconnect_called = False
 
     def set_rbw(self, rbw_hz):
         self.rbw_values.append(rbw_hz)
 
     def set_vbw(self, vbw_hz, auto=False):
         self.vbw_values.append((vbw_hz, auto))
-
-    def disconnect(self):
-        self.disconnect_called = True
 
 
 def fake_acquire_trace(mx, trace_num):
@@ -96,8 +92,6 @@ def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
     result = FrequencyStep(frequency_thz=377.1, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
     assert setpoints == [(377.1, 1)]
-    # Shutter opens for the squeezing acquisition and is closed again before
-    # the shot-noise reference is taken.
     assert shutter.events == ["open", "close"]
     assert mx.trace_calls == [1, 2]
     assert result.traces["squeezing"] == [1]
@@ -111,30 +105,50 @@ def test_frequency_step_requires_shutter():
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
 
-def test_run_bandwidth_sweep_disconnects_even_on_failure(monkeypatch):
+def test_run_bandwidth_sweep_uses_caller_owned_mxa(monkeypatch):
     mx = FakeMXA()
-    monkeypatch.setattr("iyzee.experiment.procedures.prepare_analyzer", lambda traces, config: mx)
+    prepared = []
+    monkeypatch.setattr(
+        "iyzee.experiment.procedures.prepare_analyzer",
+        lambda analyzer, traces, config: prepared.append((analyzer, traces, config)),
+    )
+    monkeypatch.setattr(
+        "iyzee.experiment.procedures.bandwidth_sweep_steps",
+        lambda rbw_values_hz=None: [],
+    )
+
+    result = run_bandwidth_sweep(mx)
+
+    assert result == []
+    assert prepared and prepared[0][0] is mx
+
+
+def test_run_bandwidth_sweep_does_not_disconnect_on_failure(monkeypatch):
+    mx = FakeMXA()
+    monkeypatch.setattr("iyzee.experiment.procedures.prepare_analyzer", lambda *args: None)
     monkeypatch.setattr(
         "iyzee.experiment.procedures.bandwidth_sweep_steps",
         lambda rbw_values_hz=None: [BoomStep()],
     )
 
     with pytest.raises(RuntimeError, match="boom"):
-        run_bandwidth_sweep()
-
-    assert mx.disconnect_called
+        run_bandwidth_sweep(mx)
 
 
-def test_run_frequency_sweep_disconnects_even_on_failure(monkeypatch):
+def test_run_frequency_sweep_uses_caller_owned_devices(monkeypatch):
     mx = FakeMXA()
-    monkeypatch.setattr("iyzee.experiment.procedures.prepare_analyzer", lambda traces, config: mx)
-    monkeypatch.setattr("iyzee.experiment.procedures.ShutterControl", FakeShutterControl)
+    shutter = FakeShutterControl()
+    prepared = []
+    monkeypatch.setattr(
+        "iyzee.experiment.procedures.prepare_analyzer",
+        lambda analyzer, traces, config: prepared.append((analyzer, traces, config)),
+    )
     monkeypatch.setattr(
         "iyzee.experiment.procedures.frequency_sweep_steps",
-        lambda **kwargs: [BoomStep()],
+        lambda **kwargs: [],
     )
 
-    with pytest.raises(RuntimeError, match="boom"):
-        run_frequency_sweep()
+    result = run_frequency_sweep(mx, shutter)
 
-    assert mx.disconnect_called
+    assert result == []
+    assert prepared and prepared[0][0] is mx
