@@ -16,7 +16,7 @@ def create_dirs(name: str = "") -> Path:
     """Create and return today's measurement-data directory."""
     package_root = Path(__file__).resolve().parent.parent
     today = datetime.now().astimezone().strftime("%Y-%m-%d")
-    data_dir = package_root / "data" / today / name
+    data_dir = package_root / "data" / today + '_' + name
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
 

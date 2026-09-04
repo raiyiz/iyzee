@@ -123,13 +123,14 @@ def frequency_sweep_steps(
 def run_bandwidth_sweep(rbw_values_hz=None, *, on_error: str = "raise") -> list[StepResult]:
     """Measure squeezing/shot-noise traces while scanning RBW."""
     config = AnalyzerConfig(
-        center_hz=1.5e6,
-        span_hz=1e5,
-        avg_count=300,
+        center_hz=1e6,
+        span_hz=0,
+        avg_count=200,
         sweep_duration_ms=10,
         res_bw_hz=24e3,
     )
     mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), config)
+    print(f"{mx=}")
     ctx = ExperimentContext(mx=mx, run_id=uuid.uuid4().hex[:8], config=asdict(config))
 
     try:
