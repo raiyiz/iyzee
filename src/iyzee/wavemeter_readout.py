@@ -6,12 +6,16 @@ import numpy as np
 import pandas as pd
 from tabulate import tabulate
 
+from iyzee import IP
+
 """
 Readout of single laser frequency with Wavemeter switch over network
 
 Live plotting and single readout of a channel
 """
-D1_center_85 = 377.107385690  # D1 Rubidium 85 transition frequency vacuum as reference (D.Steck), THz
+D1_center_85 = (
+    377.107385690  # D1 Rubidium 85 transition frequency vacuum as reference (D.Steck), THz
+)
 D2_center_85 = 384.230406373  # D2 Rubidium 85 transition frequency, THz
 
 D1_center_87 = 377.1074635  # D1 Rubidium 87 in THz
@@ -59,6 +63,10 @@ Rb_transitions = [
 ]
 
 
+class WavemeterReadoutError(RuntimeError):
+    """Raised when a wavemeter measurement cannot be obtained or parsed."""
+
+
 def compute_two_photon_detuning(f1: float, f2: float):
     """
     Helper function to compute the two photon detuning
@@ -90,17 +98,17 @@ def compute_two_photon_detuning(f1: float, f2: float):
     return two_photon_detuning
 
 
-# ls_frequency = float(urllib.request.urlopen(f"http://10.140.1.96:8000/api/{channel}/").read().decode("ascii")) - 377.107385690
+# ls_frequency = float(urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/").read().decode("ascii")) - 377.107385690
 def single_readout(
     channel: int, reference_f: float = 0, label: str = "", printing: bool = True
 ) -> float:
     """
-    Fetching the laser frequency once from a wavemeter channel with urllib
+    Fetch the laser frequency once from a wavemeter channel with urllib
     and compare to a reference frequency.
 
     Parameters:
         channel (int): Wavemeter channel (0-8 or 0-4 depending on switch)
-        reference_f (float): Reference frequency value which is substracted from the readout. Default is 0.
+        reference_f (float): Reference frequency value which is substracted. Default is 0.
         label (str): Optional labeling of the print
         printing (bool): Enable/Disable printing of the readout
     """
@@ -108,15 +116,12 @@ def single_readout(
 
     try:
         ls_frequency = float(
-            urllib.request.urlopen(
-                f"http://10.140.1.118:8000/api/{channel}/", timeout=timeout
-            )
+            urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=timeout)
             .read()
             .decode("ascii")
         )
-    except Exception as e:
-        print(f"Error fetching wavemeter data: {e}")
-        ls_frequency = 0
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise WavemeterReadoutError(f"Failed to read wavemeter channel {channel}") from exc
 
     ls_frequency -= reference_f
     if printing:
@@ -132,7 +137,7 @@ def fast_readout(ch: int) -> float:
     direct urllib request, without try/except
     """
     return float(
-        urllib.request.urlopen(f"http://10.140.1.118:8000/api/{ch}/", timeout=0.1)
+        urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{ch}/", timeout=0.1)
         .read()
         .decode("ascii")
     )
@@ -149,25 +154,23 @@ def set_pid_setpoint(freq: float, channel: int):
     """
 
     urllib.request.urlopen(
-        "http://10.140.1.118:8000/api/set_pid/",
+        f"http://{IP.WAVEMETER}:8000/api/set_pid/",
         data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
     )
     print(f"[WS-7] Set new PID-setpoint of channel {channel} to be {freq} THz.")
 
 
-def track_frequency(
-    total_time, time_step, save_path, channel, reference_f=0, save_csv=False
-):
+def track_frequency(total_time, time_step, save_path, channel, reference_f=0, save_csv=False):
     # Initialize numpy arrays for time and frequency data
     times = np.array([])
     track_freq = np.array([])
 
     # Turn on interactive mode for live plotting
     plt.ion()
-    fig, ax = plt.subplots(figsize=(4.5, 2.5))
+    _fig, ax = plt.subplots(figsize=(4.5, 2.5))
 
-    (line,) = ax.plot([], [], "b-", label="Laser Frequency (THz)")
-    fill_between = ax.fill_between([], [], [], color="blue", alpha=0.3)
+    (_line,) = ax.plot([], [], "b-", label="Laser Frequency (THz)")
+    ax.fill_between([], [], [], color="blue", alpha=0.3)
 
     start_time = time.time()
 
@@ -179,15 +182,14 @@ def track_frequency(
         try:  # readout laser frequency and plot laser detuning or absolute laser frequency
             ls_frequency = (
                 float(
-                    urllib.request.urlopen(f"http://10.140.1.96:8000/api/{channel}/")
+                    urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=2)
                     .read()
-                    .decode("ascii"),
-                    timeout=2,
+                    .decode("ascii")
                 )
                 - reference_f
             )
-        except Exception as e:
-            print(f"Error fetching data: {e}")
+        except (OSError, ValueError, UnicodeError) as exc:
+            print(f"Error fetching data: {exc}")
             return
 
         # Calculate the elapsed time since the start of data collection
@@ -241,11 +243,7 @@ def track_frequency(
 
 
 def monitoring_frequencies(channels, two_photon=True):
-    header = (
-        ["Transition"]
-        + ["Frequencies (THz)"]
-        + [f"Detuning (ch{c}) / GHz" for c in channels]
-    )
+    header = ["Transition"] + ["Frequencies (THz)"] + [f"Detuning (ch{c}) / GHz" for c in channels]
     rows = []
     freqs = [single_readout(c, reference_f=0, printing=False) for c in channels]
 
@@ -263,4 +261,10 @@ def monitoring_frequencies(channels, two_photon=True):
     print(tabulate(rows, headers=header, tablefmt="psql", floatfmt="+.7f"))
 
 
-monitoring_frequencies([0, 1])
+def main():
+    """Run the wavemeter frequency monitoring utility."""
+    monitoring_frequencies([0, 1])
+
+
+if __name__ == "__main__":
+    main()
