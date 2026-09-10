@@ -1,8 +1,23 @@
-from iyzee.experiment.plotting import multiplot
+from iyzee.experiment.plotting import build_figure, multiplot
 from iyzee.experiment.step import StepResult
 
 
-def test_multiplot_handles_empty_data(monkeypatch):
+def test_build_figure_does_not_show(monkeypatch):
+    shown = False
+
+    def fake_show():
+        nonlocal shown
+        shown = True
+
+    monkeypatch.setattr("iyzee.experiment.plotting.plt.show", fake_show)
+
+    figure = build_figure([])
+
+    assert figure is not None
+    assert not shown
+
+
+def test_multiplot_shows_but_build_figure_stays_rendering_free(monkeypatch):
     shown = False
 
     def fake_show():
@@ -16,7 +31,7 @@ def test_multiplot_handles_empty_data(monkeypatch):
     assert shown
 
 
-def test_multiplot_plots_each_result(monkeypatch):
+def test_build_figure_plots_each_result(monkeypatch):
     plotted = []
 
     class FakeAx:
@@ -37,7 +52,6 @@ def test_multiplot_plots_each_result(monkeypatch):
             pass
 
     monkeypatch.setattr("iyzee.experiment.plotting.plt.subplots", lambda: (FakeFig(), FakeAx()))
-    monkeypatch.setattr("iyzee.experiment.plotting.plt.show", lambda: None)
 
     results = [
         StepResult(
@@ -48,6 +62,6 @@ def test_multiplot_plots_each_result(monkeypatch):
         )
     ]
 
-    multiplot(results)
+    build_figure(results)
 
     assert plotted == [[2.0, 3.0]]
