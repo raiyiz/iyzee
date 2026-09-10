@@ -72,6 +72,21 @@ class FakeShutter:
         self.close_calls += 1
 
 
+class FakeScope:
+    def __init__(self):
+        self.connected = False
+        self.connect_calls = 0
+        self.close_calls = 0
+
+    def connect(self):
+        self.connect_calls += 1
+        self.connected = True
+
+    def close(self):
+        self.close_calls += 1
+        self.connected = False
+
+
 def test_mxa_connect_is_lazy_and_idempotent(monkeypatch):
     created = []
 
@@ -111,31 +126,65 @@ def test_shutter_connect_is_lazy(monkeypatch):
     assert shutter.psu.connect_calls == 0
 
 
+def test_scope_connect_is_lazy_and_idempotent(monkeypatch):
+    created = []
+
+    def make_scope():
+        scope = FakeScope()
+        created.append(scope)
+        return scope
+
+    monkeypatch.setattr(devices, "LeCroy", make_scope)
+    manager = devices.DeviceManager()
+
+    assert not manager.scope_connected
+    first = manager.connect_scope()
+    second = manager.connect_scope()
+
+    assert first is second
+    assert created == [first]
+    assert first.connect_calls == 2
+    assert manager.scope_connected
+
+
+def test_scope_operation_requires_explicit_connection(monkeypatch):
+    scope = FakeScope()
+    monkeypatch.setattr(devices, "LeCroy", lambda: scope)
+    manager = devices.DeviceManager()
+
+    with manager.scope_for_operation() as _:
+        raise AssertionError("an unconnected scope should not be usable")
+
+
 def test_close_all_releases_all_resources(monkeypatch):
     mxa = FakeMXA()
     shutter = FakeShutter()
+    scope = FakeScope()
     monkeypatch.setattr(devices, "KeysightMXA", lambda: mxa)
     monkeypatch.setattr(devices, "ShutterControl", lambda: shutter)
+    monkeypatch.setattr(devices, "LeCroy", lambda: scope)
     manager = devices.DeviceManager()
 
     manager.connect_mxa()
     manager.connect_shutter()
+    manager.connect_scope()
     manager.close_all()
 
     assert not manager.mxa_connected
     assert not manager.shutter_connected
+    assert not manager.scope_connected
     assert mxa.close_calls == 1
     assert shutter.close_calls == 1
     assert shutter.psu.close_calls == 1
+    assert scope.close_calls == 1
 
 
-def test_mxa_operation_serializes_access(monkeypatch):
-    mxa = FakeMXA()
-    monkeypatch.setattr(devices, "KeysightMXA", lambda: mxa)
+def test_scope_operation_serializes_access(monkeypatch):
+    scope = FakeScope()
+    monkeypatch.setattr(devices, "LeCroy", lambda: scope)
     manager = devices.DeviceManager()
+    manager.connect_scope()
 
-    with manager.mxa_for_operation() as connected:
-        assert connected is mxa
-        assert manager.mxa_connected
-
-    assert manager.mxa_connected
+    with manager.scope_for_operation() as connected:
+        assert connected is scope
+        assert manager.scope_connected
