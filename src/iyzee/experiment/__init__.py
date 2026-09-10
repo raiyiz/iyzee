@@ -10,11 +10,12 @@ machinery rather than hand-written loops.
 
 from .config import TRACE_SHOT, TRACE_SQZ, AnalyzerConfig, acquire_trace, prepare_analyzer
 from .persistence import create_dirs, save_data, save_step_results
-from .plotting import multiplot
+from .plotting import build_figure, multiplot
 from .procedures import (
     BandwidthStep,
     FrequencyStep,
     bandwidth_sweep_steps,
+    capture_traces,
     frequency_sweep_steps,
     run_bandwidth_sweep,
     run_frequency_sweep,
@@ -33,6 +34,8 @@ __all__ = [
     "TRACE_SQZ",
     "acquire_trace",
     "bandwidth_sweep_steps",
+    "build_figure",
+    "capture_traces",
     "create_dirs",
     "frequency_sweep_steps",
     "multiplot",

@@ -45,6 +45,34 @@ def test_run_sequence_can_skip_failures():
     assert [r.x_value for r in results] == [2]
 
 
+def test_run_sequence_reports_successful_steps_to_hook():
+    steps = [RecordingStep("a", 1), RecordingStep("b", 2)]
+    seen = []
+
+    results = run_sequence(
+        steps,
+        make_ctx(),
+        on_step=lambda index, total, result: seen.append((index, total, result.label)),
+    )
+
+    assert results[0].label == "a"
+    assert seen == [(1, 2, "a"), (2, 2, "b")]
+
+
+def test_run_sequence_does_not_report_failed_steps():
+    seen = []
+
+    results = run_sequence(
+        [RecordingStep("a", 1, fail=True), RecordingStep("b", 2)],
+        make_ctx(),
+        on_error="skip",
+        on_step=lambda index, total, result: seen.append((index, total, result.label)),
+    )
+
+    assert [result.x_value for result in results] == [2]
+    assert seen == [(2, 2, "b")]
+
+
 def test_run_sequence_rejects_unknown_error_policy():
     with pytest.raises(ValueError):
         run_sequence([], make_ctx(), on_error="bogus")

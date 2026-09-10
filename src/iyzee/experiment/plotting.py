@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 
 from .step import StepResult
 
 
-def multiplot(results: list[StepResult]) -> None:
-    """Plot the squeezing-minus-shot-noise difference for each scan point."""
+def build_figure(results: list[StepResult]) -> Figure:
+    """Build the standard squeezing-minus-shot-noise figure without showing it."""
     fig, ax = plt.subplots()
     labels = []
 
@@ -25,4 +26,10 @@ def multiplot(results: list[StepResult]) -> None:
     ax.set_xlabel("Trace point")
     ax.set_ylabel("Squeezing - shot noise")
     fig.tight_layout()
+    return fig
+
+
+def multiplot(results: list[StepResult]) -> None:
+    """Build and show the standard figure for script-based workflows."""
+    build_figure(results)
     plt.show()

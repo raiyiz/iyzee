@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from .step import ExperimentContext, Step, StepResult
 
@@ -15,8 +15,14 @@ def run_sequence(
     ctx: ExperimentContext,
     *,
     on_error: str = "raise",
+    on_step: Callable[[int, int, StepResult], None] | None = None,
 ) -> list[StepResult]:
     """Run ``steps`` in order against ``ctx``, returning their results.
+
+    ``on_step`` is called after every successfully completed step with
+    ``(index, total, result)``. It is intentionally optional so existing
+    scripts keep their current behavior while interactive clients can use
+    it for progress, live plots, logging, or persistence hooks.
 
     ``on_error`` controls what happens when a step raises:
 
@@ -36,6 +42,7 @@ def run_sequence(
         raise ValueError(f"on_error must be 'raise' or 'skip', got {on_error!r}")
 
     results: list[StepResult] = []
+    total = len(steps)
     for index, step in enumerate(steps):
         step_name = getattr(step, "label", None) or f"step[{index}]"
         log.info("run %s: starting %s", ctx.run_id, step_name)
@@ -48,4 +55,6 @@ def run_sequence(
             continue
         log.info("run %s: finished %s", ctx.run_id, step_name)
         results.append(result)
+        if on_step is not None:
+            on_step(index + 1, total, result)
     return results

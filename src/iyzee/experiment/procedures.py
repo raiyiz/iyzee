@@ -1,15 +1,10 @@
-"""Concrete experiment procedures built from composable steps.
-
-These used to be the hand-written ``record_bw_seq()``/``record_freq_seq()``
-functions in ``main.py``. Each is now a small ``Step`` describing one
-measurement point, plus a factory function that builds the scan and a
-``run_*`` procedure that operates on devices owned by the caller.
-"""
+"""Concrete experiment procedures built from composable steps."""
 
 from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 from ..power import ShutterControl
@@ -21,10 +16,7 @@ from .step import ExperimentContext, StepResult
 
 @dataclass
 class BandwidthStep:
-    """Acquire squeezing/shot-noise traces at one resolution bandwidth.
-
-    Keeps the experimental VBW relationship explicit: VBW = 2 * RBW.
-    """
+    """Acquire squeezing/shot-noise traces at one resolution bandwidth."""
 
     rbw_hz: float
 
@@ -49,13 +41,7 @@ class BandwidthStep:
 
 @dataclass
 class FrequencyStep:
-    """Set the laser frequency setpoint, wait to settle, and acquire.
-
-    The shutter opens only around the squeezing acquisition and is closed
-    again before the shot-noise reference trace is captured; that ordering
-    is physically meaningful (the shot-noise reference must not include the
-    squeezed-light path), not incidental sequencing.
-    """
+    """Set the laser frequency setpoint, wait to settle, and acquire."""
 
     frequency_thz: float
     wavemeter_channel: int
@@ -79,7 +65,6 @@ class FrequencyStep:
             ctx.shutter.close()
 
         shot_noise = acquire_trace(ctx.mx, TRACE_SHOT)
-
         return StepResult(
             label=self.label,
             x_value=self.frequency_thz,
@@ -118,7 +103,29 @@ def frequency_sweep_steps(
     ]
 
 
-def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> list[StepResult]:
+def capture_traces(mx, *, config: AnalyzerConfig | None = None) -> StepResult:
+    """Acquire the standard squeezing and shot-noise pair from an MXA."""
+    config = config or AnalyzerConfig()
+    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
+    return StepResult(
+        label="single capture",
+        x_value=0.0,
+        x_unit="point",
+        traces={
+            "squeezing": acquire_trace(mx, TRACE_SQZ),
+            "shot_noise": acquire_trace(mx, TRACE_SHOT),
+        },
+        meta=asdict(config),
+    )
+
+
+def run_bandwidth_sweep(
+    mx,
+    rbw_values_hz=None,
+    *,
+    on_error: str = "raise",
+    on_step: Callable[[int, int, StepResult], None] | None = None,
+) -> list[StepResult]:
     """Measure squeezing/shot-noise traces using the caller-owned MXA."""
     config = AnalyzerConfig(
         center_hz=1e6,
@@ -129,7 +136,12 @@ def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> l
     )
     prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
     ctx = ExperimentContext(mx=mx, run_id=uuid.uuid4().hex[:8], config=asdict(config))
-    return run_sequence(bandwidth_sweep_steps(rbw_values_hz), ctx, on_error=on_error)
+    return run_sequence(
+        bandwidth_sweep_steps(rbw_values_hz),
+        ctx,
+        on_error=on_error,
+        on_step=on_step,
+    )
 
 
 def run_frequency_sweep(
@@ -139,6 +151,7 @@ def run_frequency_sweep(
     wavemeter_channel: int = 1,
     *,
     on_error: str = "raise",
+    on_step: Callable[[int, int, StepResult], None] | None = None,
 ) -> list[StepResult]:
     """Measure squeezing/shot-noise traces using caller-owned devices."""
     config = AnalyzerConfig(
@@ -161,4 +174,4 @@ def run_frequency_sweep(
         wavemeter_channel=wavemeter_channel,
         relax_time_s=relax_time_s,
     )
-    return run_sequence(steps, ctx, on_error=on_error)
+    return run_sequence(steps, ctx, on_error=on_error, on_step=on_step)
