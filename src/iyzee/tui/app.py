@@ -192,14 +192,11 @@ class IyzTuiApp(App[None]):
 
     def _run_finished(self, results: list[StepResult], run_name: str) -> None:
         self._last_results = results
-        self._set_running(False)
         self.query_one("#progress", ProgressBar).update(
             total=max(len(results), 1), progress=len(results)
         )
         self.query_one("#run-status", Static).update(f"Finished — {len(results)} points")
-        savedir = create_dirs(run_name)
-        path = save_step_results(results, savedir, run_metadata={"workflow": run_name})
-        self._log(f"Saved {len(results)} points → {Path(path).name}")
+        self._save_results_worker(results, run_name)
 
     def _run_failed(self, error: Exception) -> None:
         self._set_running(False)
@@ -268,6 +265,17 @@ class IyzTuiApp(App[None]):
             self.call_from_thread(self._run_failed, exc)
             return
         self.call_from_thread(self._run_finished, results, "frequency-sweep")
+
+    @work(thread=True)
+    def _save_results_worker(self, results: list[StepResult], run_name: str) -> None:
+        try:
+            savedir = create_dirs(run_name)
+            path = save_step_results(results, savedir, run_metadata={"workflow": run_name})
+        except Exception as exc:
+            self.call_from_thread(self._run_failed, exc)
+            return
+        self.call_from_thread(self._set_running, False)
+        self.call_from_thread(self._log, f"Saved {len(results)} points → {Path(path).name}")
 
     def _on_worker_step(self, index: int, total: int, result: StepResult) -> None:
         """Bridge an experiment-thread progress event back to Textual's UI thread."""
