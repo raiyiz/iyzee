@@ -127,7 +127,7 @@ def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> l
         sweep_duration_ms=10,
         res_bw_hz=24e3,
     )
-    mx = prepare_analyzer((TRACE_SQZ, TRACE_SHOT), config)
+    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
     ctx = ExperimentContext(mx=mx, run_id=uuid.uuid4().hex[:8], config=asdict(config))
     return run_sequence(bandwidth_sweep_steps(rbw_values_hz), ctx, on_error=on_error)
 
