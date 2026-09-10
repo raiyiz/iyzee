@@ -1,3 +1,5 @@
+import pytest
+
 from iyzee import CH
 from iyzee.tui import devices
 
@@ -152,8 +154,9 @@ def test_scope_operation_requires_explicit_connection(monkeypatch):
     monkeypatch.setattr(devices, "LeCroy", lambda: scope)
     manager = devices.DeviceManager()
 
-    with manager.scope_for_operation() as _:
-        raise AssertionError("an unconnected scope should not be usable")
+    with pytest.raises(RuntimeError, match="scope is not connected"):
+        with manager.scope_for_operation():
+            pass
 
 
 def test_close_all_releases_all_resources(monkeypatch):
