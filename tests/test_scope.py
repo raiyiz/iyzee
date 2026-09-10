@@ -1,91 +1,113 @@
-import socket
 import struct
 
 import numpy as np
 import pytest
 
 from iyzee.scope import LeCroy
+from iyzee.vicp import VICP_DATA_FLAG, VICP_EOI_FLAG, VICPTransport
 
 
 class FragmentingFakeSocket:
-    """A fake socket whose recv() returns data in small, arbitrary chunks."""
+    """Fake TCP socket returning data in small arbitrary chunks."""
 
-    def __init__(self, data: bytes, chunk_size: int = 3):
-        self._buf = data
+    def __init__(self, data: bytes = b"", chunk_size: int = 3):
+        self._buf = bytearray(data)
         self._chunk_size = chunk_size
         self.sent = bytearray()
+        self.connected_to = None
+        self.closed = False
+        self.timeout = None
 
-    def recv(self, n: int) -> bytes:
-        take = min(n, self._chunk_size, len(self._buf))
-        chunk, self._buf = self._buf[:take], self._buf[take:]
+    def connect(self, address):
+        self.connected_to = address
+
+    def settimeout(self, value):
+        self.timeout = value
+
+    def close(self):
+        self.closed = True
+
+    def recv(self, size: int) -> bytes:
+        take = min(size, self._chunk_size, len(self._buf))
+        chunk = bytes(self._buf[:take])
+        del self._buf[:take]
         return chunk
 
-    def send(self, data: bytes) -> int:
+    def sendall(self, data: bytes) -> None:
         self.sent.extend(data)
-        return len(data)
 
 
 def vicp_frame(flag: int, payload: bytes) -> bytes:
-    header = struct.pack("B3BI", flag, 1, 0, 0, socket.htonl(len(payload)))
-    return header + payload
+    return VICPTransport.encode_header(flag, len(payload)) + payload
 
 
-def test_recv_exact_reassembles_fragmented_reads():
-    payload = b"0123456789ABCDEF"
-    sock = FragmentingFakeSocket(payload, chunk_size=3)
-
-    result = LeCroy._recv_exact(sock, len(payload))
-
-    assert result == payload
+def test_vicp_header_round_trip():
+    header = VICPTransport.encode_header(VICP_DATA_FLAG | VICP_EOI_FLAG, 1234)
+    assert VICPTransport.decode_header(header) == (VICP_DATA_FLAG | VICP_EOI_FLAG, 1234)
 
 
-def test_recv_exact_raises_on_closed_connection():
-    sock = FragmentingFakeSocket(b"short", chunk_size=3)
+def test_transport_reassembles_fragmented_frame():
+    fake = FragmentingFakeSocket(vicp_frame(VICP_EOI_FLAG, b"hello"), chunk_size=2)
+    transport = VICPTransport("scope", socket_factory=lambda *_: fake)
+    transport.connect()
 
-    with pytest.raises(ConnectionError):
-        LeCroy._recv_exact(sock, 100)
+    frame = transport.receive_frame()
 
-
-def test_get_header_assembles_fragmented_header():
-    scope = LeCroy()
-    header = vicp_frame(0x80, b"")[:8]
-    scope.s = FragmentingFakeSocket(header, chunk_size=2)
-
-    flag, length = scope._LeCroy__getHeader()
-
-    assert flag == 0x80
-    assert length == 0
+    assert frame.flags == VICP_EOI_FLAG
+    assert frame.payload == b"hello"
+    assert fake.connected_to == ("scope", 1861)
 
 
-def test_read_all_reassembles_fragmented_vicp_frames():
-    scope = LeCroy()
-    response = vicp_frame(0x80, b"hello ") + vicp_frame(0x01, b"world")
-    scope.s = FragmentingFakeSocket(response, chunk_size=2)
+def test_transport_receive_message_joins_continuation_frames():
+    response = vicp_frame(VICP_DATA_FLAG, b"hello ") + vicp_frame(VICP_EOI_FLAG, b"world")
+    fake = FragmentingFakeSocket(response, chunk_size=2)
+    transport = VICPTransport("scope", socket_factory=lambda *_: fake)
+    transport.connect()
 
-    flag, text = scope.readAll()
+    flags, payload = transport.receive_message()
 
-    assert flag == 0x01
-    assert text == "hello world"
+    assert flags == VICP_EOI_FLAG
+    assert payload == b"hello world"
 
 
-def test_send_serializes_vicp_header_and_message():
-    scope = LeCroy()
-    scope.s = FragmentingFakeSocket(b"")
+def test_transport_send_uses_single_complete_write():
+    fake = FragmentingFakeSocket()
+    transport = VICPTransport("scope", socket_factory=lambda *_: fake)
+    transport.connect()
 
-    scope.send("C1:VDIV 1.0")
+    transport.send_ascii("C1:VDIV 1.0")
 
-    flag, reserved_1, reserved_2, reserved_3, length = struct.unpack("B3BI", scope.s.sent[:8])
-    assert flag == LeCroy.LECROY_DATA_FLAG | LeCroy.LECROY_EOI_FLAG
-    assert (reserved_1, reserved_2, reserved_3) == (1, 0, 0)
-    assert socket.ntohl(length) == len("C1:VDIV 1.0")
-    assert scope.s.sent[8:] == b"C1:VDIV 1.0"
+    flags, length = VICPTransport.decode_header(fake.sent[:8])
+    assert flags == VICP_DATA_FLAG | VICP_EOI_FLAG
+    assert length == len("C1:VDIV 1.0")
+    assert fake.sent[8:] == b"C1:VDIV 1.0"
+
+
+def test_transport_closes_socket_after_connect_failure():
+    fake = FragmentingFakeSocket()
+
+    def failing_socket(*_):
+        class FailingSocket(FragmentingFakeSocket):
+            def connect(self, address):
+                raise OSError("offline")
+
+        return FailingSocket()
+
+    transport = VICPTransport("scope", socket_factory=failing_socket)
+    with pytest.raises(OSError, match="offline"):
+        transport.connect()
+    assert not transport.connected
+
+
+def waveform_responses(data: bytes) -> bytes:
+    preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
+    return preamble + vicp_frame(VICP_DATA_FLAG, data) + vicp_frame(VICP_EOI_FLAG, b"\n")
 
 
 def test_get_data_bytes_reassembles_fragmented_waveform():
-    scope = LeCroy()
-    preamble = b"x" * 38
-    waveform = vicp_frame(0x80, bytes([0, 1, 255])) + vicp_frame(0x01, b"\n")
-    scope.s = FragmentingFakeSocket(preamble + waveform, chunk_size=2)
+    fake = FragmentingFakeSocket(waveform_responses(bytes([0, 1, 255])), chunk_size=2)
+    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope.connect()
 
     result = scope.getDataBytes(channel="C1", block="DAT1")
 
@@ -93,11 +115,10 @@ def test_get_data_bytes_reassembles_fragmented_waveform():
 
 
 def test_get_data_words_reassembles_fragmented_waveform():
-    scope = LeCroy()
     data = struct.pack("<2h", -123, 456)
-    preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
-    waveform = vicp_frame(0x80, data) + vicp_frame(0x01, b"\n")
-    scope.s = FragmentingFakeSocket(preamble + waveform, chunk_size=2)
+    fake = FragmentingFakeSocket(waveform_responses(data), chunk_size=2)
+    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope.connect()
 
     result = scope.getDataWords(channel="C1", block="DAT1")
 
@@ -105,37 +126,36 @@ def test_get_data_words_reassembles_fragmented_waveform():
 
 
 def test_get_data_words_rejects_malformed_waveform_header():
-    scope = LeCroy()
-    scope.s = FragmentingFakeSocket(b"x" * 38, chunk_size=3)
+    fake = FragmentingFakeSocket(b"x" * 38, chunk_size=3)
+    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope.connect()
 
-    with pytest.raises(RuntimeError, match="incorrectly returned header"):
+    with pytest.raises(RuntimeError, match="incorrectly returned waveform header"):
         scope.getDataWords(channel="C1", block="DAT1")
 
 
 def test_get_data_words_rejects_short_waveform_data():
-    scope = LeCroy()
     data = struct.pack("<h", 123)
     preamble = b"x" * 27 + b"#9" + f"{len(data) + 2:09d}".encode("ascii")
-    waveform = vicp_frame(0x80, data) + vicp_frame(0x01, b"\n")
-    scope.s = FragmentingFakeSocket(preamble + waveform, chunk_size=2)
+    fake = FragmentingFakeSocket(preamble + vicp_frame(VICP_DATA_FLAG, data) + vicp_frame(VICP_EOI_FLAG, b"\n"), chunk_size=2)
+    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope.connect()
 
-    with pytest.raises(AssertionError, match="Expected 4 bytes, got 2"):
+    with pytest.raises(RuntimeError, match="expected 4 waveform bytes, got 2"):
         scope.getDataWords(channel="C1", block="DAT1")
 
 
 def test_get_data_floats_applies_vertical_scaling_and_unit():
-    scope = LeCroy()
     data = struct.pack("<2h", 100, -50)
-    preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
     responses = (
-        preamble
-        + vicp_frame(0x80, data)
-        + vicp_frame(0x01, b"\n")
-        + vicp_frame(0x01, b'VALUE: 0.25"\n')
-        + vicp_frame(0x01, b'VALUE: 2.0"\n')
-        + vicp_frame(0x01, b'Unit Name = V"\n')
+        waveform_responses(data)
+        + vicp_frame(VICP_EOI_FLAG, b'VALUE: 0.25"\n')
+        + vicp_frame(VICP_EOI_FLAG, b'VALUE: 2.0"\n')
+        + vicp_frame(VICP_EOI_FLAG, b'Unit Name = V"\n')
     )
-    scope.s = FragmentingFakeSocket(responses, chunk_size=2)
+    fake = FragmentingFakeSocket(responses, chunk_size=2)
+    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope.connect()
 
     unit, values = scope.getDataFloats(channel="C1", block="DAT1")
 
@@ -143,19 +163,25 @@ def test_get_data_floats_applies_vertical_scaling_and_unit():
     np.testing.assert_allclose(values, np.array([199.75, -100.25]))
 
 
-def test_get_horizontal_properties_reads_unit_offset_and_interval():
-    scope = LeCroy()
-    responses = b"".join(
-        [
-            vicp_frame(0x01, b'Unit Name = s"\n'),
-            vicp_frame(0x01, b'VALUE: 0.25"\n'),
-            vicp_frame(0x01, b'VALUE: 0.001"\n'),
-        ]
+def test_acquire_waveform_builds_physical_time_axis():
+    data = struct.pack("<2h", 10, 20)
+    responses = (
+        waveform_responses(data)
+        + vicp_frame(VICP_EOI_FLAG, b'VALUE: 0.0"\n')
+        + vicp_frame(VICP_EOI_FLAG, b'VALUE: 2.0"\n')
+        + vicp_frame(VICP_EOI_FLAG, b'Unit Name = V"\n')
+        + vicp_frame(VICP_EOI_FLAG, b'Unit Name = s"\n')
+        + vicp_frame(VICP_EOI_FLAG, b'VALUE: 0.25"\n')
+        + vicp_frame(VICP_EOI_FLAG, b'VALUE: 0.001"\n')
     )
-    scope.s = FragmentingFakeSocket(responses, chunk_size=2)
+    fake = FragmentingFakeSocket(responses, chunk_size=2)
+    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope.connect()
 
-    unit, offset, interval = scope.getHorProperties(channel="C1")
+    waveform = scope.acquire_waveform("C1")
 
-    assert unit == "s"
-    assert offset == pytest.approx(0.25)
-    assert interval == pytest.approx(0.001)
+    assert waveform.channel == "C1"
+    assert waveform.y_unit == "V"
+    assert waveform.x_unit == "s"
+    np.testing.assert_allclose(waveform.y, [20.0, 40.0])
+    np.testing.assert_allclose(waveform.x, [0.25, 0.251])
