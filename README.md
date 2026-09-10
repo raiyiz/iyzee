@@ -65,6 +65,11 @@ The interactive UI is built with [Textual](https://textual.textualize.io/) and
 iyzee-tui
 ```
 
+Starting the UI does **not** contact any instrument. The initial dashboard is a
+safe idle state: device indicators are disconnected, the run status is idle,
+and the trace area is blank until a successful acquisition. Press **Connect**
+for the device you want to use, then start the workflow.
+
 The first screen intentionally stays small: connect the MXA and shutter/PSU,
 run a bandwidth sweep, run a frequency sweep, or capture a single pair of
 traces. Completed steps update a progress bar and live plot, and runs are
@@ -139,7 +144,7 @@ than in typical application code:
 The technical documentation connects the measurement physics to the analyzer
 state, SCPI commands, and Python implementation. The MXA and measurement guide
 covers the measurement chain, RBW/VBW, detector and averaging semantics, ENBW,
-synchronization, trace transfer, noise density and band power, analyzer noise
+synchronization, trace transfer, noise density, band power, analyzer noise
 cancellation, trigger timing, and the squeezing/shot-noise workflow.
 
 The source is written in Typst and compiled in CI.
