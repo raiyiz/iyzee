@@ -221,7 +221,9 @@ def test_get_data_floats_applies_vertical_scaling_and_unit():
 
 
 def test_identify_reads_scope_id():
-    fake = FragmentingFakeSocket(vicp_frame(VICP_EOI_FLAG, b"LeCroy,WaveSurfer,452,1\n"), chunk_size=2)
+    fake = FragmentingFakeSocket(
+        vicp_frame(VICP_EOI_FLAG, b"LeCroy,WaveSurfer,452,1\n"), chunk_size=2
+    )
     scope = make_scope(fake)
     scope.connect()
 
