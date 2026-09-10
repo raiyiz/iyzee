@@ -58,6 +58,10 @@ def test_constructor_accepts_injected_resource_manager():
     mxa = KeysightMXA("10.0.0.1", resource_manager=resource_manager)
 
     assert mxa.rm is resource_manager
+    assert resource_manager.opened == []
+    assert mxa.instrument is None
+
+    mxa.connect()
     assert len(resource_manager.opened) == 1
     assert mxa.instrument is resource_manager.opened[0][1]
 
@@ -66,15 +70,18 @@ def test_constructor_accepts_injected_resource_manager():
     assert resource_manager.opened[0][1].close_count == 1
 
 
-def test_constructor_opens_exactly_one_connection(monkeypatch):
+def test_constructor_opens_only_when_connect_is_called(monkeypatch):
     resource_manager = FakeResourceManager()
     monkeypatch.setattr(base_module.pyvisa, "ResourceManager", lambda: resource_manager)
 
     mxa = KeysightMXA("10.0.0.1", timeout_ms=1234)
 
+    assert resource_manager.opened == []
+    assert mxa.instrument is None
+
+    mxa.connect()
     assert len(resource_manager.opened) == 1
     assert resource_manager.opened[0][0] == "TCPIP0::10.0.0.1::inst0::INSTR"
-    assert mxa.instrument is resource_manager.opened[0][1]
     assert mxa.instrument.timeout == 1234
     assert mxa.instrument.read_termination == "\n"
     assert mxa.instrument.write_termination == "\n"
@@ -83,16 +90,16 @@ def test_constructor_opens_exactly_one_connection(monkeypatch):
     assert len(resource_manager.opened) == 1
 
 
-def test_context_manager_does_not_reopen_connection(monkeypatch):
+def test_context_manager_connects_once_and_closes(monkeypatch):
     resource_manager = FakeResourceManager()
     monkeypatch.setattr(base_module.pyvisa, "ResourceManager", lambda: resource_manager)
 
     mxa = KeysightMXA("10.0.0.1")
-    instrument = mxa.instrument
 
     with mxa as managed:
         assert managed is mxa
-        assert mxa.instrument is instrument
+        instrument = mxa.instrument
+        assert instrument is resource_manager.opened[0][1]
         assert len(resource_manager.opened) == 1
 
     assert mxa.instrument is None
@@ -104,6 +111,7 @@ def test_close_is_idempotent_and_reconnects_after_close(monkeypatch):
     monkeypatch.setattr(base_module.pyvisa, "ResourceManager", lambda: resource_manager)
 
     mxa = KeysightMXA("10.0.0.1")
+    mxa.connect()
     first_instrument = mxa.instrument
 
     mxa.close()
@@ -122,6 +130,7 @@ def test_disconnect_remains_alias_for_close(monkeypatch):
     monkeypatch.setattr(base_module.pyvisa, "ResourceManager", lambda: resource_manager)
 
     mxa = KeysightMXA("10.0.0.1")
+    mxa.connect()
     instrument = mxa.instrument
 
     mxa.disconnect()
@@ -135,13 +144,12 @@ def test_context_manager_closes_on_exception(monkeypatch):
     monkeypatch.setattr(base_module.pyvisa, "ResourceManager", lambda: resource_manager)
 
     mxa = KeysightMXA("10.0.0.1")
-    instrument = mxa.instrument
 
     with pytest.raises(RuntimeError), mxa:
         raise RuntimeError("acquisition failed")
 
     assert mxa.instrument is None
-    assert instrument.close_count == 1
+    assert resource_manager.opened[0][1].close_count == 1
 
 
 def test_wait_opc_requires_explicit_completion_response():
