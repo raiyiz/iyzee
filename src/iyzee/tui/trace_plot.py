@@ -12,7 +12,7 @@ class TracePlot(PlotextPlot):
     """Render the most recently acquired squeezing and shot-noise traces."""
 
     def on_mount(self) -> None:
-        self.plt.title("Live trace")
+        self.plt.title("Live trace — no acquisition yet")
         self.plt.xlabel("Trace point")
         self.plt.ylabel("Amplitude")
 
@@ -30,5 +30,4 @@ class TracePlot(PlotextPlot):
         self.plt.title(f"Live trace — {result.label}")
         self.plt.xlabel("Trace point")
         self.plt.ylabel("Amplitude")
-        self.plt.legend()
         self.refresh()
