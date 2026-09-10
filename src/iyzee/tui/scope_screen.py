@@ -1,11 +1,11 @@
-"""Dedicated Textual screen for LeCroy scope control."""
+"""LeCroy scope view embedded in the main TUI shell."""
 
 from __future__ import annotations
 
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Static
 
 from ..scope import Waveform
@@ -13,23 +13,22 @@ from .devices import DeviceManager
 from .scope_plot import ScopeTracePlot
 
 
-class ScopeScreen(Screen[None]):
-    """Connect, identify, and acquire a waveform from the LeCroy scope."""
+class ScopeScreen(Widget):
+    """Right-hand page for safe LeCroy connection, inspection, and acquisition."""
 
-    BINDINGS = [("escape", "close", "Back")]
-
-    CSS = """
-    Screen {
-        layout: vertical;
-        padding: 1 2;
+    DEFAULT_CSS = """
+    ScopeScreen {
+        width: 100%;
+        height: 100%;
     }
 
     #scope-body {
+        width: 100%;
         height: 1fr;
     }
 
     #scope-controls {
-        width: 34;
+        width: 32;
         padding: 1;
         border: round $primary;
     }
@@ -37,6 +36,19 @@ class ScopeScreen(Screen[None]):
     #scope-main {
         width: 1fr;
         padding-left: 2;
+    }
+
+    .page-header {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    .page-title {
+        text-style: bold;
+    }
+
+    .muted {
+        color: $text-muted;
     }
 
     .section-title {
@@ -54,15 +66,10 @@ class ScopeScreen(Screen[None]):
         margin-right: 1;
     }
 
-    #scope-status {
-        height: 5;
-        border: round $secondary;
-        padding: 1;
-        margin-bottom: 1;
-    }
-
+    #scope-status,
     #scope-idn {
-        height: 4;
+        height: auto;
+        min-height: 3;
         border: round $secondary;
         padding: 1;
         margin-bottom: 1;
@@ -70,12 +77,8 @@ class ScopeScreen(Screen[None]):
 
     #scope-plot {
         height: 1fr;
-        min-height: 20;
+        min-height: 18;
         border: round $primary;
-    }
-
-    .muted {
-        color: $text-muted;
     }
     """
 
@@ -85,17 +88,20 @@ class ScopeScreen(Screen[None]):
         self._busy = False
 
     def compose(self) -> ComposeResult:
+        with Horizontal(classes="page-header"):
+            yield Label("LECROY SCOPE", classes="page-title")
+            yield Static("  /  single-waveform inspection", classes="muted")
+
         with Horizontal(id="scope-body"):
             with Vertical(id="scope-controls"):
-                yield Label("LECROY SCOPE", classes="section-title")
+                yield Label("Connection", classes="section-title")
                 yield Static("○ Disconnected", id="scope-connection")
                 with Horizontal(classes="control-row"):
                     yield Button("Connect", id="scope-connect", variant="primary")
                     yield Button("Disconnect", id="scope-disconnect")
 
                 yield Label("Identity", classes="section-title")
-                with Horizontal(classes="control-row"):
-                    yield Button("Read ID", id="scope-idn-read")
+                yield Button("Read ID", id="scope-idn-read")
 
                 yield Label("Acquisition", classes="section-title")
                 with Horizontal(classes="control-row"):
@@ -103,7 +109,7 @@ class ScopeScreen(Screen[None]):
                     yield Button("Acquire", id="scope-acquire", variant="success")
 
                 yield Static(
-                    "Acquire one waveform using the scope's current front-panel configuration.",
+                    "The scope uses its current front-panel acquisition configuration.",
                     classes="muted",
                 )
 
@@ -119,9 +125,9 @@ class ScopeScreen(Screen[None]):
             "scope-disconnect",
             "scope-idn-read",
             "scope-acquire",
-            "scope-channel",
         ):
-            self.query_one(f"#{widget_id}").disabled = busy
+            self.query_one(f"#{widget_id}", Button).disabled = busy
+        self.query_one("#scope-channel", Input).disabled = busy
 
     def _set_connection(self, text: str) -> None:
         self.query_one("#scope-connection", Static).update(text)
@@ -182,6 +188,7 @@ class ScopeScreen(Screen[None]):
             return
         self.app.call_from_thread(self._set_busy, False)
         self.app.call_from_thread(self._set_connection, "○ Disconnected")
+        self.app.call_from_thread(self._set_idn, "ID: not queried")
         self.app.call_from_thread(self._set_status, "Scope disconnected")
 
     def _show_waveform(self, waveform: Waveform) -> None:
@@ -218,6 +225,3 @@ class ScopeScreen(Screen[None]):
         elif button_id == "scope-disconnect":
             self._set_busy(True)
             self._disconnect_worker()
-
-    def action_close(self) -> None:
-        self.app.pop_screen()
