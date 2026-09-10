@@ -41,6 +41,10 @@ def vicp_frame(flag: int, payload: bytes) -> bytes:
     return VICPTransport.encode_header(flag, len(payload)) + payload
 
 
+def make_scope(fake: FragmentingFakeSocket) -> LeCroy:
+    return LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+
+
 def test_vicp_header_round_trip():
     header = VICPTransport.encode_header(VICP_DATA_FLAG | VICP_EOI_FLAG, 1234)
     flags, version, sequence, length = VICPTransport.decode_header(header)
@@ -65,10 +69,13 @@ def test_transport_reassembles_fragmented_frame():
     assert frame.header_version == 1
     assert frame.sequence == 1
     assert fake.connected_to == ("scope", 1861)
+    assert fake.timeout == 5.0
 
 
 def test_transport_receive_message_stops_on_eoi_with_data_flag_set():
-    response = vicp_frame(VICP_DATA_FLAG, b"hello ") + vicp_frame(VICP_DATA_FLAG | VICP_EOI_FLAG, b"world")
+    response = vicp_frame(VICP_DATA_FLAG, b"hello ") + vicp_frame(
+        VICP_DATA_FLAG | VICP_EOI_FLAG, b"world"
+    )
     fake = FragmentingFakeSocket(response, chunk_size=2)
     transport = VICPTransport("scope", socket_factory=lambda *_: fake)
     transport.connect()
@@ -113,14 +120,36 @@ def test_transport_closes_socket_after_connect_failure():
     assert created[0].closed
 
 
-def waveform_responses(data: bytes) -> bytes:
+def test_transport_context_manager_closes_socket():
+    fake = FragmentingFakeSocket()
+    transport = VICPTransport("scope", socket_factory=lambda *_: fake)
+
+    with transport:
+        assert transport.connected
+    assert not transport.connected
+    assert fake.closed
+
+
+def test_lecroy_context_manager_uses_transport_lifecycle():
+    fake = FragmentingFakeSocket()
+    scope = make_scope(fake)
+
+    with scope:
+        assert scope.connected
+    assert not scope.connected
+    assert fake.closed
+
+
+def waveform_responses(data: bytes, *, final_data_frame: bool = False) -> bytes:
     preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
+    if final_data_frame:
+        return preamble + vicp_frame(VICP_DATA_FLAG | VICP_EOI_FLAG, data)
     return preamble + vicp_frame(VICP_DATA_FLAG, data) + vicp_frame(VICP_EOI_FLAG, b"\n")
 
 
 def test_get_data_bytes_reassembles_odd_length_waveform():
     fake = FragmentingFakeSocket(waveform_responses(bytes([0, 1, 255])), chunk_size=2)
-    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope = make_scope(fake)
     scope.connect()
 
     result = scope.getDataBytes(channel="C1", block="DAT1")
@@ -128,10 +157,21 @@ def test_get_data_bytes_reassembles_odd_length_waveform():
     assert result == [(0,), (1,), (-1,)]
 
 
+def test_get_data_words_accepts_final_data_eoi_frame():
+    data = struct.pack("<2h", -123, 456)
+    fake = FragmentingFakeSocket(waveform_responses(data, final_data_frame=True), chunk_size=2)
+    scope = make_scope(fake)
+    scope.connect()
+
+    result = scope.getDataWords(channel="C1", block="DAT1")
+
+    assert result == (-123, 456)
+
+
 def test_get_data_words_reassembles_fragmented_waveform():
     data = struct.pack("<2h", -123, 456)
     fake = FragmentingFakeSocket(waveform_responses(data), chunk_size=2)
-    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope = make_scope(fake)
     scope.connect()
 
     result = scope.getDataWords(channel="C1", block="DAT1")
@@ -141,7 +181,7 @@ def test_get_data_words_reassembles_fragmented_waveform():
 
 def test_get_data_words_rejects_malformed_waveform_header():
     fake = FragmentingFakeSocket(b"x" * 38, chunk_size=3)
-    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope = make_scope(fake)
     scope.connect()
 
     with pytest.raises(RuntimeError, match="incorrectly returned waveform header"):
@@ -151,8 +191,11 @@ def test_get_data_words_rejects_malformed_waveform_header():
 def test_get_data_words_rejects_short_waveform_data():
     data = struct.pack("<h", 123)
     preamble = b"x" * 27 + b"#9" + f"{len(data) + 2:09d}".encode("ascii")
-    fake = FragmentingFakeSocket(preamble + vicp_frame(VICP_DATA_FLAG, data) + vicp_frame(VICP_EOI_FLAG, b"\n"), chunk_size=2)
-    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    fake = FragmentingFakeSocket(
+        preamble + vicp_frame(VICP_DATA_FLAG, data) + vicp_frame(VICP_EOI_FLAG, b"\n"),
+        chunk_size=2,
+    )
+    scope = make_scope(fake)
     scope.connect()
 
     with pytest.raises(RuntimeError, match="expected 4 waveform bytes, got 2"):
@@ -168,13 +211,22 @@ def test_get_data_floats_applies_vertical_scaling_and_unit():
         + vicp_frame(VICP_EOI_FLAG, b'Unit Name = V"\n')
     )
     fake = FragmentingFakeSocket(responses, chunk_size=2)
-    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope = make_scope(fake)
     scope.connect()
 
     unit, values = scope.getDataFloats(channel="C1", block="DAT1")
 
     assert unit == "V"
     np.testing.assert_allclose(values, np.array([199.75, -100.25]))
+
+
+def test_identify_reads_scope_id():
+    fake = FragmentingFakeSocket(vicp_frame(VICP_EOI_FLAG, b"LeCroy,WaveSurfer,452,1\n"), chunk_size=2)
+    scope = make_scope(fake)
+    scope.connect()
+
+    assert scope.identify() == "LeCroy,WaveSurfer,452,1\n"
+    assert fake.sent[8:] == b"*IDN?"
 
 
 def test_acquire_waveform_builds_physical_time_axis():
@@ -189,7 +241,7 @@ def test_acquire_waveform_builds_physical_time_axis():
         + vicp_frame(VICP_EOI_FLAG, b'VALUE: 0.001"\n')
     )
     fake = FragmentingFakeSocket(responses, chunk_size=2)
-    scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
+    scope = make_scope(fake)
     scope.connect()
 
     waveform = scope.acquire_waveform("C1")
