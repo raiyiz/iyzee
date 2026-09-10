@@ -147,22 +147,22 @@ class IyzTuiApp(App[None]):
                     yield Input("1", id="wavemeter-channel", type="integer")
 
                 yield Static(
-                    "B / F / C run workflows • D disconnects all devices • Q quits safely",
+                    "No devices are contacted at startup. Connect first, then run a workflow.",
                     classes="muted",
                 )
 
             with Vertical(id="main"):
-                yield Static("Ready", id="run-status")
+                yield Static("Ready — no devices connected", id="run-status")
                 yield ProgressBar(total=1, show_eta=False, id="progress")
                 yield TracePlot(id="plot")
-                yield Static("No run yet.", id="log")
+                yield Static("No acquisition yet.", id="log")
 
         yield Footer()
 
     def _set_status(self, widget_id: str, text: str) -> None:
         self.query_one(f"#{widget_id}", Static).update(text)
 
-    def _log(self, message: str) -> None:
+    def _append_log(self, message: str) -> None:
         self.query_one("#log", Static).update(message)
         log.info(message)
 
@@ -182,7 +182,7 @@ class IyzTuiApp(App[None]):
         self._set_running(True)
         self.query_one("#progress", ProgressBar).update(total=total, progress=0)
         self.query_one("#run-status", Static).update(label)
-        self._log(label)
+        self._append_log(label)
 
     def _step_finished(self, index: int, total: int, result: StepResult) -> None:
         self.query_one("#progress", ProgressBar).update(total=total, progress=index)
@@ -192,16 +192,19 @@ class IyzTuiApp(App[None]):
 
     def _run_finished(self, results: list[StepResult], run_name: str) -> None:
         self._last_results = results
+        self._set_running(False)
         self.query_one("#progress", ProgressBar).update(
             total=max(len(results), 1), progress=len(results)
         )
         self.query_one("#run-status", Static).update(f"Finished — {len(results)} points")
-        self._save_results_worker(results, run_name)
+        savedir = create_dirs(run_name)
+        path = save_step_results(results, savedir, run_metadata={"workflow": run_name})
+        self._append_log(f"Saved {len(results)} points → {Path(path).name}")
 
     def _run_failed(self, error: Exception) -> None:
         self._set_running(False)
         self.query_one("#run-status", Static).update("Run failed")
-        self._log(f"ERROR: {error}")
+        self._append_log(f"ERROR: {error}")
 
     def _frequency_defaults(self) -> tuple[float, int]:
         center = float(self.query_one("#frequency-center", Input).value or "377.1052067")
@@ -216,7 +219,7 @@ class IyzTuiApp(App[None]):
             self.call_from_thread(self._run_failed, exc)
         else:
             self.call_from_thread(self._set_status, "mxa-status", "● MXA connected")
-            self.call_from_thread(self._log, "MXA connected")
+            self.call_from_thread(self._append_log, "MXA connected")
 
     @work(thread=True)
     def _connect_shutter_worker(self) -> None:
@@ -226,7 +229,7 @@ class IyzTuiApp(App[None]):
             self.call_from_thread(self._run_failed, exc)
         else:
             self.call_from_thread(self._set_status, "shutter-status", "● Shutter / PSU connected")
-            self.call_from_thread(self._log, "Shutter / PSU connected")
+            self.call_from_thread(self._append_log, "Shutter / PSU connected")
 
     @work(thread=True)
     def _capture_worker(self) -> None:
@@ -266,17 +269,6 @@ class IyzTuiApp(App[None]):
             return
         self.call_from_thread(self._run_finished, results, "frequency-sweep")
 
-    @work(thread=True)
-    def _save_results_worker(self, results: list[StepResult], run_name: str) -> None:
-        try:
-            savedir = create_dirs(run_name)
-            path = save_step_results(results, savedir, run_metadata={"workflow": run_name})
-        except Exception as exc:
-            self.call_from_thread(self._run_failed, exc)
-            return
-        self.call_from_thread(self._set_running, False)
-        self.call_from_thread(self._log, f"Saved {len(results)} points → {Path(path).name}")
-
     def _on_worker_step(self, index: int, total: int, result: StepResult) -> None:
         """Bridge an experiment-thread progress event back to Textual's UI thread."""
         self.call_from_thread(self._step_finished, index, total, result)
@@ -290,7 +282,7 @@ class IyzTuiApp(App[None]):
             return
         self.call_from_thread(self._set_status, "mxa-status", "○ MXA disconnected")
         self.call_from_thread(self._set_status, "shutter-status", "○ Shutter / PSU disconnected")
-        self.call_from_thread(self._log, "All devices disconnected")
+        self.call_from_thread(self._append_log, "All devices disconnected")
 
     @work(thread=True)
     def _quit_worker(self) -> None:
@@ -349,6 +341,7 @@ class IyzTuiApp(App[None]):
 
     def action_quit_app(self) -> None:
         self._quit_worker()
+
 
 
 def main() -> None:
