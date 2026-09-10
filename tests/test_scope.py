@@ -43,7 +43,12 @@ def vicp_frame(flag: int, payload: bytes) -> bytes:
 
 def test_vicp_header_round_trip():
     header = VICPTransport.encode_header(VICP_DATA_FLAG | VICP_EOI_FLAG, 1234)
-    assert VICPTransport.decode_header(header) == (VICP_DATA_FLAG | VICP_EOI_FLAG, 1234)
+    flags, version, sequence, length = VICPTransport.decode_header(header)
+
+    assert flags == VICP_DATA_FLAG | VICP_EOI_FLAG
+    assert version == 1
+    assert sequence == 1
+    assert length == 1234
 
 
 def test_transport_reassembles_fragmented_frame():
@@ -55,18 +60,22 @@ def test_transport_reassembles_fragmented_frame():
 
     assert frame.flags == VICP_EOI_FLAG
     assert frame.payload == b"hello"
+    assert frame.eoi
+    assert not frame.data
+    assert frame.header_version == 1
+    assert frame.sequence == 1
     assert fake.connected_to == ("scope", 1861)
 
 
-def test_transport_receive_message_joins_continuation_frames():
-    response = vicp_frame(VICP_DATA_FLAG, b"hello ") + vicp_frame(VICP_EOI_FLAG, b"world")
+def test_transport_receive_message_stops_on_eoi_with_data_flag_set():
+    response = vicp_frame(VICP_DATA_FLAG, b"hello ") + vicp_frame(VICP_DATA_FLAG | VICP_EOI_FLAG, b"world")
     fake = FragmentingFakeSocket(response, chunk_size=2)
     transport = VICPTransport("scope", socket_factory=lambda *_: fake)
     transport.connect()
 
     flags, payload = transport.receive_message()
 
-    assert flags == VICP_EOI_FLAG
+    assert flags == VICP_DATA_FLAG | VICP_EOI_FLAG
     assert payload == b"hello world"
 
 
@@ -77,26 +86,31 @@ def test_transport_send_uses_single_complete_write():
 
     transport.send_ascii("C1:VDIV 1.0")
 
-    flags, length = VICPTransport.decode_header(fake.sent[:8])
+    flags, version, sequence, length = VICPTransport.decode_header(fake.sent[:8])
     assert flags == VICP_DATA_FLAG | VICP_EOI_FLAG
+    assert version == 1
+    assert sequence == 1
     assert length == len("C1:VDIV 1.0")
     assert fake.sent[8:] == b"C1:VDIV 1.0"
 
 
 def test_transport_closes_socket_after_connect_failure():
-    fake = FragmentingFakeSocket()
+    created = []
 
     def failing_socket(*_):
         class FailingSocket(FragmentingFakeSocket):
             def connect(self, address):
                 raise OSError("offline")
 
-        return FailingSocket()
+        sock = FailingSocket()
+        created.append(sock)
+        return sock
 
     transport = VICPTransport("scope", socket_factory=failing_socket)
     with pytest.raises(OSError, match="offline"):
         transport.connect()
     assert not transport.connected
+    assert created[0].closed
 
 
 def waveform_responses(data: bytes) -> bytes:
@@ -104,7 +118,7 @@ def waveform_responses(data: bytes) -> bytes:
     return preamble + vicp_frame(VICP_DATA_FLAG, data) + vicp_frame(VICP_EOI_FLAG, b"\n")
 
 
-def test_get_data_bytes_reassembles_fragmented_waveform():
+def test_get_data_bytes_reassembles_odd_length_waveform():
     fake = FragmentingFakeSocket(waveform_responses(bytes([0, 1, 255])), chunk_size=2)
     scope = LeCroy(transport=VICPTransport("scope", socket_factory=lambda *_: fake))
     scope.connect()
