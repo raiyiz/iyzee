@@ -31,6 +31,10 @@ def test_psu_accepts_injected_resource_manager():
     psu = PSU(ip=IP.POWER_SUPPLY, resource_manager=resource_manager)
 
     assert psu.rm is resource_manager
+    assert resource_manager.opened == []
+    assert psu.instrument is None
+
+    psu.connect()
     assert resource_manager.opened[0][0] == "TCPIP::10.140.1.42::5025::SOCKET"
     assert psu.instrument is resource_manager.opened[0][1]
 

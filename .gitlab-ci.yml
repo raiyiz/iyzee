@@ -1,0 +1,52 @@
+image: python:3.14
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH == "moonshine"'
+
+stages:
+  - test
+  - lint
+  - typecheck
+  - docs
+
+test:
+  stage: test
+  script:
+    - python -m pip install -e '.[test]'
+    - python -m pytest
+
+lint:
+  stage: lint
+  script:
+    - python -m pip install ruff
+    - ruff check .
+    - ruff format --check .
+
+typecheck:
+  stage: typecheck
+  script:
+    - python -m pip install -e . mypy
+    - mypy src tests
+
+docs:
+  stage: docs
+  image: ghcr.io/typst/typst:latest
+  script:
+    - set -eu
+    - mkdir -p build/docs
+    - |
+      for source in docs/*.typ; do
+        case "$source" in
+          docs/requirements.typ) continue ;;
+        esac
+        output="build/docs/$(basename "${source%.typ}").pdf"
+        typst compile "$source" "$output"
+      done
+  artifacts:
+    name: iyzee-documentation
+    paths:
+      - build/docs/*.pdf
+    expire_in: 30 days
