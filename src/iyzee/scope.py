@@ -141,19 +141,43 @@ class LeCroy:
         _flags, response = self.readAll()
         return response
 
-    def getDataFloats(self, channel: str = "C1", block: str = "DAT1") -> tuple[str, np.ndarray]:
+    def getDataFloats(
+        self, channel: str = "C1", block: str = "DAT1"
+    ) -> tuple[str, np.ndarray]:
         """Return physically-scaled vertical samples and their unit."""
-        word_values = np.asarray(self.getDataWords(channel=channel, block=block), dtype=np.float64)
-        offset = float(self._inspect(channel, "VERTICAL_OFFSET").split(":")[-1].split('"\n')[0].strip())
-        gain = float(self._inspect(channel, "VERTICAL_GAIN").split(":")[-1].split('"\n')[0].strip())
+        word_values = np.asarray(
+            self.getDataWords(channel=channel, block=block), dtype=np.float64
+        )
+        offset = float(
+            self._inspect(channel, "VERTICAL_OFFSET")
+            .split(":")[-1]
+            .split('"\n')[0]
+            .strip()
+        )
+        gain = float(
+            self._inspect(channel, "VERTICAL_GAIN")
+            .split(":")[-1]
+            .split('"\n')[0]
+            .strip()
+        )
         unit = self._inspect(channel, "VERTUNIT").split("Unit Name = ")[-1].split('"\n')[0]
         return unit, gain * word_values - offset
 
     def getHorProperties(self, channel: str = "C1") -> tuple[str, float, float]:
         """Return horizontal unit, offset, and sample interval."""
         unit = self._inspect(channel, "HORUNIT").split("Unit Name = ")[-1].split('"\n')[0]
-        offset = float(self._inspect(channel, "HORIZ_OFFSET").split(":")[-1].split('"\n')[0].strip())
-        interval = float(self._inspect(channel, "HORIZ_INTERVAL").split(":")[-1].split('"\n')[0].strip())
+        offset = float(
+            self._inspect(channel, "HORIZ_OFFSET")
+            .split(":")[-1]
+            .split('"\n')[0]
+            .strip()
+        )
+        interval = float(
+            self._inspect(channel, "HORIZ_INTERVAL")
+            .split(":")[-1]
+            .split('"\n')[0]
+            .strip()
+        )
         return unit, offset, interval
 
     def acquire_waveform(self, channel: str = "C1", block: str = "DAT1") -> Waveform:
