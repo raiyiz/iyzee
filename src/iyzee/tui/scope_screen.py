@@ -146,7 +146,9 @@ class ScopeScreen(Screen[None]):
             return
         self.call_from_thread(self._set_busy, False)
         self.call_from_thread(self._set_connection, "● Connected")
-        self.call_from_thread(self._set_status, f"Scope connected\n{scope.ip}:{scope.LECROY_SERVER_PORT}")
+        self.call_from_thread(
+            self._set_status, f"Scope connected\n{scope.ip}:{scope.LECROY_SERVER_PORT}"
+        )
 
     @work(thread=True)
     def _identify_worker(self) -> None:
