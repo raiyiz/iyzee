@@ -9,13 +9,16 @@ automated noise measurements with a Keysight MXA.
 src/iyzee/
 ├── main.py               # legacy script entry point
 ├── tui/                  # interactive terminal UI
-│   ├── app.py            # Textual application and screen composition
+│   ├── app.py            # Textual application and navigation
 │   ├── devices.py        # worker-safe device ownership / serialization
-│   └── trace_plot.py     # live trace presentation
+│   ├── trace_plot.py     # MXA trace presentation
+│   ├── scope_screen.py   # LeCroy scope page
+│   └── scope_plot.py     # LeCroy waveform presentation
 ├── base.py               # shared VISA lifecycle, instrument IPs, PSU channels
 ├── mxa.py                # Keysight MXA SCPI/VISA driver
 ├── power.py              # power supply + optical shutter control
-├── scope.py              # LeCroy oscilloscope communication
+├── scope.py              # LeCroy high-level driver and waveform conversion
+├── vicp.py               # VICP framing and TCP transport
 ├── wavemeter_readout.py  # wavemeter / laser setpoint control
 └── experiment/            # composable measurement procedures
     ├── step.py            # Step protocol, ExperimentContext, StepResult
@@ -70,20 +73,29 @@ safe idle state: device indicators are disconnected, the run status is idle,
 and the trace area is blank until a successful acquisition. Press **Connect**
 for the device you want to use, then start the workflow.
 
-The first screen intentionally stays small: connect the MXA and shutter/PSU,
-run a bandwidth sweep, run a frequency sweep, or capture a single pair of
-traces. Completed steps update a progress bar and live plot, and runs are
-saved through the same persistence functions used by scripts.
+The main dashboard covers MXA and shutter/PSU workflows. Press **LeCroy scope**
+or `s` to open the dedicated scope page. That page deliberately keeps the first
+scope slice small and useful: explicitly connect/disconnect, query `*IDN?`,
+choose a channel, acquire one physical-unit waveform, and inspect it in the
+terminal. Scope acquisition uses the scope's current front-panel acquisition
+configuration; it does not introduce a second scope-configuration system yet.
 
 The UI is deliberately a thin presentation layer. Experiment logic remains in
 `experiment/`, while `tui/devices.py` owns lazy device creation and serializes
-hardware access. Synchronous PyVISA and wavemeter calls stay synchronous in
-their drivers but are invoked from Textual thread workers, so the event loop
-never waits for instrument I/O.
+hardware access. Synchronous PyVISA, VICP socket, and wavemeter calls stay
+synchronous in their drivers but are invoked from Textual thread workers, so the
+event loop never waits for instrument I/O.
+
+The LeCroy VICP implementation is split into `vicp.py` and `scope.py`.
+`VICPTransport` owns TCP connection state, exact reads, complete writes, framed
+header decoding, frame-size limits, timeouts, and EOI-based message termination.
+The scope driver owns LeCroy commands and binary waveform interpretation. This
+keeps protocol details out of the TUI and makes the wire protocol testable with
+fake sockets.
 
 For script workflows, `multiplot()` keeps its existing blocking `plt.show()`
 behavior. TUI code uses `build_figure()` only when a Matplotlib figure is
-needed and renders live acquisitions through `TracePlot` instead.
+needed and renders live acquisitions through the terminal plotting widgets.
 
 ### UI extension path
 
@@ -96,7 +108,7 @@ Keep future UI work in layers:
 - **Presentation widgets:** live traces, run history, tables, and saved-result
   browsing.
 - **Experiment layer:** reusable `Step`s, procedures, and progress hooks.
-- **Drivers:** synchronous, hardware-specific SCPI/HTTP APIs.
+- **Drivers/transports:** synchronous, hardware-specific SCPI/HTTP/VICP APIs.
 
 A useful rule is: the TUI should orchestrate existing experiment operations,
 not grow a second implementation of a sweep or acquisition loop.
@@ -107,9 +119,8 @@ therefore be introduced as an explicit experiment-level mechanism (for
 example a cooperative cancellation flag checked between steps), with shutter
 shutdown guaranteed in `finally` blocks.
 
-The live plot is isolated behind `tui/trace_plot.py`, so a later switch from
-`textual-plotext` to another terminal plotting widget does not change the
-experiment or persistence APIs.
+The plotting widgets are isolated from the experiment layer, so their terminal
+backend can be replaced without changing acquisition or persistence APIs.
 
 ## Instrument drivers
 
@@ -119,9 +130,9 @@ experiment or persistence APIs.
   SCPI strings.
 - **`power.py`** — PSU control plus `ShutterControl`, a thin wrapper that
   drives the optical shutter through one PSU channel.
-- **`scope.py`** — LeCroy oscilloscope driver (VICP protocol over TCP). Not
-  yet unified with `BaseDevice`'s connection lifecycle; treat as a standalone
-  legacy driver.
+- **`scope.py` + `vicp.py`** — LeCroy oscilloscope control over the native VICP
+  TCP protocol. `scope.py` exposes explicit connect/close lifecycle and typed
+  waveform data; `vicp.py` isolates framing and socket behavior.
 - **`wavemeter_readout.py`** — wavemeter readout and PID setpoint control over
   HTTP, plus Rubidium transition-frequency reference tables used for
   reporting laser detuning.
@@ -171,21 +182,21 @@ Keep the separation simple while the project is small:
    machinery a procedure is built from.**
 4. **`mxa.py` / `power.py` / `scope.py` / `wavemeter_readout.py` — how to
    control each instrument:** reusable, hardware-specific operations.
-5. **`base.py` — shared infrastructure:** connection lifecycle, addresses,
-   channel definitions.
+5. **`base.py` and `vicp.py` — shared infrastructure:** VISA/VICP lifecycle,
+   addresses, framing, and transport boundaries.
 
 As more procedures are added, split `procedures.py` further rather than
 letting one file grow indefinitely.
 
 ## Known gaps
 
-- `scope.py`'s `LeCroy` driver is not integrated with `BaseDevice`'s
-  connection lifecycle.
+- The TUI currently assumes the lab's known static instrument addresses.
+- Scope configuration, triggering, measurement tables, coordinated MXA+scope
+  experiments, cancellation, and a run-history browser are not yet exposed by
+  the TUI.
 - `wavemeter_readout.py`'s frequency constants and `single_readout()` /
   `set_pid_setpoint()` parameters are bare floats (THz/GHz/MHz mixed via a
   `scal` factor) rather than explicitly unit-typed.
-- The TUI currently assumes the lab's known static instrument addresses and
-  does not yet offer cancellation or a run-history browser.
 
-Those driver modules handle physically sensitive behavior and should be
-changed with real-hardware review, not just UI tests.
+Physically sensitive driver changes should be reviewed against the real
+hardware, not just tests.
