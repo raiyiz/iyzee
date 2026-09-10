@@ -3,21 +3,15 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from threading import RLock
 from collections.abc import Iterator
+from threading import RLock
 
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
 
 
 class DeviceManager:
-    """Own lazily-created devices and serialize access from worker threads.
-
-    Device objects are created and connected inside Textual worker threads,
-    so potentially blocking PyVISA setup never runs on the UI event loop.
-    The same lock is held for an entire experiment run to prevent two worker
-    threads from talking to the same VISA resource concurrently.
-    """
+    """Own lazily-created devices and serialize access from worker threads."""
 
     def __init__(self) -> None:
         self._mxa: KeysightMXA | None = None
@@ -62,13 +56,24 @@ class DeviceManager:
     def close_all(self) -> None:
         """Close all currently-open devices, best-effort and idempotently."""
         with self._lock:
+            errors: list[Exception] = []
+
             if self._shutter is not None:
                 try:
                     self._shutter.close()
+                except Exception as exc:
+                    errors.append(exc)
                 finally:
                     self._shutter.psu.close()
                 self._shutter = None
 
             if self._mxa is not None:
-                self._mxa.close()
-                self._mxa = None
+                try:
+                    self._mxa.close()
+                except Exception as exc:
+                    errors.append(exc)
+                finally:
+                    self._mxa = None
+
+            if errors:
+                raise errors[0]
