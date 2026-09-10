@@ -8,7 +8,7 @@ from pathlib import Path
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Footer, Header, Input, Label, ProgressBar, Static
+from textual.widgets import Button, ContentSwitcher, Footer, Header, Input, Label, ProgressBar, Static
 
 from ..experiment import (
     capture_traces,
@@ -26,7 +26,7 @@ log = logging.getLogger("iyzee.tui")
 
 
 class IyzTuiApp(App[None]):
-    """Small, keyboard-friendly control surface for experiment runs."""
+    """Keyboard-friendly control surface for experiment runs and devices."""
 
     TITLE = "iyzee — laboratory control"
     SUB_TITLE = "connect → configure → acquire → review"
@@ -51,7 +51,7 @@ class IyzTuiApp(App[None]):
 
     #main {
         width: 1fr;
-        padding: 0 1 0 2;
+        padding-left: 2;
     }
 
     .section-title {
@@ -77,6 +77,25 @@ class IyzTuiApp(App[None]):
 
     Button {
         margin: 0 1 1 0;
+    }
+
+    .page-button {
+        width: 100%;
+    }
+
+    #dashboard-view,
+    #scope-view {
+        width: 100%;
+        height: 100%;
+    }
+
+    #dashboard-header {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #dashboard-header-title {
+        text-style: bold;
     }
 
     #run-status {
@@ -135,8 +154,9 @@ class IyzTuiApp(App[None]):
                     yield Static("○ Shutter / PSU", id="shutter-status", classes="status")
                     yield Button("Connect", id="connect-shutter", variant="primary")
 
-                yield Label("INSTRUMENT PAGES", classes="section-title")
-                yield Button("LeCroy scope", id="scope", variant="primary")
+                yield Label("PAGES", classes="section-title")
+                yield Button("Dashboard", id="dashboard-page", classes="page-button")
+                yield Button("LeCroy scope", id="scope-page", classes="page-button", variant="primary")
 
                 yield Label("RUN CONTROLS", classes="section-title")
                 with Horizontal(classes="control-row"):
@@ -157,12 +177,24 @@ class IyzTuiApp(App[None]):
                 )
 
             with Vertical(id="main"):
-                yield Static("Ready — no devices connected", id="run-status")
-                yield ProgressBar(total=1, show_eta=False, id="progress")
-                yield TracePlot(id="plot")
-                yield Static("No acquisition yet.", id="log")
+                with ContentSwitcher(initial="dashboard-view", id="page-switcher"):
+                    with Vertical(id="dashboard-view"):
+                        with Horizontal(id="dashboard-header"):
+                            yield Label("DASHBOARD", id="dashboard-header-title")
+                            yield Static("  /  experiments and live analyzer traces", classes="muted")
+                        yield Static("Ready — no devices connected", id="run-status")
+                        yield ProgressBar(total=1, show_eta=False, id="progress")
+                        yield TracePlot(id="plot")
+                        yield Static("No acquisition yet.", id="log")
+                    yield ScopeScreen(self.devices, id="scope-view")
 
         yield Footer()
+
+    def _show_page(self, page_id: str) -> None:
+        self.query_one("#page-switcher", ContentSwitcher).current = page_id
+        dashboard_active = page_id == "dashboard-view"
+        self.query_one("#dashboard-page", Button).variant = "primary" if dashboard_active else "default"
+        self.query_one("#scope-page", Button).variant = "primary" if not dashboard_active else "default"
 
     def _set_status(self, widget_id: str, text: str) -> None:
         self.query_one(f"#{widget_id}", Static).update(text)
@@ -176,7 +208,8 @@ class IyzTuiApp(App[None]):
         for button_id in (
             "connect-mxa",
             "connect-shutter",
-            "scope",
+            "dashboard-page",
+            "scope-page",
             "bandwidth",
             "frequency",
             "capture",
@@ -185,6 +218,7 @@ class IyzTuiApp(App[None]):
             self.query_one(f"#{button_id}", Button).disabled = running
 
     def _start_run(self, total: int, label: str) -> None:
+        self._show_page("dashboard-view")
         self._set_running(True)
         self.query_one("#progress", ProgressBar).update(total=total, progress=0)
         self.query_one("#run-status", Static).update(label)
@@ -306,8 +340,10 @@ class IyzTuiApp(App[None]):
             self._connect_mxa_worker()
         elif button_id == "connect-shutter":
             self._connect_shutter_worker()
-        elif button_id == "scope":
-            self.push_screen(ScopeScreen(self.devices))
+        elif button_id in {"scope", "scope-page"}:
+            self._show_page("scope-view")
+        elif button_id == "dashboard-page":
+            self._show_page("dashboard-view")
         elif button_id == "bandwidth":
             self._last_results = []
             self._start_run(19, "Running bandwidth sweep…")
@@ -345,7 +381,7 @@ class IyzTuiApp(App[None]):
 
     def action_scope(self) -> None:
         if not self._running:
-            self.push_screen(ScopeScreen(self.devices))
+            self._show_page("scope-view")
 
     def action_disconnect(self) -> None:
         if not self._running:
