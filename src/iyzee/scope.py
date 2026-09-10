@@ -83,6 +83,12 @@ class LeCroy:
         self._require_connected()
         return self.transport.receive_ascii()
 
+    def identify(self) -> str:
+        """Query the scope identification string."""
+        self.send("*IDN?")
+        _flags, response = self.readAll()
+        return response
+
     def _read_waveform_block(self, *, sample_width: int) -> bytes:
         """Read the scope's waveform response and return raw sample bytes."""
         if sample_width <= 0:
