@@ -110,12 +110,12 @@ class LeCroy:
         data = bytearray()
         while True:
             frame = self.transport.receive_frame()
-            if frame.flags & VICP_DATA_FLAG:
+            if frame.data:
                 data.extend(frame.payload)
-                continue
-            if frame.payload != b"\n":
-                raise RuntimeError("waveform transfer did not terminate with newline")
-            break
+            elif frame.payload not in (b"", b"\n"):
+                raise RuntimeError("unexpected non-data VICP waveform frame")
+            if frame.eoi:
+                break
 
         if len(data) != expected_bytes:
             raise RuntimeError(f"expected {expected_bytes} waveform bytes, got {len(data)}")
