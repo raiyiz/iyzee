@@ -82,8 +82,8 @@ class ScopeScreen(Widget):
     }
     """
 
-    def __init__(self, devices: DeviceManager) -> None:
-        super().__init__()
+    def __init__(self, devices: DeviceManager, *, id: str | None = None) -> None:
+        super().__init__(id=id)
         self.devices = devices
         self._busy = False
 
@@ -165,7 +165,9 @@ class ScopeScreen(Widget):
             with self.devices.scope_for_operation() as scope:
                 identity = scope.identify()
         except Exception as exc:
-            self.app.call_from_thread(self._operation_failed, f"ID query failed\n{exc}")
+            self.app.call_from_thread(
+                self._operation_failed, f"ID query failed\n{exc}"
+            )
             return
         self.app.call_from_thread(self._set_busy, False)
         self.app.call_from_thread(self._set_idn, f"ID: {identity.strip()}")
