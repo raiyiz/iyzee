@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
@@ -65,7 +66,7 @@ class LeCroy:
         self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
         self.close()
         return False
 
