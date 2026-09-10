@@ -1,284 +1,156 @@
-import socket
-import struct  # for unpacking c structs
-from ctypes import Structure, c_int, c_ubyte
+"""LeCroy oscilloscope control and waveform acquisition."""
+
+from __future__ import annotations
+
+import struct
+from dataclasses import dataclass
 
 import numpy as np
 
-
-# c struct for header frame
-class LECROY_TCP_HEADER(Structure):
-    """defines LeCroy VICP protocol (TCP header)
-    _fields_ are byte, byte[3] and int (4-byte)
-    """
-
-    _fields_ = [("bEOI_Flag", c_ubyte), ("reserved", c_ubyte * 3), ("iLength", c_int)]
+from .base import IP
+from .vicp import VICP_DATA_FLAG, VICPTransport
 
 
-# various flags just in case in hex
-LECROY_EOI_FLAG = 0x01
-LECROY_SRQ_FLAG = 0x08
-LECROY_CLEAR_FLAG = 0x10
-LECROY_LOCKOUT_FLAG = 0x20
-LECROY_REMOTE_FLAG = 0x40
-LECROY_DATA_FLAG = 0x80
+@dataclass(frozen=True)
+class Waveform:
+    """One measured oscilloscope waveform with its physical axes."""
+
+    x: np.ndarray
+    y: np.ndarray
+    x_unit: str
+    y_unit: str
+    channel: str
 
 
 class LeCroy:
-    """
-    Class for remote control and download of LeCroy oscilloscope data
-    tested for WaveSurfer 452
-    Methods
-    ------------
-    connect(IP) : after initializing to connect
-    disconnect() : to end communication
-    send(message) : message to device (commands, etc.)
-    readAll() : read a full framed response from the device, returns ascii string
+    """Remote control and waveform acquisition for a LeCroy oscilloscope."""
 
-    getDataBytes(channel="C1", block="DAT1"): binary data download, 8-bit
-    getDataWords(channel="C1", block="DAT1"): binary data download, 16-bit
-    getDataFloats(channel="C1", block="DAT1"): unit, vertical data (downloads 16-bit binary)
-    getHorProperties(channel="C1") : returns (unit, offset, interval) in time dir.
-    """
-
-    MAX_TCP_CONNECT = 5  # time in s. to get a conn
-    MAC_TCP_READ = 3  # time in s. to wait for the DSO to respond
-    LECROY_SERVER_PORT = 1861  # as defined by LeCroy
+    LECROY_SERVER_PORT = 1861
     CMD_BUF_LEN = 8192
     LECROY_EOI_FLAG = 0x01
-    LECROY_DATA_FLAG = 0x80
+    LECROY_DATA_FLAG = VICP_DATA_FLAG
 
-    def __init__(self):
-        self.CONNECTED = False
-        # In future consider setting blocking connecting for socket
-        # socket.socket.setblocking(False) # blocking by select
-        # socket.socket.settimeout(SOCK_TIMEOUT)
-
-    @staticmethod
-    def _recv_exact(sock: socket.socket, num_bytes: int) -> bytes:
-        """Read exactly ``num_bytes`` from ``sock``.
-
-        A single ``socket.recv()`` call is not guaranteed to return all the
-        bytes that are available/requested; it may return fewer. Loop until
-        the requested number of bytes has actually been received.
-        """
-        chunks = bytearray()
-        while len(chunks) < num_bytes:
-            chunk = sock.recv(num_bytes - len(chunks))
-            if not chunk:
-                raise ConnectionError(f"Socket closed after {len(chunks)}/{num_bytes} bytes")
-            chunks.extend(chunk)
-        return bytes(chunks)
-
-    def connect(self, IP, delayval=3.0):
-        """Connect to the IP, using LeCroy.LECROY_SERVER_PORT as port
-        creates a socket at LeCroy.s
-        """
-        if self.CONNECTED:
-            print("Already connected!")
-            return -2
-
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.s.connect((IP, self.LECROY_SERVER_PORT))
-        # TODO: if scope is turned off, then handle, not wait forever
-
-        self.SOCK_TIMEOUT = delayval
-        self.CONNECTED = True
-
-    def disconnect(self):
-        """Disconnect from socket LeCroy.s"""
-        if not self.CONNECTED:
-            return -2
-
-        self.s.close()
-        self.CONNECTED = False
-
-    def send(self, message):
-        """Send a message through the socket to LeCroy oscilloscope.
-        Sends message length in header frame and then writes to the
-        socket until all is received by the oscilloscope
-        returns 0 if abnormal exit
-        """
-        msglen = len(message)
-        # set the header info
-        head = LECROY_TCP_HEADER(
-            self.LECROY_DATA_FLAG | self.LECROY_EOI_FLAG,
-            (1, 0, 0),
-            socket.htonl(msglen),
+    def __init__(
+        self,
+        ip: IP | str = IP.SCOPE,
+        *,
+        timeout_s: float = 5.0,
+        transport: VICPTransport | None = None,
+    ) -> None:
+        self.ip = str(ip)
+        self.timeout_s = timeout_s
+        self.transport = transport or VICPTransport(
+            self.ip,
+            port=self.LECROY_SERVER_PORT,
+            timeout_s=timeout_s,
         )
 
-        # write the header first
-        self.s.send(bytes(head))
+    @property
+    def connected(self) -> bool:
+        return self.transport.connected
 
-        # write the message
-        byteindx = 0
-        msgbytes = message.encode("ascii")
-        while byteindx < msglen:
-            xferd = self.s.send(msgbytes[byteindx:])
-            if xferd < 0:
-                raise RuntimeError(f"could not write the data block, returned {xferd}")
-            byteindx += xferd
+    def connect(self) -> None:
+        """Connect to the scope; repeated calls are harmless."""
+        self.transport.connect()
 
-    def __translate(self, data):
-        """Takes the device header (data) and finds the flag and data length
-        the device has specified in the usual Byte, Byte[3], Int format
-        See the documentation for possible eofflags
-        returns (eofflag, datalen)
-        """
-        headdata = struct.unpack("B3BI", data)  # get response (header from device)
-        datalen = socket.ntohl(headdata[-1])  # data length to be captured
-        eofflag = headdata[0]
-        return (eofflag, datalen)
+    def close(self) -> None:
+        """Close the network connection."""
+        self.transport.close()
 
-    def __getHeader(self):
-        """
-        Receive a 8-byte header from socket LeCroy.s
-        translate it and return the (eofflag, datalen)
-        """
-        data = self._recv_exact(self.s, 8)
-        return self.__translate(data)
+    def disconnect(self) -> None:
+        """Backward-compatible alias for ``close``."""
+        self.close()
 
-    def readAll(self):
-        """Read all that the device gives us (ascii) on Lecroy.s socket
-        1) Get header from device (flag, len)
-        2) receive len bytes and decode it
-        returns the flag of the last transmission frame and complete data string in ascii
-        NB! assumes all data frame transfers can be done in one go
-        """
-        dtstr = ""
+    def __enter__(self) -> "LeCroy":
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        self.close()
+        return False
+
+    def _require_connected(self) -> None:
+        if not self.connected:
+            raise RuntimeError("LeCroy scope is not connected")
+
+    def send(self, message: str) -> None:
+        """Send an ASCII VICP command."""
+        self._require_connected()
+        self.transport.send_ascii(message)
+
+    def readAll(self) -> tuple[int, str]:
+        """Read a complete framed ASCII response."""
+        self._require_connected()
+        return self.transport.receive_ascii()
+
+    def _read_waveform_block(self) -> bytes:
+        """Read the scope's waveform response and return raw sample bytes."""
+        transport = self.transport
+        sock = transport._require_socket()
+        preamble = transport._recv_exact(sock, 38)
+        if preamble[-11:-9] != b"#9":
+            raise RuntimeError("incorrectly returned waveform header")
+        try:
+            expected_bytes = int(preamble[-9:].decode("ascii"))
+        except ValueError as exc:
+            raise RuntimeError("invalid waveform byte-count header") from exc
+        if expected_bytes <= 0:
+            raise RuntimeError(f"invalid waveform byte count: {expected_bytes}")
+        if expected_bytes % 2:
+            raise RuntimeError("odd number of waveform bytes expected")
+
+        data = bytearray()
         while True:
-            flg, lnt = self.__getHeader()  # find how
-            dtstr += self._recv_exact(self.s, lnt).decode("ascii")  # gather data
-            if flg != self.LECROY_DATA_FLAG:  # data flag 0x80
-                break
-        return flg, dtstr
+            frame = transport.receive_frame()
+            if frame.flags & VICP_DATA_FLAG:
+                data.extend(frame.payload)
+                continue
+            if frame.payload != b"\n":
+                raise RuntimeError("waveform transfer did not terminate with newline")
+            break
 
-    def getDataBytes(self, channel="C1", block="DAT1"):
-        """
-        Simplest data retrieval, by byte values (low precision)
-        Use only for verification (should work regardless of data packing)
-        Channel can be "C1" or "C2",
-        data type "DAT1" for first block or "DAT2" for second (special, look at doc.)
-        returns list of values in 8-bit signed precision
-        """
-        self.send("CFMT DEF9,BYTE,BIN")  # by 1 byte, binary
-        # gets all the data of specified block on specified channel (waveform)
+        if len(data) != expected_bytes:
+            raise RuntimeError(f"expected {expected_bytes} waveform bytes, got {len(data)}")
+        return bytes(data)
+
+    def getDataBytes(self, channel: str = "C1", block: str = "DAT1") -> list[tuple[int]]:
+        """Return raw signed 8-bit waveform samples."""
+        self.send("CFMT DEF9,BYTE,BIN")
         self.send(f"{channel}:WF? {block}")
-        self._recv_exact(self.s, 38)  # two data lines with headers 2*(8+11) characters
-        dta = b""
-        while True:
-            flg, aln = self.__getHeader()
-            if flg != self.LECROY_DATA_FLAG:
-                en = self._recv_exact(self.s, aln)
-                if en != b"\n":
-                    print(
-                        f"unexpected return, instead newline got {en} \n next length was {aln}, flag {flg}"
-                    )
-                break
-            # loop until all aln data is transferred
-            dta += self._recv_exact(self.s, aln)
-        # aa = [struct.unpack("b", ov) for ov in dta]
-        aa = [iup for iup in struct.iter_unpack("b", dta)]
-        return aa
+        raw = self._read_waveform_block()
+        return list(struct.iter_unpack("b", raw))
 
-    def getDataWords(self, channel="C1", block="DAT1"):
-        """
-        return data in tuple of word values (-32768 to 32767)
-        Reads header, and double checks:
-        1: that the data stream ended correctly (!LECROY_DATA_FLAG flag with "\n" end),
-        2: length of the byte vector matches the specified length in the header
-        channel : "C1" or "C2"
-        block : "DAT1" (mostly), or "DAT2"
+    def getDataWords(self, channel: str = "C1", block: str = "DAT1") -> tuple[int, ...]:
+        """Return raw signed 16-bit little-endian waveform samples."""
+        self.send("CFMT DEF9,WORD,BIN")
+        self.send(f"{channel}:WF? {block}")
+        self.send("CORD LO")
+        raw = self._read_waveform_block()
+        return struct.unpack(f"<{len(raw) // 2}h", raw)
 
-        returns list of values (16-bit signed)
-        """
+    def _inspect(self, channel: str, field: str) -> str:
+        self.send(f'{channel}:INSPECT? "{field}"')
+        _flags, response = self.readAll()
+        return response
 
-        self.send("CFMT DEF9,WORD,BIN")  # by 2-byte word
-        self.send(f"{channel}:WF? {block}")  # gets all the data on C2 waveform data
-        self.send("CORD LO")  # <LSB><MSB>
-        # rethead : first 10 bytes ascii string (like response)
-        # followed by #9 xxxx xxxxx where x are 9 numbers to give len. of bin. blck
-        # so ... #9002000004 means 2000004 bytes in binary array
-        # or in our (2-byte word) case 1 000 002 numbers
-        rethead = self._recv_exact(self.s, 38)  # two data lines with headers 2*(8+11) characters
+    def getDataFloats(self, channel: str = "C1", block: str = "DAT1") -> tuple[str, np.ndarray]:
+        """Return physically-scaled vertical samples and their unit."""
+        word_values = np.asarray(self.getDataWords(channel=channel, block=block), dtype=np.float64)
+        offset = float(self._inspect(channel, "VERTICAL_OFFSET").split(":")[-1].split('"\n')[0].strip())
+        gain = float(self._inspect(channel, "VERTICAL_GAIN").split(":")[-1].split('"\n')[0].strip())
+        unit = self._inspect(channel, "VERTUNIT").split("Unit Name = ")[-1].split('"\n')[0]
+        return unit, gain * word_values - offset
 
-        if rethead[-11:-9] != b"#9":
-            # we are not in a correct place, abort!
-            raise RuntimeError("incorrectly returned header")
-        # get the number of bytes expected by conv to str, lstrip leading 0
-        exp_bytes = int(rethead[-9:].decode("ascii").lstrip("0"))  # check later
-        if (exp_bytes % 2) != 0:
-            # incorrect, should be an even number of bytes
-            raise RuntimeError("odd number of bytes expected")
+    def getHorProperties(self, channel: str = "C1") -> tuple[str, float, float]:
+        """Return horizontal unit, offset, and sample interval."""
+        unit = self._inspect(channel, "HORUNIT").split("Unit Name = ")[-1].split('"\n')[0]
+        offset = float(self._inspect(channel, "HORIZ_OFFSET").split(":")[-1].split('"\n')[0].strip())
+        interval = float(self._inspect(channel, "HORIZ_INTERVAL").split(":")[-1].split('"\n')[0].strip())
+        return unit, offset, interval
 
-        # accumulate the data from the socket
-        dta = b""  # bytes data accumulator
-        while True:
-            flg, alen = self.__getHeader()  # flg=LECROY_DATA_FLAG : more data coming
-            if flg != self.LECROY_DATA_FLAG:
-                # no more data expected
-                en = self._recv_exact(self.s, alen)
-                # does it end correctly
-                if en != b"\n":
-                    print(
-                        f"unexpected return, instead newline got {en} \n next length was {alen}, flag {flg}"
-                    )
-                break
-            # loop until all alen data is transferred
-            dta += self._recv_exact(self.s, alen)  # if the local accum. is done, only then append
-
-        # we have byte values now
-        # check if the length is correct
-        if len(dta) != exp_bytes:
-            raise AssertionError(f"Expected {exp_bytes} bytes, got {len(dta)}")
-        return struct.unpack(f"<{len(dta) // 2}h", dta)
-
-    def getDataFloats(self, channel="C1", block="DAT1"):
-        """
-        return the data in measured units in np.float64
-        channel : "C1" or "C2"
-        block : "DAT1" (mostly), or "DAT2"
-        DAT1 is basic integer data block for storing measurements
-        DAT2 is used to hold the results of processing functions (extrema, FFT, etc.)
-        returns (VERTUNIT, array) : properly scaled numpy array of vertical value data
-        """
-        word_values = np.array(self.getDataWords(channel=channel, block=block))
-        # get vertical offset
-        self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
-        _r1, r2 = self.readAll()
-        VOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        # get vertical gain
-        self.send(f'{channel}:INSPECT? "VERTICAL_GAIN"')
-        _r1, r2 = self.readAll()
-        VG = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        # get vertical unit
-        self.send(f'{channel}:INSPECT? "VERTUNIT"')
-        _r1, r2 = self.readAll()
-        VERTUNIT = r2.split("Unit Name = ")[-1].split('"\n')[0]
-        # value = VERT_GAIN * data - VERT_OFFSET
-        return (VERTUNIT, VG * np.array(word_values, dtype=np.float64) - VOS)
-
-    def getHorProperties(self, channel="C1"):
-        """
-        return the time vector data for the measurement for channel "channel"
-        for single sweep waveforms, for data point i, we have the horiz.
-        time from trigger being
-        t[i] = HORIZ_INTERVAL * i + HORIZ_OFFSET
-        in specified HORIZ_UNIT units
-        returns (HORUNIT, HORIZ_OFFSET, HORIZ_INTERVAL)
-        where
-        HORUNIT (string) is horizontal unit
-        HORIZ_OFFSET (double) is trigger offset for the first sweep of the trigger,
-                                 seconds b.w. the trig. and 1st data point
-        HORIZ_INTERVAL (float) is sampling interal for time domain waveforms
-        """
-        self.send(f'{channel}:INSPECT? "HORUNIT"')
-        _r1, r2 = self.readAll()
-        HORUNIT = r2.split("Unit Name = ")[-1].split('"\n')[0]
-        self.send(f'{channel}:INSPECT? "HORIZ_OFFSET"')
-        _r1, r2 = self.readAll()
-        HOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        self.send(f'{channel}:INSPECT? "HORIZ_INTERVAL"')
-        _r1, r2 = self.readAll()
-        HInV = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-
-        return (HORUNIT, HOS, HInV)
+    def acquire_waveform(self, channel: str = "C1", block: str = "DAT1") -> Waveform:
+        """Download and scale one waveform into physical x/y arrays."""
+        y_unit, y = self.getDataFloats(channel=channel, block=block)
+        x_unit, x_offset, x_interval = self.getHorProperties(channel=channel)
+        x = x_offset + x_interval * np.arange(y.size, dtype=np.float64)
+        return Waveform(x=x, y=y, x_unit=x_unit, y_unit=y_unit, channel=channel)
