@@ -48,7 +48,7 @@ class FakeMXA:
 
 class FakePSU:
     def __init__(self):
-        self.instrument = None
+        self.instrument = FakeInstrument()
         self.connect_calls = 0
         self.close_calls = 0
 
@@ -95,7 +95,6 @@ def test_mxa_connect_is_lazy_and_idempotent(monkeypatch):
     assert manager.mxa_connected
 
 
-@pytest.mark.skip("fails, needs to be investigated")
 def test_shutter_connect_is_lazy(monkeypatch):
     created = []
 
