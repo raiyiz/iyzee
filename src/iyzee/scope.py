@@ -83,8 +83,10 @@ class LeCroy:
         self._require_connected()
         return self.transport.receive_ascii()
 
-    def _read_waveform_block(self) -> bytes:
+    def _read_waveform_block(self, *, sample_width: int) -> bytes:
         """Read the scope's waveform response and return raw sample bytes."""
+        if sample_width <= 0:
+            raise ValueError("sample_width must be positive")
         preamble = self.transport.receive_exact(38)
         if preamble[-11:-9] != b"#9":
             raise RuntimeError("incorrectly returned waveform header")
@@ -94,8 +96,10 @@ class LeCroy:
             raise RuntimeError("invalid waveform byte-count header") from exc
         if expected_bytes <= 0:
             raise RuntimeError(f"invalid waveform byte count: {expected_bytes}")
-        if expected_bytes % 2:
-            raise RuntimeError("odd number of waveform bytes expected")
+        if expected_bytes % sample_width:
+            raise RuntimeError(
+                f"waveform byte count {expected_bytes} is not divisible by sample width {sample_width}"
+            )
 
         data = bytearray()
         while True:
@@ -115,7 +119,7 @@ class LeCroy:
         """Return raw signed 8-bit waveform samples."""
         self.send("CFMT DEF9,BYTE,BIN")
         self.send(f"{channel}:WF? {block}")
-        raw = self._read_waveform_block()
+        raw = self._read_waveform_block(sample_width=1)
         return list(struct.iter_unpack("b", raw))
 
     def getDataWords(self, channel: str = "C1", block: str = "DAT1") -> tuple[int, ...]:
@@ -123,7 +127,7 @@ class LeCroy:
         self.send("CFMT DEF9,WORD,BIN")
         self.send(f"{channel}:WF? {block}")
         self.send("CORD LO")
-        raw = self._read_waveform_block()
+        raw = self._read_waveform_block(sample_width=2)
         return struct.unpack(f"<{len(raw) // 2}h", raw)
 
     def _inspect(self, channel: str, field: str) -> str:
