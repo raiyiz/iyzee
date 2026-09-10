@@ -8,7 +8,16 @@ from pathlib import Path
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, ContentSwitcher, Footer, Header, Input, Label, ProgressBar, Static
+from textual.widgets import (
+    Button,
+    ContentSwitcher,
+    Footer,
+    Header,
+    Input,
+    Label,
+    ProgressBar,
+    Static,
+)
 
 from ..experiment import (
     capture_traces,
@@ -155,8 +164,8 @@ class IyzTuiApp(App[None]):
                     yield Button("Connect", id="connect-shutter", variant="primary")
 
                 yield Label("PAGES", classes="section-title")
-                yield Button("Dashboard", id="dashboard-page", classes="page-button")
-                yield Button("LeCroy scope", id="scope-page", classes="page-button", variant="primary")
+                yield Button("Dashboard", id="dashboard-page", classes="page-button", variant="primary")
+                yield Button("LeCroy scope", id="scope-page", classes="page-button")
 
                 yield Label("RUN CONTROLS", classes="section-title")
                 with Horizontal(classes="control-row"):
@@ -181,7 +190,9 @@ class IyzTuiApp(App[None]):
                     with Vertical(id="dashboard-view"):
                         with Horizontal(id="dashboard-header"):
                             yield Label("DASHBOARD", id="dashboard-header-title")
-                            yield Static("  /  experiments and live analyzer traces", classes="muted")
+                            yield Static(
+                                "  /  experiments and live analyzer traces", classes="muted"
+                            )
                         yield Static("Ready — no devices connected", id="run-status")
                         yield ProgressBar(total=1, show_eta=False, id="progress")
                         yield TracePlot(id="plot")
@@ -193,8 +204,12 @@ class IyzTuiApp(App[None]):
     def _show_page(self, page_id: str) -> None:
         self.query_one("#page-switcher", ContentSwitcher).current = page_id
         dashboard_active = page_id == "dashboard-view"
-        self.query_one("#dashboard-page", Button).variant = "primary" if dashboard_active else "default"
-        self.query_one("#scope-page", Button).variant = "primary" if not dashboard_active else "default"
+        self.query_one("#dashboard-page", Button).variant = (
+            "primary" if dashboard_active else "default"
+        )
+        self.query_one("#scope-page", Button).variant = (
+            "default" if dashboard_active else "primary"
+        )
 
     def _set_status(self, widget_id: str, text: str) -> None:
         self.query_one(f"#{widget_id}", Static).update(text)
