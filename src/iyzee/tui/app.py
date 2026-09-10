@@ -343,7 +343,6 @@ class IyzTuiApp(App[None]):
         self._quit_worker()
 
 
-
 def main() -> None:
     """Launch the iyzee terminal application."""
     IyzTuiApp().run()

@@ -1,5 +1,3 @@
-import pytest
-
 from iyzee import CH
 from iyzee.tui import devices
 
