@@ -5,7 +5,7 @@ from __future__ import annotations
 import socket
 import struct
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 VICP_HEADER_SIZE = 8
 VICP_DATA_FLAG = 0x80
@@ -132,7 +132,7 @@ class VICPTransport:
         self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
         self.close()
         return False
 
