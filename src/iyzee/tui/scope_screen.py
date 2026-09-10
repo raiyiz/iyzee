@@ -141,12 +141,12 @@ class ScopeScreen(Screen[None]):
         try:
             scope = self.devices.connect_scope()
         except Exception as exc:
-            self.call_from_thread(self._operation_failed, f"Connection failed\n{exc}")
-            self.call_from_thread(self._set_connection, "× Connection failed")
+            self.app.call_from_thread(self._operation_failed, f"Connection failed\n{exc}")
+            self.app.call_from_thread(self._set_connection, "× Connection failed")
             return
-        self.call_from_thread(self._set_busy, False)
-        self.call_from_thread(self._set_connection, "● Connected")
-        self.call_from_thread(
+        self.app.call_from_thread(self._set_busy, False)
+        self.app.call_from_thread(self._set_connection, "● Connected")
+        self.app.call_from_thread(
             self._set_status, f"Scope connected\n{scope.ip}:{scope.LECROY_SERVER_PORT}"
         )
 
@@ -156,11 +156,11 @@ class ScopeScreen(Screen[None]):
             with self.devices.scope_for_operation() as scope:
                 identity = scope.identify()
         except Exception as exc:
-            self.call_from_thread(self._operation_failed, f"ID query failed\n{exc}")
+            self.app.call_from_thread(self._operation_failed, f"ID query failed\n{exc}")
             return
-        self.call_from_thread(self._set_busy, False)
-        self.call_from_thread(self._set_idn, f"ID: {identity.strip()}")
-        self.call_from_thread(self._set_status, "Scope identity read successfully")
+        self.app.call_from_thread(self._set_busy, False)
+        self.app.call_from_thread(self._set_idn, f"ID: {identity.strip()}")
+        self.app.call_from_thread(self._set_status, "Scope identity read successfully")
 
     @work(thread=True)
     def _acquire_worker(self, channel: str) -> None:
@@ -168,21 +168,21 @@ class ScopeScreen(Screen[None]):
             with self.devices.scope_for_operation() as scope:
                 waveform = scope.acquire_waveform(channel)
         except Exception as exc:
-            self.call_from_thread(self._operation_failed, f"Acquisition failed\n{exc}")
+            self.app.call_from_thread(self._operation_failed, f"Acquisition failed\n{exc}")
             return
-        self.call_from_thread(self._show_waveform, waveform)
-        self.call_from_thread(self._set_busy, False)
+        self.app.call_from_thread(self._show_waveform, waveform)
+        self.app.call_from_thread(self._set_busy, False)
 
     @work(thread=True)
     def _disconnect_worker(self) -> None:
         try:
             self.devices.close_scope()
         except Exception as exc:
-            self.call_from_thread(self._operation_failed, f"Disconnect failed\n{exc}")
+            self.app.call_from_thread(self._operation_failed, f"Disconnect failed\n{exc}")
             return
-        self.call_from_thread(self._set_busy, False)
-        self.call_from_thread(self._set_connection, "○ Disconnected")
-        self.call_from_thread(self._set_status, "Scope disconnected")
+        self.app.call_from_thread(self._set_busy, False)
+        self.app.call_from_thread(self._set_connection, "○ Disconnected")
+        self.app.call_from_thread(self._set_status, "Scope disconnected")
 
     def _show_waveform(self, waveform: Waveform) -> None:
         self.query_one("#scope-plot", ScopeTracePlot).update_waveform(waveform)
