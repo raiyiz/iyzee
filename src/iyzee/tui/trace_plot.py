@@ -15,7 +15,6 @@ class TracePlot(PlotextPlot):
         self.plt.title("Live trace")
         self.plt.xlabel("Trace point")
         self.plt.ylabel("Amplitude")
-        self.plt.grid(True, True)
 
     def update_result(self, result: StepResult) -> None:
         squeezing = np.asarray(result.traces.get("squeezing", []), dtype=float)
