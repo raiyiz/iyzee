@@ -85,9 +85,7 @@ class LeCroy:
 
     def _read_waveform_block(self) -> bytes:
         """Read the scope's waveform response and return raw sample bytes."""
-        transport = self.transport
-        sock = transport._require_socket()
-        preamble = transport._recv_exact(sock, 38)
+        preamble = self.transport.receive_exact(38)
         if preamble[-11:-9] != b"#9":
             raise RuntimeError("incorrectly returned waveform header")
         try:
@@ -101,7 +99,7 @@ class LeCroy:
 
         data = bytearray()
         while True:
-            frame = transport.receive_frame()
+            frame = self.transport.receive_frame()
             if frame.flags & VICP_DATA_FLAG:
                 data.extend(frame.payload)
                 continue
