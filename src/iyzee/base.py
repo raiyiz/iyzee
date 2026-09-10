@@ -19,29 +19,43 @@ class IP(StrEnum):
     """IP addresses of the laboratory instruments."""
 
     POWER_SUPPLY = "10.140.1.42"
-    NOISE_ANALYZER = "10.140.1.115"
-    SCOPE = "10.140.1.28"
-    WAVEMETER = "10.140.1.118"
+    NOISE_ANALYZER = "10.140.1.40"
+    SCOPE = "10.140.1.220"
+    WAVEMETER = "10.140.1.119"
 
 
 class BaseDevice:
     """Common VISA connection handling for laboratory instruments."""
 
-    def __init__(self, ip: IP | None = None, resource_manager=None):
+    def __init__(
+        self,
+        ip: IP | None = None,
+        resource_manager=None,
+        timeout_ms: int = 10_000,
+        read_termination: str | None = None,
+        write_termination: str | None = None,
+    ):
         self.ip = ip
+        self.timeout_ms = timeout_ms
+        self.read_termination = read_termination
+        self.write_termination = write_termination
         self.rm = resource_manager or pyvisa.ResourceManager()
         self.instrument: Any = None
-        self.connect()
+        self.visa_address = f"TCPIP0::{self.ip}::inst0::INSTR"
 
     def open(self):
-        return self.rm.open_resource(f"TCPIP0::{self.ip}::inst0::INSTR")
+        return self.rm.open_resource(self.visa_address)
 
     def connect(self) -> None:
         """Open the device once; repeated calls reuse the existing resource."""
         if self.instrument is not None:
             return
         self.instrument = self.open()
-        self.instrument.timeout = 10_000
+        self.instrument.timeout = self.timeout_ms
+        if self.read_termination is not None:
+            self.instrument.read_termination = self.read_termination
+        if self.write_termination is not None:
+            self.instrument.write_termination = self.write_termination
 
     def close(self) -> None:
         """Close the VISA resource, if it is open."""
@@ -50,7 +64,7 @@ class BaseDevice:
             self.instrument = None
 
     def __enter__(self):
-        """Return an open device for use in a context manager."""
+        """Open the device at the explicit resource boundary."""
         self.connect()
         return self
 

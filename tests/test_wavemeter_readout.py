@@ -42,3 +42,20 @@ def test_single_readout_raises_on_invalid_measurement(monkeypatch):
 
     with pytest.raises(wavemeter_readout.WavemeterReadoutError):
         wavemeter_readout.single_readout(1, printing=False)
+
+
+def test_monitoring_frequencies_matches_channels_by_position(monkeypatch, capsys):
+    # Non-contiguous, non-zero-based channel numbers: freqs[c] would previously
+    # index out of range / pick the wrong reading for channels like these.
+    readings = {2: 377.107385690, 5: 384.230406373}
+    monkeypatch.setattr(
+        wavemeter_readout,
+        "single_readout",
+        lambda channel, reference_f=0, printing=False: readings[channel],
+    )
+
+    wavemeter_readout.monitoring_frequencies([2, 5], two_photon=False)
+
+    printed = capsys.readouterr().out
+    assert "ch2" in printed
+    assert "ch5" in printed

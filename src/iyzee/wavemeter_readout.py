@@ -247,9 +247,9 @@ def monitoring_frequencies(channels, two_photon=True):
     rows = []
     freqs = [single_readout(c, reference_f=0, printing=False) for c in channels]
 
-    rows.append(["absolute freq (THz)"] + [""] + [f for f in freqs])
+    rows.append(["absolute freq (THz)"] + [""] + list(freqs))
     for label, f in Rb_transitions:
-        row = [label] + [f] + [(freqs[c] - f) * 1e3 for c in channels]
+        row = [label, f] + [(freq - f) * 1e3 for freq in freqs]
         rows.append(row)
 
     if two_photon:
