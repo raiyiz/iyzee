@@ -10,7 +10,13 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Input, Label, ProgressBar, Static
 
-from ..experiment import capture_traces, create_dirs, run_bandwidth_sweep, run_frequency_sweep, save_step_results
+from ..experiment import (
+    capture_traces,
+    create_dirs,
+    run_bandwidth_sweep,
+    run_frequency_sweep,
+    save_step_results,
+)
 from ..experiment.step import StepResult
 from .devices import DeviceManager
 from .trace_plot import TracePlot
@@ -52,7 +58,8 @@ class IyzTuiApp(App[None]):
         margin: 0 0 1 0;
     }
 
-    .device-row {
+    .device-row,
+    .control-row {
         height: auto;
         margin: 0 0 1 0;
     }
@@ -60,11 +67,6 @@ class IyzTuiApp(App[None]):
     .status {
         width: 1fr;
         padding: 0 1;
-    }
-
-    .control-row {
-        height: auto;
-        margin: 0 0 1 0;
     }
 
     .control-row Input {
@@ -89,8 +91,8 @@ class IyzTuiApp(App[None]):
 
     #plot {
         height: 1fr;
-        border: round $primary;
         min-height: 20;
+        border: round $primary;
     }
 
     #log {
@@ -178,14 +180,12 @@ class IyzTuiApp(App[None]):
 
     def _start_run(self, total: int, label: str) -> None:
         self._set_running(True)
-        progress = self.query_one("#progress", ProgressBar)
-        progress.update(total=total, progress=0)
+        self.query_one("#progress", ProgressBar).update(total=total, progress=0)
         self.query_one("#run-status", Static).update(label)
         self._log(label)
 
     def _step_finished(self, index: int, total: int, result: StepResult) -> None:
-        progress = self.query_one("#progress", ProgressBar)
-        progress.update(total=total, progress=index)
+        self.query_one("#progress", ProgressBar).update(total=total, progress=index)
         self._last_results.append(result)
         self.query_one("#plot", TracePlot).update_result(result)
         self.query_one("#run-status", Static).update(f"{index}/{total}  {result.label}")
@@ -205,6 +205,11 @@ class IyzTuiApp(App[None]):
         self._set_running(False)
         self.query_one("#run-status", Static).update("Run failed")
         self._log(f"ERROR: {error}")
+
+    def _frequency_defaults(self) -> tuple[float, int]:
+        center = float(self.query_one("#frequency-center", Input).value or "377.1052067")
+        channel = int(self.query_one("#wavemeter-channel", Input).value or "1")
+        return center, channel
 
     @work(thread=True)
     def _connect_mxa_worker(self) -> None:
@@ -242,7 +247,6 @@ class IyzTuiApp(App[None]):
     def _bandwidth_worker(self) -> None:
         try:
             with self.devices.mxa_for_operation() as mx:
-                self.call_from_thread(self._start_run, 19, "Running bandwidth sweep…")
                 results = run_bandwidth_sweep(mx, on_step=self._on_worker_step)
         except Exception as exc:
             self.call_from_thread(self._run_failed, exc)
@@ -253,7 +257,6 @@ class IyzTuiApp(App[None]):
     def _frequency_worker(self, center_thz: float, channel: int) -> None:
         try:
             with self.devices.frequency_sweep_devices() as (mx, shutter):
-                self.call_from_thread(self._start_run, 2, "Running frequency sweep…")
                 results = run_frequency_sweep(
                     mx,
                     shutter,
@@ -299,15 +302,16 @@ class IyzTuiApp(App[None]):
             self._connect_shutter_worker()
         elif button_id == "bandwidth":
             self._last_results = []
+            self._start_run(19, "Running bandwidth sweep…")
             self._bandwidth_worker()
         elif button_id == "frequency":
             self._last_results = []
-            center = float(self.query_one("#frequency-center", Input).value or "377.1052067")
-            channel = int(self.query_one("#wavemeter-channel", Input).value or "1")
+            center, channel = self._frequency_defaults()
+            self._start_run(2, "Running frequency sweep…")
             self._frequency_worker(center, channel)
         elif button_id == "capture":
             self._last_results = []
-            self.call_from_thread(self._start_run, 1, "Capturing traces…")
+            self._start_run(1, "Capturing traces…")
             self._capture_worker()
         elif button_id == "disconnect":
             self._disconnect_worker()
@@ -315,19 +319,20 @@ class IyzTuiApp(App[None]):
     def action_bandwidth(self) -> None:
         if not self._running:
             self._last_results = []
+            self._start_run(19, "Running bandwidth sweep…")
             self._bandwidth_worker()
 
     def action_frequency(self) -> None:
         if not self._running:
             self._last_results = []
-            center = float(self.query_one("#frequency-center", Input).value or "377.1052067")
-            channel = int(self.query_one("#wavemeter-channel", Input).value or "1")
+            center, channel = self._frequency_defaults()
+            self._start_run(2, "Running frequency sweep…")
             self._frequency_worker(center, channel)
 
     def action_capture(self) -> None:
         if not self._running:
             self._last_results = []
-            self.call_from_thread(self._start_run, 1, "Capturing traces…")
+            self._start_run(1, "Capturing traces…")
             self._capture_worker()
 
     def action_disconnect(self) -> None:
