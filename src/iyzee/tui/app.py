@@ -19,6 +19,7 @@ from ..experiment import (
 )
 from ..experiment.step import StepResult
 from .devices import DeviceManager
+from .scope_screen import ScopeScreen
 from .trace_plot import TracePlot
 
 log = logging.getLogger("iyzee.tui")
@@ -111,6 +112,7 @@ class IyzTuiApp(App[None]):
         ("b", "bandwidth", "Bandwidth sweep"),
         ("f", "frequency", "Frequency sweep"),
         ("c", "capture", "Capture traces"),
+        ("s", "scope", "Scope page"),
         ("d", "disconnect", "Disconnect"),
         ("q", "quit_app", "Quit"),
     ]
@@ -132,6 +134,9 @@ class IyzTuiApp(App[None]):
                 with Horizontal(classes="device-row"):
                     yield Static("○ Shutter / PSU", id="shutter-status", classes="status")
                     yield Button("Connect", id="connect-shutter", variant="primary")
+
+                yield Label("INSTRUMENT PAGES", classes="section-title")
+                yield Button("LeCroy scope", id="scope", variant="primary")
 
                 yield Label("RUN CONTROLS", classes="section-title")
                 with Horizontal(classes="control-row"):
@@ -171,6 +176,7 @@ class IyzTuiApp(App[None]):
         for button_id in (
             "connect-mxa",
             "connect-shutter",
+            "scope",
             "bandwidth",
             "frequency",
             "capture",
@@ -300,6 +306,8 @@ class IyzTuiApp(App[None]):
             self._connect_mxa_worker()
         elif button_id == "connect-shutter":
             self._connect_shutter_worker()
+        elif button_id == "scope":
+            self.push_screen(ScopeScreen(self.devices))
         elif button_id == "bandwidth":
             self._last_results = []
             self._start_run(19, "Running bandwidth sweep…")
@@ -334,6 +342,10 @@ class IyzTuiApp(App[None]):
             self._last_results = []
             self._start_run(1, "Capturing traces…")
             self._capture_worker()
+
+    def action_scope(self) -> None:
+        if not self._running:
+            self.push_screen(ScopeScreen(self.devices))
 
     def action_disconnect(self) -> None:
         if not self._running:
