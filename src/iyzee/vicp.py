@@ -16,13 +16,9 @@ class SocketLike(Protocol):
     """Subset of socket methods required by the VICP transport."""
 
     def connect(self, address: tuple[str, int]) -> None: ...
-
     def close(self) -> None: ...
-
     def sendall(self, data: bytes) -> None: ...
-
     def recv(self, size: int) -> bytes: ...
-
     def settimeout(self, value: float | None) -> None: ...
 
 
@@ -119,6 +115,10 @@ class VICPTransport:
         if self._socket is None:
             raise RuntimeError("VICP transport is not connected")
         return self._socket
+
+    def receive_exact(self, size: int) -> bytes:
+        """Read an exact number of raw bytes from the connected peer."""
+        return self._recv_exact(self._require_socket(), size)
 
     def send(self, payload: bytes, *, flags: int = VICP_DATA_FLAG | VICP_EOI_FLAG) -> None:
         """Send one complete VICP frame."""
