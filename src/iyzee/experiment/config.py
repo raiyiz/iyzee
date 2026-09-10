@@ -23,9 +23,7 @@ class AnalyzerConfig:
     trig_source: str = "EXT"
 
 
-def prepare_analyzer(
-    mx: KeysightMXA, traces, config: AnalyzerConfig | None = None
-) -> KeysightMXA:
+def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
     """Configure an already-owned MXA for a measurement procedure."""
     config = config or AnalyzerConfig()
 
