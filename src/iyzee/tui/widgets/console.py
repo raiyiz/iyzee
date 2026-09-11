@@ -46,7 +46,7 @@ class IyzeeConsole(Vertical):
     """
 
     BINDINGS = [
-        Binding("ctrl+enter", "execute", "Run", show=True),
+        Binding("shift+enter", "execute", "Run", show=True),
         Binding("ctrl+p", "history_previous", "History ↑", show=True),
         Binding("ctrl+n", "history_next", "History ↓", show=True),
         Binding("tab", "complete", "Complete", show=False),
@@ -64,7 +64,7 @@ class IyzeeConsole(Vertical):
         yield Static("", id="console-completions")
         yield TextArea(
             id="console-input",
-            placeholder="Python / IPython code  •  Ctrl+Enter to run  •  Tab to complete",
+            placeholder="Python / IPython code  •  Shift+Enter to run  •  Tab to complete",
             soft_wrap=True,
             compact=True,
         )
@@ -89,7 +89,7 @@ class IyzeeConsole(Vertical):
         output.write(
             "IPython features: Tab completion, ?, ??, %, !, history, and top-level await."
         )
-        output.write("Ctrl+Enter executes the current cell; Ctrl+P/Ctrl+N browse IPython history.")
+        output.write("Shift+Enter executes the current cell; Ctrl+P/Ctrl+N browse IPython history.")
 
     def _set_status(self, text: str) -> None:
         self.query_one("#console-status", expect_type=Static).update(text)
