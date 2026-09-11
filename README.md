@@ -53,6 +53,9 @@ boundary in the application entry point. This keeps hardware access out of
 experiment construction and makes procedure tests independent of real
 instruments.
 
+Adding a new experiment means adding a new `Step` subclass and a factory
+function in `procedures.py`, not writing a new hand-rolled loop.
+
 ## Instrument drivers
 
 - **`mxa.py`** — hardware abstraction for the Keysight MXA. New MXA
@@ -85,11 +88,10 @@ trace = mx.get_trace_data(1)
 ```
 
 The console uses IPython's own execution engine rather than a custom Python
-parser. Completion, inspection (`?` / `??`), magic commands (`%time`, `%who`,
-...), history, shell commands (`!`), and top-level `await` therefore come from
-IPython itself. The Textual widget provides the presentation layer and runs
-blocking hardware calls in a worker thread so the rest of the TUI remains
-responsive.
+parser. Completion, inspection (`?` / `??`), magic commands, history, shell
+commands, and top-level `await` therefore come from IPython itself. The
+Textual widget provides the presentation layer and runs blocking hardware
+calls in a worker thread so the rest of the TUI remains responsive.
 
 The console deliberately exposes a small, explicit live namespace instead of
 mirroring arbitrary application internals. Connected `mx`, `shutter`, and
@@ -102,7 +104,8 @@ when the live device namespace is refreshed.
 This is laboratory/instrument-control software; a few rules matter more than
 in typical application code:
 
-- Never turn a hardware communication failure into a plausible measurement value.
+- Never turn a hardware communication failure into a plausible measurement
+  value (see `WavemeterReadoutError`, `KeysightMXA.wait_opc()`).
 - Don't change instrument setpoints or SCPI behavior without understanding
   and testing the change — these drive real hardware.
 - The interactive console intentionally has direct write access to connected
@@ -116,3 +119,50 @@ state, SCPI commands, and Python implementation. The MXA and measurement guide
 covers the measurement chain, RBW/VBW, detector and averaging semantics, ENBW,
 synchronization, trace transfer, noise density and band power, analyzer noise
 cancellation, trigger timing, and the squeezing/shot-noise workflow.
+
+The source is written in Typst and compiled in both CI systems. Each pipeline
+publishes the compiled PDFs as artifacts for review and download.
+
+- [MXA and measurement guide](docs/mxa-and-measurements.typ) — source
+- [Cleanup summary](docs/cleanup-summary.typ) — source
+- [GitHub Actions documentation artifacts](https://github.com/raiyiz/iyzee/actions/workflows/ci.yml)
+- GitLab CI publishes the same documentation set as pipeline artifacts; the
+  repository does not currently declare its GitLab mirror URL.
+
+For a reproducible measurement, the relevant analyzer settings should travel
+with the data: frequency range and points, RBW/VBW, detector, averaging,
+sweep time, attenuation/reference level, trigger state, and calibration
+context. `StepResult.meta` and `save_step_results()`'s per-point metadata are
+how that happens in practice.
+
+## Design direction
+
+Keep the separation simple while the project is small:
+
+1. **`main.py` — application boundary:** resource ownership and composition.
+2. **`experiment/procedures.py` — what to measure:** concrete procedures,
+   scan parameters, sequencing.
+3. **`experiment/{step,runner,config,persistence,plotting}.py` — the
+   machinery a procedure is built from:** the `Step` abstraction, execution,
+   analyzer setup, saving, and plotting.
+4. **`mxa.py` / `power.py` / `scope.py` / `wavemeter_readout.py` — how to
+   control each instrument:** reusable, hardware-specific operations.
+5. **`base.py` — shared infrastructure:** connection lifecycle, addresses,
+   channel definitions.
+
+As more procedures are added, split `procedures.py` further rather than
+letting one file grow indefinitely.
+
+## Known gaps
+
+- `scope.py`'s `LeCroy` driver is not integrated with `BaseDevice`'s
+  connection lifecycle (no context-manager support, no injectable transport
+  beyond the low-level socket helpers already covered by tests).
+- `wavemeter_readout.py`'s frequency constants and `single_readout()` /
+  `set_pid_setpoint()` parameters are bare floats (THz/GHz/MHz mixed via a
+  `scal` factor) rather than explicitly unit-typed.
+
+Both driver modules above handle physically sensitive behavior (laser
+frequency locking, live socket protocol parsing) and are deliberately left
+alone during routine cleanup passes — changes there should be reviewed
+against the real hardware, not just tests.
