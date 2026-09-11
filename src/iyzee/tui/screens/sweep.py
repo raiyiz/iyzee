@@ -184,9 +184,7 @@ class SweepScreen(Screen):
         center = _positive_float(self.query_one("#freq-center", Input).value, "Laser center")
         channel = _positive_int(self.query_one("#freq-channel", Input).value, "Wavemeter channel")
         points = _positive_int(self.query_one("#freq-points", Input).value, "Points")
-        step_khz = _positive_float(
-            self.query_one("#freq-offset-khz", Input).value, "Offset step"
-        )
+        step_khz = _positive_float(self.query_one("#freq-offset-khz", Input).value, "Offset step")
         step_thz = step_khz * 1e-9
         offsets = [(i - (points // 2)) * step_thz for i in range(points)]
 

@@ -90,7 +90,7 @@ class TracesScreen(Screen):
                 meta = json.loads(str(run_metadata))
                 lines.append("")
                 lines.extend(f"{k}: {v}" for k, v in meta.items())
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pass
         summary.update("\n".join(lines))
 
