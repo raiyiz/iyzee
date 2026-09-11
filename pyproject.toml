@@ -14,15 +14,21 @@ dependencies = [
     "pyvisa>=1.16.2",
     "pyvisa-py>=0.8.1",
     "tabulate>=0.10.0",
+    "textual>=8.2.8",
+    "textual-plotext>=1.0.1",
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest>=9.1.1",
 ]
+dev = [
+    "textual-dev>=1.7.0",
+]
 
 [project.scripts]
 iyzee = "iyzee.main:main"
+iyzee-tui = "iyzee.tui.app:run"
 
 [build-system]
 requires = ["uv_build>=0.12.6,<0.13.0"]
