@@ -8,8 +8,14 @@ import numpy as np
 from .step import StepResult
 
 
-def multiplot(results: list[StepResult]) -> None:
-    """Plot the squeezing-minus-shot-noise difference for each scan point."""
+def build_figure(results: list[StepResult]):
+    """Build (but do not display) the squeezing-minus-shot-noise figure.
+
+    Split out of :func:`multiplot` so non-interactive callers — saving to
+    disk, or a TUI that renders traces itself with something like
+    ``textual-plotext`` — can get the figure without ``matplotlib`` trying
+    to pop up a blocking GUI window.
+    """
     fig, ax = plt.subplots()
     labels = []
 
@@ -25,4 +31,14 @@ def multiplot(results: list[StepResult]) -> None:
     ax.set_xlabel("Trace point")
     ax.set_ylabel("Squeezing - shot noise")
     fig.tight_layout()
+    return fig
+
+
+def multiplot(results: list[StepResult]) -> None:
+    """Build and display the squeezing-minus-shot-noise figure.
+
+    Kept for the script/CLI entry point (``main.py``) and existing callers.
+    Non-interactive callers should use :func:`build_figure` instead.
+    """
+    build_figure(results)
     plt.show()
