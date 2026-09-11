@@ -5,6 +5,7 @@ from __future__ import annotations
 from textual.app import App
 
 from .instruments import InstrumentHandle
+from .navigation import NavigationController
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.sweep import SweepScreen
@@ -30,6 +31,7 @@ class IyzeeApp(App):
     def __init__(self) -> None:
         super().__init__()
         self.handles: dict[str, InstrumentHandle] = {}
+        self.navigation = NavigationController(self)
         self._connect_screen = ConnectScreen()
         self._sweep_screen = SweepScreen()
         self._traces_screen = TracesScreen()
