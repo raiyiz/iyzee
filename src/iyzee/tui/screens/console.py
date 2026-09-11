@@ -13,10 +13,6 @@ from ..widgets.console import IyzeeConsole
 class ConsoleScreen(Screen):
     """A live Python/IPython console bound to the app's current instruments."""
 
-    BINDINGS = [
-        ("escape", "app.pop_screen", "Close"),
-    ]
-
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("Embedded IPython • same process • same live device objects", classes="panel-title")
