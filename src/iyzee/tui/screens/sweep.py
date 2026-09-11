@@ -12,6 +12,7 @@ against the existing building blocks, not a change to ``experiment/``.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import asdict
 from threading import Event
@@ -48,6 +49,8 @@ from ...experiment import (
     run_sequence,
     save_step_results,
 )
+
+log = logging.getLogger("iyzee.tui")
 
 
 class SweepAborted(Exception):
@@ -201,12 +204,24 @@ class SweepScreen(Screen):
 
     # -- the run itself, off the UI thread -----------------------------------
 
-    @work(thread=True, exclusive=True, group="sweep")
+    def _ui(self, callback, *args, **kwargs) -> None:
+        """Call back into the UI thread from the sweep worker, without
+        letting a now-stale widget reference (e.g. the user switched away
+        from this screen mid-sweep) turn into an unhandled worker
+        exception. See ``ConnectScreen._ui`` for the same pattern.
+        """
+        try:
+            self.app.call_from_thread(callback, *args, **kwargs)
+        except Exception:
+            log.exception("sweep screen: UI update from worker thread failed")
+
+    @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
     def _run(self, mx, shutter, steps: list[Step], config: AnalyzerConfig, kind: str) -> None:
         try:
             prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
         except Exception as exc:  # noqa: BLE001
-            self.app.call_from_thread(self._finish, kind, aborted=False, setup_error=exc)
+            log.exception("sweep: failed to configure analyzer")
+            self._ui(self._finish, kind, aborted=False, setup_error=exc)
             return
 
         run_id = uuid.uuid4().hex[:8]
@@ -215,7 +230,7 @@ class SweepScreen(Screen):
         def on_step(index, total, step, result, error) -> None:
             if result is not None:
                 self._collected.append(result)
-            self.app.call_from_thread(self._on_step, index, total, step, result, error)
+            self._ui(self._on_step, index, total, step, result, error)
             if self._abort_event.is_set():
                 raise SweepAborted()
 
@@ -224,8 +239,12 @@ class SweepScreen(Screen):
             run_sequence(steps, ctx, on_error="skip", on_step=on_step)
         except SweepAborted:
             aborted = True
+        except Exception:  # noqa: BLE001 - last-resort net; specific errors are
+            # already handled per-step by run_sequence(on_error="skip") plus
+            # on_step above, so anything reaching here is unexpected.
+            log.exception("sweep: run_sequence raised unexpectedly")
 
-        self.app.call_from_thread(self._finish, kind, aborted=aborted, setup_error=None)
+        self._ui(self._finish, kind, aborted=aborted, setup_error=None)
 
     def _on_step(self, index, total, step: Step, result: StepResult | None, error) -> None:
         self.query_one("#sweep-progress", ProgressBar).update(progress=index + 1)

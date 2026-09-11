@@ -57,6 +57,11 @@ class TracesScreen(Screen):
         for path in self._paths:
             run_dir = path.parent.name
             list_view.append(ListItem(Label(f"{run_dir}/{path.name}")))
+        if self._paths:
+            # append() does not set a highlighted index the way passing
+            # children to ListView's constructor does, so without this
+            # nothing is "current" and pressing Enter has no row to select.
+            list_view.index = 0
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.list_view.id != "traces-list":

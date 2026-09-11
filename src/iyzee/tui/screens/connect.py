@@ -9,6 +9,8 @@ touched back on the main thread via ``call_from_thread``.
 
 from __future__ import annotations
 
+import logging
+
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -18,14 +20,14 @@ from textual.widgets import DataTable, Footer, Header, Static
 from ..instruments import INSTRUMENTS, InstrumentSpec
 from ..workers import ConnectOutcome
 
+log = logging.getLogger("iyzee.tui")
+
 STATUS_COL = "status"
 DETAIL_COL = "detail"
 
 
 class ConnectScreen(Screen):
     """Table of instruments with live connect/disconnect status."""
-
-    BINDINGS = [("enter", "toggle_connect", "Connect / Disconnect")]
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -57,15 +59,16 @@ class ConnectScreen(Screen):
             if spec.key in self.app.handles:
                 table.update_cell(spec.key, STATUS_COL, "connected")
 
-    def _spec_at_cursor(self) -> InstrumentSpec | None:
-        table = self.query_one(DataTable)
-        if table.row_count == 0:
-            return None
-        row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
-        return next((spec for spec in INSTRUMENTS if row_key == spec.key), None)
-
-    def action_toggle_connect(self) -> None:
-        spec = self._spec_at_cursor()
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        # NOTE: this is the correct hook for "Enter pressed on a row" — a
+        # Screen-level `BINDINGS = [("enter", ...)]` does *not* work here,
+        # because DataTable binds Enter to its own `select_cursor` action
+        # internally and consumes the key before it would ever bubble up
+        # to the screen. RowSelected is what DataTable posts as a result
+        # of that internal action; listen for the message, not the key.
+        if event.data_table.id != "instrument-table":
+            return
+        spec = next((s for s in INSTRUMENTS if event.row_key == s.key), None)
         if spec is None:
             return
         if spec.key in self.app.handles:
@@ -73,35 +76,51 @@ class ConnectScreen(Screen):
         else:
             self._connect(spec)
 
-    @work(thread=True, exclusive=True, group="connect")
+    def _ui(self, callback, *args, **kwargs) -> None:
+        """Call back into the UI thread from a worker, without ever letting
+        that call blow up the worker itself.
+
+        If the user has switched screens (or the table has been torn down
+        for some other reason) by the time a background connect/disconnect
+        finishes, the widget this tries to update may be gone. Textual
+        propagates any exception raised inside a ``call_from_thread``
+        callback back to the calling (worker) thread; left unguarded, that
+        turns an ordinary "switched screens mid-connect" moment into an
+        unhandled worker exception, which is a much worse failure mode
+        than just skipping a now-irrelevant UI update.
+        """
+        try:
+            self.app.call_from_thread(callback, *args, **kwargs)
+        except Exception:
+            log.exception("connect screen: UI update from worker thread failed")
+
+    @work(thread=True, exclusive=True, group="connect", exit_on_error=False)
     def _connect(self, spec: InstrumentSpec) -> None:
-        self.app.call_from_thread(self._set_row, spec.key, "connecting...", "-")
+        self._ui(self._set_row, spec.key, "connecting...", "-")
         try:
             handle = spec.build()
             handle.connect()
             detail = handle.probe()
         except Exception as exc:  # noqa: BLE001 - surfacing to the UI, not swallowing
-            self.app.call_from_thread(self._set_row, spec.key, "error", str(exc))
-            self.app.call_from_thread(
-                self.notify, f"{spec.label}: {exc}", severity="error", timeout=6
-            )
+            log.exception("failed to connect %s", spec.key)
+            self._ui(self._set_row, spec.key, "error", str(exc))
+            self._ui(self.notify, f"{spec.label}: {exc}", severity="error", timeout=6)
             return
         self.app.handles[spec.key] = handle
         outcome = ConnectOutcome(key=spec.key, ok=True, detail=detail)
-        self.app.call_from_thread(self._set_row, outcome.key, "connected", outcome.detail)
+        self._ui(self._set_row, outcome.key, "connected", outcome.detail)
 
-    @work(thread=True, exclusive=True, group="connect")
+    @work(thread=True, exclusive=True, group="connect", exit_on_error=False)
     def _disconnect(self, spec: InstrumentSpec) -> None:
         handle = self.app.handles.pop(spec.key, None)
-        self.app.call_from_thread(self._set_row, spec.key, "disconnecting...", "-")
+        self._ui(self._set_row, spec.key, "disconnecting...", "-")
         if handle is not None:
             try:
                 handle.disconnect()
             except Exception as exc:  # noqa: BLE001
-                self.app.call_from_thread(
-                    self.notify, f"{spec.label}: error closing ({exc})", severity="warning"
-                )
-        self.app.call_from_thread(self._set_row, spec.key, "disconnected", "-")
+                log.exception("error closing %s", spec.key)
+                self._ui(self.notify, f"{spec.label}: error closing ({exc})", severity="warning")
+        self._ui(self._set_row, spec.key, "disconnected", "-")
 
     def _set_row(self, key: str, status: str, detail: str) -> None:
         table = self.query_one(DataTable)

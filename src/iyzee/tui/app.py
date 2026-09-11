@@ -35,6 +35,8 @@ class IyzeeApp(App):
         ("c", "show_connect", "Connect"),
         ("s", "show_sweep", "Sweep"),
         ("t", "show_traces", "Traces"),
+        ("q", "quit", "Quit"),
+        ("ctrl+q", "quit", "Quit"),
     ]
 
     def __init__(self) -> None:
