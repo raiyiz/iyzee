@@ -29,3 +29,12 @@ def test_namespace_from_handles_exposes_live_objects() -> None:
     assert namespace["mx"] is device
     assert namespace["scope"] == "scope"
     assert namespace["handles"] is handles
+
+
+def test_namespace_refresh_removes_disconnected_live_objects() -> None:
+    shell = IyzeeIPython({"mx": "closed-device", "measurement": 21})
+    shell.update_namespace({"handles": {}})
+
+    assert "mx" not in shell.shell.user_ns
+    assert shell.shell.user_ns["measurement"] == 21
+    assert shell.shell.user_ns["handles"] == {}
