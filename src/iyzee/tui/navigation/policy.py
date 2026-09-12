@@ -14,6 +14,4 @@ class NavigationPolicy:
         """Return whether ``widget`` should receive editing keys first."""
         if widget is None:
             return False
-        return isinstance(widget, (Input, TextArea)) or bool(
-            getattr(widget, "is_editable", False)
-        )
+        return isinstance(widget, (Input, TextArea)) or bool(getattr(widget, "is_editable", False))
