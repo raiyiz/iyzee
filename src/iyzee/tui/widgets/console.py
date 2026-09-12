@@ -78,7 +78,9 @@ class IyzeeConsole(Vertical):
         Binding("tab", "complete", "Complete", show=False),
     ]
 
-    def __init__(self, shell: IyzeeIPython, *, namespace: Mapping[str, object] | None = None) -> None:
+    def __init__(
+        self, shell: IyzeeIPython, *, namespace: Mapping[str, object] | None = None
+    ) -> None:
         super().__init__()
         self.shell = shell
         self._namespace = dict(namespace or {})
@@ -107,9 +109,7 @@ class IyzeeConsole(Vertical):
         output = self.query_one(RichLog)
         output.write("[bold cyan]iyzee IPython console[/]")
         output.write("Live Python access: mx / shutter / scope appear when connected.")
-        output.write(
-            "IPython features: Tab completion, ?, ??, %, !, history, and top-level await."
-        )
+        output.write("IPython features: Tab completion, ?, ??, %, !, history, and top-level await.")
         output.write(
             "Shift+Enter executes the current cell; ↑/↓ or Ctrl+P/Ctrl+N browse IPython history."
         )
