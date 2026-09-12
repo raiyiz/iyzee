@@ -90,14 +90,21 @@ trace = mx.get_trace_data(1)
 The console uses IPython's own execution engine rather than a custom Python
 parser. Completion, inspection (`?` / `??`), magic commands, history, shell
 commands, and top-level `await` therefore come from IPython itself. The
-Textual widget provides the presentation layer and runs blocking hardware
-calls in a worker thread so the rest of the TUI remains responsive.
+console input accepts **Up/Down** at the top/bottom of a multiline cell for
+history navigation, while **Ctrl+P/Ctrl+N** remain available as explicit
+history shortcuts. Shift+Enter executes the current cell and Tab completes.
+
+Outside editable widgets, `j`/`k` use Textual's focus traversal. `:` opens
+Textual's built-in Command Palette; the existing app actions are exposed there
+without introducing a second command parser or modal-state machine. Editable
+widgets keep ownership of normal text-entry keys.
 
 The console deliberately exposes a small, explicit live namespace instead of
 mirroring arbitrary application internals. Connected `mx`, `shutter`, and
 `scope` objects, plus the shared `handles` mapping, are available as they
-become live. User-created Python variables remain in the IPython namespace
-when the live device namespace is refreshed.
+become live. When an instrument disconnects, its corresponding live name is
+removed from the IPython namespace; user-created Python variables remain when
+the live device namespace is refreshed.
 
 ## Safety notes
 
@@ -158,11 +165,3 @@ letting one file grow indefinitely.
 - `scope.py`'s `LeCroy` driver is not integrated with `BaseDevice`'s
   connection lifecycle (no context-manager support, no injectable transport
   beyond the low-level socket helpers already covered by tests).
-- `wavemeter_readout.py`'s frequency constants and `single_readout()` /
-  `set_pid_setpoint()` parameters are bare floats (THz/GHz/MHz mixed via a
-  `scal` factor) rather than explicitly unit-typed.
-
-Both driver modules above handle physically sensitive behavior (laser
-frequency locking, live socket protocol parsing) and are deliberately left
-alone during routine cleanup passes — changes there should be reviewed
-against the real hardware, not just tests.
