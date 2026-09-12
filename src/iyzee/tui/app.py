@@ -1,61 +1,71 @@
-"""Textual application entry point for the iyzee lab-control TUI.
-
-Run with ``uv run iyzee-tui`` (or ``python -m iyzee.tui.app``).
-
-Three screens cover the common tasks end to end:
-
-- **Connect** (``c``): open/close links to the MXA, shutter/PSU,
-  wavemeter, and scope.
-- **Sweep** (``s``): configure and run a bandwidth or frequency sweep
-  against the connected MXA, with a live progress bar and trace plot.
-- **Traces** (``t``): browse previously recorded ``.npz`` runs on disk.
-
-Connection state lives on the ``App`` itself (``self.handles``), not on
-any one screen, so switching screens never drops a live instrument link.
-"""
+"""Textual application entry point for the iyzee lab-control TUI."""
 
 from __future__ import annotations
 
 from textual.app import App
+from textual.events import Key
+from textual.widget import Widget
 
 from .instruments import InstrumentHandle
+from .navigation.policy import NavigationPolicy
 from .screens.connect import ConnectScreen
+from .screens.console import ConsoleScreen
 from .screens.sweep import SweepScreen
 from .screens.traces import TracesScreen
 
 
 class IyzeeApp(App):
-    """Connect to lab instruments, run sweeps, and browse recorded traces."""
+    """Connect to lab instruments, browse traces, and use IPython."""
 
     TITLE = "iyzee"
     SUB_TITLE = "lab instrument control"
     CSS_PATH = "app.tcss"
 
-    BINDINGS = [
-        ("c", "show_connect", "Connect"),
-        ("s", "show_sweep", "Sweep"),
-        ("t", "show_traces", "Traces"),
-        ("q", "quit", "Quit"),
-        ("ctrl+q", "quit", "Quit"),
-    ]
-
     def __init__(self) -> None:
         super().__init__()
-        # Shared app-level state: connected instrument handles, keyed by
-        # InstrumentSpec.key (see instruments.py). Screens read and write
-        # this directly via `self.app.handles` instead of passing state
-        # between screens.
         self.handles: dict[str, InstrumentHandle] = {}
-
-        # Screens are created once and reused across switch_screen() calls
-        # so e.g. the Sweep screen's config inputs survive a trip to the
-        # Connect screen and back.
+        self._navigation_policy = NavigationPolicy()
         self._connect_screen = ConnectScreen()
         self._sweep_screen = SweepScreen()
         self._traces_screen = TracesScreen()
+        self._console_screen = ConsoleScreen()
 
     def on_mount(self) -> None:
         self.push_screen(self._connect_screen)
+
+    def on_key(self, event: Key) -> None:
+        """Handle global keys only when the focused widget is not editing."""
+        focused: Widget | None = self.screen.focused if self.screen else None
+        if self._navigation_policy.is_insert(focused):
+            if event.key == "escape" and focused.id != "console-input":
+                focused.blur()
+                event.stop()
+            return
+
+        if event.key == "j":
+            self.screen.focus_next()
+            event.stop()
+        elif event.key == "k":
+            self.screen.focus_previous()
+            event.stop()
+        elif event.key == ":":
+            self.action_command_palette()
+            event.stop()
+        elif event.key == "q":
+            self.exit()
+            event.stop()
+        elif event.key == "c":
+            self.action_show_connect()
+            event.stop()
+        elif event.key == "s":
+            self.action_show_sweep()
+            event.stop()
+        elif event.key == "t":
+            self.action_show_traces()
+            event.stop()
+        elif event.key == "i":
+            self.action_show_console()
+            event.stop()
 
     def action_show_connect(self) -> None:
         self.switch_screen(self._connect_screen)
@@ -65,6 +75,9 @@ class IyzeeApp(App):
 
     def action_show_traces(self) -> None:
         self.switch_screen(self._traces_screen)
+
+    def action_show_console(self) -> None:
+        self.switch_screen(self._console_screen)
 
 
 def run() -> None:

@@ -74,24 +74,58 @@ function in `procedures.py`, not writing a new hand-rolled loop.
   context-manager lifecycle), `IP` (instrument addresses), `CH` (PSU channel
   IDs). `KeysightMXA` and `PSU` both build on `BaseDevice`.
 
+## Interactive IPython console
+
+The TUI now includes an embedded IPython console (`i` from any screen). It
+runs in the same process as the application and receives the actual live
+instrument objects, so commands such as these operate on the current session:
+
+```python
+mx.set_center_freq(1.5e6)
+mx.set_rbw(24e3)
+mx.single_sweep_wait()
+trace = mx.get_trace_data(1)
+```
+
+The console uses IPython's own execution engine rather than a custom Python
+parser. Completion, inspection (`?` / `??`), magic commands, history, shell
+commands, and top-level `await` therefore come from IPython itself. The
+console input accepts **Up/Down** at the top/bottom of a multiline cell for
+history navigation, while **Ctrl+P/Ctrl+N** remain available as explicit
+history shortcuts. Shift+Enter executes the current cell and Tab completes.
+
+Outside editable widgets, `j`/`k` use Textual's focus traversal. `:` opens
+Textual's built-in Command Palette; the existing app actions are exposed there
+without introducing a second command parser or modal-state machine. Editable
+widgets keep ownership of normal text-entry keys.
+
+The console deliberately exposes a small, explicit live namespace instead of
+mirroring arbitrary application internals. Connected `mx`, `shutter`, and
+`scope` objects, plus the shared `handles` mapping, are available as they
+become live. When an instrument disconnects, its corresponding live name is
+removed from the IPython namespace; user-created Python variables remain when
+the live device namespace is refreshed.
+
 ## Safety notes
 
-This is laboratory/instrument-control software; a few rules matter more here
-than in typical application code:
+This is laboratory/instrument-control software; a few rules matter more than
+in typical application code:
 
 - Never turn a hardware communication failure into a plausible measurement
   value (see `WavemeterReadoutError`, `KeysightMXA.wait_opc()`).
 - Don't change instrument setpoints or SCPI behavior without understanding
   and testing the change — these drive real hardware.
+- The interactive console intentionally has direct write access to connected
+  devices; use it with the same care as writing Python against the instrument
+  drivers directly.
 
 ## Documentation
 
 The technical documentation connects the measurement physics to the analyzer
-state, SCPI commands, and Python implementation. The MXA and measurement
-guide covers the measurement chain, RBW/VBW, detector and averaging
-semantics, ENBW, synchronization, trace transfer, noise density and band
-power, analyzer noise cancellation, trigger timing, and the squeezing/shot-
-noise workflow.
+state, SCPI commands, and Python implementation. The MXA and measurement guide
+covers the measurement chain, RBW/VBW, detector and averaging semantics, ENBW,
+synchronization, trace transfer, noise density and band power, analyzer noise
+cancellation, trigger timing, and the squeezing/shot-noise workflow.
 
 The source is written in Typst and compiled in both CI systems. Each pipeline
 publishes the compiled PDFs as artifacts for review and download.
@@ -131,11 +165,3 @@ letting one file grow indefinitely.
 - `scope.py`'s `LeCroy` driver is not integrated with `BaseDevice`'s
   connection lifecycle (no context-manager support, no injectable transport
   beyond the low-level socket helpers already covered by tests).
-- `wavemeter_readout.py`'s frequency constants and `single_readout()` /
-  `set_pid_setpoint()` parameters are bare floats (THz/GHz/MHz mixed via a
-  `scal` factor) rather than explicitly unit-typed.
-
-Both driver modules above handle physically sensitive behavior (laser
-frequency locking, live socket protocol parsing) and are deliberately left
-alone during routine cleanup passes — changes there should be reviewed
-against the real hardware, not just tests.
