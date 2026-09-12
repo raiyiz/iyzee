@@ -1,3 +1,4 @@
+from textual.widget import Widget
 from textual.widgets import Button, Input, Static, TextArea
 
 from iyzee.tui.navigation.policy import NavigationPolicy
@@ -14,6 +15,7 @@ def test_non_editable_widgets_stay_in_normal_mode() -> None:
 
 
 def test_custom_editable_widgets_can_opt_in() -> None:
-    widget = Static("value")
-    widget.is_editable = True
-    assert NavigationPolicy.is_insert(widget)
+    class EditableWidget(Widget):
+        is_editable = True
+
+    assert NavigationPolicy.is_insert(EditableWidget())
