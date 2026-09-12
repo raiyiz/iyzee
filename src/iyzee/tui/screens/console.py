@@ -15,7 +15,9 @@ class ConsoleScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Static("Embedded IPython • same process • same live device objects", classes="panel-title")
+        yield Static(
+            "Embedded IPython • same process • same live device objects", classes="panel-title"
+        )
         yield IyzeeConsole(IyzeeIPython())
 
     def on_mount(self) -> None:
