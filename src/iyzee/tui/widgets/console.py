@@ -17,7 +17,7 @@ from ..ipython import ExecutionOutput, IyzeeIPython
 
 
 class _ConsoleInput(TextArea):
-    """TextArea that gives IPython-style history first refusal at line edges."""
+    """IPython editor with history and a small Vim-style mode boundary."""
 
     def __init__(self, console: IyzeeConsole) -> None:
         super().__init__(
@@ -27,18 +27,54 @@ class _ConsoleInput(TextArea):
             compact=True,
         )
         self.console = console
+        self.vim_normal = False
 
     def on_key(self, event: Key) -> None:
+        if self.vim_normal:
+            self._handle_vim_normal(event)
+            return
+
+        if event.key == "escape":
+            self.vim_normal = True
+            event.stop()
+            return
+
         if event.key == "up" and self.cursor_location.row == 0:
-            if self.console._history_available():
+            if self.console.history_available:
                 self.console.action_history_previous()
                 event.stop()
                 return
         elif event.key == "down" and self.cursor_location.row == self.document.line_count - 1:
-            if self.console._history_cursor is not None:
+            if self.console.history_cursor is not None:
                 self.console.action_history_next()
                 event.stop()
                 return
+
+    def _handle_vim_normal(self, event: Key) -> None:
+        if event.key == "escape":
+            self.vim_normal = False
+            self.blur()
+            event.stop()
+            return
+        if event.key == "i":
+            self.vim_normal = False
+            event.stop()
+            return
+        if event.key == "a":
+            self.action_cursor_right()
+            self.vim_normal = False
+            event.stop()
+            return
+        actions = {
+            "h": self.action_cursor_left,
+            "j": self.action_cursor_down,
+            "k": self.action_cursor_up,
+            "l": self.action_cursor_right,
+        }
+        action = actions.get(event.key)
+        if action is not None:
+            action()
+            event.stop()
 
 
 class IyzeeConsole(Vertical):
@@ -183,8 +219,15 @@ class IyzeeConsole(Vertical):
     def _hide_completions(self) -> None:
         self.query_one("#console-completions", expect_type=Static).styles.display = "none"
 
-    def _history_available(self) -> bool:
+    @property
+    def history_available(self) -> bool:
+        """Whether the IPython session has history entries to browse."""
         return bool(self.shell.history)
+
+    @property
+    def history_cursor(self) -> int | None:
+        """Current history index, or ``None`` when not browsing history."""
+        return self._history_cursor
 
     def action_history_previous(self) -> None:
         history = self.shell.history
