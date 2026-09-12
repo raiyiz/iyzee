@@ -56,8 +56,11 @@ class IyzeeIPython:
         source = source.rstrip()
         if not source.strip():
             return ExecutionOutput(
-                source="", stdout="", stderr="",
-                execution_count=self.shell.execution_count, success=True,
+                source="",
+                stdout="",
+                stderr="",
+                execution_count=self.shell.execution_count,
+                success=True,
             )
         stdout = io.StringIO()
         stderr = io.StringIO()
