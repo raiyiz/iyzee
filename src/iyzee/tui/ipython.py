@@ -26,6 +26,8 @@ class ExecutionOutput:
 class IyzeeIPython:
     """Own one embedded :class:`InteractiveShell` for the running TUI."""
 
+    LIVE_NAMES = frozenset(("mx", "shutter", "scope", "handles"))
+
     def __init__(self, namespace: Mapping[str, Any] | None = None) -> None:
         config = Config()
         config.InteractiveShell.automagic = True
@@ -41,9 +43,13 @@ class IyzeeIPython:
         self._lock = threading.RLock()
 
     def update_namespace(self, namespace: Mapping[str, Any]) -> None:
-        """Refresh application-owned names without deleting user variables."""
+        """Refresh live application names and remove disconnected handles."""
         with self._lock:
-            self.shell.user_ns.update(namespace)
+            for name in self.LIVE_NAMES:
+                if name in namespace:
+                    self.shell.user_ns[name] = namespace[name]
+                else:
+                    self.shell.user_ns.pop(name, None)
 
     def execute(self, source: str) -> ExecutionOutput:
         """Execute one cell and capture terminal-oriented output."""
