@@ -21,15 +21,6 @@ class IyzeeApp(App):
     SUB_TITLE = "lab instrument control"
     CSS_PATH = "app.tcss"
 
-    BINDINGS = [
-        ("c", "show_connect", "Connect"),
-        ("s", "show_sweep", "Sweep"),
-        ("t", "show_traces", "Traces"),
-        ("i", "show_console", "IPython"),
-        ("q", "quit", "Quit"),
-        ("ctrl+q", "quit", "Quit"),
-    ]
-
     def __init__(self) -> None:
         super().__init__()
         self.handles: dict[str, InstrumentHandle] = {}
@@ -43,9 +34,12 @@ class IyzeeApp(App):
         self.push_screen(self._connect_screen)
 
     def on_key(self, event: Key) -> None:
-        """Handle navigation keys only when the focused widget is not editing."""
+        """Handle global keys only when the focused widget is not editing."""
         focused: Widget | None = self.screen.focused if self.screen else None
         if self._navigation_policy.is_insert(focused):
+            if event.key == "escape" and focused is not self.query_one("#console-input", expect_type=Widget):
+                focused.blur()
+                event.stop()
             return
 
         if event.key == "j":
@@ -56,6 +50,21 @@ class IyzeeApp(App):
             event.stop()
         elif event.key == ":":
             self.action_command_palette()
+            event.stop()
+        elif event.key == "q":
+            self.exit()
+            event.stop()
+        elif event.key == "c":
+            self.action_show_connect()
+            event.stop()
+        elif event.key == "s":
+            self.action_show_sweep()
+            event.stop()
+        elif event.key == "t":
+            self.action_show_traces()
+            event.stop()
+        elif event.key == "i":
+            self.action_show_console()
             event.stop()
 
     def action_show_connect(self) -> None:
