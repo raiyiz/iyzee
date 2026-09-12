@@ -1,6 +1,5 @@
-"""Navigation primitives for the Iyzee TUI."""
+"""Small navigation helpers for the Iyzee TUI."""
 
-from .controller import NavigationController
-from .mode import Mode
+from .policy import NavigationPolicy
 
-__all__ = ["Mode", "NavigationController"]
+__all__ = ["NavigationPolicy"]
