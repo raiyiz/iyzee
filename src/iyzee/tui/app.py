@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from textual.app import App
+from textual.events import Key
+from textual.widget import Widget
 
 from .instruments import InstrumentHandle
-from .navigation import NavigationController
+from .navigation.policy import NavigationPolicy
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.sweep import SweepScreen
@@ -13,25 +15,16 @@ from .screens.traces import TracesScreen
 
 
 class IyzeeApp(App):
-    """Connect to lab instruments, run sweeps, browse traces, and use IPython."""
+    """Connect to lab instruments, browse traces, and use IPython."""
 
     TITLE = "iyzee"
     SUB_TITLE = "lab instrument control"
     CSS_PATH = "app.tcss"
 
-    BINDINGS = [
-        ("c", "show_connect", "Connect"),
-        ("s", "show_sweep", "Sweep"),
-        ("t", "show_traces", "Traces"),
-        ("i", "show_console", "IPython"),
-        ("q", "quit", "Quit"),
-        ("ctrl+q", "quit", "Quit"),
-    ]
-
     def __init__(self) -> None:
         super().__init__()
         self.handles: dict[str, InstrumentHandle] = {}
-        self.navigation = NavigationController(self)
+        self._navigation_policy = NavigationPolicy()
         self._connect_screen = ConnectScreen()
         self._sweep_screen = SweepScreen()
         self._traces_screen = TracesScreen()
@@ -39,6 +32,37 @@ class IyzeeApp(App):
 
     def on_mount(self) -> None:
         self.push_screen(self._connect_screen)
+
+    def on_key(self, event: Key) -> None:
+        """Handle only application-level keys when the focused widget is not editing."""
+        focused: Widget | None = self.screen.focused if self.screen else None
+        if self._navigation_policy.is_insert(focused):
+            return
+
+        if event.key == "j":
+            self.screen.focus_next()
+            event.stop()
+        elif event.key == "k":
+            self.screen.focus_previous()
+            event.stop()
+        elif event.key == ":":
+            self.action_command_palette()
+            event.stop()
+        elif event.key == "q":
+            self.exit()
+            event.stop()
+        elif event.key == "c":
+            self.action_show_connect()
+            event.stop()
+        elif event.key == "s":
+            self.action_show_sweep()
+            event.stop()
+        elif event.key == "t":
+            self.action_show_traces()
+            event.stop()
+        elif event.key == "i":
+            self.action_show_console()
+            event.stop()
 
     def action_show_connect(self) -> None:
         self.switch_screen(self._connect_screen)
