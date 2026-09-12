@@ -19,12 +19,16 @@ def test_ipython_preserves_variables_between_cells() -> None:
 
 
 def test_namespace_from_handles_exposes_live_objects() -> None:
-    class Handle:
+    class MxaHandle:
         def __init__(self, device):
             self.device = device
 
+    class ScopeHandle:
+        def __init__(self, scope):
+            self.scope = scope
+
     device = object()
-    handles = {"mxa": Handle(device), "scope": Handle("scope")}
+    handles = {"mxa": MxaHandle(device), "scope": ScopeHandle("scope")}
     namespace = namespace_from_handles(handles)
     assert namespace["mx"] is device
     assert namespace["scope"] == "scope"
