@@ -10,9 +10,35 @@ from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.events import Key
 from textual.widgets import Footer, RichLog, Static, TextArea
 
 from ..ipython import ExecutionOutput, IyzeeIPython
+
+
+class _ConsoleInput(TextArea):
+    """TextArea that gives IPython-style history first refusal at line edges."""
+
+    def __init__(self, console: IyzeeConsole) -> None:
+        super().__init__(
+            id="console-input",
+            placeholder="Python / IPython code  •  Shift+Enter to run  •  Tab to complete",
+            soft_wrap=True,
+            compact=True,
+        )
+        self.console = console
+
+    def on_key(self, event: Key) -> None:
+        if event.key == "up" and self.cursor_location.row == 0:
+            if self.console._history_available():
+                self.console.action_history_previous()
+                event.stop()
+                return
+        elif event.key == "down" and self.cursor_location.row == self.document.line_count - 1:
+            if self.console._history_cursor is not None:
+                self.console.action_history_next()
+                event.stop()
+                return
 
 
 class IyzeeConsole(Vertical):
@@ -62,12 +88,7 @@ class IyzeeConsole(Vertical):
     def compose(self) -> ComposeResult:
         yield RichLog(id="console-output", wrap=True, markup=True, highlight=False)
         yield Static("", id="console-completions")
-        yield TextArea(
-            id="console-input",
-            placeholder="Python / IPython code  •  Shift+Enter to run  •  Tab to complete",
-            soft_wrap=True,
-            compact=True,
-        )
+        yield _ConsoleInput(self)
         yield Static("", id="console-status")
         yield Footer()
 
@@ -89,7 +110,9 @@ class IyzeeConsole(Vertical):
         output.write(
             "IPython features: Tab completion, ?, ??, %, !, history, and top-level await."
         )
-        output.write("Shift+Enter executes the current cell; Ctrl+P/Ctrl+N browse IPython history.")
+        output.write(
+            "Shift+Enter executes the current cell; ↑/↓ or Ctrl+P/Ctrl+N browse IPython history."
+        )
 
     def _set_status(self, text: str) -> None:
         self.query_one("#console-status", expect_type=Static).update(text)
@@ -159,6 +182,9 @@ class IyzeeConsole(Vertical):
 
     def _hide_completions(self) -> None:
         self.query_one("#console-completions", expect_type=Static).styles.display = "none"
+
+    def _history_available(self) -> bool:
+        return bool(self.shell.history)
 
     def action_history_previous(self) -> None:
         history = self.shell.history
