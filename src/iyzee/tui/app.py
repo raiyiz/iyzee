@@ -37,7 +37,7 @@ class IyzeeApp(App):
         """Handle global keys only when the focused widget is not editing."""
         focused: Widget | None = self.screen.focused if self.screen else None
         if self._navigation_policy.is_insert(focused):
-            if event.key == "escape" and focused is not self.query_one("#console-input", expect_type=Widget):
+            if event.key == "escape" and focused.id != "console-input":
                 focused.blur()
                 event.stop()
             return
