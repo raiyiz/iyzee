@@ -39,12 +39,13 @@ class _ConsoleInput(TextArea):
             event.stop()
             return
 
-        if event.key == "up" and self.cursor_location.row == 0:
+        cursor_row = self.cursor_location[0]
+        if event.key == "up" and cursor_row == 0:
             if self.console.history_available:
                 self.console.action_history_previous()
                 event.stop()
                 return
-        elif event.key == "down" and self.cursor_location.row == self.document.line_count - 1:
+        elif event.key == "down" and cursor_row == self.document.line_count - 1:
             if self.console.history_cursor is not None:
                 self.console.action_history_next()
                 event.stop()
