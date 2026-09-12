@@ -1,18 +1,19 @@
-from iyzee.tui.navigation.commands import Command, CommandRegistry
-from iyzee.tui.navigation.mode import Mode
+from textual.widgets import Button, Input, Static, TextArea
+
+from iyzee.tui.navigation.policy import NavigationPolicy
 
 
-def test_navigation_modes_are_explicit() -> None:
-    assert [Mode.NORMAL, Mode.INSERT, Mode.COMMAND] == list(Mode)
+def test_editable_widgets_derive_insert_mode_from_focus() -> None:
+    assert NavigationPolicy.is_insert(Input())
+    assert NavigationPolicy.is_insert(TextArea())
 
 
-def test_command_registry_registers_and_lists_commands() -> None:
-    called: list[list[str]] = []
-    registry = CommandRegistry()
-    registry.register(Command("sweep", "Open Sweep", called.append))
+def test_non_editable_widgets_stay_in_normal_mode() -> None:
+    assert not NavigationPolicy.is_insert(Button("Run"))
+    assert not NavigationPolicy.is_insert(Static("status"))
 
-    command = registry.get("sweep")
-    assert command is not None
-    command.callback(["bandwidth"])
-    assert called == [["bandwidth"]]
-    assert registry.names() == ("sweep",)
+
+def test_custom_editable_widgets_can_opt_in() -> None:
+    widget = Static("value")
+    widget.is_editable = True
+    assert NavigationPolicy.is_insert(widget)
