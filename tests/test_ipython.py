@@ -140,8 +140,6 @@ def test_lab_tab_completion_actually_works() -> None:
     _text, matches = shell.complete("lab.", 4)
     assert {".mx", ".results", ".last_run", ".connected"} <= set(matches)
 
-
-
     shell = IyzeeIPython(FakeApp())
     for src in ["x = 1", "y = 2", "y = 2", "z = x + y"]:
         shell.execute(src)

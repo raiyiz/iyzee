@@ -221,9 +221,7 @@ class IyzeeIPython:
         with self._lock:
             entries: list[str] = []
             last = ""
-            for _session, _line, cell in self.shell.history_manager.get_range(
-                session=0, raw=True
-            ):
+            for _session, _line, cell in self.shell.history_manager.get_range(session=0, raw=True):
                 cell = cell.rstrip()
                 if cell and cell != last:
                     entries.append(cell)

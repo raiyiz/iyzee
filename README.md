@@ -136,8 +136,8 @@ lab.mx.set_rbw(24e3)
 lab.mx.single_sweep_wait()
 trace = lab.mx.get_trace_data(1)
 
-lab.results[-1].traces["squeezing"]   # last completed sweep
-lab.connected                          # e.g. ("mx", "shutter")
+lab.results[-1].traces["squeezing"]  # last completed sweep
+lab.connected  # e.g. ("mx", "shutter")
 ```
 
 `lab` does a fresh lookup against the app's actual state on every attribute
