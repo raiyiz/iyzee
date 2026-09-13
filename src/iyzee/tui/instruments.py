@@ -16,9 +16,10 @@ code changes required.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from ..base import CH, IP
 from ..mxa import KeysightMXA
@@ -163,6 +164,52 @@ class InstrumentSpec:
 
     def build(self) -> InstrumentHandle:
         return self.make()
+
+
+class LockedProxy:
+    """Serializes calls to a live device shared between a screen worker
+    and the IPython console.
+
+    The console is handed the same live ``mx``/``shutter``/``scope``
+    objects a screen's background worker calls directly (see
+    ``ipython.namespace_from_handles``). Without this, a console cell
+    calling e.g. ``mx.single_sweep_wait()`` could run at the same moment
+    ``SweepScreen`` is mid-sweep on that same MXA — two threads issuing
+    commands to one VISA resource concurrently, which PyVISA does not
+    guarantee is safe.
+
+    Wraps a device so attribute access passes straight through, but
+    calling any method acquires ``lock`` for the call's duration — the
+    same :class:`threading.Lock` a screen holds around its own hardware
+    calls to this instrument (``IyzeeApp.instrument_locks``).
+
+    Deliberately does *not* forward dunder methods such as ``__enter__``
+    or ``__getitem__``: connection lifecycle belongs to the Connect
+    screen, and console code reaching for ``with mx:`` would close the
+    device out from under the app's own bookkeeping (the Connect screen's
+    table would still say "connected" while the underlying VISA resource
+    was actually closed).
+    """
+
+    def __init__(self, target: Any, lock: threading.Lock) -> None:
+        object.__setattr__(self, "_target", target)
+        object.__setattr__(self, "_lock", lock)
+
+    def __getattr__(self, name: str) -> Any:
+        target = object.__getattribute__(self, "_target")
+        value = getattr(target, name)
+        if not callable(value):
+            return value
+        lock = object.__getattribute__(self, "_lock")
+
+        def _locked_call(*args: Any, **kwargs: Any) -> Any:
+            with lock:
+                return value(*args, **kwargs)
+
+        return _locked_call
+
+    def __repr__(self) -> str:
+        return repr(object.__getattribute__(self, "_target"))
 
 
 INSTRUMENTS: list[InstrumentSpec] = [

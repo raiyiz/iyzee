@@ -98,9 +98,10 @@ class ConnectScreen(Screen):
     def _connect(self, spec: InstrumentSpec) -> None:
         self._ui(self._set_row, spec.key, "connecting...", "-")
         try:
-            handle = spec.build()
-            handle.connect()
-            detail = handle.probe()
+            with self.app.instrument_locks[spec.key]:
+                handle = spec.build()
+                handle.connect()
+                detail = handle.probe()
         except Exception as exc:  # noqa: BLE001 - surfacing to the UI, not swallowing
             log.exception("failed to connect %s", spec.key)
             self._ui(self._set_row, spec.key, "error", str(exc))
@@ -116,7 +117,8 @@ class ConnectScreen(Screen):
         self._ui(self._set_row, spec.key, "disconnecting...", "-")
         if handle is not None:
             try:
-                handle.disconnect()
+                with self.app.instrument_locks[spec.key]:
+                    handle.disconnect()
             except Exception as exc:  # noqa: BLE001
                 log.exception("error closing %s", spec.key)
                 self._ui(self.notify, f"{spec.label}: error closing ({exc})", severity="warning")

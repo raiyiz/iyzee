@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+from collections import defaultdict
+
 from textual.app import App
 from textual.events import Key
 from textual.widget import Widget
@@ -12,6 +15,7 @@ from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.sweep import SweepScreen
 from .screens.traces import TracesScreen
+from .workers import LastRun
 
 
 class IyzeeApp(App):
@@ -24,6 +28,20 @@ class IyzeeApp(App):
     def __init__(self) -> None:
         super().__init__()
         self.handles: dict[str, InstrumentHandle] = {}
+        # One lock per instrument key, shared by every caller that talks to
+        # that instrument's hardware: a screen's background worker (Connect,
+        # Sweep) and the IPython console via LockedProxy (see
+        # instruments.LockedProxy and ipython.namespace_from_handles). This
+        # is what stops the console and a screen from issuing overlapping
+        # commands to the same physical instrument from two threads at once.
+        # defaultdict so any caller can address a key before that
+        # instrument has ever been connected, without pre-populating one
+        # lock per entry in instruments.INSTRUMENTS here.
+        self.instrument_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+        # The most recently completed sweep, if any — set by
+        # SweepScreen._finish, read by ConsoleScreen to expose `results` in
+        # the console namespace. See workers.LastRun.
+        self.last_run: LastRun | None = None
         self._navigation_policy = NavigationPolicy()
         self._connect_screen = ConnectScreen()
         self._sweep_screen = SweepScreen()

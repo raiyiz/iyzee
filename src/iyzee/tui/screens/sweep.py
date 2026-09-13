@@ -12,6 +12,7 @@ against the existing building blocks, not a change to ``experiment/``.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import uuid
 from dataclasses import asdict
@@ -49,6 +50,7 @@ from ...experiment import (
     run_sequence,
     save_step_results,
 )
+from ..workers import LastRun
 
 log = logging.getLogger("iyzee.tui")
 
@@ -215,32 +217,47 @@ class SweepScreen(Screen):
 
     @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
     def _run(self, mx, shutter, steps: list[Step], config: AnalyzerConfig, kind: str) -> None:
-        try:
-            prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
-        except Exception as exc:  # noqa: BLE001
-            log.exception("sweep: failed to configure analyzer")
-            self._ui(self._finish, kind, aborted=False, setup_error=exc)
-            return
+        # Hold the MXA's lock (and the shutter's, for a frequency sweep) for
+        # the whole run, not just individual calls — a sweep is one logical
+        # operation, and interleaving a console cell's commands partway
+        # through it would be just as broken as interleaving two sweeps.
+        # This is the same lock instruments.LockedProxy acquires per call
+        # for console code, and ConnectScreen acquires around connect/
+        # disconnect (see IyzeeApp.instrument_locks).
+        locks = [self.app.instrument_locks["mxa"]]
+        if shutter is not None:
+            locks.append(self.app.instrument_locks["shutter"])
 
-        run_id = uuid.uuid4().hex[:8]
-        ctx = ExperimentContext(mx=mx, run_id=run_id, shutter=shutter, config=asdict(config))
+        with contextlib.ExitStack() as stack:
+            for lock in locks:
+                stack.enter_context(lock)
 
-        def on_step(index, total, step, result, error) -> None:
-            if result is not None:
-                self._collected.append(result)
-            self._ui(self._on_step, index, total, step, result, error)
-            if self._abort_event.is_set():
-                raise SweepAborted()
+            try:
+                prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
+            except Exception as exc:  # noqa: BLE001
+                log.exception("sweep: failed to configure analyzer")
+                self._ui(self._finish, kind, aborted=False, setup_error=exc)
+                return
 
-        aborted = False
-        try:
-            run_sequence(steps, ctx, on_error="skip", on_step=on_step)
-        except SweepAborted:
-            aborted = True
-        except Exception:  # noqa: BLE001 - last-resort net; specific errors are
-            # already handled per-step by run_sequence(on_error="skip") plus
-            # on_step above, so anything reaching here is unexpected.
-            log.exception("sweep: run_sequence raised unexpectedly")
+            run_id = uuid.uuid4().hex[:8]
+            ctx = ExperimentContext(mx=mx, run_id=run_id, shutter=shutter, config=asdict(config))
+
+            def on_step(index, total, step, result, error) -> None:
+                if result is not None:
+                    self._collected.append(result)
+                self._ui(self._on_step, index, total, step, result, error)
+                if self._abort_event.is_set():
+                    raise SweepAborted()
+
+            aborted = False
+            try:
+                run_sequence(steps, ctx, on_error="skip", on_step=on_step)
+            except SweepAborted:
+                aborted = True
+            except Exception:  # noqa: BLE001 - last-resort net; specific errors are
+                # already handled per-step by run_sequence(on_error="skip") plus
+                # on_step above, so anything reaching here is unexpected.
+                log.exception("sweep: run_sequence raised unexpectedly")
 
         self._ui(self._finish, kind, aborted=aborted, setup_error=None)
 
@@ -281,6 +298,7 @@ class SweepScreen(Screen):
 
         savedir = create_dirs(name=kind)
         path = save_step_results(self._collected, savedir)
+        self.app.last_run = LastRun(kind=kind, results=list(self._collected), path=path)
         status = "aborted" if aborted else "finished"
         log.write(f"Sweep {status}: {len(self._collected)} point(s) saved to {path}")
         self.notify(f"Saved {len(self._collected)} point(s) to {path.name}")

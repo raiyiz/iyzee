@@ -12,12 +12,39 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.events import Key
 from textual.widgets import Footer, RichLog, Static, TextArea
+from textual_vim_textarea import Mode, VimTextArea
 
 from ..ipython import ExecutionOutput, IyzeeIPython
 
 
-class _ConsoleInput(TextArea):
-    """IPython editor with history and a small Vim-style mode boundary."""
+class _ConsoleInput(VimTextArea):
+    """IPython editor: real vim modal editing, plus history navigation and
+    an escape hatch back to the app's own navigation.
+
+    Vim's motions, operators, counts, registers, and command line all come
+    from ``textual_vim_textarea.VimTextArea`` unmodified (see that
+    package's own docs for the full key set) — this subclass only adds two
+    things the base widget doesn't know about: IPython history on Up/Down,
+    and a second Escape to leave the widget entirely.
+
+    Escape is two-stage by design, not an oversight:
+
+    - 1st Escape (from INSERT): handled *inside* VimTextArea itself,
+      which transitions INSERT -> NORMAL and keeps focus. Our own
+      ``on_key`` below never even sees the "after" state for this
+      keystroke — Textual calls a widget's public ``on_key`` before its
+      internal ``_on_key`` (which is what VimTextArea overrides to
+      implement the transition), so at the moment our check runs,
+      ``self.mode`` still reads INSERT. That ordering was verified
+      directly against textual-vim-textarea 1.2.0, not assumed.
+    - 2nd Escape (already NORMAL): our check now sees NORMAL and blurs,
+      handing focus back to the app-level nav (`IyzeeApp.on_key`).
+
+    This mirrors how nested modal contexts are usually resolved elsewhere
+    (e.g. Neovim's terminal mode needs its own escape *out* of terminal
+    input before window/pane navigation applies) — a single Escape can't
+    mean both things at once without breaking one of them.
+    """
 
     def __init__(self, console: IyzeeConsole) -> None:
         super().__init__(
@@ -27,16 +54,21 @@ class _ConsoleInput(TextArea):
             compact=True,
         )
         self.console = console
-        self.vim_normal = False
+        # Start ready to type: this is a REPL first, a vim buffer second.
+        # Escape still reaches full vim NORMAL mode (motions, operators,
+        # ':' command line, ...) whenever it's wanted.
+        self.mode = Mode.INSERT
 
     def on_key(self, event: Key) -> None:
-        if self.vim_normal:
-            self._handle_vim_normal(event)
+        if event.key == "escape" and self.mode is Mode.NORMAL:
+            self.blur()
+            event.stop()
             return
 
-        if event.key == "escape":
-            self.vim_normal = True
-            event.stop()
+        if self.mode is not Mode.INSERT:
+            # Deliberately not offering history browsing from NORMAL mode:
+            # up/down there are vim cursor motions, not REPL history, to
+            # keep the two mental models from bleeding into each other.
             return
 
         cursor_row = self.cursor_location[0]
@@ -50,32 +82,6 @@ class _ConsoleInput(TextArea):
                 self.console.action_history_next()
                 event.stop()
                 return
-
-    def _handle_vim_normal(self, event: Key) -> None:
-        if event.key == "escape":
-            self.vim_normal = False
-            self.blur()
-            event.stop()
-            return
-        if event.key == "i":
-            self.vim_normal = False
-            event.stop()
-            return
-        if event.key == "a":
-            self.action_cursor_right()
-            self.vim_normal = False
-            event.stop()
-            return
-        actions = {
-            "h": self.action_cursor_left,
-            "j": self.action_cursor_down,
-            "k": self.action_cursor_up,
-            "l": self.action_cursor_right,
-        }
-        action = actions.get(event.key)
-        if action is not None:
-            action()
-            event.stop()
 
 
 class IyzeeConsole(Vertical):

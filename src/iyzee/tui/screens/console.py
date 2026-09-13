@@ -22,7 +22,18 @@ class ConsoleScreen(Screen):
 
     def on_mount(self) -> None:
         self.console = self.query_one(IyzeeConsole)
-        self.console.refresh_namespace(namespace_from_handles(self.app.handles))
+        self.console.refresh_namespace(self._namespace())
 
     def on_screen_resume(self) -> None:
-        self.console.refresh_namespace(namespace_from_handles(self.app.handles))
+        self.console.refresh_namespace(self._namespace())
+
+    def _namespace(self) -> dict[str, object]:
+        namespace = namespace_from_handles(self.app.handles, self.app.instrument_locks)
+        # The most recently completed sweep, if any — so e.g.
+        # np.mean(results[-1].traces["squeezing"]) works right after a
+        # sweep without leaving the console. See workers.LastRun and
+        # IyzeeIPython.LIVE_NAMES.
+        last_run = self.app.last_run
+        namespace["results"] = last_run.results if last_run is not None else []
+        namespace["last_run"] = last_run
+        return namespace
