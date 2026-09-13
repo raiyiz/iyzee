@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
 
 from rich.markup import escape
 from textual import work
@@ -121,12 +120,9 @@ class IyzeeConsole(Vertical):
         Binding("tab", "complete", "Complete", show=False),
     ]
 
-    def __init__(
-        self, shell: IyzeeIPython, *, namespace: Mapping[str, object] | None = None
-    ) -> None:
+    def __init__(self, shell: IyzeeIPython) -> None:
         super().__init__()
         self.shell = shell
-        self._namespace = dict(namespace or {})
         self._history_cursor: int | None = None
         self._history_draft = ""
 
@@ -139,19 +135,22 @@ class IyzeeConsole(Vertical):
 
     def on_mount(self) -> None:
         self._write_banner()
+        self.refresh_status()
         self.query_one(TextArea).focus()
 
-    def refresh_namespace(self, namespace: Mapping[str, object]) -> None:
-        """Refresh live application objects without deleting user variables."""
-        self._namespace = dict(namespace)
-        self.shell.update_namespace(namespace)
-        names = ", ".join(sorted(name for name in namespace if not name.startswith("_")))
-        self._set_status(f"live namespace: {names or 'IPython only'}")
+    def refresh_status(self) -> None:
+        """Update the "connected: ..." status line. Purely cosmetic — the
+        console's `lab` variable itself always reflects current state
+        without needing this or any other refresh; see LabProxy."""
+        lab = self.shell.shell.user_ns.get("lab")
+        connected = ", ".join(lab.connected) if lab is not None else ""
+        self._set_status(f"lab: {connected or 'nothing connected yet'}")
 
     def _write_banner(self) -> None:
         output = self.query_one(RichLog)
         output.write("[bold cyan]iyzee IPython console[/]")
-        output.write("Live Python access: mx / shutter / scope appear when connected.")
+        output.write("Live Python access: lab.mx / lab.shutter / lab.scope when connected.")
+        output.write("lab.results is the last completed sweep's StepResult list.")
         output.write("IPython features: Tab completion, ?, ??, %, !, history, and top-level await.")
         output.write(
             "Shift+Enter executes the current cell; ↑/↓ or Ctrl+P/Ctrl+N browse IPython history."

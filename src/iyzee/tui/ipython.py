@@ -6,12 +6,30 @@ import contextlib
 import io
 import threading
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping, Protocol
 
 from IPython.core.interactiveshell import InteractiveShell
 from traitlets.config import Config
 
 from .instruments import LockedProxy
+
+if TYPE_CHECKING:
+    from .workers import LastRun
+
+
+class AppState(Protocol):
+    """What :class:`LabProxy` needs from the running app.
+
+    A structural (duck-typed) view rather than importing ``IyzeeApp``
+    directly — ``app.py`` imports the console screen, which imports this
+    module, so importing ``IyzeeApp`` back here would be a cycle. Anything
+    with these three attributes works, which is also what makes this easy
+    to unit test with a small stand-in instead of a full running app.
+    """
+
+    handles: Mapping[str, Any]
+    instrument_locks: Mapping[str, threading.Lock]
+    last_run: LastRun | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,29 +43,107 @@ class ExecutionOutput:
     success: bool
 
 
+class LabProxy:
+    """Live view of the app's connected instruments and last sweep.
+
+    Exposed to the console as a single ``lab`` variable
+    (``lab.mx``, ``lab.shutter``, ``lab.scope``, ``lab.results``,
+    ``lab.last_run``) rather than as separate top-level globals. Every
+    attribute access does a fresh lookup against the running app's
+    current state; nothing is ever copied or cached here, which is what
+    makes this simpler and more robust than the namespace-copying
+    approach it replaced:
+
+    - **Nothing to refresh.** The old design copied live objects into the
+      shell's namespace on connect and had to notice and clean them up
+      again on disconnect (an explicit ``LIVE_NAMES`` allow-list, checked
+      on every screen visit). ``lab`` needs none of that — disconnect the
+      MXA and the very next ``lab.mx`` access reflects it immediately,
+      because it re-reads ``app.handles`` every time rather than trusting
+      a value captured earlier.
+    - **No stale references.** With the old design, a disconnected
+      instrument's copied handle kept working (badly) until the next
+      refresh happened to notice it was gone. Here there's no copy to go
+      stale in the first place — you get a clear ``AttributeError`` the
+      moment the thing you're asking for isn't there, immediately, not on
+      some delay tied to screen navigation.
+    - **No name-collision risk.** The old design owned five bare names in
+      the shell (``mx``, ``shutter``, ``scope``, ``results``,
+      ``handles``) that a user's own variable of the same name could
+      collide with. ``lab`` owns exactly one name; shadow ``mx`` for a
+      scratch calculation and it's a completely ordinary Python variable
+      with zero interaction with app state, forever.
+
+    Add a new instrument by adding one entry to ``_INSTRUMENT_KEYS``
+    below (attribute name -> ``app.handles``/``app.instrument_locks``
+    key) — nothing else needs to change.
+    """
+
+    _INSTRUMENT_KEYS = {"mx": "mxa", "shutter": "shutter", "scope": "scope"}
+
+    def __init__(self, app: AppState) -> None:
+        object.__setattr__(self, "_app", app)
+
+    def __getattr__(self, name: str) -> Any:
+        app = object.__getattribute__(self, "_app")
+        instrument_keys = object.__getattribute__(self, "_INSTRUMENT_KEYS")
+        if name in instrument_keys:
+            key = instrument_keys[name]
+            handle = app.handles.get(key)
+            if handle is None:
+                raise AttributeError(
+                    f"lab.{name} is not connected — connect it on the Connect screen first"
+                )
+            device = _device_from_handle(name, handle)
+            return LockedProxy(device, app.instrument_locks[key])
+        if name == "results":
+            return app.last_run.results if app.last_run is not None else []
+        if name == "last_run":
+            return app.last_run
+        if name == "handles":
+            return app.handles
+        raise AttributeError(name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("lab is read-only — assign to a new variable instead")
+
+    def __dir__(self) -> list[str]:
+        # Always lists the full set regardless of what's connected right
+        # now, so `lab.<Tab>` in the console shows what's *possible*
+        # (mx/shutter/scope), not just what happens to be connected at
+        # this exact moment.
+        return sorted({*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected"})
+
+    @property
+    def connected(self) -> tuple[str, ...]:
+        """Names of the instruments currently connected, e.g. ``("mx",)``."""
+        app = object.__getattribute__(self, "_app")
+        return tuple(name for name, key in self._INSTRUMENT_KEYS.items() if key in app.handles)
+
+
+def _device_from_handle(name: str, handle: Any) -> Any:
+    """Unwrap an ``InstrumentHandle`` to the underlying live driver object.
+
+    Mirrors each handle's own accessor in ``instruments.py``
+    (``_VisaHandle.device``, ``ShutterHandle.shutter``,
+    ``ScopeHandle.scope``) — different names because the underlying
+    drivers themselves are heterogeneous (VISA vs. a PSU wrapper vs. a
+    raw-socket driver), not by accident.
+    """
+    if name == "mx":
+        return getattr(handle, "device", handle)
+    if name == "shutter":
+        live = getattr(handle, "shutter", None)
+        return live if live is not None else handle
+    if name == "scope":
+        return getattr(handle, "scope", handle)
+    return handle
+
+
 class IyzeeIPython:
     """Own one embedded :class:`InteractiveShell` for the running TUI."""
 
-    # The complete set of names this class manages on the app's behalf —
-    # currently the live devices (namespace_from_handles) plus the last
-    # completed sweep (ConsoleScreen._namespace). When one of these drops
-    # out of a call to update_namespace() (e.g. an instrument was
-    # disconnected), it is actively removed from the shell rather than
-    # left pointing at stale state — see update_namespace().
-    #
-    # This has to be an explicit set, not something derived purely from
-    # "whatever was passed to update_namespace() last time": a value can
-    # arrive via this same mechanism without being ours to manage — e.g.
-    # a test (or, in principle, a future caller) seeding IyzeeIPython's
-    # *constructor* with both an app-owned name and a user-style variable
-    # in the same dict. A tracker with no notion of which names are ours
-    # cannot tell those apart, and will delete the user's variable the
-    # next time the app-owned name disappears. Add a new managed name
-    # here when you add one to namespace_from_handles() or
-    # ConsoleScreen._namespace() — nothing else needs to change.
-    LIVE_NAMES = frozenset(("mx", "shutter", "scope", "handles", "results", "last_run"))
-
-    def __init__(self, namespace: Mapping[str, Any] | None = None) -> None:
+    def __init__(self, app: AppState, *, namespace: Mapping[str, Any] | None = None) -> None:
         config = Config()
         config.InteractiveShell.automagic = True
         config.InteractiveShell.autoawait = True
@@ -57,27 +153,20 @@ class IyzeeIPython:
         config.InteractiveShell.log_output = False
         config.InteractiveShell.banner1 = ""
         config.InteractiveShell.banner2 = ""
-        self.shell = InteractiveShell(config=config, user_ns=dict(namespace or {}))
+        # Jedi does static analysis and can't see through LabProxy's
+        # dynamic __getattr__ — with it on, `lab.<Tab>` silently returns
+        # no completions at all (checked directly: Jedi returns nothing
+        # for `lab.` and IPython's complete() does not fall back to its
+        # own simpler dir()-based completer when that happens). Regular
+        # attribute/module/keyword completion elsewhere is unaffected.
+        config.Completer.use_jedi = False
+        user_ns = dict(namespace or {})
+        # Set once, never reassigned — see LabProxy's docstring for why
+        # this replaces refreshing a set of copied globals on every visit.
+        user_ns["lab"] = LabProxy(app)
+        self.shell = InteractiveShell(config=config, user_ns=user_ns)
         self.shell.init_completer()
         self._lock = threading.RLock()
-
-    def update_namespace(self, namespace: Mapping[str, Any]) -> None:
-        """Refresh live application names and remove disconnected handles.
-
-        Only names in :data:`LIVE_NAMES` are ever touched — anything else
-        the caller passes in, or that the user assigned themselves during
-        the session, is left alone. A name in ``LIVE_NAMES`` that is
-        *absent* from this call's ``namespace`` (e.g. "mx" after the MXA
-        was disconnected) is removed rather than left pointing at stale
-        state, which would otherwise fail confusingly — not obviously —
-        the next time someone used it from the console.
-        """
-        with self._lock:
-            for name in self.LIVE_NAMES:
-                if name in namespace:
-                    self.shell.user_ns[name] = namespace[name]
-                else:
-                    self.shell.user_ns.pop(name, None)
 
     def execute(self, source: str) -> ExecutionOutput:
         """Execute one cell and capture terminal-oriented output."""
@@ -132,7 +221,9 @@ class IyzeeIPython:
         with self._lock:
             entries: list[str] = []
             last = ""
-            for _session, _line, cell in self.shell.history_manager.get_range(session=0, raw=True):
+            for _session, _line, cell in self.shell.history_manager.get_range(
+                session=0, raw=True
+            ):
                 cell = cell.rstrip()
                 if cell and cell != last:
                     entries.append(cell)
@@ -143,37 +234,3 @@ class IyzeeIPython:
         """Run IPython's shutdown hooks."""
         with self._lock:
             self.shell.atexit_operations()
-
-
-def namespace_from_handles(
-    handles: Mapping[str, Any], locks: Mapping[str, threading.Lock] | None = None
-) -> dict[str, Any]:
-    """Build the live-device namespace exposed to the console.
-
-    When ``locks`` is given (normally ``IyzeeApp.instrument_locks``), each
-    live device is wrapped in a :class:`~iyzee.tui.instruments.LockedProxy`
-    keyed by the same instrument key a screen's background worker locks
-    around its own hardware calls — see ``LockedProxy`` for why this
-    matters. Omitting ``locks`` exposes the raw device objects instead,
-    which is only appropriate for tests that don't touch real threads.
-    """
-    namespace: dict[str, Any] = {}
-    mxa = handles.get("mxa")
-    if mxa is not None:
-        namespace["mx"] = _locked(getattr(mxa, "device", mxa), "mxa", locks)
-    shutter = handles.get("shutter")
-    if shutter is not None:
-        live_shutter = getattr(shutter, "shutter", None)
-        device = live_shutter if live_shutter is not None else shutter
-        namespace["shutter"] = _locked(device, "shutter", locks)
-    scope = handles.get("scope")
-    if scope is not None:
-        namespace["scope"] = _locked(getattr(scope, "scope", scope), "scope", locks)
-    namespace["handles"] = handles
-    return namespace
-
-
-def _locked(device: Any, key: str, locks: Mapping[str, threading.Lock] | None) -> Any:
-    if locks is None:
-        return device
-    return LockedProxy(device, locks[key])

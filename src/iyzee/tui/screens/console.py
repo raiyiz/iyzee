@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import Header, Static
 
-from ..ipython import IyzeeIPython, namespace_from_handles
+from ..ipython import IyzeeIPython
 from ..widgets.console import IyzeeConsole
 
 
@@ -16,24 +16,20 @@ class ConsoleScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static(
-            "Embedded IPython • same process • same live device objects", classes="panel-title"
+            "Embedded IPython • same process • lab.mx / lab.shutter / lab.scope",
+            classes="panel-title",
         )
-        yield IyzeeConsole(IyzeeIPython())
+        # Constructed once — this only runs on the screen's first mount,
+        # not on every switch_screen() back to it, so the shell (and its
+        # variables, history, lab) genuinely persists for the app's
+        # lifetime. lab itself needs no refreshing either way (see
+        # LabProxy's docstring) — it reads app state live on every access.
+        yield IyzeeConsole(IyzeeIPython(self.app))
 
     def on_mount(self) -> None:
         self.console = self.query_one(IyzeeConsole)
-        self.console.refresh_namespace(self._namespace())
 
     def on_screen_resume(self) -> None:
-        self.console.refresh_namespace(self._namespace())
-
-    def _namespace(self) -> dict[str, object]:
-        namespace = namespace_from_handles(self.app.handles, self.app.instrument_locks)
-        # The most recently completed sweep, if any — so e.g.
-        # np.mean(results[-1].traces["squeezing"]) works right after a
-        # sweep without leaving the console. See workers.LastRun and
-        # IyzeeIPython.LIVE_NAMES.
-        last_run = self.app.last_run
-        namespace["results"] = last_run.results if last_run is not None else []
-        namespace["last_run"] = last_run
-        return namespace
+        # Purely cosmetic: update the status line's "connected: ..." text.
+        # Nothing about the shell itself needs refreshing.
+        self.console.refresh_status()

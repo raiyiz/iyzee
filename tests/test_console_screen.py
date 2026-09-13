@@ -1,6 +1,6 @@
 """Integration check that a completed sweep's results actually reach the
-IPython console's namespace — the wiring in ConsoleScreen._namespace(),
-not just the LastRun dataclass or namespace_from_handles() in isolation.
+IPython console through `lab` — exercising the real ConsoleScreen/
+IyzeeIPython wiring end-to-end, not just LabProxy in isolation.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from iyzee.tui.app import IyzeeApp
 from iyzee.tui.workers import LastRun
 
 
-def test_last_run_results_reach_console_namespace() -> None:
+def test_last_run_reaches_lab_in_the_running_app() -> None:
     async def scenario() -> None:
         app = IyzeeApp()
         async with app.run_test() as pilot:
@@ -22,9 +22,9 @@ def test_last_run_results_reach_console_namespace() -> None:
             await pilot.press("i")
             await pilot.pause()
 
-            shell = app._console_screen.console.shell.shell
-            assert shell.user_ns["results"] == [result]
-            assert shell.user_ns["last_run"].kind == "bandwidth"
+            lab = app._console_screen.console.shell.shell.user_ns["lab"]
+            assert lab.results == [result]
+            assert lab.last_run.kind == "bandwidth"
 
     asyncio.run(scenario())
 
@@ -36,8 +36,37 @@ def test_no_last_run_gives_empty_results_not_a_crash() -> None:
             await pilot.press("i")
             await pilot.pause()
 
-            shell = app._console_screen.console.shell.shell
-            assert shell.user_ns["results"] == []
-            assert shell.user_ns["last_run"] is None
+            lab = app._console_screen.console.shell.shell.user_ns["lab"]
+            assert lab.results == []
+            assert lab.last_run is None
+
+    asyncio.run(scenario())
+
+
+def test_disconnecting_mxa_is_immediately_reflected_in_lab_no_refresh_needed() -> None:
+    """The scenario that used to require an explicit stale-name cleanup
+    pass — here there's nothing to clean up because lab.mx is never
+    cached in the first place."""
+
+    async def scenario() -> None:
+        app = IyzeeApp()
+        async with app.run_test() as pilot:
+            await pilot.press("i")
+            await pilot.pause()
+            lab = app._console_screen.console.shell.shell.user_ns["lab"]
+
+            class FakeHandle:
+                device = object()
+
+            app.handles["mxa"] = FakeHandle()
+            assert repr(lab.mx) == repr(FakeHandle.device)
+
+            del app.handles["mxa"]
+            try:
+                lab.mx
+            except AttributeError as exc:
+                assert "not connected" in str(exc)
+            else:
+                raise AssertionError("expected AttributeError")
 
     asyncio.run(scenario())
