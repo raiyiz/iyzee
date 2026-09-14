@@ -1,6 +1,6 @@
 """Traces screen: browse previously recorded sweep runs.
 
-Reads exactly what ``experiment.persistence.save_step_results`` already
+Reads exactly what ``experiment.io.save_step_results`` already
 writes — the compressed ``.npz`` archives with per-point metadata — so
 there's no new persistence format to maintain just for browsing.
 """
@@ -17,7 +17,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 from textual_plotext import PlotextPlot
 
-# <package_root>/data — matches iyzee.experiment.persistence.create_dirs(),
+# <package_root>/data — matches iyzee.experiment.io.create_dirs(),
 # without calling it (create_dirs() always creates a fresh dated directory,
 # which we don't want as a side effect of just opening this screen).
 _DATA_ROOT = Path(__file__).resolve().parents[2] / "data"

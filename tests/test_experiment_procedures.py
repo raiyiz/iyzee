@@ -1,13 +1,14 @@
 import pytest
 
+from iyzee.experiment.core import ExperimentContext
 from iyzee.experiment.procedures import (
     BandwidthStep,
     FrequencyStep,
+    acquire_trace,
     bandwidth_sweep_steps,
     run_bandwidth_sweep,
     run_frequency_sweep,
 )
-from iyzee.experiment.step import ExperimentContext
 
 
 class FakeMXA:
@@ -152,3 +153,23 @@ def test_run_frequency_sweep_uses_caller_owned_devices(monkeypatch):
 
     assert result == []
     assert prepared and prepared[0][0] is mx
+
+
+class FakeMXAForTraceAcquisition:
+    def __init__(self):
+        self.update_states = []
+
+    def set_trace_update(self, trace_num, state):
+        self.update_states.append((trace_num, state))
+
+    def single_sweep_wait(self):
+        raise RuntimeError("sweep failed")
+
+
+def test_acquire_trace_disables_trace_after_failure():
+    mx = FakeMXAForTraceAcquisition()
+
+    with pytest.raises(RuntimeError, match="sweep failed"):
+        acquire_trace(mx, 1)
+
+    assert mx.update_states == [(1, True), (1, False)]

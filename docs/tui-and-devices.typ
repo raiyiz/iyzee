@@ -166,7 +166,7 @@ Four `Screen` subclasses cover the common tasks (`tui/screens/`); `IyzeeApp` (`t
 
 == Navigation
 
-`NavigationPolicy` (`tui/navigation/`) answers exactly one question: *is the currently focused widget one that should own ordinary keypresses for text editing right now?* It's a pure check (`isinstance` against `Input`/`TextArea`-family widgets), not a mode flag `IyzeeApp` has to remember to update — which matters because a hand-maintained mode variable can silently drift out of sync with what's actually focused, while a pure function of "what's focused right now" cannot. `IyzeeApp.on_key` consults it before treating `j`/`k`/`c`/`s`/`t`/`i`/`q`/`:` as global navigation; anything actually being typed into keeps ownership of its own keys. `:` opens Textual's built-in Command Palette rather than a hand-rolled command bar or parser.
+Key handling relies entirely on Textual's own focus and binding-priority system, with no app-specific policy layer on top: a focused widget's own bindings (an `Input`'s text-entry keys, the console's `VimTextArea` motions) are offered the key first, and it only falls through to `IyzeeApp.BINDINGS` (`j`/`k`/`c`/`s`/`t`/`i`/`q`/`:`, ...) if the widget doesn't handle it. There is no hand-maintained "am I in insert mode" flag to keep in sync with what's actually focused — Textual's dispatch order is the single source of truth for that. `:` opens Textual's built-in Command Palette rather than a hand-rolled command bar or parser.
 
 = The console in practice <sec-console>
 

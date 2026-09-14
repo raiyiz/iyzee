@@ -9,6 +9,7 @@ import asyncio
 
 from iyzee.experiment import StepResult
 from iyzee.tui.app import IyzeeApp
+from iyzee.tui.screens.console import ConsoleScreen
 from iyzee.tui.workers import LastRun
 
 
@@ -22,7 +23,8 @@ def test_last_run_reaches_lab_in_the_running_app() -> None:
             await pilot.press("i")
             await pilot.pause()
 
-            lab = app._console_screen.console.shell.shell.user_ns["lab"]
+            assert isinstance(app.screen, ConsoleScreen)
+            lab = app.screen.console.shell.shell.user_ns["lab"]
             assert lab.results == [result]
             assert lab.last_run.kind == "bandwidth"
 
@@ -36,7 +38,8 @@ def test_no_last_run_gives_empty_results_not_a_crash() -> None:
             await pilot.press("i")
             await pilot.pause()
 
-            lab = app._console_screen.console.shell.shell.user_ns["lab"]
+            assert isinstance(app.screen, ConsoleScreen)
+            lab = app.screen.console.shell.shell.user_ns["lab"]
             assert lab.results == []
             assert lab.last_run is None
 
@@ -53,7 +56,8 @@ def test_disconnecting_mxa_is_immediately_reflected_in_lab_no_refresh_needed() -
         async with app.run_test() as pilot:
             await pilot.press("i")
             await pilot.pause()
-            lab = app._console_screen.console.shell.shell.user_ns["lab"]
+            assert isinstance(app.screen, ConsoleScreen)
+            lab = app.screen.console.shell.shell.user_ns["lab"]
 
             class FakeHandle:
                 device = object()
