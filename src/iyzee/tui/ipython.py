@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
@@ -17,6 +18,21 @@ if TYPE_CHECKING:
     from .workers import LastRun
 
 
+_IDENTIFIER_RE = re.compile(r"[\w.]*$")
+
+
+def _identifier_before(source: str, cursor_pos: int) -> str:
+    """The dotted identifier ending at ``cursor_pos``.
+
+    E.g. ``"lab.mx"`` out of ``"lab.mx.freq()"`` at position 6. Matches
+    IPython's own notion of a completable/inspectable token: word
+    characters and dots, stopping at the first character that's neither
+    (an open paren, a space, a comma, ...).
+    """
+    match = _IDENTIFIER_RE.search(source[:cursor_pos])
+    return match.group(0) if match else ""
+
+
 class AppState(Protocol):
     """What :class:`LabProxy` needs from the running app.
 
@@ -25,11 +41,25 @@ class AppState(Protocol):
     module, so importing ``IyzeeApp`` back here would be a cycle. Anything
     with these three attributes works, which is also what makes this easy
     to unit test with a small stand-in instead of a full running app.
+
+    Declared as read-only ``@property`` members rather than plain
+    attributes: ``LabProxy``/``IyzeeIPython`` only ever read through this
+    protocol (``.get()``, indexing, ``in``), never assign a whole new
+    mapping. Plain (writable) Protocol attributes are checked invariantly
+    by mypy, which would reject ``IyzeeApp``'s actual ``dict[str, ...]``
+    fields as not being exactly ``Mapping[str, ...]``; read-only
+    properties are checked covariantly instead, so a ``dict`` (a
+    ``Mapping`` subtype) satisfies this protocol as intended.
     """
 
-    handles: Mapping[str, Any]
-    instrument_locks: Mapping[str, threading.Lock]
-    last_run: LastRun | None
+    @property
+    def handles(self) -> Mapping[str, Any]: ...
+
+    @property
+    def instrument_locks(self) -> Mapping[str, threading.Lock]: ...
+
+    @property
+    def last_run(self) -> LastRun | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,9 +227,21 @@ class IyzeeIPython:
             return self.shell.complete(source, line=source, cursor_pos=cursor_pos)
 
     def inspect(self, source: str, cursor_pos: int, detail_level: int = 0) -> dict[str, Any]:
-        """Return IPython's object inspection payload."""
+        """Return IPython's object inspection payload for the identifier at ``cursor_pos``.
+
+        ``InteractiveShell.object_inspect`` takes an object *name*, not a
+        source string plus a cursor position — it has no ``cursor_pos``
+        parameter at all. The previous implementation passed ``cursor_pos``
+        positionally into ``object_inspect``'s ``detail_level`` slot and
+        then passed ``detail_level`` again by keyword, which raised
+        ``TypeError: object_inspect() got multiple values for argument
+        'detail_level'`` on every call. This extracts the dotted
+        identifier ending at ``cursor_pos`` (e.g. ``"lab.mx"`` out of
+        ``"lab.mx.freq"`` at position 6) and inspects that instead.
+        """
         with self._lock:
-            return self.shell.object_inspect(source, cursor_pos, detail_level=detail_level)
+            oname = _identifier_before(source, cursor_pos)
+            return self.shell.object_inspect(oname, detail_level=detail_level)
 
     @property
     def history(self) -> list[str]:
@@ -221,6 +263,11 @@ class IyzeeIPython:
         with self._lock:
             entries: list[str] = []
             last = ""
+            # traitlets' Instance descriptor makes this Any | None to
+            # mypy; IPython's own source (interactiveshell.py) asserts
+            # the same thing before use rather than narrowing the
+            # declared type, so this follows that convention.
+            assert self.shell.history_manager is not None
             for _session, _line, cell in self.shell.history_manager.get_range(session=0, raw=True):
                 cell = cell.rstrip()
                 if cell and cell != last:

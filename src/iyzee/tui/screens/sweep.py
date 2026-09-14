@@ -15,8 +15,10 @@ from __future__ import annotations
 import contextlib
 import logging
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict
 from threading import Event
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from textual import work
@@ -50,7 +52,11 @@ from ...experiment import (
     run_sequence,
     save_step_results,
 )
+from ..instruments import ShutterHandle, _VisaHandle
 from ..workers import LastRun
+
+if TYPE_CHECKING:
+    from ..app import IyzeeApp
 
 log = logging.getLogger("iyzee.tui")
 
@@ -67,6 +73,11 @@ class SweepAborted(Exception):
 
 class SweepScreen(Screen):
     """Pick a sweep type, configure it, run it, and watch it live."""
+
+    @property
+    def iyzee_app(self) -> IyzeeApp:
+        """``self.app`` narrowed to the concrete app type (see ConnectScreen.iyzee_app)."""
+        return cast("IyzeeApp", self.app)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -137,10 +148,17 @@ class SweepScreen(Screen):
     # -- kicking off the run -------------------------------------------------
 
     def _start_sweep(self) -> None:
-        mx_handle = self.app.handles.get("mxa")
+        mx_handle = self.iyzee_app.handles.get("mxa")
         if mx_handle is None:
             self.notify("Connect the MXA first (Connect screen).", severity="error")
             return
+        # The Connect screen always builds "mxa" from a _VisaHandle and
+        # "shutter" from a ShutterHandle (see instruments.INSTRUMENTS) —
+        # handles is typed dict[str, InstrumentHandle] because that's all
+        # the Connect screen itself needs, but this screen needs the
+        # concrete wrapper's .device/.shutter, which aren't on that
+        # narrower Protocol.
+        mx_handle = cast(_VisaHandle, mx_handle)
 
         kind = self.query_one("#sweep-type", Select).value
         try:
@@ -148,12 +166,12 @@ class SweepScreen(Screen):
                 steps, config = self._build_bandwidth_run()
                 shutter = None
             else:
-                shutter_handle = self.app.handles.get("shutter")
-                if shutter_handle is None or shutter_handle.shutter is None:
+                shutter_handle = self.iyzee_app.handles.get("shutter")
+                if shutter_handle is None or cast(ShutterHandle, shutter_handle).shutter is None:
                     self.notify("Connect the shutter first (Connect screen).", severity="error")
                     return
                 steps, config = self._build_frequency_run()
-                shutter = shutter_handle.shutter
+                shutter = cast(ShutterHandle, shutter_handle).shutter
         except ValueError as exc:
             self.notify(f"Invalid sweep parameters: {exc}", severity="error")
             return
@@ -172,7 +190,7 @@ class SweepScreen(Screen):
         self.query_one("#abort-sweep", Button).disabled = False
         self._run(mx_handle.device, shutter, steps, config, kind)
 
-    def _build_bandwidth_run(self) -> tuple[list[Step], AnalyzerConfig]:
+    def _build_bandwidth_run(self) -> tuple[Sequence[Step], AnalyzerConfig]:
         start = _positive_float(self.query_one("#rbw-start", Input).value, "RBW start")
         stop = _positive_float(self.query_one("#rbw-stop", Input).value, "RBW stop")
         count = _positive_int(self.query_one("#rbw-steps", Input).value, "Steps")
@@ -182,7 +200,7 @@ class SweepScreen(Screen):
         )
         return bandwidth_sweep_steps(rbw_values), config
 
-    def _build_frequency_run(self) -> tuple[list[Step], AnalyzerConfig]:
+    def _build_frequency_run(self) -> tuple[Sequence[Step], AnalyzerConfig]:
         center = _positive_float(self.query_one("#freq-center", Input).value, "Laser center")
         channel = _positive_int(self.query_one("#freq-channel", Input).value, "Wavemeter channel")
         points = _positive_int(self.query_one("#freq-points", Input).value, "Points")
@@ -216,7 +234,7 @@ class SweepScreen(Screen):
             log.exception("sweep screen: UI update from worker thread failed")
 
     @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
-    def _run(self, mx, shutter, steps: list[Step], config: AnalyzerConfig, kind: str) -> None:
+    def _run(self, mx, shutter, steps: Sequence[Step], config: AnalyzerConfig, kind: str) -> None:
         # Hold the MXA's lock (and the shutter's, for a frequency sweep) for
         # the whole run, not just individual calls — a sweep is one logical
         # operation, and interleaving a console cell's commands partway
@@ -224,9 +242,9 @@ class SweepScreen(Screen):
         # This is the same lock instruments.LockedProxy acquires per call
         # for console code, and ConnectScreen acquires around connect/
         # disconnect (see IyzeeApp.instrument_locks).
-        locks = [self.app.instrument_locks["mxa"]]
+        locks = [self.iyzee_app.instrument_locks["mxa"]]
         if shutter is not None:
-            locks.append(self.app.instrument_locks["shutter"])
+            locks.append(self.iyzee_app.instrument_locks["shutter"])
 
         with contextlib.ExitStack() as stack:
             for lock in locks:
@@ -298,7 +316,7 @@ class SweepScreen(Screen):
 
         savedir = create_dirs(name=kind)
         path = save_step_results(self._collected, savedir)
-        self.app.last_run = LastRun(kind=kind, results=list(self._collected), path=path)
+        self.iyzee_app.last_run = LastRun(kind=kind, results=list(self._collected), path=path)
         status = "aborted" if aborted else "finished"
         log.write(f"Sweep {status}: {len(self._collected)} point(s) saved to {path}")
         self.notify(f"Saved {len(self._collected)} point(s) to {path.name}")

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+from typing import cast
 
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.document._document import Document
 from textual.events import Key
 from textual.widgets import Footer, RichLog, Static, TextArea
 from textual_vim_textarea import Mode, VimTextArea
@@ -191,7 +193,13 @@ class IyzeeConsole(Vertical):
     def action_complete(self) -> None:
         text_area = self.query_one(TextArea)
         source = text_area.text
-        cursor_pos = text_area.document.get_index_from_location(text_area.cursor_location)
+        # TextArea.document is typed as the abstract DocumentBase (it could
+        # in principle be a custom document type), but TextArea only ever
+        # constructs a concrete Document (or SyntaxAwareDocument, which
+        # subclasses it) — see textual.widgets._text_area.TextArea.__init__.
+        # The offset<->location helpers below live on that concrete type.
+        document = cast(Document, text_area.document)
+        cursor_pos = document.get_index_from_location(text_area.cursor_location)
         _completed, matches = self.shell.complete(source, cursor_pos)
         if not matches:
             self._hide_completions()
@@ -201,9 +209,9 @@ class IyzeeConsole(Vertical):
         token_start = self._completion_token_start(source, cursor_pos)
         current = source[token_start:cursor_pos]
         if common and common != current:
-            start = text_area.document.get_location_from_index(token_start)
+            start = document.get_location_from_index(token_start)
             text_area.replace(common, start, text_area.cursor_location)
-            new_cursor = text_area.document.get_location_from_index(token_start + len(common))
+            new_cursor = document.get_location_from_index(token_start + len(common))
             text_area.move_cursor(new_cursor)
         self._show_completions(matches, common)
 

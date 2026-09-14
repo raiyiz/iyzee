@@ -58,6 +58,15 @@ def test_disconnecting_mxa_is_immediately_reflected_in_lab_no_refresh_needed() -
             class FakeHandle:
                 device = object()
 
+                def connect(self) -> None:
+                    raise NotImplementedError
+
+                def disconnect(self) -> None:
+                    raise NotImplementedError
+
+                def probe(self) -> str:
+                    raise NotImplementedError
+
             app.handles["mxa"] = FakeHandle()
             assert repr(lab.mx) == repr(FakeHandle.device)
 

@@ -12,6 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from iyzee.experiment import StepResult
 from iyzee.tui.instruments import LockedProxy
 from iyzee.tui.ipython import IyzeeIPython, LabProxy
 from iyzee.tui.workers import LastRun
@@ -96,9 +97,11 @@ def test_lab_results_and_last_run_reflect_the_latest_sweep() -> None:
     assert lab.results == []
     assert lab.last_run is None
 
-    app.last_run = LastRun(kind="bandwidth", results=["pt0"], path=None)
-    assert lab.results == ["pt0"]
-    assert lab.last_run.kind == "bandwidth"
+    app.last_run = LastRun(kind="bandwidth", results=[StepResult("pt0", 0.0, "Hz", {})], path=None)
+    assert lab.results == app.last_run.results
+    last_run = lab.last_run
+    assert last_run is not None
+    assert last_run.kind == "bandwidth"
 
 
 def test_lab_is_read_only() -> None:

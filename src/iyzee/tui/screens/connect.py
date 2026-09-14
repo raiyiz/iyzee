@@ -10,6 +10,7 @@ touched back on the main thread via ``call_from_thread``.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, cast
 
 from textual import work
 from textual.app import ComposeResult
@@ -20,6 +21,9 @@ from textual.widgets import DataTable, Footer, Header, Static
 from ..instruments import INSTRUMENTS, InstrumentSpec
 from ..workers import ConnectOutcome
 
+if TYPE_CHECKING:
+    from ..app import IyzeeApp
+
 log = logging.getLogger("iyzee.tui")
 
 STATUS_COL = "status"
@@ -28,6 +32,17 @@ DETAIL_COL = "detail"
 
 class ConnectScreen(Screen):
     """Table of instruments with live connect/disconnect status."""
+
+    @property
+    def iyzee_app(self) -> IyzeeApp:
+        """``self.app`` narrowed to the concrete app type.
+
+        ``Screen.app`` is typed as ``App[Any]`` in Textual's stubs, which
+        doesn't know about ``handles``/``instrument_locks`` — this app is
+        always an ``IyzeeApp`` at runtime (``IyzeeApp().run()`` is the
+        only entry point), so the cast is safe.
+        """
+        return cast("IyzeeApp", self.app)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -56,7 +71,7 @@ class ConnectScreen(Screen):
     def _refresh_from_app_state(self) -> None:
         table = self.query_one(DataTable)
         for spec in INSTRUMENTS:
-            if spec.key in self.app.handles:
+            if spec.key in self.iyzee_app.handles:
                 table.update_cell(spec.key, STATUS_COL, "connected")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -71,7 +86,7 @@ class ConnectScreen(Screen):
         spec = next((s for s in INSTRUMENTS if event.row_key == s.key), None)
         if spec is None:
             return
-        if spec.key in self.app.handles:
+        if spec.key in self.iyzee_app.handles:
             self._disconnect(spec)
         else:
             self._connect(spec)
@@ -98,7 +113,7 @@ class ConnectScreen(Screen):
     def _connect(self, spec: InstrumentSpec) -> None:
         self._ui(self._set_row, spec.key, "connecting...", "-")
         try:
-            with self.app.instrument_locks[spec.key]:
+            with self.iyzee_app.instrument_locks[spec.key]:
                 handle = spec.build()
                 handle.connect()
                 detail = handle.probe()
@@ -107,17 +122,17 @@ class ConnectScreen(Screen):
             self._ui(self._set_row, spec.key, "error", str(exc))
             self._ui(self.notify, f"{spec.label}: {exc}", severity="error", timeout=6)
             return
-        self.app.handles[spec.key] = handle
+        self.iyzee_app.handles[spec.key] = handle
         outcome = ConnectOutcome(key=spec.key, ok=True, detail=detail)
         self._ui(self._set_row, outcome.key, "connected", outcome.detail)
 
     @work(thread=True, exclusive=True, group="connect", exit_on_error=False)
     def _disconnect(self, spec: InstrumentSpec) -> None:
-        handle = self.app.handles.pop(spec.key, None)
+        handle = self.iyzee_app.handles.pop(spec.key, None)
         self._ui(self._set_row, spec.key, "disconnecting...", "-")
         if handle is not None:
             try:
-                with self.app.instrument_locks[spec.key]:
+                with self.iyzee_app.instrument_locks[spec.key]:
                     handle.disconnect()
             except Exception as exc:  # noqa: BLE001
                 log.exception("error closing %s", spec.key)
