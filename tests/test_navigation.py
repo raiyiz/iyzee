@@ -42,8 +42,15 @@ def test_screen_navigation_uses_textual_modes() -> None:
 
             await pilot.press("i")
             assert isinstance(app.screen, ConsoleScreen)
+            assert app.screen.focused is not None
+            assert app.screen.focused.id == "console-input"
 
-            await pilot.press("c")
+            await pilot.press("f1")
             assert isinstance(app.screen, ConnectScreen)
+
+            await pilot.press("f4")
+            assert isinstance(app.screen, ConsoleScreen)
+            assert app.screen.focused is not None
+            assert app.screen.focused.id == "console-input"
 
     asyncio.run(scenario())
