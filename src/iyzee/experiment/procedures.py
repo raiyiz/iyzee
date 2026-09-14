@@ -19,6 +19,11 @@ from .runner import run_sequence
 from .step import ExperimentContext, StepResult
 
 
+# Instrument keys required before each procedure can run.
+BANDWIDTH_SWEEP_INSTRUMENTS: tuple[str, ...] = ("mxa",)
+FREQUENCY_SWEEP_INSTRUMENTS: tuple[str, ...] = ("mxa", "shutter", "wavemeter")
+
+
 @dataclass
 class BandwidthStep:
     """Acquire squeezing/shot-noise traces at one resolution bandwidth.
