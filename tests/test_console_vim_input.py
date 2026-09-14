@@ -14,7 +14,7 @@ import asyncio
 from textual_vim_textarea import Mode
 
 from iyzee.tui.app import IyzeeApp
-from iyzee.tui.widgets.console import IyzeeConsole, _ConsoleInput
+from iyzee.tui.screens.console import IyzeeConsole, _ConsoleInput
 
 
 def test_console_input_starts_in_insert_mode_for_immediate_typing() -> None:

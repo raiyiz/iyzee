@@ -12,24 +12,20 @@ src/iyzee/
 ├── main.py               # CLI entry point: own resources, run a procedure, plot, save
 ├── base.py                # shared VISA lifecycle, instrument IPs, PSU channels
 ├── mxa.py                 # Keysight MXA SCPI/VISA driver
-├── power.py               # power supply + optical shutter control
-├── scope.py               # LeCroy oscilloscope communication
+├── power.py                # power supply + optical shutter control
+├── scope.py                # LeCroy oscilloscope communication
 ├── wavemeter_readout.py  # wavemeter / laser setpoint control
 ├── experiment/            # composable measurement procedures
-│   ├── step.py            # Step protocol, ExperimentContext, StepResult
-│   ├── runner.py          # run_sequence(): executes a list of Steps, with progress callback
-│   ├── config.py          # AnalyzerConfig, prepare_analyzer(), acquire_trace()
-│   ├── procedures.py      # BandwidthStep, FrequencyStep, run_*_sweep()
-│   ├── persistence.py     # create_dirs(), save_data(), save_step_results()
-│   └── plotting.py        # build_figure(), multiplot()
+│   ├── core.py             # Step protocol, ExperimentContext, StepResult, run_sequence()
+│   ├── procedures.py      # AnalyzerConfig, prepare_analyzer(), acquire_trace(), BandwidthStep, FrequencyStep, run_*_sweep()
+│   └── io.py                # create_dirs(), save_data(), save_step_results(), build_figure(), multiplot()
 └── tui/                    # interactive terminal UI (`iyzee-tui`)
     ├── app.py              # IyzeeApp: screens, key dispatch, shared app state
     ├── instruments.py      # InstrumentSpec registry, LockedProxy
     ├── ipython.py          # embedded IPython shell, LabProxy
     ├── workers.py          # cross-thread message types (LastRun, StepProgress, ...)
-    ├── navigation/         # NavigationPolicy: is a focused widget editable right now?
-    ├── screens/            # ConnectScreen, SweepScreen, TracesScreen, ConsoleScreen
-    └── widgets/            # IyzeeConsole, the console's Vim-mode text input
+    └── screens/            # ConnectScreen, SweepScreen, TracesScreen, ConsoleScreen
+        └── console.py      # ConsoleScreen + IyzeeConsole, the console's Vim-mode input widget
 ```
 
 ## Running the TUI
@@ -56,9 +52,10 @@ traversal) and `:` opens Textual's built-in Command Palette — the app's
 existing actions are exposed there without a second command parser or a
 hand-rolled modal-state machine. A widget that's actually accepting text
 input (an `Input`, the console's text area) keeps ownership of its own
-keys, checked via `NavigationPolicy.is_insert()` rather than a separately
-maintained "mode" that could drift out of sync with what's really
-focused.
+keys: Textual routes keys to the focused widget first and only falls
+through to `IyzeeApp`'s own `BINDINGS` if that widget doesn't handle them,
+so there's no separately maintained "mode" that could drift out of sync
+with what's really focused.
 
 ## How a measurement runs
 
@@ -190,8 +187,10 @@ Outside editable widgets, `j`/`k` use Textual's own focus traversal
 `:` opens Textual's built-in Command Palette, exposing the app's existing
 actions without a second command parser or a separately maintained modal
 state machine. Whether a key is "global navigation" or "text editing" is
-decided by `NavigationPolicy.is_insert()` — a pure check of what's currently
-focused, not a mode flag that has to be kept in sync with reality.
+decided by Textual itself: a focused widget's own bindings (an `Input`'s
+text-entry keys, the console's Vim motions) take priority over `IyzeeApp`'s
+`BINDINGS`, so there's no hand-maintained mode flag that has to be kept in
+sync with reality.
 
 ## Safety notes
 
@@ -247,10 +246,10 @@ Keep the separation simple while the project is small:
    sit on top of the same `experiment/` and driver layers below rather than
    duplicating anything from them.
 2. **`experiment/procedures.py` — what to measure:** concrete procedures,
-   scan parameters, sequencing.
-3. **`experiment/{step,runner,config,persistence,plotting}.py` — the
-   machinery a procedure is built from:** the `Step` abstraction, execution,
-   analyzer setup, saving, and plotting.
+   analyzer setup, scan parameters, sequencing.
+3. **`experiment/{core,io}.py` — the machinery a procedure is built from:**
+   the `Step` abstraction and execution (`core.py`), saving and plotting
+   (`io.py`).
 4. **`mxa.py` / `power.py` / `scope.py` / `wavemeter_readout.py` — how to
    control each instrument:** reusable, hardware-specific operations.
 5. **`base.py` — shared infrastructure:** connection lifecycle, addresses,
@@ -258,8 +257,9 @@ Keep the separation simple while the project is small:
 
 As more procedures are added, split `procedures.py` further rather than
 letting one file grow indefinitely. The same applies to `tui/screens/` as
-more screens are added, and `tui/navigation/` if app-wide keyboard
-navigation grows beyond what `NavigationPolicy` currently covers.
+more screens are added. Keyboard navigation itself doesn't need its own
+module — it's Textual's native focus/binding-priority system end to end,
+with nothing app-specific to maintain there.
 
 ## Known gaps
 

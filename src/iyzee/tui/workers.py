@@ -50,7 +50,7 @@ class LastRun:
 class StepProgress:
     """One ``on_step`` callback from ``run_sequence``, made UI-friendly.
 
-    Mirrors ``iyzee.experiment.runner.StepCallback`` but as a plain value
+    Mirrors ``iyzee.experiment.core.StepCallback`` but as a plain value
     that's easy to pass through ``call_from_thread`` and easy to test.
     """
 

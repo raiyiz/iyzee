@@ -1,11 +1,62 @@
-"""Run a sequence of experiment steps against a shared context."""
+"""Core abstractions and the runner for composable, hardware-driving
+experiment steps.
+
+``Step``/``StepResult``/``ExperimentContext`` describe one reproducible
+measurement point; ``run_sequence`` runs a list of them against a shared,
+already-connected context. See ``experiment/procedures.py`` for concrete
+steps built from these, and ``experiment/io.py`` for saving/plotting
+results.
+"""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
-from .step import ExperimentContext, Step, StepResult
+
+@dataclass
+class StepResult:
+    """The outcome of running one experiment step.
+
+    ``traces`` holds named acquisitions (e.g. ``"squeezing"``, ``"shot_noise"``)
+    so a step can capture more than the historical squeezing/shot-noise pair
+    without changing this schema. ``meta`` carries whatever instrument state
+    or context is relevant to reproducing this specific point (e.g. RBW/VBW,
+    averaging count, laser setpoint) and is what makes a saved measurement
+    self-describing rather than a bare array of numbers.
+    """
+
+    label: str
+    x_value: float
+    x_unit: str
+    traces: dict[str, Any]
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ExperimentContext:
+    """Already-connected hardware handles and run-level metadata shared by
+    every step in a sequence.
+
+    A context is built once per run and passed to each step's ``run()``;
+    steps do not open or close connections themselves — that stays the
+    responsibility of the procedure that builds the context, the same way
+    ``record_bw_seq``/``record_freq_seq`` used to own connect/disconnect.
+    """
+
+    mx: Any
+    run_id: str
+    shutter: Any | None = None
+    config: dict[str, Any] = field(default_factory=dict)
+
+
+class Step(Protocol):
+    """A single reproducible measurement point in an experiment sequence."""
+
+    def run(self, ctx: ExperimentContext) -> StepResult: ...
+
 
 log = logging.getLogger("iyzee.experiment")
 

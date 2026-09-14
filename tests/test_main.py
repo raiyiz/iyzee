@@ -1,7 +1,7 @@
 """main.py is the application entry point and hardware resource boundary."""
 
 import iyzee.main as main_module
-from iyzee.experiment.step import StepResult
+from iyzee.experiment.core import StepResult
 
 
 class FakeMXA:

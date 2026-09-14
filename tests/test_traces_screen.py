@@ -1,6 +1,6 @@
 """Tests for TracesScreen's archive loading and listing.
 
-These write real .npz fixtures with iyzee.experiment.persistence rather
+These write real .npz fixtures with iyzee.experiment.io rather
 than hand-rolling the archive format, so the tests track the actual
 on-disk schema instead of a guess at it. _DATA_ROOT is monkeypatched to
 a tmp_path for every test — nothing here touches the package's real

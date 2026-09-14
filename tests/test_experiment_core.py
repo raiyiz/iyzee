@@ -2,8 +2,7 @@ import logging
 
 import pytest
 
-from iyzee.experiment.runner import run_sequence
-from iyzee.experiment.step import ExperimentContext, StepResult
+from iyzee.experiment.core import ExperimentContext, StepResult, run_sequence
 
 
 class RecordingStep:
