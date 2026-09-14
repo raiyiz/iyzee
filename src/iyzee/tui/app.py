@@ -6,12 +6,13 @@ import threading
 from collections import defaultdict
 
 from textual.app import App
+from textual.binding import Binding
 
+from .instruments import InstrumentHandle
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.sweep import SweepScreen
 from .screens.traces import TracesScreen
-from .instruments import InstrumentHandle
 from .workers import LastRun
 
 
@@ -27,10 +28,14 @@ class IyzeeApp(App):
     # handling, while Footer and the command palette expose the same
     # navigation to mouse and keyboard users.
     BINDINGS = [
-        ("c", "switch_mode('connect')", "Connect"),
-        ("s", "switch_mode('sweep')", "Sweep"),
-        ("t", "switch_mode('traces')", "Traces"),
-        ("i", "switch_mode('console')", "Console"),
+        Binding("c", "switch_mode('connect')", "Connect"),
+        Binding("s", "switch_mode('sweep')", "Sweep"),
+        Binding("t", "switch_mode('traces')", "Traces"),
+        Binding("i", "switch_mode('console')", "Console"),
+        Binding("f1", "switch_mode('connect')", "Connect", priority=True),
+        Binding("f2", "switch_mode('sweep')", "Sweep", priority=True),
+        Binding("f3", "switch_mode('traces')", "Traces", priority=True),
+        Binding("f4", "switch_mode('console')", "Console", priority=True),
     ]
     MODES = {
         "connect": ConnectScreen,
