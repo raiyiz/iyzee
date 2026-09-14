@@ -20,6 +20,7 @@ import pytest
 from iyzee.tui import instruments as instruments_mod
 from iyzee.tui.instruments import (
     INSTRUMENTS,
+    InstrumentSpec,
     LockedProxy,
     ScopeHandle,
     ShutterHandle,
@@ -234,3 +235,34 @@ def test_instrument_registry_keys_are_unique() -> None:
 
 def test_instrument_registry_labels_are_non_empty() -> None:
     assert all(spec.label for spec in INSTRUMENTS)
+
+
+def test_instrument_spec_build_uses_defaults() -> None:
+    built: list[dict] = []
+
+    def make(config):
+        built.append(dict(config))
+        return object()
+
+    spec = InstrumentSpec("fake", "Fake", make, {"ip": "10.0.0.1", "timeout_ms": 1000})
+    assert spec.build() is not None
+    assert built == [{"ip": "10.0.0.1", "timeout_ms": 1000}]
+
+
+def test_instrument_spec_build_overrides_defaults() -> None:
+    built: list[dict] = []
+
+    def make(config):
+        built.append(dict(config))
+        return object()
+
+    spec = InstrumentSpec("fake", "Fake", make, {"ip": "10.0.0.1", "timeout_ms": 1000})
+    spec.build({"ip": "10.0.0.2"})
+    assert built == [{"ip": "10.0.0.2", "timeout_ms": 1000}]
+
+
+def test_instrument_spec_build_does_not_mutate_defaults() -> None:
+    defaults = {"ip": "10.0.0.1"}
+    spec = InstrumentSpec("fake", "Fake", lambda config: object(), defaults)
+    spec.build({"ip": "10.0.0.2"})
+    assert defaults == {"ip": "10.0.0.1"}
