@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 class ConsoleScreen(Screen):
     """A live Python/IPython console bound to the app's current instruments."""
 
+    AUTO_FOCUS = "#console-input"
+
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static(
