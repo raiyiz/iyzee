@@ -1,5 +1,3 @@
-import threading
-
 import pytest
 
 from iyzee.experiment.config import (
