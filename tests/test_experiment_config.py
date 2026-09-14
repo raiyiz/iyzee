@@ -5,6 +5,10 @@ from iyzee.experiment.config import (
     build_instruments,
     select_instruments,
 )
+from iyzee.experiment.procedures import (
+    BANDWIDTH_SWEEP_INSTRUMENTS,
+    FREQUENCY_SWEEP_INSTRUMENTS,
+)
 from iyzee.tui.instruments import InstrumentSpec
 
 
@@ -67,6 +71,11 @@ def test_build_instruments_only_builds_required_handles_and_applies_overrides():
 
     assert list(handles) == ["mxa"]
     assert built == [{"ip": "local-mxa"}]
+
+
+def test_procedures_declare_only_the_instruments_they_use():
+    assert BANDWIDTH_SWEEP_INSTRUMENTS == ("mxa",)
+    assert FREQUENCY_SWEEP_INSTRUMENTS == ("mxa", "shutter", "wavemeter")
 
 
 class _FakeHandle:
