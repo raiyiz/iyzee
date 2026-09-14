@@ -39,7 +39,8 @@ class _ConsoleInput(VimTextArea):
       ``self.mode`` still reads INSERT. That ordering was verified
       directly against textual-vim-textarea 1.2.0, not assumed.
     - 2nd Escape (already NORMAL): our check now sees NORMAL and blurs,
-      handing focus back to the app-level nav (`IyzeeApp.on_key`).
+      handing focus back to Textual's app-level bindings (the same
+      navigation shown in the Footer and command palette).
 
     This mirrors how nested modal contexts are usually resolved elsewhere
     (e.g. Neovim's terminal mode needs its own escape *out* of terminal
