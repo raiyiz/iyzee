@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..mxa import KeysightMXA
-from ..tui.instruments import InstrumentSpec
+
+if TYPE_CHECKING:
+    from ..tui.instruments import InstrumentSpec
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
