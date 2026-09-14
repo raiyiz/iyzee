@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from ..mxa import KeysightMXA
+from ..tui.instruments import InstrumentSpec
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
@@ -21,6 +24,21 @@ class AnalyzerConfig:
     res_bw_hz: float = 10e3
     avg_type: str = "LOG"
     trig_source: str = "EXT"
+
+
+def instrument_settings(
+    spec: InstrumentSpec,
+    overrides: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve one instrument's defaults with optional local overrides.
+
+    The returned dictionary is independent of the spec and override mappings,
+    so callers can safely modify it before constructing an instrument.
+    """
+    settings = dict(spec.defaults)
+    if overrides is not None:
+        settings.update(overrides)
+    return settings
 
 
 def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
