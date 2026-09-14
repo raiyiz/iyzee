@@ -17,8 +17,8 @@ code changes required.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ..base import CH, IP
@@ -99,7 +99,7 @@ class ShutterHandle:
 
     @property
     def shutter(self) -> ShutterControl | None:
-        """The live :class:`ShutterControl`, once connected."""
+        """The live :class:`~iyzee.power.ShutterControl`, once connected."""
         return self._shutter
 
 
@@ -160,10 +160,15 @@ class InstrumentSpec:
 
     key: str
     label: str
-    make: Callable[[], InstrumentHandle]
+    make: Callable[[Mapping[str, Any]], InstrumentHandle]
+    defaults: Mapping[str, Any] = field(default_factory=dict)
 
-    def build(self) -> InstrumentHandle:
-        return self.make()
+    def build(self, overrides: Mapping[str, Any] | None = None) -> InstrumentHandle:
+        """Build a handle from the spec defaults plus optional overrides."""
+        settings = dict(self.defaults)
+        if overrides is not None:
+            settings.update(overrides)
+        return self.make(settings)
 
 
 class LockedProxy:
@@ -213,8 +218,28 @@ class LockedProxy:
 
 
 INSTRUMENTS: list[InstrumentSpec] = [
-    InstrumentSpec("mxa", "Keysight MXA", lambda: _VisaHandle(KeysightMXA())),
-    InstrumentSpec("shutter", "Shutter (PSU CH3)", lambda: ShutterHandle()),
-    InstrumentSpec("wavemeter", "Wavemeter (WS-7)", lambda: WavemeterHandle()),
-    InstrumentSpec("scope", "LeCroy scope [legacy]", lambda: ScopeHandle()),
+    InstrumentSpec(
+        "mxa",
+        "Keysight MXA",
+        lambda cfg: _VisaHandle(KeysightMXA(ip=cfg["ip"], timeout_ms=cfg["timeout_ms"])),
+        {"ip": IP.NOISE_ANALYZER, "timeout_ms": 5_000},
+    ),
+    InstrumentSpec(
+        "shutter",
+        "Shutter (PSU CH3)",
+        lambda cfg: ShutterHandle(chan=cfg["channel"], ip=cfg["ip"]),
+        {"channel": CH.THREE, "ip": IP.POWER_SUPPLY},
+    ),
+    InstrumentSpec(
+        "wavemeter",
+        "Wavemeter (WS-7)",
+        lambda cfg: WavemeterHandle(channel=cfg["channel"]),
+        {"channel": 0},
+    ),
+    InstrumentSpec(
+        "scope",
+        "LeCroy scope [legacy]",
+        lambda cfg: ScopeHandle(ip=cfg["ip"]),
+        {"ip": IP.SCOPE},
+    ),
 ]
