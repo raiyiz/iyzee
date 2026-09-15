@@ -4,8 +4,10 @@ it hosts, kept together since the widget has no other caller."""
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, cast
+import re
+from typing import TYPE_CHECKING, Any, cast
 
+from IPython.core.displaypub import DisplayPublisher
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
@@ -97,6 +99,14 @@ class _ConsoleInput(VimTextArea):
         # ':' command line, ...) whenever it's wanted.
         self.mode = Mode.INSERT
 
+    def watch_mode(self, mode: Mode) -> None:
+        # VimTextArea's own watch_mode only posts a ModeChanged message;
+        # nothing in the UI otherwise shows which mode is active, so a
+        # mode you can't see becomes a mode you mistype into. Surface it
+        # on the console's status line instead.
+        super().watch_mode(mode)
+        self.console.set_vim_mode(mode)
+
     def on_key(self, event: Key) -> None:
         if event.key == "escape" and self.mode is Mode.NORMAL:
             self.blur()
@@ -164,6 +174,10 @@ class IyzeeConsole(Vertical):
         self.shell = shell
         self._history_cursor: int | None = None
         self._history_draft = ""
+        self._lab_text = ""
+        # Matches _ConsoleInput's initial Mode.INSERT until the first
+        # watch_mode fire (which may happen before this widget is mounted).
+        self._mode_label = "-- INSERT --"
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="console-output", wrap=True, markup=True, highlight=False)
@@ -173,6 +187,7 @@ class IyzeeConsole(Vertical):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.shell.shell.display_pub = _ConsoleDisplayPublisher(self)
         self._write_banner()
         self.refresh_status()
         self.query_one(TextArea).focus()
@@ -183,7 +198,18 @@ class IyzeeConsole(Vertical):
         without needing this or any other refresh; see LabProxy."""
         lab = self.shell.shell.user_ns.get("lab")
         connected = ", ".join(lab.connected) if lab is not None else ""
-        self._set_status(f"lab: {connected or 'nothing connected yet'}")
+        self._lab_text = f"lab: {connected or 'nothing connected yet'}"
+        self._render_status()
+
+    def set_vim_mode(self, mode: Mode) -> None:
+        """Update the vim mode indicator. Called from
+        `_ConsoleInput.watch_mode` — see that method for why."""
+        self._mode_label = f"-- {mode.value} --"
+        if self.is_mounted:
+            self._render_status()
+
+    def _render_status(self) -> None:
+        self._set_status(f"{self._mode_label}   {self._lab_text}")
 
     def _write_banner(self) -> None:
         output = self.query_one(RichLog)
@@ -300,3 +326,62 @@ class IyzeeConsole(Vertical):
             self.query_one(TextArea).load_text(self._history_draft)
         else:
             self.query_one(TextArea).load_text(history[self._history_cursor])
+
+
+class _ConsoleDisplayPublisher(DisplayPublisher):
+    """Route IPython's rich ``display()`` output into the console pane.
+
+    The base :class:`DisplayPublisher` only ever does anything with the
+    ``text/plain`` entry of a display bundle (``print(data["text/plain"])``)
+    — every other mimetype (``text/html`` from a pandas ``DataFrame``,
+    ``image/png`` from a matplotlib figure, ...) is silently dropped, so
+    ``display(df)`` degraded to a bare ``<DataFrame at 0x...>`` repr with no
+    indication anything was lost.
+
+    This renders ``text/html`` as plain text (tags stripped — a real HTML
+    renderer is out of scope here) and gives image mimetypes a one-line
+    placeholder instead of vanishing, so "a plot was produced" is at least
+    visible. Actually rendering images inline (sixel/kitty graphics
+    protocols) needs real-terminal verification this pass doesn't have
+    budget for — tracked as a follow-up in
+    ``docs/console-improvements-plan.md``.
+
+    Runs inside the execution worker thread (``IyzeeConsole._execute``),
+    not the UI thread, so writes are marshalled via ``call_from_thread``
+    like every other cross-thread UI update in this widget. Note this
+    writes to the output log *immediately*, whereas a cell's own
+    stdout/stderr is only flushed once the whole cell finishes (see
+    ``execute()`` in ``ipython.py``) — a ``print()`` before a ``display()``
+    call in the same cell will visibly appear *after* it. Fixing that
+    ordering means streaming stdout live too (plan item #4); not attempted
+    here.
+    """
+
+    def __init__(self, console: IyzeeConsole) -> None:
+        super().__init__()
+        self.console = console
+
+    def publish(
+        self,
+        data: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self.console.app.call_from_thread(self._write, data)
+
+    def _write(self, data: dict[str, Any]) -> None:
+        output = self.console.query_one(RichLog)
+        if "text/html" in data:
+            text = re.sub(r"<[^>]+>", "", data["text/html"]).strip()
+            output.write(escape(text) if text else "[dim](empty)[/]")
+            return
+        for mime in data:
+            if mime.startswith("image/"):
+                size = len(data[mime])
+                output.write(
+                    f"[dim]\\[{mime}, {size} bytes — inline image display "
+                    "not supported in this console][/]"
+                )
+                return
+        if "text/plain" in data:
+            output.write(escape(data["text/plain"]))
