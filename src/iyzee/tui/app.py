@@ -27,6 +27,15 @@ class IyzeeApp(App):
     # ``on_key``. This means editable widgets retain their normal key
     # handling, while Footer and the command palette expose the same
     # navigation to mouse and keyboard users.
+    #
+    # "escape" and "j"/"k" specifically: Textual's own Input/TextArea
+    # widgets don't bind Escape to anything, so it already bubbles here
+    # untouched — this doesn't intercept a key those widgets wanted.
+    # "j"/"k" bind to the same focus_next/focus_previous actions Tab/
+    # Shift+Tab already use; an editable widget consumes plain "j"/"k"
+    # keystrokes itself (typing the character) before they ever reach
+    # this binding, so it only fires when nothing is claiming them —
+    # i.e. exactly the "outside editable widgets" case.
     BINDINGS = [
         Binding("c", "switch_mode('connect')", "Connect"),
         Binding("s", "switch_mode('sweep')", "Sweep"),
@@ -36,6 +45,9 @@ class IyzeeApp(App):
         Binding("f2", "switch_mode('sweep')", "Sweep", priority=True),
         Binding("f3", "switch_mode('traces')", "Traces", priority=True),
         Binding("f4", "switch_mode('console')", "Console", priority=True),
+        Binding("escape", "blur_focused", "Leave field", show=False),
+        Binding("j", "focus_next", "Focus next", show=False),
+        Binding("k", "focus_previous", "Focus previous", show=False),
     ]
     MODES = {
         "connect": ConnectScreen,
@@ -65,6 +77,18 @@ class IyzeeApp(App):
 
     def on_mount(self) -> None:
         self.switch_mode(self.DEFAULT_MODE)
+
+    def action_blur_focused(self) -> None:
+        """Leave the currently focused field, if any.
+
+        This is what makes "escape" a real "back to navigation" motion for
+        plain Input fields (RBW, IP addresses, ...), matching the escape
+        the console's vim mode already has — those widgets have no notion
+        of their own to leave, so without this, focusing one meant "j"/"k"
+        typed into it forever instead of moving focus.
+        """
+        if self.focused is not None:
+            self.focused.blur()
 
 
 def run() -> None:

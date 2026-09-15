@@ -120,3 +120,46 @@ Exhaustive test coverage per item — token-constrained this round, so each
 item gets 1–2 targeted regression tests (mirroring the style of the
 existing `test_help_syntax_does_not_hit_the_interactive_pager`), not a
 full matrix. Flagged explicitly per item above rather than left implicit.
+
+---
+
+## Addendum: app-wide vim navigation + real console plotting
+
+Two more fixes landed in this same pass, prompted by "vim mode doesn't
+work for most buttons" and "how do we plot from the console":
+
+**`j`/`k` focus navigation didn't actually exist anywhere.** The README
+claimed "outside editable widgets, `j`/`k` move focus" — that was
+aspirational documentation, not real: confirmed by grep (zero `j`/`k`
+bindings anywhere in `src/iyzee/`) and by running it (pressing `j` in a
+focused `Input` just types the letter `j`). Also confirmed as a side
+effect: plain `Input` fields had no Escape binding either, so once
+focused there was no way out except Tab/click — meaning the global
+screen-switch keys (`c`/`s`/`t`/`i`) were silently swallowed as literal
+text too, not just `j`/`k`. Fixed with two `IyzeeApp`-level bindings
+(`escape` → blur the focused widget, `j`/`k` → `focus_next`/
+`focus_previous`) — no per-screen or per-widget changes, consistent with
+"navigation lives in Textual's bindings, not hand-rolled key
+interpretation." Known limitation, not fixed: this isn't persistent vim
+NORMAL mode — landing on another `Input` re-enters implicit "insert
+mode" for that field, so hopping across several fields is
+`Escape j Escape j...`, matching vim's real modal semantics (NORMAL-mode
+keys don't fire while typing) but not the free-roaming `jjjj` some users
+might expect. A true persistent-mode form would need a modal `Input`
+subclass — real work, not attempted here.
+
+**Matplotlib figures now render into the console.** Registered a
+`text/plain` type-printer for `matplotlib.figure.Figure` on the shell's
+`PlainTextFormatter` (not routed through `_ConsoleDisplayPublisher` from
+item #1 above — that layer only ever sees an already-flattened mimetype
+bundle, by which point the `Figure` object itself is gone) that walks
+`fig.axes[0].lines` and draws into a `PlotextPlot` panel added to the
+console screen, hidden until first used. Reuses `textual-plotext`,
+already a project dependency and already used the same way by the sweep
+screen — no new dependency. One real gotcha hit and fixed during
+implementation: `PlainTextFormatter` type-printers use IPython's
+pretty-printer protocol (`func(obj, printer, cycle)`, write via
+`printer.text(...)`), not a plain `func(obj) -> str` like other
+formatters — easy to miss, caught by testing against the real formatter
+rather than assuming the signature.
+

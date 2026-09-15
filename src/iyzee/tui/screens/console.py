@@ -17,6 +17,7 @@ from textual.document._document import Document
 from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Footer, Header, RichLog, Static, TextArea
+from textual_plotext import PlotextPlot
 from textual_vim_textarea import Mode, VimTextArea
 
 from ..ipython import ExecutionOutput, IyzeeIPython
@@ -142,6 +143,12 @@ class IyzeeConsole(Vertical):
         border: round $primary-darken-1;
         margin: 0 1 1 1;
     }
+    IyzeeConsole #console-plot {
+        height: 12;
+        margin: 0 1 1 1;
+        border: round $primary-darken-1;
+        display: none;
+    }
     IyzeeConsole #console-input {
         height: 7;
         margin: 0 1;
@@ -181,6 +188,7 @@ class IyzeeConsole(Vertical):
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="console-output", wrap=True, markup=True, highlight=False)
+        yield PlotextPlot(id="console-plot")
         yield Static("", id="console-completions")
         yield _ConsoleInput(self)
         yield Static("", id="console-status")
@@ -188,9 +196,66 @@ class IyzeeConsole(Vertical):
 
     def on_mount(self) -> None:
         self.shell.shell.display_pub = _ConsoleDisplayPublisher(self)
+        self._install_figure_plotting()
         self._write_banner()
         self.refresh_status()
         self.query_one(TextArea).focus()
+
+    def _install_figure_plotting(self) -> None:
+        """Render matplotlib Figures into the plot panel instead of the
+        unhelpful default ``<Figure size ... with N Axes>`` text repr.
+
+        Registered as a ``text/plain`` formatter (not routed through
+        ``_ConsoleDisplayPublisher``) because that's the layer that still
+        has the actual ``Figure`` object — by the time data reaches a
+        ``DisplayPublisher.publish()`` call, matplotlib has already
+        flattened it to a mimetype bundle (if it even produced one; a
+        bare ``Figure`` without ``%matplotlib inline``-equivalent wiring
+        doesn't). Covers this codebase's actual shape — simple line plots,
+        the same kind ``experiment.io.build_figure()`` produces — by
+        walking ``fig.axes[0].lines``; anything fancier (subplots beyond
+        the first axes, imshow, 3D) still falls back to the plain repr.
+        """
+        from matplotlib.figure import Figure
+
+        formatter = self.shell.shell.display_formatter.formatters["text/plain"]
+        formatter.for_type(Figure, self._render_figure)
+
+    def _render_figure(self, fig: Any, p: Any, cycle: bool) -> None:
+        # PlainTextFormatter uses IPython.lib.pretty's pretty-printer
+        # protocol for registered type printers: func(obj, printer, cycle)
+        # writing via `p.text(...)`, not a plain `func(obj) -> str`. Easy
+        # to miss since every other formatter (HTML, PNG, ...) just wants
+        # a return value.
+        if cycle:
+            p.text("Figure(...)")
+            return
+        lines = [
+            (list(line.get_xdata()), list(line.get_ydata()), line.get_label())
+            for ax in fig.axes
+            for line in ax.lines
+        ]
+        if not lines:
+            p.text(f"<Figure size {fig.get_size_inches()} with {len(fig.axes)} Axes>")
+            return
+        labels = {
+            "xlabel": fig.axes[0].get_xlabel() if fig.axes else "",
+            "ylabel": fig.axes[0].get_ylabel() if fig.axes else "",
+        }
+        self.app.call_from_thread(self._draw_figure, lines, labels)
+        p.text(f"[plotted {len(lines)} line(s) in the panel above the input]")
+
+    def _draw_figure(self, lines: list[tuple[list, list, str]], labels: dict[str, str]) -> None:
+        plot = self.query_one("#console-plot", PlotextPlot)
+        plot.display = True
+        plot.plt.clear_data()
+        for xdata, ydata, label in lines:
+            plot.plt.plot(xdata, ydata, label=label or None)
+        if labels["xlabel"]:
+            plot.plt.xlabel(labels["xlabel"])
+        if labels["ylabel"]:
+            plot.plt.ylabel(labels["ylabel"])
+        plot.refresh()
 
     def refresh_status(self) -> None:
         """Update the "connected: ..." status line. Purely cosmetic — the

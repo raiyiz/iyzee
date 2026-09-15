@@ -1,6 +1,7 @@
 import asyncio
 
-from textual.widgets import RichLog, TextArea
+from textual.widgets import Input, RichLog, TextArea
+from textual_plotext import PlotextPlot
 
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens.connect import ConnectScreen
@@ -106,5 +107,68 @@ def test_console_display_placeholders_image_output() -> None:
             rendered = " ".join(str(seg) for line in log.lines for seg in line)
             assert "image/png" in rendered
             assert "not supported" in rendered
+
+    asyncio.run(scenario())
+
+
+def test_escape_leaves_input_field_for_navigation() -> None:
+    """Plain Input fields (RBW, IP addresses, ...) have no vim mode of
+    their own and, before this, no Escape binding either -- once focused,
+    j/k/c/s/t/i all typed as literal characters instead of navigating or
+    switching screens, with no way out except Tab/click. Regression test
+    that Escape blurs the field and hands control back to the app's own
+    bindings (j/k focus stepping, and the global screen-switch keys)."""
+
+    async def scenario() -> None:
+        app = IyzeeApp()
+        async with app.run_test() as pilot:
+            await pilot.press("s")
+            field = app.screen.query(Input).first()
+            field.focus()
+
+            await pilot.press("j")
+            assert field.value == "j", "j should still type into a focused Input"
+
+            await pilot.press("escape")
+            assert app.screen.focused is not field
+
+            await pilot.press("i")
+            assert isinstance(app.screen, ConsoleScreen), (
+                "global screen-switch keys should work again once no Input has focus"
+            )
+
+    asyncio.run(scenario())
+
+
+def test_console_plots_matplotlib_figures_in_place() -> None:
+    """A bare matplotlib Figure used to degrade to the unhelpful
+    `<Figure size ... with N Axes>` text repr with no way to actually see
+    it. Regression test that its line data now renders into the console's
+    plot panel (reusing textual_plotext, already a project dependency and
+    already used the same way by the sweep screen)."""
+
+    async def scenario() -> None:
+        app = IyzeeApp()
+        async with app.run_test() as pilot:
+            await pilot.press("i")
+            text_area = app.screen.query_one(TextArea)
+            text_area.load_text(
+                "import matplotlib\n"
+                "matplotlib.use('Agg')\n"
+                "import matplotlib.pyplot as plt\n"
+                "fig, ax = plt.subplots()\n"
+                "ax.plot([1, 2, 3], [4, 5, 6], label='trace')\n"
+                "fig"
+            )
+            await pilot.press("shift+enter")
+            await pilot.pause(0.3)
+
+            plot = app.screen.query_one("#console-plot", PlotextPlot)
+            assert plot.display is True
+
+            log = app.screen.query_one(RichLog)
+            rendered = " ".join(str(seg) for line in log.lines for seg in line)
+            assert "plotted 1 line" in rendered
+            assert "Figure size" not in rendered
 
     asyncio.run(scenario())
