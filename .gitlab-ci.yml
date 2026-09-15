@@ -33,7 +33,17 @@ typecheck:
 
 docs:
   stage: docs
-  image: ghcr.io/typst/typst:latest
+  image:
+    name: ghcr.io/typst/typst:latest
+    # The typst image's ENTRYPOINT is the typst binary itself
+    # (["/bin/typst"]), not a shell. GitLab's Docker executor runs jobs
+    # by handing a shell-detection script to the image's entrypoint —
+    # it doesn't replace a non-shell entrypoint on its own — so without
+    # this override, `script:` below is passed as arguments to `typst`
+    # instead of being executed, and the job fails before compiling
+    # anything. Clearing the entrypoint lets the runner fall back to a
+    # real shell (Alpine's /bin/sh, present in this image's base).
+    entrypoint: [""]
   script:
     - set -eu
     - mkdir -p build/docs

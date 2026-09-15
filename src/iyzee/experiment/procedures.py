@@ -1,4 +1,4 @@
-"""Concrete experiment procedures built from composable steps.
+"""MXA setup and the concrete experiment procedures built from it.
 
 These used to be the hand-written ``record_bw_seq()``/``record_freq_seq()``
 functions in ``main.py``. Each is now a small ``Step`` describing one
@@ -12,11 +12,57 @@ import time
 import uuid
 from dataclasses import asdict, dataclass
 
+from ..mxa import KeysightMXA
 from ..power import ShutterControl
 from ..wavemeter_readout import set_pid_setpoint
-from .config import TRACE_SHOT, TRACE_SQZ, AnalyzerConfig, acquire_trace, prepare_analyzer
-from .runner import run_sequence
-from .step import ExperimentContext, StepResult
+from .core import ExperimentContext, StepResult, run_sequence
+
+TRACE_SQZ = 1
+TRACE_SHOT = 2
+
+
+@dataclass(slots=True)
+class AnalyzerConfig:
+    """Typed configuration for an MXA measurement setup."""
+
+    center_hz: float = 1e6
+    span_hz: float = 0
+    avg_count: int = 100
+    sweep_duration_ms: int = 10
+    res_bw_hz: float = 10e3
+    avg_type: str = "LOG"
+    trig_source: str = "EXT"
+
+
+def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
+    """Configure an already-owned MXA for a measurement procedure."""
+    config = config or AnalyzerConfig()
+
+    mx.set_center_freq(config.center_hz)
+    mx.set_span(config.span_hz)
+    mx.set_rbw(config.res_bw_hz)
+    mx.set_vbw(config.res_bw_hz, auto=True)
+    mx.set_attenuation_auto(True)
+    mx.set_trigger_source(config.trig_source)
+    mx.set_sweep_duration(config.sweep_duration_ms)
+    mx.set_average_count(config.avg_count)
+    mx.set_average_type(config.avg_type)
+
+    for trace in traces:
+        mx.set_trace_display(trace, True)
+        mx.set_trace_mode(trace, "AVER")
+
+    return mx
+
+
+def acquire_trace(mx, trace_num):
+    """Acquire one trace and return its data."""
+    mx.set_trace_update(trace_num, True)
+    try:
+        mx.single_sweep_wait()
+        return mx.get_trace_data(trace_num=trace_num, binary=False)
+    finally:
+        mx.set_trace_update(trace_num, False)
 
 
 @dataclass

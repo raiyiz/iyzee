@@ -1,0 +1,81 @@
+/* Shared styling for all iyzee TUI screens. Keep this minimal — most
+   layout is handled per-widget below rather than globally, so new
+   screens don't inherit surprising rules. */
+
+Screen {
+    background: $surface;
+}
+
+#instrument-table {
+    height: 1fr;
+    margin: 1 2;
+}
+
+.panel-title {
+    padding: 1 2 0 2;
+    text-style: bold;
+    color: $accent;
+}
+
+.hint {
+    padding: 0 2 1 2;
+    color: $text-muted;
+}
+
+#sweep-form {
+    layout: horizontal;
+    height: auto;
+    padding: 1 2;
+}
+
+#sweep-form > Vertical {
+    width: 1fr;
+    padding-right: 2;
+}
+
+#sweep-form Label {
+    padding-top: 1;
+}
+
+#sweep-controls {
+    layout: horizontal;
+    height: auto;
+    padding: 0 2 1 2;
+}
+
+#sweep-controls Button {
+    margin-right: 2;
+}
+
+#sweep-progress {
+    padding: 0 2;
+}
+
+#sweep-plot {
+    height: 1fr;
+    margin: 1 2;
+    border: round $primary;
+}
+
+#sweep-log {
+    height: 8;
+    margin: 0 2 1 2;
+    border: round $primary-darken-1;
+}
+
+#traces-body {
+    layout: horizontal;
+    height: 1fr;
+}
+
+#traces-list {
+    width: 40%;
+    margin: 1 2;
+}
+
+#traces-detail {
+    width: 1fr;
+    margin: 1 2 1 0;
+    border: round $primary;
+    padding: 1 2;
+}
