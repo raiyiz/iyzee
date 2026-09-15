@@ -196,6 +196,21 @@ class IyzeeIPython:
         user_ns["lab"] = LabProxy(app)
         self.shell = InteractiveShell(config=config, user_ns=user_ns)
         self.shell.init_completer()
+        # IPython's own internal helper `get_ipython()` (used by page(), the
+        # pager routing behind `?`/`??`, %pdoc, ...) does not resolve to
+        # `self.shell` just because we constructed it — that helper reads
+        # InteractiveShell's class-level singleton pointer, which the plain
+        # constructor never sets. Left unset, `page()` sees no active shell,
+        # skips our `display_page=True` hook entirely, and falls through to
+        # the real interactive pager — which blocks on real stdin for
+        # "Return to continue" and immediately hits EOFError, since Textual
+        # owns the terminal. Assigning the class attribute directly (instead
+        # of using `InteractiveShell.instance()`, which would silently
+        # *reuse* an existing shell rather than build this new, independent
+        # one — see test_history_does_not_leak_across_shell_instances)
+        # activates this shell for `get_ipython()` without weakening the
+        # isolation between separate `IyzeeIPython` instances.
+        InteractiveShell._instance = self.shell
         self._lock = threading.RLock()
 
     def execute(self, source: str) -> ExecutionOutput:

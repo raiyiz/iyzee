@@ -189,3 +189,24 @@ def test_locked_proxy_serializes_concurrent_calls() -> None:
         t.join()
 
     assert device.max_concurrent == 1
+
+
+def test_help_syntax_does_not_hit_the_interactive_pager() -> None:
+    """Regression test: `name?`/`name??` route through IPython's own pager
+    machinery (`page.page()`), which consults the module-level
+    `get_ipython()` singleton to find hooks — including the
+    `display_page=True` hook this shell configures specifically so pager
+    output becomes plain output instead of an interactive `less`-style
+    prompt. If the shell never registers itself as that singleton,
+    `get_ipython()` returns None, `page()` skips the hook entirely, and
+    falls back to a real interactive pager that blocks on stdin and raises
+    EOFError the moment it can't read a keypress — exactly what happens
+    when Textual owns the terminal instead.
+    """
+    shell = IyzeeIPython(FakeApp())
+
+    result = shell.execute("lab?")
+
+    assert result.success
+    assert "Docstring" in result.stdout
+    assert "EOFError" not in result.stdout
