@@ -42,6 +42,7 @@ from ...experiment import (
     ExperimentContext,
     Step,
     StepResult,
+    acquire_trace,
     bandwidth_sweep_steps,
     create_dirs,
     difference_series,
@@ -115,6 +116,7 @@ class SweepScreen(Vertical):
         yield Horizontal(
             Button("Run sweep", id="run-sweep", variant="success"),
             Button("Abort", id="abort-sweep", variant="error", disabled=True),
+            Button("Capture trace", id="capture-trace"),
             id="sweep-controls",
         )
         yield ProgressBar(id="sweep-progress", total=1)
@@ -142,6 +144,8 @@ class SweepScreen(Vertical):
         elif event.button.id == "abort-sweep":
             self._abort_event.set()
             self.query_one("#abort-sweep", Button).disabled = True
+        elif event.button.id == "capture-trace":
+            self._start_capture()
 
     # -- kicking off the run -------------------------------------------------
 
@@ -179,13 +183,24 @@ class SweepScreen(Vertical):
         log = self.query_one("#sweep-log", RichLog)
         log.clear()
         plot = self.query_one("#sweep-plot", PlotextPlot)
-        plot.plt.clear_data()
-        plot.refresh()
+        # #sweep-plot is shared with "Capture trace" (a raw power-vs-
+        # frequency spectrum, different axes entirely) — draw_series with
+        # an empty series still resets title/xlabel/ylabel, which a bare
+        # clear_data() wouldn't, so a sweep after a capture doesn't keep
+        # showing the capture's axis labels.
+        draw_series(
+            plot,
+            [],
+            title="Squeezing - shot noise",
+            xlabel="Trace point",
+            ylabel="Squeezing - shot noise",
+        )
         progress = self.query_one("#sweep-progress", ProgressBar)
         progress.update(total=len(steps), progress=0)
 
         self.query_one("#run-sweep", Button).disabled = True
         self.query_one("#abort-sweep", Button).disabled = False
+        self.query_one("#capture-trace", Button).disabled = True
         self._run(mx_handle.device, shutter, steps, config, kind)
 
     def _build_bandwidth_run(self) -> tuple[Sequence[Step], AnalyzerConfig]:
@@ -297,9 +312,67 @@ class SweepScreen(Vertical):
         plot = self.query_one("#sweep-plot", PlotextPlot)
         draw_series(plot, [series], clear=False)
 
+    # -- "Capture trace": one raw spectrum off the analyzer, right now ------
+
+    def _start_capture(self) -> None:
+        mx_handle = self.iyzee_app.handles.get("mxa")
+        if mx_handle is None:
+            self.notify("Connect the MXA first (Connect screen).", severity="error")
+            return
+        mx_handle = cast(_VisaHandle, mx_handle)
+
+        self.query_one("#run-sweep", Button).disabled = True
+        self.query_one("#capture-trace", Button).disabled = True
+        log = self.query_one("#sweep-log", RichLog)
+        log.write("Capturing trace 1 from the analyzer…")
+        self._capture(mx_handle.device)
+
+    @work(thread=True, exclusive=True, group="capture", exit_on_error=False)
+    def _capture(self, mx) -> None:
+        # Deliberately does *not* call prepare_analyzer() first, unlike a
+        # sweep — this captures whatever the analyzer is currently showing
+        # (RBW, center freq, etc. left exactly as they are), not a
+        # reconfigured measurement. A quick "is this actually working, and
+        # what does the spectrum look like right now" check, not a
+        # replacement for a real sweep. Trace 1 is this codebase's
+        # convention for the primary trace (see procedures.TRACE_SQZ).
+        with self.iyzee_app.instrument_locks["mxa"]:
+            try:
+                power = acquire_trace(mx, TRACE_SQZ)
+                freq = mx.get_frequency_axis()
+            except Exception as exc:  # noqa: BLE001
+                log.exception("capture: failed to read a trace from the MXA")
+                self._ui(self._finish_capture, error=exc, freq=None, power=None)
+                return
+        self._ui(self._finish_capture, error=None, freq=freq, power=power)
+
+    def _finish_capture(
+        self, *, error: Exception | None, freq: list[float] | None, power: list[float] | None
+    ) -> None:
+        self.query_one("#run-sweep", Button).disabled = False
+        self.query_one("#capture-trace", Button).disabled = False
+        log = self.query_one("#sweep-log", RichLog)
+
+        if error is not None:
+            log.write(f"[red]Capture failed: {error}[/red]")
+            self.notify(f"Capture failed: {error}", severity="error")
+            return
+
+        assert freq is not None and power is not None  # error is None guarantees both are set
+        plot = self.query_one("#sweep-plot", PlotextPlot)
+        draw_series(
+            plot,
+            [(freq, power, "Trace 1")],
+            title="Live trace capture",
+            xlabel="Frequency (Hz)",
+            ylabel="Power (dBm)",
+        )
+        log.write(f"Captured {len(power)} point(s).")
+
     def _finish(self, kind: str, *, aborted: bool, setup_error: Exception | None) -> None:
         self.query_one("#run-sweep", Button).disabled = False
         self.query_one("#abort-sweep", Button).disabled = True
+        self.query_one("#capture-trace", Button).disabled = False
         log = self.query_one("#sweep-log", RichLog)
 
         if setup_error is not None:

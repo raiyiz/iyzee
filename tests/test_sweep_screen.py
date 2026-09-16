@@ -140,3 +140,79 @@ def test_start_frequency_sweep_without_shutter_notifies() -> None:
             assert "shutter" in notifications[0].lower()
 
     asyncio.run(scenario())
+
+
+# -- "Capture trace" ---------------------------------------------------------
+
+
+class _FakeMxaForCapture:
+    """A fake MXA supporting exactly what acquire_trace()/get_frequency_axis()
+    call — enough to drive a real _capture() worker end-to-end without a
+    live instrument."""
+
+    def __init__(self, power: list[float], freq: list[float]) -> None:
+        self._power = power
+        self._freq = freq
+        self.trace_updates: list[tuple[int, bool]] = []
+
+    def set_trace_update(self, trace_num: int, state: bool) -> None:
+        self.trace_updates.append((trace_num, state))
+
+    def single_sweep_wait(self) -> bool:
+        return True
+
+    def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> list[float]:
+        return self._power
+
+    def get_frequency_axis(self) -> list[float]:
+        return self._freq
+
+
+def test_capture_trace_without_mxa_notifies_and_does_not_launch_worker() -> None:
+    async def scenario() -> None:
+        app = IyzeeApp()
+        async with app.run_test() as pilot:
+            screen = await _open_sweep_screen(pilot)
+            notifications: list[str] = []
+            screen.notify = lambda message, **kwargs: notifications.append(message)  # type: ignore[assignment]
+
+            screen._start_capture()
+
+            assert notifications, "expected a notification asking to connect the MXA"
+            assert "Connect the MXA" in notifications[0]
+            assert screen.query_one("#capture-trace").disabled is False
+
+    asyncio.run(scenario())
+
+
+def test_capture_trace_plots_power_vs_frequency(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def scenario() -> None:
+        app = IyzeeApp()
+        fake_mxa = _FakeMxaForCapture(power=[-70.0, -68.0, -71.0], freq=[1e6, 1.1e6, 1.2e6])
+        app.handles["mxa"] = _FakeVisaHandle(fake_mxa)
+
+        async with app.run_test() as pilot:
+            screen = await _open_sweep_screen(pilot)
+
+            screen._start_capture()
+            # _capture runs in a background worker thread; give it a moment
+            # to finish and call back into the UI thread.
+            for _ in range(50):
+                await pilot.pause(0.05)
+                if not screen.query_one("#capture-trace").disabled:
+                    break
+
+            assert fake_mxa.trace_updates == [(1, True), (1, False)]
+            log_text = " ".join(
+                str(seg) for line in screen.query_one("#sweep-log").lines for seg in line
+            )
+            assert "Captured 3 point(s)" in log_text
+
+    asyncio.run(scenario())
+
+
+class _FakeVisaHandle:
+    """Minimal stand-in for instruments._VisaHandle: just needs `.device`."""
+
+    def __init__(self, device) -> None:
+        self.device = device
