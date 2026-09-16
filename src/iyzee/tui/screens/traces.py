@@ -13,8 +13,7 @@ from pathlib import Path
 import numpy as np
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
-from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
+from textual.widgets import Label, ListItem, ListView, Static
 from textual_plotext import PlotextPlot
 
 # <package_root>/data — matches iyzee.experiment.io.create_dirs(),
@@ -23,11 +22,10 @@ from textual_plotext import PlotextPlot
 _DATA_ROOT = Path(__file__).resolve().parents[2] / "data"
 
 
-class TracesScreen(Screen):
+class TracesScreen(Vertical):
     """List recorded runs on the left, preview the selected one on the right."""
 
     def compose(self) -> ComposeResult:
-        yield Header()
         yield Static("Traces", classes="panel-title")
         yield Horizontal(
             ListView(id="traces-list"),
@@ -38,13 +36,12 @@ class TracesScreen(Screen):
             ),
             id="traces-body",
         )
-        yield Footer()
 
     def on_mount(self) -> None:
         self._paths: list[Path] = []
         self.refresh_runs()
 
-    def on_screen_resume(self) -> None:
+    def on_show(self) -> None:
         self.refresh_runs()
 
     def refresh_runs(self) -> None:

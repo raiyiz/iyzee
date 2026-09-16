@@ -1,37 +1,52 @@
 import asyncio
 
-from textual.widgets import Input, RichLog, TextArea
+from textual.widgets import ContentSwitcher, Input, RichLog, TextArea
 from textual_plotext import PlotextPlot
 
-from iyzee.tui.app import IyzeeApp
+from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.screens.connect import ConnectScreen
 from iyzee.tui.screens.console import ConsoleScreen
 from iyzee.tui.screens.sweep import SweepScreen
 from iyzee.tui.screens.traces import TracesScreen
 
 
-def test_screen_navigation_uses_textual_modes() -> None:
+def test_page_navigation_uses_a_shared_content_switcher() -> None:
+    """Pages used to be independent Screens swapped via App.MODES; they're
+    now widgets held inside one ContentSwitcher behind a persistent
+    NavRail, so "isinstance(app.screen, XScreen)" no longer means
+    anything — every page is mounted the whole time. Check which page is
+    current instead, and that the rail's active-item highlight tracks it.
+    """
+
     async def scenario() -> None:
         app = IyzeeApp()
         async with app.run_test() as pilot:
-            assert isinstance(app.screen, ConnectScreen)
+            switcher = app.screen.query_one(ContentSwitcher)
+            nav = app.screen.query_one(NavRail)
+            assert switcher.current == "connect"
+            assert isinstance(switcher.get_child_by_id("connect"), ConnectScreen)
 
             await pilot.press("s")
-            assert isinstance(app.screen, SweepScreen)
+            assert switcher.current == "sweep"
+            assert isinstance(switcher.get_child_by_id("sweep"), SweepScreen)
+            assert nav.query_one("#nav-sweep").has_class("-active")
+            assert not nav.query_one("#nav-connect").has_class("-active")
 
             await pilot.press("t")
-            assert isinstance(app.screen, TracesScreen)
+            assert switcher.current == "traces"
+            assert isinstance(switcher.get_child_by_id("traces"), TracesScreen)
 
             await pilot.press("i")
-            assert isinstance(app.screen, ConsoleScreen)
+            assert switcher.current == "console"
+            assert isinstance(switcher.get_child_by_id("console"), ConsoleScreen)
             assert app.screen.focused is not None
             assert app.screen.focused.id == "console-input"
 
             await pilot.press("f1")
-            assert isinstance(app.screen, ConnectScreen)
+            assert switcher.current == "connect"
 
             await pilot.press("f4")
-            assert isinstance(app.screen, ConsoleScreen)
+            assert switcher.current == "console"
             assert app.screen.focused is not None
             assert app.screen.focused.id == "console-input"
 
@@ -79,7 +94,7 @@ def test_console_display_renders_rich_html_output() -> None:
             )
             await pilot.press("shift+enter")
             await pilot.pause(0.3)
-            log = app.screen.query_one(RichLog)
+            log = app.screen.query_one("#console-output", RichLog)
             rendered = " ".join(str(seg) for line in log.lines for seg in line)
             assert "hello world" in rendered
             assert "object at 0x" not in rendered
@@ -103,7 +118,7 @@ def test_console_display_placeholders_image_output() -> None:
             )
             await pilot.press("shift+enter")
             await pilot.pause(0.3)
-            log = app.screen.query_one(RichLog)
+            log = app.screen.query_one("#console-output", RichLog)
             rendered = " ".join(str(seg) for line in log.lines for seg in line)
             assert "image/png" in rendered
             assert "not supported" in rendered
@@ -133,8 +148,9 @@ def test_escape_leaves_input_field_for_navigation() -> None:
             assert app.screen.focused is not field
 
             await pilot.press("i")
-            assert isinstance(app.screen, ConsoleScreen), (
-                "global screen-switch keys should work again once no Input has focus"
+            switcher = app.screen.query_one(ContentSwitcher)
+            assert switcher.current == "console", (
+                "global page-switch keys should work again once no Input has focus"
             )
 
     asyncio.run(scenario())
@@ -166,7 +182,7 @@ def test_console_plots_matplotlib_figures_in_place() -> None:
             plot = app.screen.query_one("#console-plot", PlotextPlot)
             assert plot.display is True
 
-            log = app.screen.query_one(RichLog)
+            log = app.screen.query_one("#console-output", RichLog)
             rendered = " ".join(str(seg) for line in log.lines for seg in line)
             assert "plotted 1 line" in rendered
             assert "Figure size" not in rendered

@@ -15,8 +15,7 @@ from typing import TYPE_CHECKING, cast
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Static
 
 from ..instruments import INSTRUMENTS, InstrumentSpec
 from ..workers import ConnectOutcome
@@ -30,14 +29,14 @@ STATUS_COL = "status"
 DETAIL_COL = "detail"
 
 
-class ConnectScreen(Screen):
+class ConnectScreen(Vertical):
     """Table of instruments with live connect/disconnect status."""
 
     @property
     def iyzee_app(self) -> IyzeeApp:
         """``self.app`` narrowed to the concrete app type.
 
-        ``Screen.app`` is typed as ``App[Any]`` in Textual's stubs, which
+        ``Widget.app`` is typed as ``App[Any]`` in Textual's stubs, which
         doesn't know about ``handles``/``instrument_locks`` — this app is
         always an ``IyzeeApp`` at runtime (``IyzeeApp().run()`` is the
         only entry point), so the cast is safe.
@@ -45,13 +44,9 @@ class ConnectScreen(Screen):
         return cast("IyzeeApp", self.app)
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        yield Vertical(
-            Static("Instruments", classes="panel-title"),
-            Static("Enter: connect/disconnect selected row", classes="hint"),
-            DataTable(id="instrument-table", cursor_type="row"),
-        )
-        yield Footer()
+        yield Static("Instruments", classes="panel-title")
+        yield Static("Enter: connect/disconnect selected row", classes="hint")
+        yield DataTable(id="instrument-table", cursor_type="row")
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
@@ -62,8 +57,8 @@ class ConnectScreen(Screen):
             table.add_row(spec.label, "disconnected", "-", key=spec.key)
         self._refresh_from_app_state()
 
-    def on_screen_resume(self) -> None:
-        # Reflect connections made/dropped while this screen wasn't visible
+    def on_show(self) -> None:
+        # Reflect connections made/dropped while this page wasn't visible
         # (there's currently no other way to (dis)connect, but this keeps
         # the table honest if that changes later).
         self._refresh_from_app_state()

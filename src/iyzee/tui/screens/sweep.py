@@ -24,11 +24,8 @@ import numpy as np
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
 from textual.widgets import (
     Button,
-    Footer,
-    Header,
     Input,
     Label,
     ProgressBar,
@@ -71,7 +68,7 @@ class SweepAborted(Exception):
     """
 
 
-class SweepScreen(Screen):
+class SweepScreen(Vertical):
     """Pick a sweep type, configure it, run it, and watch it live."""
 
     @property
@@ -80,7 +77,6 @@ class SweepScreen(Screen):
         return cast("IyzeeApp", self.app)
 
     def compose(self) -> ComposeResult:
-        yield Header()
         yield Static("Sweep", classes="panel-title")
         yield Horizontal(
             Vertical(
@@ -122,7 +118,6 @@ class SweepScreen(Screen):
         yield ProgressBar(id="sweep-progress", total=1)
         yield PlotextPlot(id="sweep-plot")
         yield RichLog(id="sweep-log", highlight=False, markup=True)
-        yield Footer()
 
     def on_mount(self) -> None:
         self._abort_event = Event()

@@ -15,8 +15,7 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.document._document import Document
 from textual.events import Key
-from textual.screen import Screen
-from textual.widgets import Footer, Header, RichLog, Static, TextArea
+from textual.widgets import RichLog, Static, TextArea
 from textual_plotext import PlotextPlot
 from textual_vim_textarea import Mode, VimTextArea
 
@@ -26,19 +25,16 @@ if TYPE_CHECKING:
     from ..app import IyzeeApp
 
 
-class ConsoleScreen(Screen):
+class ConsoleScreen(Vertical):
     """A live Python/IPython console bound to the app's current instruments."""
 
-    AUTO_FOCUS = "#console-input"
-
     def compose(self) -> ComposeResult:
-        yield Header()
         yield Static(
             "Embedded IPython • same process • lab.mx / lab.shutter / lab.scope",
             classes="panel-title",
         )
-        # Constructed once — this only runs on the screen's first mount,
-        # not on every switch_screen() back to it, so the shell (and its
+        # Constructed once — this only runs on this page's first mount, not
+        # every time it's switched back to, so the shell (and its
         # variables, history, lab) genuinely persists for the app's
         # lifetime. lab itself needs no refreshing either way (see
         # LabProxy's docstring) — it reads app state live on every access.
@@ -51,9 +47,13 @@ class ConsoleScreen(Screen):
     def on_mount(self) -> None:
         self.console = self.query_one(IyzeeConsole)
 
-    def on_screen_resume(self) -> None:
-        # Purely cosmetic: update the status line's "connected: ..." text.
-        # Nothing about the shell itself needs refreshing.
+    def on_show(self) -> None:
+        # Screen.AUTO_FOCUS (what used to put focus on #console-input every
+        # time this screen became active) is Screen-only and doesn't exist
+        # for a plain widget, so it's done by hand here instead. Also
+        # purely cosmetic: refresh the status line's "connected: ..." text
+        # — nothing about the shell itself needs refreshing.
+        self.query_one("#console-input").focus()
         self.console.refresh_status()
 
 
@@ -192,14 +192,20 @@ class IyzeeConsole(Vertical):
         yield Static("", id="console-completions")
         yield _ConsoleInput(self)
         yield Static("", id="console-status")
-        yield Footer()
 
     def on_mount(self) -> None:
         self.shell.shell.display_pub = _ConsoleDisplayPublisher(self)
         self._install_figure_plotting()
         self._write_banner()
         self.refresh_status()
-        self.query_one(TextArea).focus()
+        # Deliberately not focusing #console-input here: on_mount now fires
+        # for every page at app startup (ContentSwitcher mounts all of its
+        # children immediately, unlike the old per-page Screens, which only
+        # ever mounted the active one), so this page's on_mount runs even
+        # while some other page is the one actually visible. Focusing here
+        # would steal focus from whichever page the user is really looking
+        # at. ConsoleScreen.on_show() does this instead, since that only
+        # fires when this page actually becomes the visible one.
 
     def _install_figure_plotting(self) -> None:
         """Render matplotlib Figures into the plot panel instead of the

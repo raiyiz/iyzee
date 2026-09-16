@@ -6,6 +6,50 @@ Screen {
     background: $surface;
 }
 
+#app-body {
+    height: 1fr;
+}
+
+#nav-rail {
+    width: 18;
+    height: 1fr;
+    padding: 1 1;
+    border-right: round $primary-darken-1;
+}
+
+#nav-title {
+    color: $text-muted;
+    text-style: bold;
+    padding: 0 1 1 1;
+}
+
+.nav-item {
+    padding: 0 1;
+    margin-bottom: 1;
+    color: $text;
+}
+
+.nav-item.-active {
+    color: $accent;
+    text-style: bold;
+}
+
+#nav-instruments {
+    margin-top: 1;
+    padding: 1 1 0 1;
+    border-top: round $primary-darken-1;
+    color: $text-muted;
+}
+
+#page-switcher {
+    height: 1fr;
+    width: 1fr;
+}
+
+#page-switcher > * {
+    height: 1fr;
+}
+
 #instrument-table {
     height: 1fr;
     margin: 1 2;
