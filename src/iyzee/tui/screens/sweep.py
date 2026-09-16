@@ -44,12 +44,14 @@ from ...experiment import (
     StepResult,
     bandwidth_sweep_steps,
     create_dirs,
+    difference_series,
     frequency_sweep_steps,
     prepare_analyzer,
     run_sequence,
     save_step_results,
 )
 from ..instruments import ShutterHandle, _VisaHandle
+from ..plotting import draw_series
 from ..workers import LastRun
 
 if TYPE_CHECKING:
@@ -126,6 +128,7 @@ class SweepScreen(Vertical):
         plot = self.query_one("#sweep-plot", PlotextPlot)
         plot.plt.title("Squeezing - shot noise")
         plot.plt.xlabel("Trace point")
+        plot.plt.ylabel("Squeezing - shot noise")
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id != "sweep-type":
@@ -286,14 +289,13 @@ class SweepScreen(Vertical):
             self._plot_result(result)
 
     def _plot_result(self, result: StepResult) -> None:
-        squeezing = result.traces.get("squeezing")
-        shot_noise = result.traces.get("shot_noise")
-        if squeezing is None or shot_noise is None:
+        series = difference_series(
+            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
+        )
+        if series is None:
             return
-        difference = np.asarray(squeezing) - np.asarray(shot_noise)
         plot = self.query_one("#sweep-plot", PlotextPlot)
-        plot.plt.plot(list(range(len(difference))), list(difference), label=result.label)
-        plot.refresh()
+        draw_series(plot, [series], clear=False)
 
     def _finish(self, kind: str, *, aborted: bool, setup_error: Exception | None) -> None:
         self.query_one("#run-sweep", Button).disabled = False

@@ -9,7 +9,14 @@ machinery rather than hand-written loops.
 """
 
 from .core import ExperimentContext, Step, StepCallback, StepResult, run_sequence
-from .io import build_figure, create_dirs, multiplot, save_data, save_step_results
+from .io import (
+    build_figure,
+    create_dirs,
+    difference_series,
+    multiplot,
+    save_data,
+    save_step_results,
+)
 from .procedures import (
     TRACE_SHOT,
     TRACE_SQZ,

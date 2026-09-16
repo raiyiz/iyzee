@@ -63,9 +63,7 @@ class _FakeHandle:
 async def _open_sweep_screen(pilot) -> SweepScreen:
     await pilot.press("s")
     await pilot.pause()
-    screen = pilot.app.screen
-    assert isinstance(screen, SweepScreen)
-    return screen
+    return pilot.app.query_one(SweepScreen)
 
 
 def test_build_bandwidth_run_uses_form_defaults() -> None:

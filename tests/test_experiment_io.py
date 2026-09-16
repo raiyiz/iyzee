@@ -4,7 +4,13 @@ from pathlib import Path
 import numpy as np
 
 from iyzee.experiment.core import StepResult
-from iyzee.experiment.io import create_dirs, multiplot, save_data, save_step_results
+from iyzee.experiment.io import (
+    create_dirs,
+    difference_series,
+    multiplot,
+    save_data,
+    save_step_results,
+)
 
 
 def test_create_dirs_is_idempotent(tmp_path, monkeypatch):
@@ -117,3 +123,14 @@ def test_multiplot_plots_each_result(monkeypatch):
     multiplot(results)
 
     assert plotted == [[2.0, 3.0]]
+
+
+def test_difference_series_computes_x_y_and_label():
+    result = difference_series([3.0, 4.0], [1.0, 1.0], "pt0")
+
+    assert result == ([0, 1], [2.0, 3.0], "pt0")
+
+
+def test_difference_series_returns_none_for_missing_traces():
+    assert difference_series(None, [1.0], "pt0") is None
+    assert difference_series([1.0], None, "pt0") is None

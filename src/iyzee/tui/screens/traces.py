@@ -16,6 +16,9 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Label, ListItem, ListView, Static
 from textual_plotext import PlotextPlot
 
+from ...experiment import difference_series
+from ..plotting import draw_series
+
 # <package_root>/data — matches iyzee.experiment.io.create_dirs(),
 # without calling it (create_dirs() always creates a fresh dated directory,
 # which we don't want as a side effect of just opening this screen).
@@ -69,7 +72,6 @@ class TracesScreen(Vertical):
     def _show(self, path: Path) -> None:
         summary = self.query_one("#traces-summary", Static)
         plot = self.query_one("#traces-plot", PlotextPlot)
-        plot.plt.clear_data()
 
         try:
             with np.load(path, allow_pickle=True) as archive:
@@ -78,6 +80,7 @@ class TracesScreen(Vertical):
                 run_metadata = archive["run_metadata"] if "run_metadata" in archive else None
         except Exception as exc:  # noqa: BLE001
             summary.update(f"[b]{path.name}[/b]\n\n[red]Could not read file: {exc}[/red]")
+            plot.plt.clear_data()
             plot.refresh()
             return
 
@@ -91,17 +94,19 @@ class TracesScreen(Vertical):
                 pass
         summary.update("\n".join(lines))
 
+        series = []
         for index, point in enumerate(data):
-            x_value, squeezing, shot_noise = point
-            if squeezing is None or shot_noise is None:
-                continue
-            difference = np.asarray(squeezing) - np.asarray(shot_noise)
+            _x_value, squeezing, shot_noise = point
             label = None
             if metadata is not None and index < len(metadata):
                 label = metadata[index].get("label")
-            plot.plt.plot(
-                list(range(len(difference))), list(difference), label=label or f"pt {index}"
-            )
-        plot.plt.title(path.name)
-        plot.plt.xlabel("Trace point")
-        plot.refresh()
+            result = difference_series(squeezing, shot_noise, label or f"pt {index}")
+            if result is not None:
+                series.append(result)
+        draw_series(
+            plot,
+            series,
+            title=path.name,
+            xlabel="Trace point",
+            ylabel="Squeezing - shot noise",
+        )

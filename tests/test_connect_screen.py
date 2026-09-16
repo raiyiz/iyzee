@@ -62,8 +62,7 @@ def test_connecting_a_row_updates_table_and_app_handles(monkeypatch: pytest.Monk
         async with app.run_test() as pilot:
             await pilot.press("c")
             await pilot.pause()
-            screen = app.screen
-            assert isinstance(screen, ConnectScreen)
+            screen = app.query_one(ConnectScreen)
 
             table = screen.query_one(DataTable)
             table.cursor_coordinate = table.cursor_coordinate._replace(row=0)
@@ -88,8 +87,7 @@ def test_connect_failure_surfaces_as_error_row_without_crashing_worker(
         async with app.run_test() as pilot:
             await pilot.press("c")
             await pilot.pause()
-            screen = app.screen
-            assert isinstance(screen, ConnectScreen)
+            screen = app.query_one(ConnectScreen)
             table = screen.query_one(DataTable)
             table.cursor_coordinate = table.cursor_coordinate._replace(row=0)
             await pilot.press("enter")
@@ -114,8 +112,7 @@ def test_disconnecting_a_connected_row_clears_app_handles(
         async with app.run_test() as pilot:
             await pilot.press("c")
             await pilot.pause()
-            screen = app.screen
-            assert isinstance(screen, ConnectScreen)
+            screen = app.query_one(ConnectScreen)
             table = screen.query_one(DataTable)
             table.cursor_coordinate = table.cursor_coordinate._replace(row=0)
             await pilot.press("enter")

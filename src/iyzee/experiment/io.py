@@ -73,6 +73,33 @@ def save_step_results(
     return save_data(data, savedir, metadata=per_point_meta, **extra)
 
 
+def difference_series(
+    squeezing: object, shot_noise: object, label: str | None
+) -> tuple[list[float], list[float], str | None] | None:
+    """Compute one squeezing-minus-shot-noise line, ready to plot.
+
+    The single source of truth for this computation — before this, the
+    same three lines (subtract, build an x-index, attach a label) were
+    written out independently in four places: this module's own
+    ``build_figure`` (matplotlib), ``SweepScreen._plot_result`` (live,
+    per point, plotext), ``TracesScreen._show`` (re-derived from a saved
+    ``.npz``, plotext), and indirectly duplicated again in spirit by
+    ``IyzeeConsole``'s figure rendering. Callers only differ in *where*
+    the squeezing/shot_noise arrays came from (a live ``StepResult`` vs.
+    an archived point) and *how* they draw the result (matplotlib vs.
+    plotext) — this covers the part in between.
+
+    Returns ``None`` if either trace is missing, matching the skip
+    behavior ``SweepScreen``/``TracesScreen`` already had (``build_figure``
+    previously didn't guard against this and would have raised on missing
+    traces — this closes that gap as a side effect of consolidating).
+    """
+    if squeezing is None or shot_noise is None:
+        return None
+    difference = np.asarray(squeezing) - np.asarray(shot_noise)
+    return list(range(len(difference))), list(difference), label
+
+
 def build_figure(results: list[StepResult]):
     """Build (but do not display) the squeezing-minus-shot-noise figure.
 
@@ -85,11 +112,14 @@ def build_figure(results: list[StepResult]):
     labels = []
 
     for result in results:
-        squeezing = np.asarray(result.traces.get("squeezing"))
-        shot_noise = np.asarray(result.traces.get("shot_noise"))
-        difference = squeezing - shot_noise
+        series = difference_series(
+            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
+        )
+        if series is None:
+            continue
+        _x, difference, label = series
         ax.plot(difference)
-        labels.append(result.label)
+        labels.append(label)
 
     if labels:
         ax.legend(labels, ncol=4, loc="upper center", bbox_to_anchor=(0.5, 1.1))

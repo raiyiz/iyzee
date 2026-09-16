@@ -71,8 +71,7 @@ async def _open_traces_screen(monkeypatch, data_root: Path) -> AsyncIterator[Tra
     async with app.run_test() as pilot:
         await pilot.press("t")
         await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, TracesScreen)
+        screen = app.query_one(TracesScreen)
         yield screen
 
 

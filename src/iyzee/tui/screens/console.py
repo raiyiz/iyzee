@@ -20,6 +20,7 @@ from textual_plotext import PlotextPlot
 from textual_vim_textarea import Mode, VimTextArea
 
 from ..ipython import ExecutionOutput, IyzeeIPython
+from ..plotting import draw_series
 
 if TYPE_CHECKING:
     from ..app import IyzeeApp
@@ -254,14 +255,12 @@ class IyzeeConsole(Vertical):
     def _draw_figure(self, lines: list[tuple[list, list, str]], labels: dict[str, str]) -> None:
         plot = self.query_one("#console-plot", PlotextPlot)
         plot.display = True
-        plot.plt.clear_data()
-        for xdata, ydata, label in lines:
-            plot.plt.plot(xdata, ydata, label=label or None)
-        if labels["xlabel"]:
-            plot.plt.xlabel(labels["xlabel"])
-        if labels["ylabel"]:
-            plot.plt.ylabel(labels["ylabel"])
-        plot.refresh()
+        draw_series(
+            plot,
+            lines,
+            xlabel=labels["xlabel"] or None,
+            ylabel=labels["ylabel"] or None,
+        )
 
     def refresh_status(self) -> None:
         """Update the "connected: ..." status line. Purely cosmetic — the
