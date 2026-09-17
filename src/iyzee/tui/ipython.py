@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import io
 import re
 import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
+from weakref import WeakSet
 
 from IPython.core.interactiveshell import InteractiveShell
 from traitlets.config import Config
@@ -173,6 +175,8 @@ def _device_from_handle(name: str, handle: Any) -> Any:
 class IyzeeIPython:
     """Own one embedded :class:`InteractiveShell` for the running TUI."""
 
+    _instances: ClassVar[WeakSet[IyzeeIPython]] = WeakSet()
+
     def __init__(self, app: AppState, *, namespace: Mapping[str, Any] | None = None) -> None:
         config = Config()
         config.InteractiveShell.automagic = True
@@ -212,6 +216,8 @@ class IyzeeIPython:
         # isolation between separate `IyzeeIPython` instances.
         InteractiveShell._instance = self.shell
         self._lock = threading.RLock()
+        self._closed = False
+        self._instances.add(self)
 
     def execute(self, source: str) -> ExecutionOutput:
         """Execute one cell and capture terminal-oriented output."""
@@ -291,6 +297,13 @@ class IyzeeIPython:
             return entries
 
     def close(self) -> None:
-        """Run IPython's shutdown hooks."""
+        """Shut down this embedded shell and unregister its process exit hook."""
         with self._lock:
+            if self._closed:
+                return
+            atexit.unregister(self.shell.atexit_operations)
             self.shell.atexit_operations()
+            self._closed = True
+            self._instances.discard(self)
+            if InteractiveShell._instance is self.shell:
+                InteractiveShell._instance = None
