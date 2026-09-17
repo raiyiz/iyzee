@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import re
 import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
@@ -16,21 +15,6 @@ from .instruments import LockedProxy
 
 if TYPE_CHECKING:
     from .workers import LastRun
-
-
-_IDENTIFIER_RE = re.compile(r"[\w.]*$")
-
-
-def _identifier_before(source: str, cursor_pos: int) -> str:
-    """The dotted identifier ending at ``cursor_pos``.
-
-    E.g. ``"lab.mx"`` out of ``"lab.mx.freq()"`` at position 6. Matches
-    IPython's own notion of a completable/inspectable token: word
-    characters and dots, stopping at the first character that's neither
-    (an open paren, a space, a comma, ...).
-    """
-    match = _IDENTIFIER_RE.search(source[:cursor_pos])
-    return match.group(0) if match else ""
 
 
 class AppState(Protocol):
@@ -240,23 +224,6 @@ class IyzeeIPython:
         """Return IPython's completion edit and candidate list."""
         with self._lock:
             return self.shell.complete(source, line=source, cursor_pos=cursor_pos)
-
-    def inspect(self, source: str, cursor_pos: int, detail_level: int = 0) -> dict[str, Any]:
-        """Return IPython's object inspection payload for the identifier at ``cursor_pos``.
-
-        ``InteractiveShell.object_inspect`` takes an object *name*, not a
-        source string plus a cursor position — it has no ``cursor_pos``
-        parameter at all. The previous implementation passed ``cursor_pos``
-        positionally into ``object_inspect``'s ``detail_level`` slot and
-        then passed ``detail_level`` again by keyword, which raised
-        ``TypeError: object_inspect() got multiple values for argument
-        'detail_level'`` on every call. This extracts the dotted
-        identifier ending at ``cursor_pos`` (e.g. ``"lab.mx"`` out of
-        ``"lab.mx.freq"`` at position 6) and inspects that instead.
-        """
-        with self._lock:
-            oname = _identifier_before(source, cursor_pos)
-            return self.shell.object_inspect(oname, detail_level=detail_level)
 
     @property
     def history(self) -> list[str]:

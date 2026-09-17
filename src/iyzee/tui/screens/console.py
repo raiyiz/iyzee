@@ -3,19 +3,22 @@ it hosts, kept together since the widget has no other caller."""
 
 from __future__ import annotations
 
+import ctypes
 import os
 import re
+import threading
 from typing import TYPE_CHECKING, Any, cast
 
 from IPython.core.displaypub import DisplayPublisher
 from rich.markup import escape
+from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.document._document import Document
 from textual.events import Key
-from textual.widgets import RichLog, Static, TextArea
+from textual.widgets import OptionList, RichLog, Static, TextArea
 from textual_plotext import PlotextPlot
 from textual_vim_textarea import Mode, VimTextArea
 
@@ -24,6 +27,29 @@ from ..plotting import draw_series
 
 if TYPE_CHECKING:
     from ..app import IyzeeApp
+
+
+def _raise_in_thread(thread_id: int, exc_type: type[BaseException]) -> None:
+    """Asynchronously raise ``exc_type`` inside the thread identified by
+    ``thread_id``.
+
+    There's no stdlib-blessed way to interrupt an arbitrary running
+    thread — ordinary threads have no safe cancellation point — so this
+    uses CPython's ``PyThreadState_SetAsyncExc``, the same low-level hook
+    behind the long-standing "interruptible thread" recipes. The target
+    thread only actually raises at its next bytecode boundary, so a call
+    blocked entirely inside a C extension with no GIL release point
+    (rare for this app's VISA/socket-based instrument calls, which do
+    release it) may not stop immediately.
+    """
+    result = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        ctypes.c_long(thread_id), ctypes.py_object(exc_type)
+    )
+    if result > 1:
+        # Pending-exception state landed on more than one thread (should
+        # never happen with a single valid id) — undo rather than risk
+        # corrupting an unrelated thread's state.
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), None)
 
 
 class ConsoleScreen(Vertical):
@@ -110,6 +136,37 @@ class _ConsoleInput(VimTextArea):
         self.console.set_vim_mode(mode)
 
     def on_key(self, event: Key) -> None:
+        if self.console.completions_visible:
+            if event.key in ("up", "down"):
+                self.console.move_completion_highlight(-1 if event.key == "up" else 1)
+                event.stop()
+                return
+            if event.key in ("enter", "tab"):
+                self.console.accept_highlighted_completion()
+                event.stop()
+                return
+            if event.key == "escape":
+                self.console.hide_completions()
+                event.stop()
+                return
+            # Any other keystroke (more typing, backspace, ...) abandons
+            # the list rather than trying to keep it in sync char-by-char
+            # — Tab reopens it against the new text. Falls through so the
+            # key still does its normal thing (e.g. actually types).
+            self.console.hide_completions()
+
+        if event.key in ("ctrl+c", "ctrl+l"):
+            # Base TextArea already binds ctrl+c to "copy selection", so
+            # it never reaches IyzeeConsole's own BINDINGS while this
+            # widget has focus — intercepted here instead, same as the
+            # two-stage Escape below.
+            if event.key == "ctrl+c":
+                self.console.action_interrupt()
+            else:
+                self.console.action_clear()
+            event.stop()
+            return
+
         if event.key == "escape" and self.mode is Mode.NORMAL:
             self.blur()
             event.stop()
@@ -175,6 +232,8 @@ class IyzeeConsole(Vertical):
         Binding("ctrl+p", "history_previous", "History ↑", show=True),
         Binding("ctrl+n", "history_next", "History ↓", show=True),
         Binding("tab", "complete", "Complete", show=False),
+        Binding("ctrl+c", "interrupt", "Interrupt", show=True),
+        Binding("ctrl+l", "clear", "Clear", show=True),
     ]
 
     def __init__(self, shell: IyzeeIPython) -> None:
@@ -186,11 +245,15 @@ class IyzeeConsole(Vertical):
         # Matches _ConsoleInput's initial Mode.INSERT until the first
         # watch_mode fire (which may happen before this widget is mounted).
         self._mode_label = "-- INSERT --"
+        self._executing = False
+        self._exec_thread_id: int | None = None
+        self._completions: list[str] = []
+        self._completion_start = 0
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="console-output", wrap=True, markup=True, highlight=False)
         yield PlotextPlot(id="console-plot")
-        yield Static("", id="console-completions")
+        yield OptionList(id="console-completions")
         yield _ConsoleInput(self)
         yield Static("", id="console-status")
 
@@ -279,7 +342,8 @@ class IyzeeConsole(Vertical):
             self._render_status()
 
     def _render_status(self) -> None:
-        self._set_status(f"{self._mode_label}   {self._lab_text}")
+        running = "   [bold yellow]running… (Ctrl+C to interrupt)[/]" if self._executing else ""
+        self._set_status(f"{self._mode_label}   {self._lab_text}{running}")
 
     def _write_banner(self) -> None:
         output = self.query_one(RichLog)
@@ -295,33 +359,91 @@ class IyzeeConsole(Vertical):
         self.query_one("#console-status", expect_type=Static).update(text)
 
     def action_execute(self) -> None:
+        if self._executing:
+            # A second Shift+Enter used to silently cancel the first cell
+            # (thanks to `exclusive=True` below) with no feedback at all.
+            # Refusing outright is more honest: nothing is lost, and
+            # Ctrl+C is the explicit, visible way to actually stop it.
+            return
         text_area = self.query_one(TextArea)
         source = text_area.text
         if not source.strip():
             return
         self._history_cursor = None
         self._history_draft = ""
-        self._hide_completions()
+        self.hide_completions()
         self.query_one(RichLog).write(
             f"[bold cyan]In [{self.shell.shell.execution_count}]:[/] {escape(source)}"
         )
         text_area.load_text("")
+        self._executing = True
+        self._render_status()
         self._execute(source)
 
     @work(thread=True, exclusive=True, group="ipython", exit_on_error=False)
     def _execute(self, source: str) -> None:
-        result = self.shell.execute(source)
+        self._exec_thread_id = threading.get_ident()
+        try:
+            result = self.shell.execute(source)
+        except BaseException as exc:
+            # Normally unreachable: IPython's own `run_cell` catches
+            # everything raised by the executed code, including
+            # KeyboardInterrupt, and reports it through `ExecutionOutput`
+            # instead. But `action_interrupt` below delivers that
+            # KeyboardInterrupt *asynchronously* (see `_raise_in_thread`),
+            # so it can in principle land at a bytecode boundary outside
+            # `run_cell`'s own try/except entirely — e.g. while
+            # `execute()`'s `contextlib.redirect_stdout` block is
+            # unwinding — and escape `shell.execute()` uncaught. Without
+            # this fallback that would skip `_finish_execution` below and
+            # leave the console stuck showing "running…" forever with no
+            # way to submit another cell, since nothing would ever reset
+            # `_executing`. Empirically reproducible: hit this exact path
+            # while testing Ctrl+C against a `time.sleep()` cell.
+            result = ExecutionOutput(
+                source=source,
+                stdout="",
+                stderr=f"{type(exc).__name__}: {exc}",
+                execution_count=self.shell.shell.execution_count,
+                success=False,
+            )
+        finally:
+            self._exec_thread_id = None
         self.app.call_from_thread(self._finish_execution, result)
 
     def _finish_execution(self, result: ExecutionOutput) -> None:
+        self._executing = False
         output = self.query_one(RichLog)
+        # IPython formats its own tracebacks (and e.g. `%time` output)
+        # with raw ANSI color codes, not Rich markup — pushing that
+        # through `escape()` used to dump literal `\x1b[31m...` bytes
+        # into the log. `Text.from_ansi` decodes real ANSI SGR sequences
+        # into proper Rich styling instead, so error output renders in
+        # color like a normal terminal rather than as escape-code noise.
         if result.stdout:
-            output.write(escape(result.stdout.rstrip("\n")))
+            output.write(Text.from_ansi(result.stdout.rstrip("\n")))
         if result.stderr:
-            output.write(escape(result.stderr.rstrip("\n")))
+            output.write(Text.from_ansi(result.stderr.rstrip("\n")))
         state = "ok" if result.success else "error"
         self._set_status(f"In [{result.execution_count}]  •  {state}")
         self.query_one(TextArea).focus()
+
+    def action_interrupt(self) -> None:
+        """Raise KeyboardInterrupt inside the running cell's worker thread.
+
+        A no-op when nothing is running — there's nothing to interrupt,
+        and importantly nothing to accidentally interrupt in some *other*,
+        unrelated thread.
+        """
+        if not self._executing or self._exec_thread_id is None:
+            return
+        self.query_one(RichLog).write("[dim]— interrupt requested —[/]")
+        _raise_in_thread(self._exec_thread_id, KeyboardInterrupt)
+
+    def action_clear(self) -> None:
+        """Clear the output log — the console's Ctrl+L, same idea as a
+        terminal's ``clear``. Leaves history/namespace/state untouched."""
+        self.query_one(RichLog).clear()
 
     def action_complete(self) -> None:
         text_area = self.query_one(TextArea)
@@ -333,38 +455,81 @@ class IyzeeConsole(Vertical):
         # The offset<->location helpers below live on that concrete type.
         document = cast(Document, text_area.document)
         cursor_pos = document.get_index_from_location(text_area.cursor_location)
-        _completed, matches = self.shell.complete(source, cursor_pos)
+        prefix, matches = self.shell.complete(source, cursor_pos)
         if not matches:
-            self._hide_completions()
+            self.hide_completions()
             return
 
+        # IPython's own completion contract (see `InteractiveShell.complete`):
+        # `prefix` is the exact slice of `source` immediately before the
+        # cursor that every entry in `matches` is a full replacement for
+        # — e.g. completing "lab.ha" returns prefix=".ha",
+        # matches=[".handles"], not "handles". So the replacement span is
+        # simply the last `len(prefix)` characters before the cursor; no
+        # separate word-boundary heuristic needed (a previous version used
+        # one based on whitespace, which is wrong for dotted attribute
+        # access like `lab.<Tab>` — it doesn't treat `.` as a boundary).
+        token_start = cursor_pos - len(prefix)
         common = os.path.commonprefix(matches)
-        token_start = self._completion_token_start(source, cursor_pos)
-        current = source[token_start:cursor_pos]
-        if common and common != current:
+        if common and common != prefix:
             start = document.get_location_from_index(token_start)
             text_area.replace(common, start, text_area.cursor_location)
             new_cursor = document.get_location_from_index(token_start + len(common))
             text_area.move_cursor(new_cursor)
-        self._show_completions(matches, common)
+        self._show_completions(matches, token_start)
 
-    @staticmethod
-    def _completion_token_start(source: str, cursor_pos: int) -> int:
-        prefix = source[:cursor_pos]
-        return max(prefix.rfind(" "), prefix.rfind("\n"), prefix.rfind("\t")) + 1
+    def _show_completions(self, matches: list[str], token_start: int) -> None:
+        """Populate the completion list and make it navigable.
 
-    def _show_completions(self, matches: list[str], common: str) -> None:
-        shown = matches[:24]
-        suffix = f"  •  common prefix: {escape(common)}" if common else ""
-        lines = "\n".join(escape(match) for match in shown)
-        if len(matches) > len(shown):
-            lines += f"\n… and {len(matches) - len(shown)} more"
-        widget = self.query_one("#console-completions", expect_type=Static)
-        widget.update(lines + suffix)
-        widget.styles.display = "block"
+        An ``OptionList`` instead of the old static text readout — Up/Down
+        move a real highlight (intercepted in ``_ConsoleInput.on_key``
+        before either history or vim motions get a look at them, see
+        there for why) and Enter/Tab accept the highlighted match, so
+        narrowing a long candidate list no longer means retyping it letter
+        by letter. ``token_start`` (an index into the source text, not a
+        row/col location — it's recomputed against the *current* document
+        at accept time) is remembered so accepting a match later replaces
+        the right span even after the common-prefix insertion above has
+        already moved the cursor.
+        """
+        self._completions = matches[:200]
+        self._completion_start = token_start
+        option_list = self.query_one("#console-completions", OptionList)
+        option_list.clear_options()
+        option_list.add_options(self._completions)
+        option_list.highlighted = 0
+        option_list.styles.display = "block"
 
-    def _hide_completions(self) -> None:
-        self.query_one("#console-completions", expect_type=Static).styles.display = "none"
+    def hide_completions(self) -> None:
+        self._completions = []
+        self.query_one("#console-completions", OptionList).styles.display = "none"
+
+    @property
+    def completions_visible(self) -> bool:
+        return bool(self._completions)
+
+    def move_completion_highlight(self, delta: int) -> None:
+        option_list = self.query_one("#console-completions", OptionList)
+        count = option_list.option_count
+        if count == 0:
+            return
+        current = option_list.highlighted or 0
+        option_list.highlighted = (current + delta) % count
+
+    def accept_highlighted_completion(self) -> None:
+        option_list = self.query_one("#console-completions", OptionList)
+        index = option_list.highlighted
+        if index is None or not self._completions:
+            self.hide_completions()
+            return
+        match = self._completions[index]
+        text_area = self.query_one(TextArea)
+        document = cast(Document, text_area.document)
+        start = document.get_location_from_index(self._completion_start)
+        text_area.replace(match, start, text_area.cursor_location)
+        new_cursor = document.get_location_from_index(self._completion_start + len(match))
+        text_area.move_cursor(new_cursor)
+        self.hide_completions()
 
     @property
     def history_available(self) -> bool:

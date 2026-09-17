@@ -77,6 +77,17 @@ class IyzeeApp(App):
     SUB_TITLE = "lab instrument control"
     CSS_PATH = "app.tcss"
 
+    # Textual's command palette defaults to Ctrl+P with a *priority*
+    # binding — priority bindings are checked before a focused widget ever
+    # gets a look at the key, regardless of the DOM/focus chain — which
+    # silently ate every Ctrl+P the console's own "previous history entry"
+    # binding was supposed to get (Ctrl+N happens not to collide with
+    # anything else Textual claims by default, so only this half of the
+    # history pair needed moving). The console's binding is the one
+    # documented and depended on elsewhere in this app, so the palette
+    # moves instead of it.
+    COMMAND_PALETTE_BINDING = "ctrl+backslash"
+
     # Keep navigation in Textual itself rather than interpreting keys in
     # ``on_key``. This means editable widgets retain their normal key
     # handling, while Footer and the command palette expose the same

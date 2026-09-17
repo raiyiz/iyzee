@@ -178,19 +178,38 @@ This mirrors how other tools resolve a modal editor nested inside modal
 navigation (e.g. Neovim's terminal mode needs its own escape *out* of
 terminal input before window/pane navigation applies) — a single Escape
 can't mean both "leave insert mode" and "leave the widget" without breaking
-one of them. Shift+Enter executes the current cell, Tab completes, and
+one of them. Shift+Enter executes the current cell; a second Shift+Enter
+while one is still running is a no-op rather than silently cancelling and
+replacing it — the status line shows `running… (Ctrl+C to interrupt)` for
+as long as a cell is in flight, and Ctrl+C raises `KeyboardInterrupt`
+inside it. That's a best-effort interrupt, not a guaranteed one: it can
+only actually stop the cell at a Python bytecode boundary, so a plain
+`time.sleep(n)` cell won't be cut short (it isn't blocked in interpreted
+Python at all while sleeping) even though a busy Python loop will
+interrupt in well under a second. Ctrl+L clears the output log without
+touching history or the namespace, same idea as a terminal's own `clear`.
 Ctrl+P/Ctrl+N remain available as explicit history shortcuts alongside the
 Up/Down-at-boundary behavior above.
 
+Tab completion opens a real, navigable list rather than dumping every
+match as static text: Up/Down move the highlight, Enter or Tab again
+accepts it, Escape closes the list without touching the buffer, and typing
+anything else abandons the list (Tab reopens it against the new text).
+
 Outside editable widgets, `j`/`k` use Textual's own focus traversal
 (`focus_next()`/`focus_previous()` — not a hand-rolled traversal order) and
-`:` opens Textual's built-in Command Palette, exposing the app's existing
-actions without a second command parser or a separately maintained modal
-state machine. Whether a key is "global navigation" or "text editing" is
-decided by Textual itself: a focused widget's own bindings (an `Input`'s
-text-entry keys, the console's Vim motions) take priority over `IyzeeApp`'s
-`BINDINGS`, so there's no hand-maintained mode flag that has to be kept in
-sync with reality.
+Ctrl+\ opens Textual's built-in Command Palette (moved off its default
+Ctrl+P, which the console's own history binding above needs), exposing the
+app's existing actions without a second command parser or a separately
+maintained modal state machine. Whether a key is "global navigation" or
+"text editing" is decided by Textual itself: a focused widget's own
+bindings (an `Input`'s text-entry keys, the console's Vim motions) take
+priority over `IyzeeApp`'s `BINDINGS`, so there's no hand-maintained mode
+flag that has to be kept in sync with reality — except for priority
+bindings like the command palette's, which are checked before the focus
+chain at all; see `IyzeeApp.COMMAND_PALETTE_BINDING`'s comment for why
+that one needed moving explicitly rather than trusting the usual
+resolution order.
 
 ## Safety notes
 
