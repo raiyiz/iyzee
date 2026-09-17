@@ -12,6 +12,7 @@ from .core import ExperimentContext, Step, StepCallback, StepResult, run_sequenc
 from .io import (
     build_figure,
     create_dirs,
+    difference_series,
     multiplot,
     save_data,
     save_step_results,
@@ -44,6 +45,7 @@ __all__ = [
     "bandwidth_sweep_steps",
     "build_figure",
     "create_dirs",
+    "difference_series",
     "frequency_sweep_steps",
     "multiplot",
     "prepare_analyzer",
