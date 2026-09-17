@@ -64,9 +64,7 @@ class NavRail(Static):
 
     def refresh_instruments(self) -> None:
         app = cast("IyzeeApp", self.app)
-        lines = [
-            f"{spec.label} {'●' if spec.key in app.handles else '○'}" for spec in INSTRUMENTS
-        ]
+        lines = [f"{spec.label} {'●' if spec.key in app.handles else '○'}" for spec in INSTRUMENTS]
         self.query_one("#nav-instruments", Static).update("\n".join(lines))
 
 

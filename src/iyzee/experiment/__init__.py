@@ -12,7 +12,6 @@ from .core import ExperimentContext, Step, StepCallback, StepResult, run_sequenc
 from .io import (
     build_figure,
     create_dirs,
-    difference_series,
     multiplot,
     save_data,
     save_step_results,

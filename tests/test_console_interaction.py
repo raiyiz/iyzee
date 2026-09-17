@@ -79,7 +79,7 @@ def test_tab_completion_is_selectable_and_replaces_the_right_span() -> None:
 
 
 def test_tab_completion_accepts_correctly_with_a_partial_prefix_typed() -> None:
-    """"lab.ha<Tab>" -> accept should give "lab.handles", not
+    """ "lab.ha<Tab>" -> accept should give "lab.handles", not
     "lab.hahandles" or ".handles" -- the case that most commonly triggers
     the bug fixed above, since it's how completion is normally used (part
     way through typing a name, not immediately after the dot)."""
