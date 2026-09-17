@@ -5,9 +5,7 @@ and `tui/ipython.py` (`IyzeeIPython`). Goal: make the embedded IPython
 console feel as capable as a real terminal/Jupyter session, and make vim
 mode legible instead of invisible.
 
-Six items, in priority order. **1, 2, 3, 5, and 6 are done.** 4 (stream
-stdout live) is scoped but not started — see its section below for why it
-was deliberately left out of this pass rather than rushed.
+Six items, in priority order. **All six are done.**
 
 ---
 
@@ -110,20 +108,66 @@ Covered by `test_tab_completion_is_selectable_and_replaces_the_right_span`
 and `test_tab_completion_accepts_correctly_with_a_partial_prefix_typed` in
 `tests/test_console_interaction.py`.
 
-## 4. Stream stdout live during long cells (not started)
+## 4. Stream stdout live during long cells (done)
 
-`execute()` currently buffers all output via `contextlib.redirect_stdout`
-and only returns once the cell fully finishes — the wrong shape for a
-console whose main job is running blocking hardware calls where progress
-prints matter. Needs a custom stdout-like object that pushes chunks to
-the UI via `call_from_thread` as they're written, instead of a plain
-`StringIO` collected at the end. Left out of this pass deliberately: it's
-a genuinely bigger change (a stateful stdout-like object shared across
-the redirect and the live UI update, correct interaction with the
-`text/plain`-vs-`display()` distinction `_ConsoleDisplayPublisher`
-already handles) than the other items here, and item 5 below already
-surfaced enough thread/timing subtlety for one pass — better to land that
-solid than rush this alongside it.
+`execute()` no longer buffers everything via a plain `io.StringIO` and
+hands it back only once the cell fully finishes. It now redirects
+`sys.stdout`/`sys.stderr` to a small `_StreamTee` object that still
+buffers everything (so `ExecutionOutput.stdout`/`.stderr` works exactly
+as before for callers that only want the final text — every direct
+`execute()` call in the test suite, for instance) but also accepts an
+`on_stdout_line`/`on_stderr_line` callback and invokes it once per
+*complete* line, as the cell produces it, rather than only at the end.
+`IyzeeConsole._execute` passes callbacks that push each line straight to
+`RichLog` via `call_from_thread` — the same mechanism
+`_ConsoleDisplayPublisher` already used for `display()` output (item #1).
+
+**Why lines, not raw `write()` chunks:** a single `print("a", "b")` call
+makes several separate `file.write()` calls under the hood — one per
+argument, one for the separator, one for the trailing newline — and
+`RichLog.write()` turns each call it receives into its own new line
+rather than appending to the previous one. Forwarding raw chunks
+one-to-one would have fragmented one logical line of output into several
+visually broken pieces. `_StreamTee` buffers until a newline shows up
+before calling back, and holds a trailing partial line (e.g.
+`print("...", end="")`) until either the next newline arrives or
+`finish_partial_line()` is called once the cell is done. Covered by
+`test_execute_streams_stdout_one_complete_line_at_a_time`,
+`test_execute_does_not_fragment_a_single_print_call_across_lines`, and
+`test_execute_flushes_a_trailing_line_with_no_newline` in
+`tests/test_ipython.py`.
+
+**Fixes the ordering bug `_ConsoleDisplayPublisher`'s docstring flagged
+as a known gap when item #1 shipped:** `display()` output was pushed to
+the UI immediately as it happened, while a cell's own stdout/stderr only
+appeared once the whole cell finished — so `print("before");
+display(x); print("after")` would show `x`'s output *before* "before"
+instead of between "before" and "after". Both now go through
+`call_from_thread` from the same worker thread in true execution order,
+so they interleave correctly. Covered by
+`test_print_and_display_output_appear_in_source_order` in
+`tests/test_console_interaction.py`; live-ness itself (output visible
+while `_executing` is still true, not only after) is covered by
+`test_output_appears_while_the_cell_is_still_running`.
+
+**Minor behavior change, judged an improvement rather than a regression:**
+the old code did `result.stdout.rstrip("\n")` before writing to the log,
+which as a side effect stripped *every* trailing blank line the user's
+own code had deliberately printed, not just the one incidental trailing
+newline `print()` always adds. Per-line streaming doesn't do this — a
+bare `print()` in the middle of a cell shows up as a genuine blank line
+(`test_execute_preserves_intentional_blank_lines_in_streamed_output`),
+and only a truly empty trailing chunk (nothing left to flush) produces no
+extra line at the end, matching what a real terminal would show.
+
+Left as-is rather than pursued further: the interaction between this and
+item #5's interrupt mechanism. A cell interrupted mid-line (partial
+output already streamed, `finish_partial_line()` never reached because
+`shell.execute()` raised out through the `BaseException` fallback in
+`_execute`) simply loses that trailing partial line rather than showing
+it — acceptable given item #5's own caveat that an interrupt landing at
+an inconvenient moment is already a known, documented rough edge, not a
+new one introduced here.
 
 ## 5. Visible "running…" state + real interrupt (done)
 

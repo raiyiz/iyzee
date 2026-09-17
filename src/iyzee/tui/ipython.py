@@ -6,7 +6,7 @@ import contextlib
 import io
 import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Mapping, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol
 
 from IPython.core.interactiveshell import InteractiveShell
 from traitlets.config import Config
@@ -55,6 +55,64 @@ class ExecutionOutput:
     stderr: str
     execution_count: int
     success: bool
+
+
+class _StreamTee:
+    """A ``sys.stdout``/``sys.stderr`` replacement that forwards output
+    live, one complete line at a time, while still buffering everything
+    (so ``ExecutionOutput.stdout``/``.stderr`` keeps working exactly as
+    before for callers — tests included — that only care about the final
+    captured text and never pass a callback at all).
+
+    Lines, not raw ``write()`` chunks: a single ``print("a", "b")`` call
+    does several separate ``file.write()`` calls under the hood — one per
+    argument plus the separator plus the trailing newline — so forwarding
+    each chunk as its own unit of output would fragment one logical line
+    of output into several as far as a line-oriented consumer (the
+    console's ``RichLog``, one call to ``.write()`` per line) is
+    concerned. This buffers until a newline shows up before calling back,
+    and holds on to a trailing partial line (e.g. ``print("...", end="")``
+    with no newline) until either the next newline arrives or
+    ``finish_partial_line()`` is called explicitly once the cell is done.
+
+    Everything besides ``write()``/``getvalue()`` (``flush()``,
+    ``isatty()``, ...) delegates straight through to a real
+    ``io.StringIO`` via ``__getattr__``, so this remains a drop-in
+    replacement for the plain ``io.StringIO()`` ``execute()`` redirected
+    to before — nothing here should notice or care that IPython's own
+    machinery treats ``sys.stdout``/``sys.stderr`` as an ordinary file.
+    """
+
+    def __init__(self, on_line: Callable[[str], None] | None = None) -> None:
+        self._buffer = io.StringIO()
+        self._on_line = on_line
+        self._partial = ""
+
+    def write(self, s: str) -> int:
+        if not s:
+            return 0
+        self._buffer.write(s)
+        if self._on_line is not None:
+            *complete, self._partial = (self._partial + s).split("\n")
+            for line in complete:
+                self._on_line(line)
+        return len(s)
+
+    def finish_partial_line(self) -> None:
+        """Flush a trailing line with no newline yet (e.g. a cell that
+        ends with ``print("...", end="")``). Call once after the cell
+        this stream belongs to has finished executing — there's nothing
+        left after that point that could complete the line another way.
+        """
+        if self._on_line is not None and self._partial:
+            self._on_line(self._partial)
+            self._partial = ""
+
+    def getvalue(self) -> str:
+        return self._buffer.getvalue()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._buffer, name)
 
 
 class LabProxy:
@@ -197,8 +255,26 @@ class IyzeeIPython:
         InteractiveShell._instance = self.shell
         self._lock = threading.RLock()
 
-    def execute(self, source: str) -> ExecutionOutput:
-        """Execute one cell and capture terminal-oriented output."""
+    def execute(
+        self,
+        source: str,
+        *,
+        on_stdout_line: Callable[[str], None] | None = None,
+        on_stderr_line: Callable[[str], None] | None = None,
+    ) -> ExecutionOutput:
+        """Execute one cell and capture terminal-oriented output.
+
+        ``on_stdout_line``/``on_stderr_line``, if given, are called once
+        per complete line *as the cell produces it* — before this method
+        returns, not only once the whole cell has finished — so a caller
+        wired up to stream that into a UI (see
+        ``IyzeeConsole._execute``) can show progress from a long-running
+        cell live instead of only seeing anything once it's done. Callers
+        that only want the final text (every direct call in this file's
+        tests, for instance) can omit both and get exactly the previous
+        behavior: nothing happens until this method returns, then
+        ``result.stdout``/``.stderr`` has everything.
+        """
         source = source.rstrip()
         if not source.strip():
             return ExecutionOutput(
@@ -208,10 +284,15 @@ class IyzeeIPython:
                 execution_count=self.shell.execution_count,
                 success=True,
             )
-        stdout = io.StringIO()
-        stderr = io.StringIO()
+        stdout = _StreamTee(on_stdout_line)
+        stderr = _StreamTee(on_stderr_line)
         with self._lock, contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             result = self.shell.run_cell(source, store_history=True, silent=False)
+        # Whatever's left after the redirect above exits (e.g. a cell
+        # that ends with `print("...", end="")`, no trailing newline) —
+        # nothing else is going to complete that line, so flush it now.
+        stdout.finish_partial_line()
+        stderr.finish_partial_line()
         return ExecutionOutput(
             source=source,
             stdout=stdout.getvalue(),

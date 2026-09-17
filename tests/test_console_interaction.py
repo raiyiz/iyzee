@@ -275,3 +275,85 @@ def test_traceback_output_is_colored_not_raw_ansi_escape_bytes() -> None:
             assert "\x1b[" not in rendered
 
     asyncio.run(scenario())
+
+
+def test_output_appears_while_the_cell_is_still_running() -> None:
+    """Plan item #4: a long cell's `print()` output used to only show up
+    once the whole cell finished (`execute()` buffered everything via
+    `contextlib.redirect_stdout` and `_finish_execution` wrote it all at
+    once at the end). This checks it actually streams live -- output from
+    early in the cell is visible *while `_executing` is still true*, not
+    only after the cell completes."""
+
+    async def scenario() -> None:
+        app = IyzeeApp()
+        async with app.run_test() as pilot:
+            await pilot.press("i")
+            text_area = app.screen.query_one(_ConsoleInput)
+            console = app.screen.query_one(IyzeeConsole)
+            log = app.screen.query_one("#console-output", RichLog)
+
+            text_area.load_text(
+                "import time\nfor i in range(3):\n    print(f'line {i}')\n    time.sleep(0.4)\n"
+            )
+            await pilot.press("shift+enter")
+
+            def first_line_visible_mid_run() -> bool:
+                rendered = " ".join(str(seg) for line in log.lines for seg in line)
+                return console._executing and "'line 0'" in rendered
+
+            seen_while_running = await _wait_until(
+                first_line_visible_mid_run, pilot=pilot, timeout=3.0
+            )
+            assert seen_while_running, (
+                "first line of output never appeared before the cell finished"
+            )
+
+            # And by the time it's done, every line made it through.
+            finished = await _wait_until(lambda: not console._executing, pilot=pilot)
+            assert finished
+            rendered = " ".join(str(seg) for line in log.lines for seg in line)
+            for i in range(3):
+                assert f"'line {i}'" in rendered
+
+    asyncio.run(scenario())
+
+
+def test_print_and_display_output_appear_in_source_order() -> None:
+    """Before streaming, a cell's own stdout was only flushed once the
+    whole cell finished, while `display()` calls were pushed to the UI
+    immediately as they happened -- so `print("before"); display(x);
+    print("after")` would show `x`'s output *before* "before" instead of
+    between "before" and "after". Regression test that streaming stdout
+    puts everything back in the order the cell actually produced it."""
+
+    async def scenario() -> None:
+        app = IyzeeApp()
+        async with app.run_test() as pilot:
+            await pilot.press("i")
+            text_area = app.screen.query_one(_ConsoleInput)
+            console = app.screen.query_one(IyzeeConsole)
+            log = app.screen.query_one("#console-output", RichLog)
+
+            text_area.load_text(
+                "from IPython.display import display\n"
+                "print('before')\n"
+                "display('the display call')\n"
+                "print('after')\n"
+            )
+            await pilot.press("shift+enter")
+            await _wait_until(lambda: not console._executing, pilot=pilot)
+
+            # Segment reprs, not plain text (matches the rest of this
+            # file's convention) -- the quoting difference between a
+            # Python-string repr of *output* ("'before'") and the
+            # double-quoted *echoed source line* ("print(\"before\")") is
+            # exactly what lets this tell the two apart.
+            lines = ["".join(str(seg) for seg in strip) for strip in log.lines]
+            before_i = next(i for i, line in enumerate(lines) if "'before'" in line)
+            display_i = next(i for i, line in enumerate(lines) if "the display call" in line)
+            after_i = next(i for i, line in enumerate(lines) if "'after'" in line)
+
+            assert before_i < display_i < after_i
+
+    asyncio.run(scenario())

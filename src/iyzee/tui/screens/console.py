@@ -383,8 +383,23 @@ class IyzeeConsole(Vertical):
     @work(thread=True, exclusive=True, group="ipython", exit_on_error=False)
     def _execute(self, source: str) -> None:
         self._exec_thread_id = threading.get_ident()
+
+        def stream(line: str) -> None:
+            # Called from this worker thread, once per complete line, as
+            # the cell produces it — marshalled to the UI thread exactly
+            # like every other cross-thread update here (compare
+            # `_ConsoleDisplayPublisher.publish`, which does the same for
+            # `display()` calls). Both now go through `call_from_thread`
+            # from this same worker thread in the order the cell actually
+            # produced them, so a `print()` before a `display()` call in
+            # one cell shows up before it too — previously stdout/stderr
+            # were only flushed once the whole cell finished, so a
+            # `display()` call partway through a cell would visibly jump
+            # ahead of `print()` output that came before it in the source.
+            self.app.call_from_thread(self._write_output_line, line)
+
         try:
-            result = self.shell.execute(source)
+            result = self.shell.execute(source, on_stdout_line=stream, on_stderr_line=stream)
         except BaseException as exc:
             # Normally unreachable: IPython's own `run_cell` catches
             # everything raised by the executed code, including
@@ -399,11 +414,17 @@ class IyzeeConsole(Vertical):
             # leave the console stuck showing "running…" forever with no
             # way to submit another cell, since nothing would ever reset
             # `_executing`. Empirically reproducible: hit this exact path
-            # while testing Ctrl+C against a `time.sleep()` cell.
+            # while testing Ctrl+C against a `time.sleep()` cell. Nothing
+            # streamed this message as it happened (there was no cell
+            # output to stream — `shell.execute()` itself never
+            # returned), so it's written directly here instead, the same
+            # way any other line would be.
+            message = f"{type(exc).__name__}: {exc}"
+            stream(message)
             result = ExecutionOutput(
                 source=source,
                 stdout="",
-                stderr=f"{type(exc).__name__}: {exc}",
+                stderr=message,
                 execution_count=self.shell.shell.execution_count,
                 success=False,
             )
@@ -411,19 +432,28 @@ class IyzeeConsole(Vertical):
             self._exec_thread_id = None
         self.app.call_from_thread(self._finish_execution, result)
 
-    def _finish_execution(self, result: ExecutionOutput) -> None:
-        self._executing = False
-        output = self.query_one(RichLog)
+    def _write_output_line(self, line: str) -> None:
         # IPython formats its own tracebacks (and e.g. `%time` output)
         # with raw ANSI color codes, not Rich markup — pushing that
         # through `escape()` used to dump literal `\x1b[31m...` bytes
         # into the log. `Text.from_ansi` decodes real ANSI SGR sequences
         # into proper Rich styling instead, so error output renders in
         # color like a normal terminal rather than as escape-code noise.
-        if result.stdout:
-            output.write(Text.from_ansi(result.stdout.rstrip("\n")))
-        if result.stderr:
-            output.write(Text.from_ansi(result.stderr.rstrip("\n")))
+        self.query_one(RichLog).write(Text.from_ansi(line))
+
+    def _finish_execution(self, result: ExecutionOutput) -> None:
+        self._executing = False
+        # stdout/stderr are no longer written here — `_execute` above
+        # streams every line live via `_write_output_line` as the cell
+        # produces it (including `execute()`'s own trailing
+        # `finish_partial_line()` flush and this method's own
+        # `BaseException` fallback), so writing `result.stdout`/`.stderr`
+        # again here would just duplicate everything that's already on
+        # screen. `result` is kept around regardless (rather than
+        # narrowed to just the status fields) since other callers of
+        # `execute()` — direct callers in tests, primarily — still want
+        # the full text back, and this stays the one place that turns an
+        # `ExecutionOutput` into "the cell finished" UI state.
         state = "ok" if result.success else "error"
         self._set_status(f"In [{result.execution_count}]  •  {state}")
         self.query_one(TextArea).focus()
@@ -583,13 +613,12 @@ class _ConsoleDisplayPublisher(DisplayPublisher):
 
     Runs inside the execution worker thread (``IyzeeConsole._execute``),
     not the UI thread, so writes are marshalled via ``call_from_thread``
-    like every other cross-thread UI update in this widget. Note this
-    writes to the output log *immediately*, whereas a cell's own
-    stdout/stderr is only flushed once the whole cell finishes (see
-    ``execute()`` in ``ipython.py``) — a ``print()`` before a ``display()``
-    call in the same cell will visibly appear *after* it. Fixing that
-    ordering means streaming stdout live too (plan item #4); not attempted
-    here.
+    like every other cross-thread UI update in this widget — including a
+    cell's own stdout/stderr, which (since plan item #4) is streamed live
+    through the same mechanism rather than only flushed once the whole
+    cell finishes, so a ``print()`` before a ``display()`` call in the
+    same cell now appears before it, in the order the cell actually
+    produced them, rather than after.
     """
 
     def __init__(self, console: IyzeeConsole) -> None:
