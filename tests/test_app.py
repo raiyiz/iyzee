@@ -5,7 +5,7 @@ from textual_plotext import PlotextPlot
 
 from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.screens.connect import ConnectScreen
-from iyzee.tui.screens.console import ConsoleScreen
+from iyzee.tui.screens.console import ConsoleScreen, IyzeeConsole
 from iyzee.tui.screens.sweep import SweepScreen
 from iyzee.tui.screens.traces import TracesScreen
 
@@ -53,7 +53,41 @@ def test_page_navigation_uses_a_shared_content_switcher() -> None:
     asyncio.run(scenario())
 
 
-def test_console_status_line_shows_vim_mode() -> None:
+def test_console_history_file_defaults_to_none_and_is_passed_through(tmp_path) -> None:
+    """`IyzeeApp()` with no arguments — every test in this codebase,
+    including every other one in this file — must default to no
+    persistent history file at all (`console_history_file=None`, which
+    `IyzeeIPython` turns into `:memory:`). Getting this default wrong
+    would silently reintroduce every InteractiveShell in the whole test
+    suite writing to a real, shared, ever-growing SQLite file again — see
+    `default_history_file`'s docstring in ipython.py for what that caused
+    last time. Also checks the opt-in path actually reaches the console's
+    shell: passing a real path through the app constructor should end up
+    configured on the running IyzeeIPython instance, not just stored and
+    ignored.
+    """
+
+    async def default_is_none() -> None:
+        app = IyzeeApp()
+        assert app.console_history_file is None
+        async with app.run_test() as pilot:
+            await pilot.press("i")
+            console = app.screen.query_one(IyzeeConsole)
+            assert console.shell.shell.history_manager.hist_file == ":memory:"
+
+    async def real_path_reaches_the_shell() -> None:
+        history_file = tmp_path / "console_history.sqlite"
+        app = IyzeeApp(console_history_file=history_file)
+        async with app.run_test() as pilot:
+            await pilot.press("i")
+            console = app.screen.query_one(IyzeeConsole)
+            assert console.shell.shell.history_manager.hist_file == str(history_file)
+
+    asyncio.run(default_is_none())
+    asyncio.run(real_path_reaches_the_shell())
+
+
+def test_console_mode_indicator_updates_on_escape_and_i() -> None:
     """The console's status line is the only UI feedback for which vim
     mode is active (INSERT vs NORMAL) — regression test for that
     indicator actually updating on Escape/i."""

@@ -6,15 +6,39 @@ import contextlib
 import io
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol
 
 from IPython.core.interactiveshell import InteractiveShell
+from platformdirs import user_data_dir
 from traitlets.config import Config
 
 from .instruments import LockedProxy
 
 if TYPE_CHECKING:
     from .workers import LastRun
+
+
+def default_history_file() -> Path:
+    """Where the console's persistent input history lives for real runs
+    of the app — a per-user data directory (``platformdirs``), not
+    IPython's own default (``~/.ipython/profile_default/history.sqlite``).
+
+    That default matters: it's shared by *every* ``InteractiveShell`` on
+    the machine, this app's included, and every one of them registers its
+    own `atexit` hook against it — accumulate enough of those (a single
+    test run alone constructs 100+) and shutdown ends up serializing
+    against a file that never gets smaller, which is what one earlier
+    version of this app's test suite hit as a very real, reproducible
+    hang. A dedicated path for this app alone avoids sharing that fate
+    with anything else IPython-based on the same machine, real or test.
+    This function is only ever called from the real entry point
+    (``iyzee.tui.app.run``) for exactly that reason — tests construct
+    ``IyzeeApp``/``IyzeeIPython`` with no history file at all, which
+    keeps them on ``:memory:`` (private, thrown away when the process
+    exits) without needing to know this function exists.
+    """
+    return Path(user_data_dir("iyzee")) / "console_history.sqlite"
 
 
 class AppState(Protocol):
@@ -215,37 +239,55 @@ def _device_from_handle(name: str, handle: Any) -> Any:
 class IyzeeIPython:
     """Own one embedded :class:`InteractiveShell` for the running TUI."""
 
-    def __init__(self, app: AppState, *, namespace: Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        app: AppState,
+        *,
+        namespace: Mapping[str, Any] | None = None,
+        history_file: str | Path | None = None,
+    ) -> None:
         config = Config()
         config.InteractiveShell.automagic = True
         config.InteractiveShell.autoawait = True
         config.InteractiveShell.autoindent = True
         config.InteractiveShell.display_page = True
+        # This does *not* control whether Ctrl+P/Ctrl+N can recall
+        # commands from previous sessions — that's `history_file`/
+        # `hist_file` below, and the `history` property further down
+        # queries the database directly (`get_tail()`) rather than going
+        # through whatever this loads. It only controls how much of the
+        # history database IPython caches into its own internal
+        # `input_hist_raw`/`_ih`/`%history`-magic bookkeeping at startup,
+        # none of which this app uses (Textual owns the input widget, not
+        # IPython's own readline/prompt_toolkit line editing) — so this
+        # stays 0 purely to skip a startup query this app has no use for.
         config.InteractiveShell.history_load_length = 0
-        # IPython's default HistoryManager writes every cell to a real,
-        # persistent SQLite file shared across every InteractiveShell
-        # instance on the machine (~/.ipython/profile_default/history.sqlite)
-        # — and never cleans it up. Since `history_load_length = 0` above
-        # already means this app never reads that file back (only the
-        # *current* session's history is ever used, for Ctrl+P/Ctrl+N —
-        # see the `history` property below), every session writes real
-        # disk I/O for zero benefit, and the file only ever grows: one
-        # test run alone (each test builds its own IyzeeApp, hence its
-        # own InteractiveShell) adds well over a hundred session rows.
-        # After enough accumulated runs this turns into serious, easy to
-        # miss slowdown — dozens to thousands of InteractiveShell
-        # instances all registered their own `atexit` history-session-end
-        # write against the same growing file, so at process shutdown
-        # they serialize against each other and against however large
-        # the file has grown, which can look like the whole test suite
-        # hanging right at the very end rather than a slow individual
-        # test. `:memory:` keeps each shell's history entirely private to
-        # its own process — no shared file, nothing left behind, nothing
-        # to serialize against — while behaving identically for the one
-        # thing history is actually used for here (confirmed directly:
-        # `history_manager.get_range(session=0, raw=True)` returns the
-        # same thing whether `hist_file` is `:memory:` or a real path).
-        config.HistoryManager.hist_file = ":memory:"
+        # `history_file` is the caller's choice: `None` (every test in
+        # this codebase, and any other direct construction) keeps history
+        # in `:memory:` — private to this process, thrown away when it
+        # exits, nothing shared with any other InteractiveShell on the
+        # machine. A real path (only ever passed by the real entry point,
+        # `iyzee.tui.app.run` → `default_history_file()`) makes it
+        # persistent and shared across restarts of *this app specifically*
+        # — deliberately not IPython's own default location
+        # (~/.ipython/profile_default/history.sqlite), which is shared by
+        # every InteractiveShell on the machine and is exactly what caused
+        # real, reproducible test-suite hangs before `:memory:` became the
+        # default: dozens to thousands of instances (each test builds its
+        # own) all registering their own `atexit` history-session-end
+        # write against one ever-growing shared file, serializing against
+        # each other and against however large it's grown by shutdown.
+        # `default_history_file()`'s own docstring has the rest of that
+        # story. A real *app* run only ever builds one InteractiveShell
+        # for its whole lifetime, so the growth-over-time here is orders
+        # of magnitude slower than what a test run did to the shared
+        # default — normal personal-history-file territory, not that.
+        if history_file is None:
+            config.HistoryManager.hist_file = ":memory:"
+        else:
+            history_file = Path(history_file)
+            history_file.parent.mkdir(parents=True, exist_ok=True)
+            config.HistoryManager.hist_file = str(history_file)
         config.InteractiveShell.log_output = False
         config.InteractiveShell.banner1 = ""
         config.InteractiveShell.banner2 = ""
@@ -330,22 +372,32 @@ class IyzeeIPython:
         with self._lock:
             return self.shell.complete(source, line=source, cursor_pos=cursor_pos)
 
+    #: Cap on how many past entries `history` pulls back via `get_tail()`.
+    #: With `hist_file` persistent (see `__init__`) the underlying table
+    #: can span months of real use; every `history` access re-queries it
+    #: (`history_available`, every Ctrl+P/Ctrl+N — see console.py), so an
+    #: unbounded `SELECT` would get slower the longer the app's been in
+    #: use. 500 is comfortably more than anyone browses via repeated
+    #: Ctrl+P in practice, and `get_tail()` enforces it with a SQL
+    #: `LIMIT`, not a Python-side slice — the query itself stays cheap
+    #: regardless of table size.
+    _HISTORY_TAIL_LIMIT = 500
+
     @property
     def history(self) -> list[str]:
-        """Return this session's input history, oldest first, deduped.
+        """Return input history, oldest first, deduped, most recent last.
 
-        Sourced from ``history_manager.get_range(session=0)`` —
-        ``session=0`` is IPython's own convention for "the current
-        session" (see ``HistoryManager.get_range``) — rather than
-        ``get_tail()``, which is what IPython's terminal frontend uses
-        for its persistent, cross-session up/down history (see
-        ``IPython.terminal.interactiveshell.PtkHistoryAdapter``). That's
-        deliberate: this app is a long-running process, not a
-        short-lived shell, so mixing in commands from an unrelated
-        earlier visit to this screen would be surprising rather than
-        helpful the way cross-session recall is for a normal `ipython`
-        session. Consecutive blank/duplicate entries are dropped, the
-        same filtering ``PtkHistoryAdapter`` applies.
+        Sourced from ``history_manager.get_tail()`` — the same lookup
+        IPython's own terminal frontend uses for its persistent,
+        cross-session up/down history (see
+        ``IPython.terminal.interactiveshell.PtkHistoryAdapter``) — rather
+        than ``get_range(session=0)``, which only the *current* session.
+        With a persistent ``hist_file`` (see ``__init__``) that means
+        Ctrl+P recalls commands from a previous run of the app, not just
+        this one; with the ``:memory:`` default it's equivalent to the
+        old session-scoped behavior anyway, since nothing before this
+        process existed to recall. Consecutive blank/duplicate entries
+        are dropped, the same filtering ``PtkHistoryAdapter`` applies.
         """
         with self._lock:
             entries: list[str] = []
@@ -355,7 +407,10 @@ class IyzeeIPython:
             # the same thing before use rather than narrowing the
             # declared type, so this follows that convention.
             assert self.shell.history_manager is not None
-            for _session, _line, cell in self.shell.history_manager.get_range(session=0, raw=True):
+            tail = self.shell.history_manager.get_tail(
+                n=self._HISTORY_TAIL_LIMIT, raw=True, include_latest=True
+            )
+            for _session, _line, cell in tail:
                 cell = cell.rstrip()
                 if cell and cell != last:
                     entries.append(cell)

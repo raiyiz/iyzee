@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import defaultdict
+from pathlib import Path
 from typing import cast
 
 from textual import events
@@ -13,6 +14,7 @@ from textual.containers import Horizontal
 from textual.widgets import ContentSwitcher, Footer, Header, Static
 
 from .instruments import INSTRUMENTS, InstrumentHandle
+from .ipython import default_history_file
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.sweep import SweepScreen
@@ -126,7 +128,7 @@ class IyzeeApp(App):
     }
     DEFAULT_PAGE = "connect"
 
-    def __init__(self) -> None:
+    def __init__(self, *, console_history_file: str | Path | None = None) -> None:
         super().__init__()
         self.handles: dict[str, InstrumentHandle] = {}
         # One lock per instrument key, shared by every caller that talks to
@@ -143,6 +145,15 @@ class IyzeeApp(App):
         # SweepScreen._finish, read by ConsoleScreen to expose `results` in
         # the console namespace. See workers.LastRun.
         self.last_run: LastRun | None = None
+        # Passed straight through to IyzeeIPython (see ConsoleScreen.compose)
+        # as its `history_file`. Defaults to `None` — `:memory:`, private,
+        # nothing persisted — quite deliberately: every test in this
+        # codebase constructs `IyzeeApp()` with no arguments, and picking
+        # any default here other than "no persistence" would silently
+        # reintroduce the shared-file test-suite hang `default_history_file`
+        # documents. Real persistence is opt-in, from the real entry point
+        # only (see `run()` below).
+        self.console_history_file = console_history_file
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -173,8 +184,13 @@ class IyzeeApp(App):
 
 
 def run() -> None:
-    """Console-script entry point (``iyzee-tui``)."""
-    IyzeeApp().run()
+    """Console-script entry point (``iyzee-tui``).
+
+    The only place that opts into persistent console history — see
+    `IyzeeApp.__init__` and `default_history_file`'s docstrings for why
+    that's deliberately not the default.
+    """
+    IyzeeApp(console_history_file=default_history_file()).run()
 
 
 if __name__ == "__main__":

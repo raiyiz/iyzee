@@ -69,7 +69,8 @@ class ConsoleScreen(Vertical):
         # self.app is App[Any] in Textual's stubs; it's always an
         # IyzeeApp at runtime (see ConnectScreen.iyzee_app for why), and
         # that satisfies ipython.AppState structurally.
-        yield IyzeeConsole(IyzeeIPython(cast("IyzeeApp", self.app)))
+        app = cast("IyzeeApp", self.app)
+        yield IyzeeConsole(IyzeeIPython(app, history_file=app.console_history_file))
 
     def on_mount(self) -> None:
         self.console = self.query_one(IyzeeConsole)

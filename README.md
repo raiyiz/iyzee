@@ -154,10 +154,20 @@ device from two threads at once.
 The console uses IPython's own execution engine rather than a custom Python
 parser — completion, inspection (`?` / `??`), magic commands, history, shell
 commands, and top-level `await` all come from IPython itself. History is
-scoped to the current console session (not IPython's normal cross-session
-persistent history, which would mix in commands from an unrelated earlier
-visit to this same long-running app — see `IyzeeIPython.history`'s
-docstring for why that's a deliberate choice, not an oversight). Jedi
+persistent and cross-session for a real run of the app — Ctrl+P recalls
+commands from a previous run of the app, not just the current one, matching
+a normal shell's own history file — but only ever for a real run: every
+test in this codebase (and any other direct construction) keeps history in
+`:memory:`, private to that one process and thrown away when it exits, by
+default. That split matters — IPython's own default history location
+(`~/.ipython/profile_default/history.sqlite`) is shared by *every*
+`InteractiveShell` on the machine and is exactly what caused a real,
+reproducible test-suite hang before this: a full test run constructs 100+
+shells, each registering its own `atexit` history-session-end write against
+that one ever-growing shared file. See `default_history_file`'s and
+`IyzeeIPython.__init__`'s docstrings in `ipython.py` for the rest of that
+story, and `IyzeeApp.console_history_file`'s for how a real run opts in
+(`iyzee-tui`'s entry point does; nothing else does). Jedi
 completion is disabled: it does static analysis and can't see through
 `lab`'s dynamic attribute lookup, so `lab.<Tab>` would otherwise silently
 return nothing.

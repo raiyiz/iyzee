@@ -311,11 +311,98 @@ whether `hist_file` is `:memory:` or a real path — and confirmed the
 fix actually stops the accumulation: ran the full suite before and
 after with the real on-disk session count checked both times,
 1139 → 1139, versus the file growing by 130+ rows on every run before
-this. Covered by `test_history_never_touches_a_real_file_on_disk` in
-`tests/test_ipython.py`, which pins the configuration down directly
+this. Covered by `test_history_never_touches_a_real_file_on_disk_by_default`
+in `tests/test_ipython.py`, which pins the configuration down directly
 rather than only exercising the behavior it happens to produce, so a
 future change can't silently drop it and have every symptom show up only
 much later as slowdown rather than as a clear, immediate test failure.
+
+---
+
+## Follow-on: bringing persistence back, safely, for real runs
+
+`:memory:` above was the right default, but it's a strictly *test-time*
+concern — for the actual running app, cross-session history (Ctrl+P
+recalling yesterday's commands, like a shell's own history file) is a
+real, reasonable feature, and the previous section's `history` property
+was explicitly *scoped away* from that (`get_range(session=0)`, current
+session only) as a deliberate design choice, not just a side effect of
+avoiding the disk-leak bug. Bringing it back meant revisiting that
+choice, not just flipping the same setting off.
+
+**The split that makes both things true at once:** `IyzeeIPython` now
+takes an explicit `history_file` parameter — `None` (the default, and
+what every test constructs with) means `:memory:`, exactly as before; a
+real path makes it persistent. `IyzeeApp` gained the matching
+`console_history_file` parameter, also defaulting to `None`, threaded
+through to the console's `IyzeeIPython` in `ConsoleScreen.compose()`.
+Only the real console-script entry point (`iyzee-tui` →
+`iyzee.tui.app.run`) ever passes something other than `None` —
+`default_history_file()`, a *dedicated* path under a per-user data
+directory (`platformdirs.user_data_dir("iyzee")`), deliberately not
+IPython's own shared default. Reusing that default would have undone the
+whole point: it's shared by every `InteractiveShell` on the machine, this
+app's tests included, so the same accumulation-and-atexit-contention
+failure mode from the previous section would eventually recur the moment
+enough real runs piled up, on top of mixing this app's lab-session
+commands into whatever the same machine's everyday interactive `ipython`
+usage keeps there.
+
+**The `history` property switched from `get_range(session=0)` to
+`get_tail()`** — the same lookup IPython's own terminal frontend uses for
+persistent cross-session recall — capped at the 500 most recent entries
+(`_HISTORY_TAIL_LIMIT`) so the query itself stays a cheap SQL `LIMIT`
+regardless of how large the table's grown after months of real use,
+rather than an unbounded scan repeated on every keystroke that opens
+history browsing (`history_available` alone hits this on every
+keypress). Verified directly, not just by reasoning through IPython's
+source: two separate `InteractiveShell` instances against the same real
+file, one execution each, `get_tail()` on the second one returns both —
+confirmed end-to-end through the actual `IyzeeApp`/`ConsoleScreen`/Ctrl+P
+path too, not just the underlying IPython call directly.
+
+**Growth over real time, revisited:** the previous section's "100+
+shells per test run" growth doesn't apply here — a real app run
+constructs exactly one `InteractiveShell` for its whole lifetime, so
+growth is one "session" row plus however many cells you actually run,
+per real work session. Ordinary personal-history-file territory, not
+what caused the original hang; no pruning implemented, and none seemed
+warranted at that rate, though it's worth another look if this ever
+becomes a machine that runs the TUI continuously for very long stretches
+rather than per work session.
+
+**Left as a known risk, not fixed:** two `iyzee-tui` processes running at
+once (two terminals, two people) would share one real SQLite file and
+could hit write contention — smaller-scale than the test-suite case (2
+writers, not 130+), but the same category of issue. Not addressed here;
+worth revisiting if running the TUI concurrently from multiple terminals
+turns out to be a real usage pattern rather than a hypothetical one.
+
+Covered by `test_history_persists_across_instances_given_a_real_file`,
+`test_history_file_parent_directory_is_created_if_missing`, and
+`test_default_history_file_is_under_a_per_user_data_directory` in
+`tests/test_ipython.py`, and
+`test_console_history_file_defaults_to_none_and_is_passed_through` in
+`tests/test_app.py` (the one test here that goes through the real
+`IyzeeApp`/`ConsoleScreen` wiring end to end, not just `IyzeeIPython`
+directly — checking both that the safe default reaches the running
+console and that an opted-in real path does too).
+
+**One test-writing hazard hit and worth flagging:** an early version of
+the persistence test called `IyzeeIPython.close()` between the two
+simulated "runs" to force history to disk. `close()` calls
+`InteractiveShell.atexit_operations()` directly — the *same* method
+Python's own `atexit` module already calls automatically when that
+`InteractiveShell` is garbage collected at interpreter shutdown, since
+`InteractiveShell.__init__` registers it unconditionally. Calling it
+twice on one instance corrupted enough internal state that the *second*
+(automatic) call crashed with `AttributeError: 'InteractiveShell' object
+has no attribute 'tempfiles'`, printed as an ignored exception after the
+whole test run had already reported success — the kind of thing easy to
+mistake for unrelated flakiness. Real usage never double-calls this (a
+real app's shell is only ever torn down once, by the automatic call);
+the test now uses the narrower `history_manager.writeout_cache()`
+instead, which forces the same flush without touching shutdown at all.
 
 ---
 

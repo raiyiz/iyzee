@@ -10,11 +10,12 @@ from __future__ import annotations
 import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from iyzee.experiment import StepResult
 from iyzee.tui.instruments import LockedProxy
-from iyzee.tui.ipython import IyzeeIPython, LabProxy
+from iyzee.tui.ipython import IyzeeIPython, LabProxy, default_history_file
 from iyzee.tui.workers import LastRun
 
 
@@ -167,26 +168,82 @@ def test_history_does_not_leak_across_shell_instances() -> None:
     assert second.history == []
 
 
-def test_history_never_touches_a_real_file_on_disk() -> None:
+def test_history_never_touches_a_real_file_on_disk_by_default() -> None:
     """Every InteractiveShell writes its input history to SQLite by
     default, and unless told otherwise that means a real, persistent file
     shared across every instance ever constructed on the machine
-    (`~/.ipython/profile_default/history.sqlite`) -- one this app never
-    even reads back (`history_load_length = 0`), so it was pure overhead,
-    and it never gets cleaned up: a full test run alone constructs 100+
-    shells, each leaving a row behind forever. `hist_file = ":memory:"`
-    keeps each shell's history entirely private and disposable instead --
-    this pins that configuration down directly (rather than only
-    exercising the behavior it happens to produce) so a future change
-    can't silently drop it and have every symptom show up only much
-    later, as slowdown, rather than as a clear test failure."""
+    (`~/.ipython/profile_default/history.sqlite`) -- one that never gets
+    cleaned up: a full test run alone constructs 100+ shells, each
+    leaving a row behind forever. `IyzeeIPython`'s default (no
+    `history_file` argument, exactly what every other test in this file
+    does) keeps `hist_file = ":memory:"` -- private and disposable --
+    rather than touching that shared file at all. This pins that default
+    down directly (rather than only exercising the behavior it happens to
+    produce) so a future change can't silently drop it and have every
+    symptom show up only much later, as slowdown, rather than as a clear
+    test failure."""
     shell = IyzeeIPython(FakeApp())
     assert shell.shell.history_manager.hist_file == ":memory:"
 
-    # And the thing history is actually used for here -- current-session
-    # recall for Ctrl+P/Ctrl+N -- behaves identically to a real file.
+    # And the thing history is actually used for here -- recall for
+    # Ctrl+P/Ctrl+N -- behaves identically to a real file for a single
+    # process's own commands.
     shell.execute("1 + 1")
     assert shell.history == ["1 + 1"]
+
+
+def test_history_persists_across_instances_given_a_real_file(tmp_path: Path) -> None:
+    """The actual feature `history_file` exists for: passing a real path
+    makes history recall span separate `IyzeeIPython` instances -- e.g. a
+    real restart of the app -- the way a shell's own persistent history
+    file does, rather than starting empty every time (the `:memory:`
+    default's behavior, and deliberately so -- see
+    `test_history_never_touches_a_real_file_on_disk_by_default`)."""
+    history_file = tmp_path / "console_history.sqlite"
+
+    first_run = IyzeeIPython(FakeApp(), history_file=history_file)
+    first_run.execute("yesterday = 1")
+    # Real per-cell writes land in an in-memory cache first and are only
+    # flushed to the actual SQLite file once it fills up (or the shell
+    # shuts down) — not calling `first_run.close()` here on purpose: that
+    # runs the *same* `atexit_operations` Python's own `atexit` module
+    # will also call automatically when this object is garbage collected
+    # at interpreter shutdown, and running it twice on one instance broke
+    # in a way real usage never hits (a real app's shell only ever gets
+    # torn down once, by that automatic call). `writeout_cache()` forces
+    # the flush this test needs without that hazard.
+    first_run.shell.history_manager.writeout_cache()
+
+    second_run = IyzeeIPython(FakeApp(), history_file=history_file)
+    second_run.execute("today = 2")
+
+    assert second_run.history == ["yesterday = 1", "today = 2"]
+
+
+def test_history_file_parent_directory_is_created_if_missing(tmp_path: Path) -> None:
+    """`default_history_file()` points at a per-user data directory that
+    may not exist yet on a machine that's never run this app before --
+    IyzeeIPython should create it rather than handing SQLite a path it
+    can't open."""
+    history_file = tmp_path / "not" / "yet" / "created" / "history.sqlite"
+    assert not history_file.parent.exists()
+
+    IyzeeIPython(FakeApp(), history_file=history_file)
+
+    assert history_file.parent.exists()
+
+
+def test_default_history_file_is_under_a_per_user_data_directory() -> None:
+    """Deliberately *not* IPython's own default location
+    (`~/.ipython/profile_default/history.sqlite`) -- that one's shared by
+    every InteractiveShell on the machine, this app's included, which is
+    exactly what caused real test-suite hangs before `:memory:` became
+    IyzeeIPython's own default (see the tests above). This app gets its
+    own dedicated file instead."""
+    path = default_history_file()
+
+    assert path.name == "console_history.sqlite"
+    assert ".ipython" not in path.parts
 
 
 def test_locked_proxy_serializes_concurrent_calls() -> None:
