@@ -152,14 +152,41 @@ def test_lab_tab_completion_actually_works() -> None:
 
 def test_history_does_not_leak_across_shell_instances() -> None:
     """A fresh IyzeeIPython (e.g. after an app restart) should not surface
-    another instance's input, even though IPython persists history to a
-    shared sqlite file on disk by default."""
+    another instance's input. Meaningful regression coverage even though
+    each shell's history now lives in its own private `:memory:` database
+    (see `test_history_never_touches_a_real_file_on_disk` below) rather
+    than a file multiple instances could in principle collide over --
+    isolation still isn't automatic, since `InteractiveShell._instance` is
+    a shared class-level singleton pointer this app reassigns on every
+    construction (see the comment where that happens in `ipython.py`)."""
     first = IyzeeIPython(FakeApp())
     first.execute("secret = 1")
     assert first.history == ["secret = 1"]
 
     second = IyzeeIPython(FakeApp())
     assert second.history == []
+
+
+def test_history_never_touches_a_real_file_on_disk() -> None:
+    """Every InteractiveShell writes its input history to SQLite by
+    default, and unless told otherwise that means a real, persistent file
+    shared across every instance ever constructed on the machine
+    (`~/.ipython/profile_default/history.sqlite`) -- one this app never
+    even reads back (`history_load_length = 0`), so it was pure overhead,
+    and it never gets cleaned up: a full test run alone constructs 100+
+    shells, each leaving a row behind forever. `hist_file = ":memory:"`
+    keeps each shell's history entirely private and disposable instead --
+    this pins that configuration down directly (rather than only
+    exercising the behavior it happens to produce) so a future change
+    can't silently drop it and have every symptom show up only much
+    later, as slowdown, rather than as a clear test failure."""
+    shell = IyzeeIPython(FakeApp())
+    assert shell.shell.history_manager.hist_file == ":memory:"
+
+    # And the thing history is actually used for here -- current-session
+    # recall for Ctrl+P/Ctrl+N -- behaves identically to a real file.
+    shell.execute("1 + 1")
+    assert shell.history == ["1 + 1"]
 
 
 def test_locked_proxy_serializes_concurrent_calls() -> None:

@@ -222,6 +222,30 @@ class IyzeeIPython:
         config.InteractiveShell.autoindent = True
         config.InteractiveShell.display_page = True
         config.InteractiveShell.history_load_length = 0
+        # IPython's default HistoryManager writes every cell to a real,
+        # persistent SQLite file shared across every InteractiveShell
+        # instance on the machine (~/.ipython/profile_default/history.sqlite)
+        # — and never cleans it up. Since `history_load_length = 0` above
+        # already means this app never reads that file back (only the
+        # *current* session's history is ever used, for Ctrl+P/Ctrl+N —
+        # see the `history` property below), every session writes real
+        # disk I/O for zero benefit, and the file only ever grows: one
+        # test run alone (each test builds its own IyzeeApp, hence its
+        # own InteractiveShell) adds well over a hundred session rows.
+        # After enough accumulated runs this turns into serious, easy to
+        # miss slowdown — dozens to thousands of InteractiveShell
+        # instances all registered their own `atexit` history-session-end
+        # write against the same growing file, so at process shutdown
+        # they serialize against each other and against however large
+        # the file has grown, which can look like the whole test suite
+        # hanging right at the very end rather than a slow individual
+        # test. `:memory:` keeps each shell's history entirely private to
+        # its own process — no shared file, nothing left behind, nothing
+        # to serialize against — while behaving identically for the one
+        # thing history is actually used for here (confirmed directly:
+        # `history_manager.get_range(session=0, raw=True)` returns the
+        # same thing whether `hist_file` is `:memory:` or a real path).
+        config.HistoryManager.hist_file = ":memory:"
         config.InteractiveShell.log_output = False
         config.InteractiveShell.banner1 = ""
         config.InteractiveShell.banner2 = ""

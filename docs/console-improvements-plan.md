@@ -276,6 +276,49 @@ for a keybinding budget that's already fairly full after items 3 and 5.
 
 ---
 
+## Found separately: every `InteractiveShell` was leaking a real file to disk
+
+Not one of the six items, and not something item 4's own tests were
+looking for — found because running the test suite after item 4 started
+hanging at shutdown, needing a manual Ctrl+C, badly enough to be reported
+as a bug on its own. The actual cause: IPython's default `HistoryManager`
+writes every cell to a real, persistent SQLite file *shared across every
+`InteractiveShell` instance on the machine*
+(`~/.ipython/profile_default/history.sqlite`) and never cleans it up.
+Each test in this suite builds its own `IyzeeApp` (hence its own
+`InteractiveShell`), so one full run alone adds 100+ session rows; a dev
+machine that's run the suite repeatedly can accumulate thousands over
+time (one checked directly: 1139 sessions already, all from earlier runs
+of *this same suite*, before this fix — confirmed to stop growing
+entirely afterward). Each of those instances also registers its own
+`atexit` "close out this session" hook against that same growing shared
+file, so at process shutdown they end up serializing against each other
+and against however large the file has grown by then — which reads as
+the *whole test run* hanging right at the very end, not as one slow
+test, and is exactly what the bug report looked like.
+
+Worth fixing regardless of tests: `history_load_length = 0` (already
+set, predates this fix) means the app never reads that file back in the
+first place — only the *current* session's history is ever used, for
+Ctrl+P/Ctrl+N — so every write to it was already pure overhead for the
+real running app too, not just a test-environment artifact.
+
+Fixed with one line: `config.HistoryManager.hist_file = ":memory:"`.
+Confirmed directly (not just inferred) that this doesn't change the one
+thing history is actually used for here —
+`history_manager.get_range(session=0, raw=True)` returns identically
+whether `hist_file` is `:memory:` or a real path — and confirmed the
+fix actually stops the accumulation: ran the full suite before and
+after with the real on-disk session count checked both times,
+1139 → 1139, versus the file growing by 130+ rows on every run before
+this. Covered by `test_history_never_touches_a_real_file_on_disk` in
+`tests/test_ipython.py`, which pins the configuration down directly
+rather than only exercising the behavior it happens to produce, so a
+future change can't silently drop it and have every symptom show up only
+much later as slowdown rather than as a clear, immediate test failure.
+
+---
+
 ## Out of scope for this pass
 
 Exhaustive test coverage per item — token-constrained this round, so each
