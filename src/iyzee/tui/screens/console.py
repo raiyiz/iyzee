@@ -196,9 +196,15 @@ class IyzeeConsole(Vertical):
     """Interactive IPython pane with completion, history, and output."""
 
     DEFAULT_CSS = """
-    IyzeeConsole { height: 1fr; min-height: 10; }
+    /* Scrolls (instead of clipping) once the terminal is too short for
+       output + input + status — and, more to the point, with the inline
+       plot open, whose fixed 12 rows would otherwise push the input
+       below the fold with no way to reach it. min-height keeps the
+       output log usable rather than letting it shrink to nothing. */
+    IyzeeConsole { height: 1fr; min-height: 16; overflow-y: auto; }
     IyzeeConsole #console-output {
         height: 1fr;
+        min-height: 6;
         border: round $primary-darken-1;
         margin: 0 1 1 1;
     }

@@ -12,12 +12,13 @@ from pathlib import Path
 
 import numpy as np
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Label, ListItem, ListView, Static
 from textual_plotext import PlotextPlot
 
 from ...experiment import difference_series
 from ..plotting import draw_series
+from .page import Page
 
 # <package_root>/data — matches iyzee.experiment.io.create_dirs(),
 # without calling it (create_dirs() always creates a fresh dated directory,
@@ -25,14 +26,16 @@ from ..plotting import draw_series
 _DATA_ROOT = Path(__file__).resolve().parents[2] / "data"
 
 
-class TracesScreen(Vertical):
+class TracesScreen(Page):
     """List recorded runs on the left, preview the selected one on the right."""
 
     def compose(self) -> ComposeResult:
         yield Static("Traces", classes="panel-title")
         yield Horizontal(
             ListView(id="traces-list"),
-            Vertical(
+            # Scrollable, not a plain Vertical: a run's metadata summary can
+            # be arbitrarily long, and a Vertical would clip it.
+            VerticalScroll(
                 Static("Select a run to preview it.", id="traces-summary"),
                 PlotextPlot(id="traces-plot"),
                 id="traces-detail",

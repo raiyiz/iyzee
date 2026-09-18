@@ -77,6 +77,21 @@ class IyzeeApp(App):
     SUB_TITLE = "lab instrument control"
     CSS_PATH = "app.tcss"
 
+    # Width breakpoints. Textual adds exactly one of these class names to
+    # the Screen, so app.tcss can reflow the whole UI declaratively with
+    # selectors like ``.-narrow #sweep-form`` — no resize handlers, no
+    # layout code in the screens. The thresholds are terminal columns
+    # (nav rail included), chosen so that at each tier the page area next
+    # to the rail still fits that tier's densest row: three buttons side
+    # by side from ``-medium`` up, four form fields per row at ``-wide``.
+    # At ``-narrow`` everything stacks into a single column, and whatever
+    # still doesn't fit is reached with the pages' scrollbars.
+    HORIZONTAL_BREAKPOINTS = [
+        (0, "-narrow"),
+        (76, "-medium"),
+        (116, "-wide"),
+    ]
+
     # Textual's command palette defaults to Ctrl+P with a *priority*
     # binding — priority bindings are checked before a focused widget ever
     # gets a look at the key, regardless of the DOM/focus chain — which

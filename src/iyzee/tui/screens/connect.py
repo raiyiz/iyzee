@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING, cast
 
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Vertical
 from textual.widgets import DataTable, Static
 
 from ..instruments import INSTRUMENTS, InstrumentSpec
 from ..workers import ConnectOutcome
+from .page import Page
 
 if TYPE_CHECKING:
     from ..app import IyzeeApp
@@ -29,7 +29,7 @@ STATUS_COL = "status"
 DETAIL_COL = "detail"
 
 
-class ConnectScreen(Vertical):
+class ConnectScreen(Page):
     """Table of instruments with live connect/disconnect status."""
 
     @property

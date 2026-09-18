@@ -23,7 +23,8 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Grid, Vertical
+from textual.widget import Widget
 from textual.widgets import (
     Button,
     Input,
@@ -54,11 +55,22 @@ from ...experiment import (
 from ..instruments import ShutterHandle, _VisaHandle
 from ..plotting import draw_series
 from ..workers import LastRun
+from .page import Page
 
 if TYPE_CHECKING:
     from ..app import IyzeeApp
 
 log = logging.getLogger("iyzee.tui")
+
+
+def _field(label: str, widget: Widget, *, id: str | None = None) -> Vertical:
+    """A label stacked over its input, as one grid cell of the sweep form.
+
+    Grouping the pair in a single container is what lets ``app.tcss``
+    reflow the form as a grid (1/2/4 columns depending on width) without
+    ever separating a label from the field it belongs to.
+    """
+    return Vertical(Label(label), widget, classes="field", id=id)
 
 
 class SweepAborted(Exception):
@@ -71,8 +83,15 @@ class SweepAborted(Exception):
     """
 
 
-class SweepScreen(Vertical):
-    """Pick a sweep type, configure it, run it, and watch it live."""
+class SweepScreen(Page):
+    """Pick a sweep type, configure it, run it, and watch it live.
+
+    The form, controls, plot and log together are taller than a small
+    terminal, so this is a scrolling ``Page`` rather than a plain
+    ``Vertical`` (which silently clips whatever doesn't fit — that is how
+    the Run/Abort buttons ended up unreachable). The responsive reflow
+    itself lives in ``app.tcss`` (see ``IyzeeApp.HORIZONTAL_BREAKPOINTS``).
+    """
 
     @property
     def iyzee_app(self) -> IyzeeApp:
@@ -81,44 +100,30 @@ class SweepScreen(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static("Sweep", classes="panel-title")
-        yield Horizontal(
-            Vertical(
-                Label("Sweep type"),
+        with Vertical(id="sweep-form"):
+            yield _field(
+                "Sweep type",
                 Select(
                     [("Bandwidth sweep", "bandwidth"), ("Frequency sweep", "frequency")],
                     value="bandwidth",
                     allow_blank=False,
                     id="sweep-type",
                 ),
-                Vertical(
-                    Label("RBW start (Hz)"),
-                    Input(value="20000", id="rbw-start"),
-                    Label("RBW stop (Hz)"),
-                    Input(value="380000", id="rbw-stop"),
-                    Label("Steps"),
-                    Input(value="19", id="rbw-steps"),
-                    id="bw-fields",
-                ),
-                Vertical(
-                    Label("Laser center (THz)"),
-                    Input(value="377.1052067", id="freq-center"),
-                    Label("Wavemeter channel"),
-                    Input(value="1", id="freq-channel"),
-                    Label("Points"),
-                    Input(value="5", id="freq-points"),
-                    Label("Offset step (kHz)"),
-                    Input(value="10", id="freq-offset-khz"),
-                    id="freq-fields",
-                ),
-            ),
-            id="sweep-form",
-        )
-        yield Horizontal(
-            Button("Run sweep", id="run-sweep", variant="success"),
-            Button("Abort", id="abort-sweep", variant="error", disabled=True),
-            Button("Capture trace", id="capture-trace"),
-            id="sweep-controls",
-        )
+                id="sweep-type-field",
+            )
+            with Grid(id="bw-fields", classes="field-grid"):
+                yield _field("RBW start (Hz)", Input(value="20000", id="rbw-start"))
+                yield _field("RBW stop (Hz)", Input(value="380000", id="rbw-stop"))
+                yield _field("Steps", Input(value="19", id="rbw-steps"))
+            with Grid(id="freq-fields", classes="field-grid"):
+                yield _field("Laser center (THz)", Input(value="377.1052067", id="freq-center"))
+                yield _field("Wavemeter channel", Input(value="1", id="freq-channel"))
+                yield _field("Points", Input(value="5", id="freq-points"))
+                yield _field("Offset step (kHz)", Input(value="10", id="freq-offset-khz"))
+        with Grid(id="sweep-controls"):
+            yield Button("Run sweep", id="run-sweep", variant="success")
+            yield Button("Abort", id="abort-sweep", variant="error", disabled=True)
+            yield Button("Capture trace", id="capture-trace")
         yield ProgressBar(id="sweep-progress", total=1)
         yield PlotextPlot(id="sweep-plot")
         yield RichLog(id="sweep-log", highlight=False, markup=True)
