@@ -3,12 +3,18 @@ from pathlib import Path
 
 import numpy as np
 
-from iyzee.experiment.persistence import create_dirs, save_data, save_step_results
-from iyzee.experiment.step import StepResult
+from iyzee.experiment.core import StepResult
+from iyzee.experiment.io import (
+    create_dirs,
+    difference_series,
+    multiplot,
+    save_data,
+    save_step_results,
+)
 
 
 def test_create_dirs_is_idempotent(tmp_path, monkeypatch):
-    monkeypatch.setattr("iyzee.experiment.persistence.Path", lambda *parts: Path(tmp_path, *parts))
+    monkeypatch.setattr("iyzee.experiment.io.Path", lambda *parts: Path(tmp_path, *parts))
 
     first = create_dirs("measurement")
     second = create_dirs("measurement")
@@ -66,3 +72,65 @@ def test_save_step_results_carries_per_point_and_run_metadata(tmp_path):
     assert meta[0]["label"] == "rbw=1000Hz"
     assert meta[0]["rbw_hz"] == 1000.0
     assert run_meta == {"software_revision": "abc123"}
+
+
+def test_multiplot_handles_empty_data(monkeypatch):
+    shown = False
+
+    def fake_show():
+        nonlocal shown
+        shown = True
+
+    monkeypatch.setattr("iyzee.experiment.io.plt.show", fake_show)
+
+    multiplot([])
+
+    assert shown
+
+
+def test_multiplot_plots_each_result(monkeypatch):
+    plotted = []
+
+    class FakeAx:
+        def plot(self, values):
+            plotted.append(list(values))
+
+        def legend(self, *a, **k):
+            pass
+
+        def set_xlabel(self, *a, **k):
+            pass
+
+        def set_ylabel(self, *a, **k):
+            pass
+
+    class FakeFig:
+        def tight_layout(self):
+            pass
+
+    monkeypatch.setattr("iyzee.experiment.io.plt.subplots", lambda: (FakeFig(), FakeAx()))
+    monkeypatch.setattr("iyzee.experiment.io.plt.show", lambda: None)
+
+    results = [
+        StepResult(
+            label="x=1",
+            x_value=1.0,
+            x_unit="Hz",
+            traces={"squeezing": [3.0, 4.0], "shot_noise": [1.0, 1.0]},
+        )
+    ]
+
+    multiplot(results)
+
+    assert plotted == [[2.0, 3.0]]
+
+
+def test_difference_series_computes_x_y_and_label():
+    result = difference_series([3.0, 4.0], [1.0, 1.0], "pt0")
+
+    assert result == ([0, 1], [2.0, 3.0], "pt0")
+
+
+def test_difference_series_returns_none_for_missing_traces():
+    assert difference_series(None, [1.0], "pt0") is None
+    assert difference_series([1.0], None, "pt0") is None

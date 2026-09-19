@@ -52,7 +52,7 @@ $ "MXA" -> "SCPI response" -> "PyVISA" -> "KeysightMXA" -> "Python" $
 
 The driver deliberately keeps the SCPI boundary thin. For example, `set_center_freq(freq_hz)` writes `FREQ:CENT`, `set_rbw(rbw_hz)` writes `BWID`, and `get_trace_data()` selects ASCII or binary transfer before reading the trace. Units are explicit at the Python boundary: frequencies are in Hz, sweep duration in ms, RF reference and marker powers in dBm where applicable, and counts are dimensionless.
 
-The experiment layer builds measurements from `Step` objects. `BandwidthStep` scans RBW; `FrequencyStep` changes the laser setpoint, waits for a configured settling interval, and acquires squeezing and shot-noise traces with the shutter closed again before the reference acquisition. `main.py` currently runs the bandwidth sweep, plots it, and saves the resulting `StepResult` objects.
+The experiment layer builds measurements from `Step` objects. `BandwidthStep` scans RBW; `FrequencyStep` changes the laser setpoint, waits for a configured settling interval, and acquires squeezing and shot-noise traces with the shutter closed again before the reference acquisition. `main.py` runs a fixed bandwidth sweep as a script, plots it, and saves the resulting `StepResult` objects; the `iyzee-tui` application (see the top-level README) runs either sweep interactively, with live progress, from the same `Step`/`run_sequence()` building blocks.
 
 = Measurement configuration
 
@@ -148,6 +148,8 @@ The key comparison in that workflow is squeezing versus shot noise. A difference
   [Bandwidth], [`set_rbw`, `set_vbw`], [`BWID`, `BWID:VID`],
   [Sweep], [`set_sweep_duration`, `set_sweep_points`, `single_sweep_wait`], [`SWE:TIME`, `SWE:POIN`, `INIT:*`],
   [Trace], [`set_trace_mode`, `set_trace_update`, `get_trace_data`], [`:TRACe...`, `FORMat:DATA`, `:TRACe:DATA?`],
+  [Detector / averaging], [`set_detector`, `set_average_count`, `set_average_type`], [`DET`, `AVER:COUN`, `AVER:TYPE`],
+  [Display], [`set_display_update`], [`DISP:ENAB`],
   [Markers], [`set_marker_*`, `get_marker_*`], [`CALC:MARK...`],
   [Trigger], [`set_trigger_*`, `wait_for_trigger_ready`], [`TRIG:*`, `STAT:OPER:*`],
 )
