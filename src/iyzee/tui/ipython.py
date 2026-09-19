@@ -298,6 +298,7 @@ class IyzeeIPython:
         # own simpler dir()-based completer when that happens). Regular
         # attribute/module/keyword completion elsewhere is unaffected.
         config.Completer.use_jedi = False
+        config.Completer.policy_overrides = {"allowed_getattr": {LabProxy, LockedProxy}}
         user_ns = dict(namespace or {})
         # Set once, never reassigned — see LabProxy's docstring for why
         # this replaces refreshing a set of copied globals on every visit.

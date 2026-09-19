@@ -134,6 +134,22 @@ def test_a_users_own_mx_variable_never_collides_with_lab() -> None:
     assert isinstance(shell.shell.user_ns["lab"], LabProxy)
 
 
+def test_lab_device_tab_completion_works() -> None:
+    class Device:
+        def configure(self) -> None: ...
+
+        def single_sweep_wait(self) -> None: ...
+
+    app = FakeApp(handles={"mxa": MxaHandle(Device())})
+    shell = IyzeeIPython(app)
+
+    _prefix, matches = shell.complete("lab.mx.", len("lab.mx."))
+    assert {".configure", ".single_sweep_wait"} <= set(matches)
+
+    _prefix, matches = shell.complete("lab.mx.si", len("lab.mx.si"))
+    assert ".single_sweep_wait" in matches
+
+
 def test_lab_tab_completion_actually_works() -> None:
     """Jedi (IPython's default completer) does static analysis and can't
     see through LabProxy's dynamic __getattr__ -- without use_jedi=False
