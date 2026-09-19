@@ -89,7 +89,11 @@ class BandwidthStep:
                 "squeezing": acquire_trace(ctx.mx, TRACE_SQZ),
                 "shot_noise": acquire_trace(ctx.mx, TRACE_SHOT),
             },
-            meta={"rbw_hz": self.rbw_hz, "vbw_hz": self.rbw_hz * 2},
+            meta={
+                "rbw_hz": self.rbw_hz,
+                "vbw_hz": self.rbw_hz * 2,
+                "sweep_duration_ms": ctx.config.get("sweep_duration_ms"),
+            },
         )
 
 
@@ -134,6 +138,7 @@ class FrequencyStep:
             meta={
                 "wavemeter_channel": self.wavemeter_channel,
                 "relax_time_s": self.relax_time_s,
+                "sweep_duration_ms": ctx.config.get("sweep_duration_ms"),
             },
         )
 

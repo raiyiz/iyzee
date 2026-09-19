@@ -95,7 +95,11 @@ def save_step_results(
 
 
 def difference_series(
-    squeezing: object, shot_noise: object, label: str | None
+    squeezing: object,
+    shot_noise: object,
+    label: str | None,
+    *,
+    sweep_duration_ms: float | None = None,
 ) -> tuple[list[float], list[float], str | None] | None:
     """Compute one squeezing-minus-shot-noise line, ready to plot.
 
@@ -118,7 +122,11 @@ def difference_series(
     if squeezing is None or shot_noise is None:
         return None
     difference = np.asarray(squeezing) - np.asarray(shot_noise)
-    return list(range(len(difference))), list(difference), label
+    if sweep_duration_ms is None:
+        x_values = list(range(len(difference)))
+    else:
+        x_values = np.linspace(0.0, sweep_duration_ms, len(difference)).tolist()
+    return x_values, list(difference), label
 
 
 def build_figure(results: list[StepResult]):
@@ -133,8 +141,12 @@ def build_figure(results: list[StepResult]):
     labels = []
 
     for result in results:
+        sweep_duration_ms = result.meta.get("sweep_duration_ms")
         series = difference_series(
-            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
+            result.traces.get("squeezing"),
+            result.traces.get("shot_noise"),
+            result.label,
+            sweep_duration_ms=float(sweep_duration_ms) if sweep_duration_ms is not None else None,
         )
         if series is None:
             continue
@@ -144,7 +156,7 @@ def build_figure(results: list[StepResult]):
 
     if labels:
         ax.legend(labels, ncol=4, loc="upper center", bbox_to_anchor=(0.5, 1.1))
-    ax.set_xlabel("Trace point")
+    ax.set_xlabel("Sweep time (ms)")
     ax.set_ylabel("Squeezing - shot noise")
     fig.tight_layout()
     return fig

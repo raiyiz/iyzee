@@ -138,7 +138,7 @@ class SweepScreen(Page):
         self.query_one("#freq-fields").display = False
         plot = self.query_one("#sweep-plot", PlotextPlot)
         plot.plt.title("Squeezing - shot noise")
-        plot.plt.xlabel("Trace point")
+        plot.plt.xlabel("Sweep time (ms)")
         plot.plt.ylabel("Squeezing - shot noise")
 
     def on_select_changed(self, event: Select.Changed) -> None:
@@ -202,7 +202,7 @@ class SweepScreen(Page):
             plot,
             [],
             title="Squeezing - shot noise",
-            xlabel="Trace point",
+            xlabel="Sweep time (ms)",
             ylabel="Squeezing - shot noise",
         )
         progress = self.query_one("#sweep-progress", ProgressBar)
@@ -320,8 +320,12 @@ class SweepScreen(Page):
             self._plot_result(result)
 
     def _plot_result(self, result: StepResult) -> None:
+        sweep_duration_ms = result.meta.get("sweep_duration_ms")
         series = difference_series(
-            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
+            result.traces.get("squeezing"),
+            result.traces.get("shot_noise"),
+            result.label,
+            sweep_duration_ms=float(sweep_duration_ms) if sweep_duration_ms is not None else None,
         )
         if series is None:
             return

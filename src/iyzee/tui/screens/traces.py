@@ -104,15 +104,25 @@ class TracesScreen(Page):
         for index, point in enumerate(data):
             _x_value, squeezing, shot_noise = point
             label = None
+            sweep_duration_ms = None
             if metadata is not None and index < len(metadata):
-                label = metadata[index].get("label")
-            result = difference_series(squeezing, shot_noise, label or f"pt {index}")
+                point_meta = metadata[index]
+                label = point_meta.get("label")
+                duration = point_meta.get("sweep_duration_ms")
+                if duration is not None:
+                    sweep_duration_ms = float(duration)
+            result = difference_series(
+                squeezing,
+                shot_noise,
+                label or f"pt {index}",
+                sweep_duration_ms=sweep_duration_ms,
+            )
             if result is not None:
                 series.append(result)
         draw_series(
             plot,
             series,
             title=path.name,
-            xlabel="Trace point",
+            xlabel="Sweep time (ms)",
             ylabel="Squeezing - shot noise",
         )
