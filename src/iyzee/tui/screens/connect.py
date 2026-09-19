@@ -9,14 +9,17 @@ touched back on the main thread via ``call_from_thread``.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING, cast
 
+from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.widgets import DataTable, Static
 
 from ..instruments import INSTRUMENTS, InstrumentSpec
+from ..text import one_line
 from ..workers import ConnectOutcome
 from .page import Page
 
@@ -49,6 +52,10 @@ class ConnectScreen(Page):
         yield DataTable(id="instrument-table", cursor_type="row")
 
     def on_mount(self) -> None:
+        # Keys of instruments with a connect/disconnect in flight. Enter on
+        # such a row is ignored: a second connect used to open the device
+        # a second time and overwrite (leak) the first handle.
+        self._busy: set[str] = set()
         table = self.query_one(DataTable)
         table.add_column("Instrument", key="instrument")
         table.add_column("Status", key=STATUS_COL)
@@ -81,10 +88,22 @@ class ConnectScreen(Page):
         spec = next((s for s in INSTRUMENTS if event.row_key == s.key), None)
         if spec is None:
             return
+        if spec.key in self._busy:
+            self.notify(
+                f"{spec.label} is still busy — wait for it to finish.",
+                severity="warning",
+                timeout=3,
+                markup=False,
+            )
+            return
+        self._busy.add(spec.key)
         if spec.key in self.iyzee_app.handles:
             self._disconnect(spec)
         else:
             self._connect(spec)
+
+    def _release(self, key: str) -> None:
+        self._busy.discard(key)
 
     def _ui(self, callback, *args, **kwargs) -> None:
         """Call back into the UI thread from a worker, without ever letting
@@ -104,37 +123,71 @@ class ConnectScreen(Page):
         except Exception:
             log.exception("connect screen: UI update from worker thread failed")
 
-    @work(thread=True, exclusive=True, group="connect", exit_on_error=False)
+    # Not ``exclusive``: that cancels the previous worker in the group, so
+    # connecting a second instrument used to "cancel" the first one's
+    # worker mid-connect. Per-instrument re-entry is prevented by
+    # ``_busy`` instead, and different instruments may connect in parallel.
+    @work(thread=True, group="connect", exit_on_error=False)
     def _connect(self, spec: InstrumentSpec) -> None:
-        self._ui(self._set_row, spec.key, "connecting...", "-")
         try:
-            with self.iyzee_app.instrument_locks[spec.key]:
-                handle = spec.build()
-                handle.connect()
-                detail = handle.probe()
-        except Exception as exc:  # noqa: BLE001 - surfacing to the UI, not swallowing
-            log.exception("failed to connect %s", spec.key)
-            self._ui(self._set_row, spec.key, "error", str(exc))
-            self._ui(self.notify, f"{spec.label}: {exc}", severity="error", timeout=6)
-            return
-        self.iyzee_app.handles[spec.key] = handle
-        outcome = ConnectOutcome(key=spec.key, ok=True, detail=detail)
-        self._ui(self._set_row, outcome.key, "connected", outcome.detail)
-
-    @work(thread=True, exclusive=True, group="connect", exit_on_error=False)
-    def _disconnect(self, spec: InstrumentSpec) -> None:
-        handle = self.iyzee_app.handles.pop(spec.key, None)
-        self._ui(self._set_row, spec.key, "disconnecting...", "-")
-        if handle is not None:
+            self._ui(self._set_row, spec.key, "connecting...", "-")
             try:
                 with self.iyzee_app.instrument_locks[spec.key]:
-                    handle.disconnect()
-            except Exception as exc:  # noqa: BLE001
-                log.exception("error closing %s", spec.key)
-                self._ui(self.notify, f"{spec.label}: error closing ({exc})", severity="warning")
-        self._ui(self._set_row, spec.key, "disconnected", "-")
+                    handle = spec.build()
+                    try:
+                        handle.connect()
+                        detail = handle.probe()
+                    except Exception:
+                        # connect() may have half-succeeded (or probe() failed
+                        # after it did); close the link rather than leak it,
+                        # since nothing will ever hold a reference to it.
+                        with contextlib.suppress(Exception):
+                            handle.disconnect()
+                        raise
+            except Exception as exc:  # noqa: BLE001 - surfacing to the UI, not swallowing
+                log.exception("failed to connect %s", spec.key)
+                self._ui(self._set_row, spec.key, "error", one_line(exc))
+                self._ui(
+                    self.notify,
+                    f"{spec.label}: {one_line(exc)}",
+                    severity="error",
+                    timeout=6,
+                    markup=False,
+                )
+                return
+            self.iyzee_app.handles[spec.key] = handle
+            outcome = ConnectOutcome(key=spec.key, ok=True, detail=detail)
+            self._ui(self._set_row, outcome.key, "connected", outcome.detail)
+        finally:
+            self._ui(self._release, spec.key)
+
+    @work(thread=True, group="connect", exit_on_error=False)
+    def _disconnect(self, spec: InstrumentSpec) -> None:
+        try:
+            handle = self.iyzee_app.handles.pop(spec.key, None)
+            self._ui(self._set_row, spec.key, "disconnecting...", "-")
+            if handle is not None:
+                try:
+                    with self.iyzee_app.instrument_locks[spec.key]:
+                        handle.disconnect()
+                except Exception as exc:  # noqa: BLE001
+                    log.exception("error closing %s", spec.key)
+                    self._ui(
+                        self.notify,
+                        f"{spec.label}: error closing ({one_line(exc)})",
+                        severity="warning",
+                        markup=False,
+                    )
+            self._ui(self._set_row, spec.key, "disconnected", "-")
+        finally:
+            self._ui(self._release, spec.key)
 
     def _set_row(self, key: str, status: str, detail: str) -> None:
         table = self.query_one(DataTable)
+        # A plain string in a cell is parsed as markup, and driver messages
+        # like "could not open [/dev/ttyUSB0]" then raise a MarkupError
+        # inside DataTable's render — which takes the whole app down. So the
+        # detail (external text) is escaped. Escaped rather than wrapped in
+        # Text so the stored cell value stays an ordinary str.
         table.update_cell(key, STATUS_COL, status)
-        table.update_cell(key, DETAIL_COL, detail)
+        table.update_cell(key, DETAIL_COL, escape(one_line(detail)))

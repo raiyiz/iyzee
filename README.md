@@ -36,7 +36,8 @@ uv run iyzee-tui
 ```
 
 Four screens cover the common tasks; switch between them with `c` / `s` /
-`t` / `i` (or click), or `q` / `Ctrl+Q` to quit:
+`t` / `i` (or click), or `Ctrl+Q` to quit (connected instruments are
+disconnected on the way out):
 
 - **Connect** (`c`) — one row per instrument (MXA, shutter/PSU, wavemeter,
   scope). Enter connects or disconnects the selected row.

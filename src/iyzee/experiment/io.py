@@ -27,6 +27,8 @@ def save_data(
     data,
     savedir: Path,
     metadata: list[dict] | None = None,
+    *,
+    path: Path | None = None,
     **extra_arrays: Any,
 ) -> Path:
     """Save variable-length trace data in a compressed NumPy archive.
@@ -36,14 +38,30 @@ def save_data(
     produced each point. ``extra_arrays`` lets callers attach additional
     top-level arrays (e.g. run-level metadata) without another signature
     change later.
+
+    By default a new timestamped file is created in ``savedir``. Pass
+    ``path`` (a file returned by an earlier call) to overwrite that file
+    instead — how a long run checkpoints itself after every point without
+    littering the directory with one file per point.
+
+    The write is atomic: the archive is written next to its destination
+    and moved into place, so a crash or power cut mid-write leaves the
+    previous checkpoint intact rather than a truncated ``.npz``.
     """
-    timestamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")
-    path = savedir / f"{timestamp}.npz"
+    if path is None:
+        timestamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")
+        path = savedir / f"{timestamp}.npz"
     arrays: dict[str, Any] = {"data": np.asarray(data, dtype=object)}
     if metadata is not None:
         arrays["metadata"] = np.asarray(metadata, dtype=object)
     arrays.update(extra_arrays)
-    np.savez_compressed(path, **arrays)
+    # ".part", not ".npz.tmp": np.savez appends ".npz" to names that lack it
+    # (writing through a file object avoids that), and Traces globs *.npz,
+    # so an in-flight file must not match.
+    partial = path.with_name(path.name + ".part")
+    with partial.open("wb") as handle:
+        np.savez_compressed(handle, **arrays)
+    partial.replace(path)
     return path
 
 
@@ -51,6 +69,8 @@ def save_step_results(
     results: list[StepResult],
     savedir: Path,
     run_metadata: dict[str, Any] | None = None,
+    *,
+    path: Path | None = None,
 ) -> Path:
     """Save a list of :class:`StepResult` with their per-point metadata.
 
@@ -58,7 +78,8 @@ def save_step_results(
     ``save_data()`` tuples, the saved archive is self-describing — every
     point carries the instrument state that produced it, and the run as a
     whole can carry a software revision, analyzer config, and timestamp via
-    ``run_metadata``.
+    ``run_metadata``. ``path`` overwrites an earlier save instead of creating
+    a new file (see :func:`save_data`).
     """
     data = [
         (result.x_value, result.traces.get("squeezing"), result.traces.get("shot_noise"))
@@ -70,7 +91,7 @@ def save_step_results(
     extra: dict[str, Any] = {}
     if run_metadata is not None:
         extra["run_metadata"] = np.asarray(json.dumps(run_metadata))
-    return save_data(data, savedir, metadata=per_point_meta, **extra)
+    return save_data(data, savedir, metadata=per_point_meta, path=path, **extra)
 
 
 def difference_series(

@@ -17,10 +17,12 @@ import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import asdict
+from functools import partial
 from threading import Event
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
+from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Vertical
@@ -54,6 +56,7 @@ from ...experiment import (
 )
 from ..instruments import ShutterHandle, _VisaHandle
 from ..plotting import draw_series
+from ..text import one_line
 from ..workers import LastRun
 from .page import Page
 
@@ -131,6 +134,7 @@ class SweepScreen(Page):
     def on_mount(self) -> None:
         self._abort_event = Event()
         self._collected: list[StepResult] = []
+        self._reset_checkpoint()
         self.query_one("#freq-fields").display = False
         plot = self.query_one("#sweep-plot", PlotextPlot)
         plot.plt.title("Squeezing - shot noise")
@@ -180,11 +184,12 @@ class SweepScreen(Page):
                 steps, config = self._build_frequency_run()
                 shutter = cast(ShutterHandle, shutter_handle).shutter
         except ValueError as exc:
-            self.notify(f"Invalid sweep parameters: {exc}", severity="error")
+            self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
             return
 
         self._abort_event = Event()
         self._collected = []
+        self._reset_checkpoint()
         log = self.query_one("#sweep-log", RichLog)
         log.clear()
         plot = self.query_one("#sweep-plot", PlotextPlot)
@@ -281,8 +286,12 @@ class SweepScreen(Page):
             def on_step(index, total, step, result, error) -> None:
                 if result is not None:
                     self._collected.append(result)
+                    # Straight to disk, before anything else: a crash, a
+                    # power cut or a quit part-way through a long run then
+                    # costs at most the step in flight, not the whole run.
+                    self._checkpoint(kind)
                 self._ui(self._on_step, index, total, step, result, error)
-                if self._abort_event.is_set():
+                if self._abort_event.is_set() or self.iyzee_app.shutdown_requested.is_set():
                     raise SweepAborted()
 
             aborted = False
@@ -302,9 +311,11 @@ class SweepScreen(Page):
         log = self.query_one("#sweep-log", RichLog)
         label = getattr(step, "label", None) or f"step[{index}]"
         if error is not None:
-            log.write(f"[{index + 1}/{total}] {label}: [red]failed[/red] ({error})")
+            log.write(
+                f"[{index + 1}/{total}] {escape(label)}: [red]failed[/red] ({escape(one_line(error))})"
+            )
             return
-        log.write(f"[{index + 1}/{total}] {label}: ok")
+        log.write(f"[{index + 1}/{total}] {escape(label)}: ok")
         if result is not None:
             self._plot_result(result)
 
@@ -359,8 +370,8 @@ class SweepScreen(Page):
         log = self.query_one("#sweep-log", RichLog)
 
         if error is not None:
-            log.write(f"[red]Capture failed: {error}[/red]")
-            self.notify(f"Capture failed: {error}", severity="error")
+            log.write(f"[red]Capture failed: {escape(one_line(error))}[/red]")
+            self.notify(f"Capture failed: {one_line(error)}", severity="error", markup=False)
             return
 
         assert freq is not None and power is not None  # error is None guarantees both are set
@@ -374,6 +385,45 @@ class SweepScreen(Page):
         )
         log.write(f"Captured {len(power)} point(s).")
 
+    # -- checkpointing ----------------------------------------------------
+
+    def _reset_checkpoint(self) -> None:
+        self._savedir = None
+        self._save_path = None
+        self._save_warned = False
+
+    def _checkpoint(self, kind: str, *, on_ui_thread: bool = False) -> None:
+        """Write everything collected so far to disk.
+
+        Called after every recorded point, from the worker thread. The same
+        file is overwritten each time (atomically — see ``save_data``), so
+        a run leaves exactly one archive, which is complete when the run
+        ends and merely shorter if it doesn't. A failing save (disk full,
+        permissions) must never abort the measurement itself: it is
+        logged, and reported once rather than once per point.
+
+        ``on_ui_thread`` is for the one call made from ``_finish``:
+        ``call_from_thread`` raises if used from the UI thread itself, so
+        that path has to notify directly.
+        """
+        try:
+            if self._savedir is None:
+                self._savedir = create_dirs(name=kind)
+            self._save_path = save_step_results(
+                list(self._collected), self._savedir, path=self._save_path
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception("sweep: could not save results")
+            if not self._save_warned:
+                self._save_warned = True
+                notify = self.notify if on_ui_thread else partial(self._ui, self.notify)
+                notify(
+                    f"Could not save results: {one_line(exc)}",
+                    severity="error",
+                    timeout=10,
+                    markup=False,
+                )
+
     def _finish(self, kind: str, *, aborted: bool, setup_error: Exception | None) -> None:
         self.query_one("#run-sweep", Button).disabled = False
         self.query_one("#abort-sweep", Button).disabled = True
@@ -381,20 +431,33 @@ class SweepScreen(Page):
         log = self.query_one("#sweep-log", RichLog)
 
         if setup_error is not None:
-            log.write(f"[red]Could not configure the analyzer: {setup_error}[/red]")
-            self.notify(f"Analyzer setup failed: {setup_error}", severity="error")
+            log.write(
+                f"[red]Could not configure the analyzer: {escape(one_line(setup_error))}[/red]"
+            )
+            self.notify(
+                f"Analyzer setup failed: {one_line(setup_error)}", severity="error", markup=False
+            )
             return
 
         if not self._collected:
             log.write("[yellow]No points recorded.[/yellow]")
             return
 
-        savedir = create_dirs(name=kind)
-        path = save_step_results(self._collected, savedir)
+        if self._save_path is None:
+            # Every per-point save failed; one last attempt now that the
+            # run is over (this is the UI thread, which is fine for one write).
+            self._checkpoint(kind, on_ui_thread=True)
+        path = self._save_path
         self.iyzee_app.last_run = LastRun(kind=kind, results=list(self._collected), path=path)
         status = "aborted" if aborted else "finished"
-        log.write(f"Sweep {status}: {len(self._collected)} point(s) saved to {path}")
-        self.notify(f"Saved {len(self._collected)} point(s) to {path.name}")
+        if path is None:
+            log.write(
+                f"[red]Sweep {status}: {len(self._collected)} point(s) recorded but "
+                "could not be saved — they are available as `results` in the console.[/red]"
+            )
+            return
+        log.write(f"Sweep {status}: {len(self._collected)} point(s) saved to {escape(str(path))}")
+        self.notify(f"Saved {len(self._collected)} point(s) to {path.name}", markup=False)
 
 
 def _positive_float(raw: str, field: str) -> float:

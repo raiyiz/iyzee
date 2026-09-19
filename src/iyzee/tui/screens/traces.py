@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
+from textual.markup import escape
 from textual.widgets import Label, ListItem, ListView, Static
 from textual_plotext import PlotextPlot
 
@@ -82,17 +83,19 @@ class TracesScreen(Page):
                 metadata = archive["metadata"] if "metadata" in archive else None
                 run_metadata = archive["run_metadata"] if "run_metadata" in archive else None
         except Exception as exc:  # noqa: BLE001
-            summary.update(f"[b]{path.name}[/b]\n\n[red]Could not read file: {exc}[/red]")
+            summary.update(
+                f"[b]{escape(path.name)}[/b]\n\n[red]Could not read file: {escape(str(exc))}[/red]"
+            )
             plot.plt.clear_data()
             plot.refresh()
             return
 
-        lines = [f"[b]{path.name}[/b]", f"{len(data)} point(s)"]
+        lines = [f"[b]{escape(path.name)}[/b]", f"{len(data)} point(s)"]
         if run_metadata is not None:
             try:
                 meta = json.loads(str(run_metadata))
                 lines.append("")
-                lines.extend(f"{k}: {v}" for k, v in meta.items())
+                lines.extend(f"{escape(str(k))}: {escape(str(v))}" for k, v in meta.items())
             except ValueError, TypeError:
                 pass
         summary.update("\n".join(lines))

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import threading
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import cast
@@ -20,6 +23,8 @@ from .screens.console import ConsoleScreen
 from .screens.sweep import SweepScreen
 from .screens.traces import TracesScreen
 from .workers import LastRun
+
+log = logging.getLogger("iyzee.tui")
 
 
 class NavRail(Static):
@@ -125,6 +130,11 @@ class IyzeeApp(App):
         Binding("f2", "show_page('sweep')", "Sweep", priority=True),
         Binding("f3", "show_page('traces')", "Traces", priority=True),
         Binding("f4", "show_page('console')", "Console", priority=True),
+        # Quit is Ctrl+Q only, deliberately not a bare "q": one stray
+        # keystroke shouldn't be able to shut down an app that is holding
+        # live instruments. Textual already binds Ctrl+Q, but hidden; this
+        # re-declares it so the footer actually tells people how to leave.
+        Binding("ctrl+q", "quit", "Quit", priority=True),
         Binding("escape", "blur_focused", "Leave field", show=False),
         Binding("j", "focus_next", "Focus next", show=False),
         Binding("k", "focus_previous", "Focus previous", show=False),
@@ -160,6 +170,11 @@ class IyzeeApp(App):
         # SweepScreen._finish, read by ConsoleScreen to expose `results` in
         # the console namespace. See workers.LastRun.
         self.last_run: LastRun | None = None
+        # Set once the app starts shutting down. Long-running workers poll
+        # it (SweepScreen checks it after every step) so a sweep stops at
+        # the next step boundary and releases its instrument lock, which
+        # is what lets close_instruments() disconnect cleanly.
+        self.shutdown_requested = threading.Event()
         # Passed straight through to IyzeeIPython (see ConsoleScreen.compose)
         # as its `history_file`. Defaults to `None` — `:memory:`, private,
         # nothing persisted — quite deliberately: every test in this
@@ -184,6 +199,54 @@ class IyzeeApp(App):
         nav = self.query_one(NavRail)
         nav.set_active(page_id)
         nav.refresh_instruments()
+
+    async def on_unmount(self) -> None:
+        """Runs on every way out (Ctrl+Q, ``exit()``, test teardown).
+
+        Without this, quitting simply dropped the process with every
+        connected instrument still open — VISA sessions, the PSU channel
+        driving the shutter, the scope socket. Off the UI thread, because
+        a disconnect is blocking I/O and a wedged instrument must not be
+        able to hang the quit.
+        """
+        self.shutdown_requested.set()
+        await asyncio.to_thread(self.close_instruments)
+
+    def close_instruments(self, timeout: float = 5.0) -> None:
+        """Disconnect every connected instrument, in parallel, within ``timeout``.
+
+        Each disconnect takes that instrument's lock first, so it waits
+        for an in-flight sweep step or console call instead of tearing the
+        link down under it. An instrument that stays busy past the
+        deadline is skipped (and logged) rather than blocking the exit —
+        the OS reclaims its sockets when the process ends anyway.
+        """
+        handles = dict(self.handles)
+        self.handles.clear()
+        if not handles:
+            return
+        deadline = time.monotonic() + timeout
+
+        def close(key: str, handle: InstrumentHandle) -> None:
+            lock = self.instrument_locks[key]
+            if not lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+                log.warning("shutdown: %s still busy after %.0fs, not disconnecting", key, timeout)
+                return
+            try:
+                handle.disconnect()
+            except Exception:  # noqa: BLE001 - one bad instrument mustn't stop the rest
+                log.exception("shutdown: error closing %s", key)
+            finally:
+                lock.release()
+
+        threads = [
+            threading.Thread(target=close, args=item, name=f"close-{item[0]}", daemon=True)
+            for item in handles.items()
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
 
     def action_blur_focused(self) -> None:
         """Leave the currently focused field, if any.
