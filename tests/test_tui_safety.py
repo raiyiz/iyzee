@@ -221,7 +221,8 @@ def test_row_can_be_used_again_once_the_operation_finishes(
             table = screen.query_one(DataTable)
             await _wait_until(pilot, lambda: table.get_cell("fake", STATUS_COL) == "connected")
             await _wait_until(pilot, lambda: not screen._busy)
-            await pilot.press("enter")  # now this is a disconnect
+            await pilot.press("enter")  # now this is a disconnect: the first Enter arms it...
+            await pilot.press("enter")  # ...and the second confirms
             await _wait_until(pilot, lambda: table.get_cell("fake", STATUS_COL) == "disconnected")
             assert handle.disconnect_calls == 1
             assert "fake" not in app.handles
