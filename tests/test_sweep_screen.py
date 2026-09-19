@@ -216,3 +216,12 @@ class _FakeVisaHandle:
 
     def __init__(self, device) -> None:
         self.device = device
+
+    def connect(self) -> None:
+        raise NotImplementedError
+
+    def disconnect(self) -> None:
+        raise NotImplementedError
+
+    def probe(self) -> str:
+        raise NotImplementedError
