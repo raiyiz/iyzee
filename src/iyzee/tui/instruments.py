@@ -208,6 +208,9 @@ class LockedProxy:
 
         return _locked_call
 
+    def __dir__(self) -> list[str]:
+        return dir(object.__getattribute__(self, "_target"))
+
     def __repr__(self) -> str:
         return repr(object.__getattribute__(self, "_target"))
 
