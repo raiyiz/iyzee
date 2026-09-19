@@ -24,7 +24,7 @@ import pytest
 from rich.text import Text
 from textual.widgets import DataTable, RichLog, Static
 
-from iyzee.experiment import StepResult, save_data, save_step_results
+from iyzee.experiment import ExperimentContext, StepResult, save_data, save_step_results
 from iyzee.tui import app as app_mod
 from iyzee.tui.instruments import InstrumentSpec
 from iyzee.tui.screens import connect as connect_mod
@@ -136,6 +136,9 @@ def test_sweep_log_keeps_bracketed_error_text(monkeypatch: pytest.MonkeyPatch) -
     class _Step:
         label = "pt[0]"
 
+        def run(self, ctx: ExperimentContext) -> StepResult:
+            raise NotImplementedError
+
     async def scenario() -> None:
         app = app_mod.IyzeeApp()
         async with app.run_test() as pilot:
@@ -180,8 +183,9 @@ def test_traces_summary_survives_bracketed_metadata(
             screen.query_one("#traces-list").focus()
             await pilot.press("enter")
             await pilot.pause()
-            text = screen.query_one("#traces-summary", Static).render().plain
-            assert "see [/docs] and [nan, nan]" in text
+            rendered = screen.query_one("#traces-summary", Static).render()
+            assert isinstance(rendered, Text)
+            assert "see [/docs] and [nan, nan]" in rendered.plain
 
     asyncio.run(scenario())
 
@@ -344,6 +348,15 @@ def _sweep_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_run_sequenc
 
     class _Mxa:
         device = object()
+
+        def connect(self) -> None:
+            raise NotImplementedError
+
+        def disconnect(self) -> None:
+            raise NotImplementedError
+
+        def probe(self) -> str:
+            raise NotImplementedError
 
     app.handles["mxa"] = _Mxa()
     return app

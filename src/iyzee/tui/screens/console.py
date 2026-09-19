@@ -295,8 +295,9 @@ class IyzeeConsole(Vertical):
         """
         from matplotlib.figure import Figure
 
-        formatter = self.shell.shell.display_formatter.formatters["text/plain"]
-        formatter.for_type(Figure, self._render_figure)
+        formatter = self.shell.shell.display_formatter
+        assert formatter is not None
+        formatter.formatters["text/plain"].for_type(Figure, self._render_figure)
 
     def _render_figure(self, fig: Any, p: Any, cycle: bool) -> None:
         # PlainTextFormatter uses IPython.lib.pretty's pretty-printer
@@ -634,11 +635,18 @@ class _ConsoleDisplayPublisher(DisplayPublisher):
 
     def publish(
         self,
-        data: dict[str, Any],
-        metadata: dict[str, Any] | None = None,
+        data: Any,
+        metadata: Any = None,
+        source: Any = None,
+        *,
+        transient: Any = None,
+        update: Any = None,
         **kwargs: Any,
     ) -> None:
-        self.console.app.call_from_thread(self._write, data)
+        if not isinstance(data, dict):
+            return
+        mime_data = {key: value for key, value in data.items() if isinstance(key, str)}
+        self.console.app.call_from_thread(self._write, mime_data)
 
     def _write(self, data: dict[str, Any]) -> None:
         output = self.console.query_one(RichLog)

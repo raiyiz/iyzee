@@ -239,6 +239,8 @@ def _device_from_handle(name: str, handle: Any) -> Any:
 class IyzeeIPython:
     """Own one embedded :class:`InteractiveShell` for the running TUI."""
 
+    shell: InteractiveShell
+
     def __init__(
         self,
         app: AppState,

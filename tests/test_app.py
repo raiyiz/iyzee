@@ -73,7 +73,9 @@ def test_console_history_file_defaults_to_none_and_is_passed_through(tmp_path) -
         async with app.run_test() as pilot:
             await pilot.press("i")
             console = app.screen.query_one(IyzeeConsole)
-            assert console.shell.shell.history_manager.hist_file == ":memory:"
+            history_manager = console.shell.shell.history_manager
+            assert history_manager is not None
+            assert history_manager.hist_file == ":memory:"
 
     async def real_path_reaches_the_shell() -> None:
         history_file = tmp_path / "console_history.sqlite"
@@ -81,7 +83,9 @@ def test_console_history_file_defaults_to_none_and_is_passed_through(tmp_path) -
         async with app.run_test() as pilot:
             await pilot.press("i")
             console = app.screen.query_one(IyzeeConsole)
-            assert console.shell.shell.history_manager.hist_file == str(history_file)
+            history_manager = console.shell.shell.history_manager
+            assert history_manager is not None
+            assert history_manager.hist_file == str(history_file)
 
     asyncio.run(default_is_none())
     asyncio.run(real_path_reaches_the_shell())
