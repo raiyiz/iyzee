@@ -14,6 +14,7 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.markup import escape
 from textual.widgets import ContentSwitcher, Footer, Header, Static
 
 from .instruments import INSTRUMENTS, InstrumentHandle
@@ -34,11 +35,9 @@ class NavRail(Static):
     shortcuts, not a replacement for them — clicking a row calls the same
     ``IyzeeApp.action_show_page`` those bindings do, but the rail itself
     isn't in the tab/focus chain, keeping the escape/j/k navigation added
-    earlier untouched. Instrument dots are refreshed opportunistically
-    whenever a page is switched (see ``action_show_page``), not on every
-    connect/disconnect as it happens elsewhere in the app — a deliberate
-    simplification: fully live dots would need a callback wired from
-    ConnectScreen into this widget for one cosmetic detail.
+    earlier untouched. The instrument dots are live: ConnectScreen calls
+    ``IyzeeApp.instruments_changed`` whenever a connection is made or
+    dropped, and they are also refreshed on every page switch.
     """
 
     PAGES = (
@@ -70,8 +69,22 @@ class NavRail(Static):
             self.query_one(f"#nav-{pid}", Static).set_class(pid == page_id, "-active")
 
     def refresh_instruments(self) -> None:
+        """Redraw the "Instruments" block: a status dot *before* a short name.
+
+        The dot leads the line so it can never be stranded on a wrapped
+        second line away from the name it describes; short names keep each
+        entry to a single line in the 18-column rail. The dot differs in
+        shape (filled/hollow) as well as colour, so it doesn't rely on
+        colour vision.
+        """
         app = cast("IyzeeApp", self.app)
-        lines = [f"{spec.label} {'●' if spec.key in app.handles else '○'}" for spec in INSTRUMENTS]
+        lines = ["[b]Instruments[/b]"]
+        for spec in INSTRUMENTS:
+            name = escape(spec.short_label)
+            if spec.key in app.handles:
+                lines.append(f"[green]●[/green] {name}")
+            else:
+                lines.append(f"○ {name}")
         self.query_one("#nav-instruments", Static).update("\n".join(lines))
 
 
@@ -175,6 +188,10 @@ class IyzeeApp(App):
         # the next step boundary and releases its instrument lock, which
         # is what lets close_instruments() disconnect cleanly.
         self.shutdown_requested = threading.Event()
+        # True while a sweep or a trace capture is running. ConnectScreen
+        # refuses to disconnect instruments meanwhile (the run holds the
+        # instrument locks, so a disconnect could only stall behind it).
+        self.sweep_running = False
         # Passed straight through to IyzeeIPython (see ConsoleScreen.compose)
         # as its `history_file`. Defaults to `None` — `:memory:`, private,
         # nothing persisted — quite deliberately: every test in this
@@ -192,13 +209,36 @@ class IyzeeApp(App):
             with ContentSwitcher(initial=self.DEFAULT_PAGE, id="page-switcher"):
                 for page_id, page_cls in self.PAGES.items():
                     yield page_cls(id=page_id)
-        yield Footer()
+        yield Footer(compact=True)
 
     def action_show_page(self, page_id: str) -> None:
         self.query_one(ContentSwitcher).current = page_id
         nav = self.query_one(NavRail)
         nav.set_active(page_id)
         nav.refresh_instruments()
+        # Which page-switch entries the footer offers depends on the page.
+        self.refresh_bindings()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Don't offer to navigate to the page you're already on.
+
+        Returning False hides the footer entry (and the key does nothing,
+        which is right: there's nowhere to go). It frees a slot on every
+        page, which is what keeps the console's footer — the most crowded
+        one — from clipping at 80 columns.
+        """
+        if action == "show_page" and parameters:
+            switcher = self.query(ContentSwitcher)
+            if switcher and parameters[0] == switcher.first().current:
+                return False
+        return True
+
+    def instruments_changed(self) -> None:
+        """Something connected or disconnected: refresh everything that shows it."""
+        for nav in self.query(NavRail):
+            nav.refresh_instruments()
+        for sweep in self.query(SweepScreen):
+            sweep.refresh_readiness()
 
     async def on_unmount(self) -> None:
         """Runs on every way out (Ctrl+Q, ``exit()``, test teardown).

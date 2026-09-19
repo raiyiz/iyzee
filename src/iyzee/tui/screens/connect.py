@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from typing import TYPE_CHECKING, cast
 
 from rich.markup import escape
@@ -48,7 +49,7 @@ class ConnectScreen(Page):
 
     def compose(self) -> ComposeResult:
         yield Static("Instruments", classes="panel-title")
-        yield Static("Enter: connect/disconnect selected row", classes="hint")
+        yield Static("", id="connect-hint", classes="hint")
         yield DataTable(id="instrument-table", cursor_type="row")
 
     def on_mount(self) -> None:
@@ -56,6 +57,11 @@ class ConnectScreen(Page):
         # such a row is ignored: a second connect used to open the device
         # a second time and overwrite (leak) the first handle.
         self._busy: set[str] = set()
+        # Disconnecting is destructive (it drops a live instrument), and
+        # Enter is also how you *connect* — so the first Enter on a
+        # connected row only "arms" it; a second Enter within a few seconds
+        # confirms. (key, deadline) of the armed row, or None.
+        self._armed: tuple[str, float] | None = None
         table = self.query_one(DataTable)
         table.add_column("Instrument", key="instrument")
         table.add_column("Status", key=STATUS_COL)
@@ -63,6 +69,28 @@ class ConnectScreen(Page):
         for spec in INSTRUMENTS:
             table.add_row(spec.label, "disconnected", "-", key=spec.key)
         self._refresh_from_app_state()
+        self._update_hint()
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        self._update_hint()
+
+    def _update_hint(self) -> None:
+        """Say what Enter will do on the highlighted row, right now."""
+        table = self.query_one(DataTable)
+        hint = self.query_one("#connect-hint", Static)
+        if not table.row_count:
+            hint.update("")
+            return
+        key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+        spec = next((s for s in INSTRUMENTS if s.key == key), None)
+        if spec is None:
+            hint.update("")
+        elif spec.key in self._busy:
+            hint.update(f"{escape(spec.label)}: working…")
+        elif spec.key in self.iyzee_app.handles:
+            hint.update(f"Enter, then Enter again: disconnect {escape(spec.label)}")
+        else:
+            hint.update(f"Enter: connect {escape(spec.label)}")
 
     def on_show(self) -> None:
         # Reflect connections made/dropped while this page wasn't visible
@@ -96,14 +124,37 @@ class ConnectScreen(Page):
                 markup=False,
             )
             return
-        self._busy.add(spec.key)
         if spec.key in self.iyzee_app.handles:
+            if self.iyzee_app.sweep_running:
+                self.notify(
+                    f"A sweep is running — abort it (Sweep page) before disconnecting {spec.label}.",
+                    severity="warning",
+                    timeout=5,
+                    markup=False,
+                )
+                return
+            now = time.monotonic()
+            if self._armed is None or self._armed[0] != spec.key or now > self._armed[1]:
+                self._armed = (spec.key, now + 4.0)
+                self.notify(
+                    f"Press Enter again to disconnect {spec.label}.",
+                    severity="warning",
+                    timeout=4,
+                    markup=False,
+                )
+                return
+            self._armed = None
+            self._busy.add(spec.key)
+            self._update_hint()
             self._disconnect(spec)
         else:
+            self._busy.add(spec.key)
+            self._update_hint()
             self._connect(spec)
 
     def _release(self, key: str) -> None:
         self._busy.discard(key)
+        self._update_hint()
 
     def _ui(self, callback, *args, **kwargs) -> None:
         """Call back into the UI thread from a worker, without ever letting
@@ -189,5 +240,17 @@ class ConnectScreen(Page):
         # inside DataTable's render — which takes the whole app down. So the
         # detail (external text) is escaped. Escaped rather than wrapped in
         # Text so the stored cell value stays an ordinary str.
-        table.update_cell(key, STATUS_COL, status)
-        table.update_cell(key, DETAIL_COL, escape(one_line(detail)))
+        # update_width=True: without it the columns keep the width of their
+        # first content ("-"), which clipped the instrument's identification
+        # string to a few characters ("KEYSIG").
+        table.update_cell(key, STATUS_COL, status, update_width=True)
+        table.update_cell(key, DETAIL_COL, escape(one_line(detail)), update_width=True)
+        if status in ("connected", "error", "disconnected"):
+            # A final state: release the row in this same callback (not a
+            # separate one) so there is no instant where the row *looks*
+            # ready but is still marked busy and swallows the next Enter.
+            self._busy.discard(key)
+        # The nav rail and the Sweep page's "not ready" banner both derive
+        # from app.handles, which the worker has already updated.
+        self.iyzee_app.instruments_changed()
+        self._update_hint()

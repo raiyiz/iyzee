@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import uuid
 from collections.abc import Sequence
 from dataclasses import asdict
@@ -66,6 +67,25 @@ if TYPE_CHECKING:
 log = logging.getLogger("iyzee.tui")
 
 
+# Upper bound on "Steps" / "Points". Each step is a full analyzer averaging
+# run (seconds), so 1000 is already a multi-minute measurement; the cap
+# exists to turn a stray extra zero (or 10**9) into a clear message instead
+# of a frozen UI and gigabytes of linspace.
+MAX_POINTS = 1000
+
+
+class FieldError(ValueError):
+    """A form field failed validation; ``field_id`` says which one.
+
+    A ValueError subclass so callers that only care *that* the form is
+    invalid keep working, while the screen can point at the offending field.
+    """
+
+    def __init__(self, field_id: str, message: str) -> None:
+        super().__init__(message)
+        self.field_id = field_id
+
+
 def _field(label: str, widget: Widget, *, id: str | None = None) -> Vertical:
     """A label stacked over its input, as one grid cell of the sweep form.
 
@@ -103,6 +123,9 @@ class SweepScreen(Page):
 
     def compose(self) -> ComposeResult:
         yield Static("Sweep", classes="panel-title")
+        # Shown only while something the selected sweep needs isn't
+        # connected; see refresh_readiness().
+        yield Static("", id="sweep-status")
         with Vertical(id="sweep-form"):
             yield _field(
                 "Sweep type",
@@ -140,28 +163,84 @@ class SweepScreen(Page):
         plot.plt.title("Squeezing - shot noise")
         plot.plt.xlabel("Trace point")
         plot.plt.ylabel("Squeezing - shot noise")
+        self.refresh_readiness()
+
+    def on_show(self) -> None:
+        self.refresh_readiness()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id != "sweep-type":
             return
         self.query_one("#bw-fields").display = event.value == "bandwidth"
         self.query_one("#freq-fields").display = event.value == "frequency"
+        self.refresh_readiness()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        # Editing a field you were told is wrong clears the marker.
+        event.input.remove_class("-invalid")
+
+    # -- readiness ---------------------------------------------------------
+
+    def _missing_instruments(self, kind: object) -> list[str]:
+        """Names of the instruments the given sweep needs that aren't connected."""
+        handles = self.iyzee_app.handles
+        missing: list[str] = []
+        if "mxa" not in handles:
+            missing.append("MXA")
+        if kind == "frequency":
+            shutter = handles.get("shutter")
+            if shutter is None or cast(ShutterHandle, shutter).shutter is None:
+                missing.append("shutter")
+        return missing
+
+    def refresh_readiness(self) -> None:
+        """Show, at the top of the page, why Run/Capture won't work yet.
+
+        Previously the only sign was a 5-second toast *after* pressing Run,
+        which a first-time user (who opens Sweep first) easily misses. The
+        banner appears only while something is missing and is refreshed by
+        ``IyzeeApp.instruments_changed`` as connections come and go. The
+        buttons themselves stay enabled on purpose: a disabled button gives
+        no way to ask "why?", while pressing an enabled one still explains.
+        """
+        kind = self.query_one("#sweep-type", Select).value
+        missing = self._missing_instruments(kind)
+        status = self.query_one("#sweep-status", Static)
+        if missing:
+            status.update(
+                "Not ready: connect the "
+                + " and the ".join(missing)
+                + " first — press F1 for the Connect page."
+            )
+        status.display = bool(missing)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run-sweep":
             self._start_sweep()
         elif event.button.id == "abort-sweep":
-            self._abort_event.set()
-            self.query_one("#abort-sweep", Button).disabled = True
+            self._request_abort()
         elif event.button.id == "capture-trace":
             self._start_capture()
+
+    def _request_abort(self) -> None:
+        """Abort takes effect at the next step boundary, not instantly — a
+        step is one analyzer averaging run and can't be interrupted. So
+        acknowledge the click visibly, otherwise a silently greyed-out
+        button looks like nothing happened."""
+        self._abort_event.set()
+        button = self.query_one("#abort-sweep", Button)
+        button.disabled = True
+        button.label = "Aborting…"
+        self.query_one("#sweep-log", RichLog).write(
+            "[yellow]Abort requested — finishing the current step, then stopping.[/yellow]"
+        )
 
     # -- kicking off the run -------------------------------------------------
 
     def _start_sweep(self) -> None:
         mx_handle = self.iyzee_app.handles.get("mxa")
         if mx_handle is None:
-            self.notify("Connect the MXA first (Connect screen).", severity="error")
+            self.notify("Connect the MXA first — press F1 for the Connect page.", severity="error")
             return
         # The Connect screen always builds "mxa" from a _VisaHandle and
         # "shutter" from a ShutterHandle (see instruments.INSTRUMENTS) —
@@ -179,10 +258,17 @@ class SweepScreen(Page):
             else:
                 shutter_handle = self.iyzee_app.handles.get("shutter")
                 if shutter_handle is None or cast(ShutterHandle, shutter_handle).shutter is None:
-                    self.notify("Connect the shutter first (Connect screen).", severity="error")
+                    self.notify(
+                        "Connect the shutter first — press F1 for the Connect page.",
+                        severity="error",
+                    )
                     return
                 steps, config = self._build_frequency_run()
                 shutter = cast(ShutterHandle, shutter_handle).shutter
+        except FieldError as exc:
+            self._flag_invalid(exc.field_id)
+            self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
+            return
         except ValueError as exc:
             self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
             return
@@ -211,12 +297,28 @@ class SweepScreen(Page):
         self.query_one("#run-sweep", Button).disabled = True
         self.query_one("#abort-sweep", Button).disabled = False
         self.query_one("#capture-trace", Button).disabled = True
+        self.iyzee_app.sweep_running = True
         self._run(mx_handle.device, shutter, steps, config, kind)
 
+    def _flag_invalid(self, field_id: str) -> None:
+        """Mark one input as wrong and put the cursor in it, ready to fix."""
+        for widget in self.query("Input.-invalid"):
+            widget.remove_class("-invalid")
+        widget = self.query_one(f"#{field_id}", Input)
+        widget.add_class("-invalid")
+        widget.focus()
+
+    def _read(self, field_id: str, parse, label: str, **kwargs):
+        """Parse one form field, tagging any failure with the field's id."""
+        try:
+            return parse(self.query_one(f"#{field_id}", Input).value, label, **kwargs)
+        except ValueError as exc:
+            raise FieldError(field_id, str(exc)) from exc
+
     def _build_bandwidth_run(self) -> tuple[Sequence[Step], AnalyzerConfig]:
-        start = _positive_float(self.query_one("#rbw-start", Input).value, "RBW start")
-        stop = _positive_float(self.query_one("#rbw-stop", Input).value, "RBW stop")
-        count = _positive_int(self.query_one("#rbw-steps", Input).value, "Steps")
+        start = self._read("rbw-start", _positive_float, "RBW start")
+        stop = self._read("rbw-stop", _positive_float, "RBW stop")
+        count = self._read("rbw-steps", _positive_int, "Steps", maximum=MAX_POINTS)
         rbw_values = list(np.linspace(start, stop, count))
         config = AnalyzerConfig(
             center_hz=1e6, span_hz=0, avg_count=200, sweep_duration_ms=10, res_bw_hz=rbw_values[0]
@@ -224,10 +326,10 @@ class SweepScreen(Page):
         return bandwidth_sweep_steps(rbw_values), config
 
     def _build_frequency_run(self) -> tuple[Sequence[Step], AnalyzerConfig]:
-        center = _positive_float(self.query_one("#freq-center", Input).value, "Laser center")
-        channel = _positive_int(self.query_one("#freq-channel", Input).value, "Wavemeter channel")
-        points = _positive_int(self.query_one("#freq-points", Input).value, "Points")
-        step_khz = _positive_float(self.query_one("#freq-offset-khz", Input).value, "Offset step")
+        center = self._read("freq-center", _positive_float, "Laser center")
+        channel = self._read("freq-channel", _positive_int, "Wavemeter channel")
+        points = self._read("freq-points", _positive_int, "Points", maximum=MAX_POINTS)
+        step_khz = self._read("freq-offset-khz", _positive_float, "Offset step")
         step_thz = step_khz * 1e-9
         offsets = [(i - (points // 2)) * step_thz for i in range(points)]
 
@@ -333,10 +435,11 @@ class SweepScreen(Page):
     def _start_capture(self) -> None:
         mx_handle = self.iyzee_app.handles.get("mxa")
         if mx_handle is None:
-            self.notify("Connect the MXA first (Connect screen).", severity="error")
+            self.notify("Connect the MXA first — press F1 for the Connect page.", severity="error")
             return
         mx_handle = cast(_VisaHandle, mx_handle)
 
+        self.iyzee_app.sweep_running = True
         self.query_one("#run-sweep", Button).disabled = True
         self.query_one("#capture-trace", Button).disabled = True
         log = self.query_one("#sweep-log", RichLog)
@@ -365,6 +468,7 @@ class SweepScreen(Page):
     def _finish_capture(
         self, *, error: Exception | None, freq: list[float] | None, power: list[float] | None
     ) -> None:
+        self.iyzee_app.sweep_running = False
         self.query_one("#run-sweep", Button).disabled = False
         self.query_one("#capture-trace", Button).disabled = False
         log = self.query_one("#sweep-log", RichLog)
@@ -425,8 +529,10 @@ class SweepScreen(Page):
                 )
 
     def _finish(self, kind: str, *, aborted: bool, setup_error: Exception | None) -> None:
+        self.iyzee_app.sweep_running = False
         self.query_one("#run-sweep", Button).disabled = False
         self.query_one("#abort-sweep", Button).disabled = True
+        self.query_one("#abort-sweep", Button).label = "Abort"
         self.query_one("#capture-trace", Button).disabled = False
         log = self.query_one("#sweep-log", RichLog)
 
@@ -457,7 +563,10 @@ class SweepScreen(Page):
             )
             return
         log.write(f"Sweep {status}: {len(self._collected)} point(s) saved to {escape(str(path))}")
-        self.notify(f"Saved {len(self._collected)} point(s) to {path.name}", markup=False)
+        self.notify(
+            f"Saved {len(self._collected)} point(s) to {path.parent.name}/{path.name}",
+            markup=False,
+        )
 
 
 def _positive_float(raw: str, field: str) -> float:
@@ -465,16 +574,22 @@ def _positive_float(raw: str, field: str) -> float:
         value = float(raw)
     except ValueError as exc:
         raise ValueError(f"{field} must be a number") from exc
+    # float() happily parses "nan" and "inf"; neither is a usable setting,
+    # and nan even slips past a `<= 0` check because it compares false.
+    if not math.isfinite(value):
+        raise ValueError(f"{field} must be a finite number")
     if value <= 0:
         raise ValueError(f"{field} must be positive")
     return value
 
 
-def _positive_int(raw: str, field: str) -> int:
+def _positive_int(raw: str, field: str, *, maximum: int | None = None) -> int:
     try:
         value = int(raw)
     except ValueError as exc:
         raise ValueError(f"{field} must be a whole number") from exc
     if value <= 0:
         raise ValueError(f"{field} must be positive")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{field} must be at most {maximum}")
     return value

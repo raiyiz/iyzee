@@ -118,9 +118,8 @@ class _ConsoleInput(VimTextArea):
     def __init__(self, console: IyzeeConsole) -> None:
         super().__init__(
             id="console-input",
-            placeholder="Python / IPython code  •  Shift+Enter to run  •  Tab to complete",
+            placeholder="Python / IPython code  •  Shift+Enter or Ctrl+J to run  •  Tab to complete",
             soft_wrap=True,
-            compact=True,
         )
         self.console = console
         # Start ready to type: this is a REPL first, a vim buffer second.
@@ -235,9 +234,17 @@ class IyzeeConsole(Vertical):
     """
 
     BINDINGS = [
-        Binding("shift+enter", "execute", "Run", show=True),
-        Binding("ctrl+p", "history_previous", "History ↑", show=True),
-        Binding("ctrl+n", "history_next", "History ↓", show=True),
+        # Shift+Enter only reaches the app in terminals that report modified
+        # Enter keys (kitty, WezTerm, Ghostty, ...); in most others (macOS
+        # Terminal, default tmux, many SSH setups) it arrives as a plain
+        # Enter, i.e. a newline, and would leave no way to run anything.
+        # Ctrl+J is a distinct control character every terminal delivers.
+        Binding("shift+enter,ctrl+j", "execute", "Run", key_display="shift+⏎ / ^j", show=True),
+        # History keys are in the console banner rather than the footer:
+        # with Quit and the page keys also listed, the footer overflowed
+        # 100 columns and silently dropped the F3/F4 entries.
+        Binding("ctrl+p", "history_previous", "History ↑", show=False),
+        Binding("ctrl+n", "history_next", "History ↓", show=False),
         Binding("tab", "complete", "Complete", show=False),
         Binding("ctrl+c", "interrupt", "Interrupt", show=True),
         Binding("ctrl+l", "clear", "Clear", show=True),
@@ -258,7 +265,11 @@ class IyzeeConsole(Vertical):
         self._completion_start = 0
 
     def compose(self) -> ComposeResult:
-        yield RichLog(id="console-output", wrap=True, markup=True, highlight=False)
+        # min_width: RichLog lays lines out at least this wide (default 78), so
+        # in a narrower pane (58 columns at an 80-column terminal) every long
+        # line — a traceback, a banner — needed sideways scrolling instead of
+        # wrapping to the pane.
+        yield RichLog(id="console-output", wrap=True, markup=True, highlight=False, min_width=30)
         yield PlotextPlot(id="console-plot")
         yield OptionList(id="console-completions")
         yield _ConsoleInput(self)
@@ -345,6 +356,10 @@ class IyzeeConsole(Vertical):
         """Update the vim mode indicator. Called from
         `_ConsoleInput.watch_mode` — see that method for why."""
         self._mode_label = f"-- {mode.value} --"
+        if mode is Mode.NORMAL:
+            # Landing here by pressing Escape is the classic way to get
+            # "stuck" if you don't know vim: letters are commands, not text.
+            self._mode_label += "  i: back to typing · Esc: leave"
         if self.is_mounted:
             self._render_status()
 
@@ -359,7 +374,15 @@ class IyzeeConsole(Vertical):
         output.write("lab.results is the last completed sweep's StepResult list.")
         output.write("IPython features: Tab completion, ?, ??, %, !, history, and top-level await.")
         output.write(
-            "Shift+Enter executes the current cell; ↑/↓ or Ctrl+P/Ctrl+N browse IPython history."
+            "Shift+Enter runs the current cell — or Ctrl+J, which works in every terminal "
+            "(many can't tell Shift+Enter from Enter)."
+        )
+        output.write(
+            "↑/↓ or Ctrl+P/Ctrl+N browse IPython history; Ctrl+C interrupts; Ctrl+L clears."
+        )
+        output.write(
+            "The editor is vim-style: Esc switches to NORMAL mode (letters become commands), "
+            "i returns to typing, and Esc again leaves the field."
         )
 
     def _set_status(self, text: str) -> None:

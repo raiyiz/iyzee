@@ -91,6 +91,17 @@ Screen {
 
 /* -- Sweep -------------------------------------------------------------- */
 
+/* "Not ready: connect the MXA first" — only displayed while something the
+   selected sweep needs is missing (see SweepScreen.refresh_readiness). */
+#sweep-status {
+    height: auto;
+    margin: 1 2 0 2;
+    padding: 0 1;
+    border-left: thick $warning;
+    color: $warning;
+    background: $warning 12%;
+}
+
 /* margin, not padding: Textual's scroll_visible() doesn't account for the
    padding of a non-scrolling ancestor, so with padding here the fields
    inside would land one row short of fully visible when scrolled to. */
@@ -167,6 +178,12 @@ Screen {
 #sweep-progress Bar {
     width: 1fr;
     min-width: 8;
+}
+
+/* Textual's default track colour equals the page background, so the bar was
+   invisible until it had progress (and the unfilled part never showed). */
+#sweep-progress Bar > .bar--bar {
+    background: $panel;
 }
 
 #sweep-plot {

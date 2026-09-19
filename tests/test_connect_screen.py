@@ -119,7 +119,10 @@ def test_disconnecting_a_connected_row_clears_app_handles(
             await _wait_for_row_status(screen, "fake", "connected", "error")
 
             handle = cast(_FakeHandle, app.handles["fake"])
-            await pilot.press("enter")  # same row again -> disconnect
+            # Same row again -> disconnect, which asks for confirmation: the
+            # first Enter only arms it, the second (within a few seconds) does it.
+            await pilot.press("enter")
+            await pilot.press("enter")
 
             for _ in range(50):
                 if handle.disconnected:

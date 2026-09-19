@@ -40,7 +40,9 @@ Four screens cover the common tasks; switch between them with `c` / `s` /
 disconnected on the way out):
 
 - **Connect** (`c`) — one row per instrument (MXA, shutter/PSU, wavemeter,
-  scope). Enter connects or disconnects the selected row.
+  scope). Enter connects the selected row; on a connected row it asks for a
+  second Enter to disconnect (and refuses while a sweep is running). The nav
+  rail's instrument dots follow connections live.
 - **Sweep** (`s`) — configure and run a bandwidth or frequency sweep, with
   a live progress bar and trace plot. Built directly on `Step`/
   `run_sequence()` — it doesn't duplicate anything from `experiment/`.
@@ -189,7 +191,9 @@ This mirrors how other tools resolve a modal editor nested inside modal
 navigation (e.g. Neovim's terminal mode needs its own escape *out* of
 terminal input before window/pane navigation applies) — a single Escape
 can't mean both "leave insert mode" and "leave the widget" without breaking
-one of them. Shift+Enter executes the current cell; a second Shift+Enter
+one of them. Shift+Enter executes the current cell — or Ctrl+J, which
+every terminal can send (many, e.g. macOS Terminal and default tmux, deliver Shift+Enter as a
+plain Enter); a second Shift+Enter
 while one is still running is a no-op rather than silently cancelling and
 replacing it — the status line shows `running… (Ctrl+C to interrupt)` for
 as long as a cell is in flight, and Ctrl+C raises `KeyboardInterrupt`

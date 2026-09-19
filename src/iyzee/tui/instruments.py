@@ -161,6 +161,13 @@ class InstrumentSpec:
     key: str
     label: str
     make: Callable[[], InstrumentHandle]
+    # Compact name for the narrow nav rail, where the full label wraps and
+    # strands the status dot on a line of its own. Defaults to ``label``.
+    short: str = ""
+
+    @property
+    def short_label(self) -> str:
+        return self.short or self.label
 
     def build(self) -> InstrumentHandle:
         return self.make()
@@ -216,8 +223,8 @@ class LockedProxy:
 
 
 INSTRUMENTS: list[InstrumentSpec] = [
-    InstrumentSpec("mxa", "Keysight MXA", lambda: _VisaHandle(KeysightMXA())),
-    InstrumentSpec("shutter", "Shutter (PSU CH3)", lambda: ShutterHandle()),
-    InstrumentSpec("wavemeter", "Wavemeter (WS-7)", lambda: WavemeterHandle()),
-    InstrumentSpec("scope", "LeCroy scope [legacy]", lambda: ScopeHandle()),
+    InstrumentSpec("mxa", "Keysight MXA", lambda: _VisaHandle(KeysightMXA()), short="MXA"),
+    InstrumentSpec("shutter", "Shutter (PSU CH3)", lambda: ShutterHandle(), short="Shutter"),
+    InstrumentSpec("wavemeter", "Wavemeter (WS-7)", lambda: WavemeterHandle(), short="Wavemeter"),
+    InstrumentSpec("scope", "LeCroy scope [legacy]", lambda: ScopeHandle(), short="Scope"),
 ]
