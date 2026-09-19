@@ -199,7 +199,9 @@ def test_history_never_touches_a_real_file_on_disk_by_default() -> None:
     symptom show up only much later, as slowdown, rather than as a clear
     test failure."""
     shell = IyzeeIPython(FakeApp())
-    assert shell.shell.history_manager.hist_file == ":memory:"
+    history_manager = shell.shell.history_manager
+    assert history_manager is not None
+    assert history_manager.hist_file == ":memory:"
 
     # And the thing history is actually used for here -- recall for
     # Ctrl+P/Ctrl+N -- behaves identically to a real file for a single
@@ -228,7 +230,9 @@ def test_history_persists_across_instances_given_a_real_file(tmp_path: Path) -> 
     # in a way real usage never hits (a real app's shell only ever gets
     # torn down once, by that automatic call). `writeout_cache()` forces
     # the flush this test needs without that hazard.
-    first_run.shell.history_manager.writeout_cache()
+    history_manager = first_run.shell.history_manager
+    assert history_manager is not None
+    history_manager.writeout_cache()
 
     second_run = IyzeeIPython(FakeApp(), history_file=history_file)
     second_run.execute("today = 2")
