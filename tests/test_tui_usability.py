@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 
 import pytest
+from rich.text import Text
+from textual.containers import ContentSwitcher
 from textual.widgets import Button, DataTable, Input, ListView, RichLog, Select, Static
 
 from iyzee.experiment import StepResult, save_step_results
@@ -90,7 +92,9 @@ async def _enter_on_first_row(app, pilot) -> tuple[ConnectScreen, DataTable]:
 
 
 def _text(widget: Static) -> str:
-    return widget.render().plain
+    rendered = widget.render()
+    assert isinstance(rendered, Text)
+    return rendered.plain
 
 
 def _messages(app) -> list[str]:
@@ -288,7 +292,9 @@ def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
             await _wait_until(pilot, lambda: app.last_run is not None)
             await _wait_until(pilot, lambda: not app.sweep_running)
             assert str(abort.label) == "Abort", "label restored for the next run"
-            assert len(app.last_run.results) == 1
+            last_run = app.last_run
+            assert last_run is not None
+            assert len(last_run.results) == 1
 
     asyncio.run(scenario())
 
@@ -329,7 +335,9 @@ def test_an_expired_confirmation_does_not_disconnect(monkeypatch: pytest.MonkeyP
             await _wait_until(pilot, lambda: table.get_cell("fake", STATUS_COL) == "connected")
             await pilot.press("enter")  # arms
             await pilot.pause(0.1)
-            key, _deadline = screen._armed
+            armed = screen._armed
+            assert armed is not None
+            key, _deadline = armed
             screen._armed = (key, time.monotonic() - 1)  # the window has passed
 
             await pilot.press("enter")  # must re-arm, not disconnect
@@ -388,7 +396,8 @@ def test_detail_column_is_wide_enough_for_the_identification_string(
             screen, table = await _enter_on_first_row(app, pilot)
             await _wait_until(pilot, lambda: table.get_cell("fake", STATUS_COL) == "connected")
             await pilot.pause()
-            width = table.columns[DETAIL_COL].get_render_width(table)
+            column = table.ordered_columns[table.get_column_index(DETAIL_COL)]
+            width = column.get_render_width(table)
             assert width >= len(idn), f"Detail column is {width} wide, string is {len(idn)}"
 
     asyncio.run(scenario())
@@ -504,7 +513,9 @@ def test_traces_list_shows_the_time_of_day_not_the_raw_filename(
             await pilot.press("t")
             await pilot.pause(0.3)
             item = app.query_one("#traces-list", ListView).children[0]
-            label = item.query_one("Label").render().plain
+            rendered = item.query_one("Label").render()
+            assert isinstance(rendered, Text)
+            label = rendered.plain
             assert label == "2026-09-18_bandwidth  14:10:05", label
 
     asyncio.run(scenario())
@@ -539,7 +550,7 @@ def test_every_page_stays_reachable_from_every_other_page() -> None:
     async def scenario() -> None:
         app = app_mod.IyzeeApp()
         async with app.run_test() as pilot:
-            switcher = app.query_one("#page-switcher")
+            switcher = app.query_one("#page-switcher", ContentSwitcher)
             for key, page in [("s", "sweep"), ("t", "traces"), ("c", "connect"), ("s", "sweep")]:
                 await pilot.press(key)
                 await pilot.pause()
