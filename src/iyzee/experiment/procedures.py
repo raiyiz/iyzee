@@ -172,7 +172,7 @@ def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> l
         avg_count=200,
         sweep_duration_ms=5,
         res_bw_hz=24e3,
-        trig_source= "IMM",
+        trig_source="IMM",
     )
     prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
     ctx = ExperimentContext(mx=mx, run_id=uuid.uuid4().hex[:8], config=asdict(config))
