@@ -1,55 +1,36 @@
-"""Full-screen embedded IPython console: the screen and the console widget
-it hosts, kept together since the widget has no other caller."""
+"""The Console page: a real IPython terminal, inside the app.
+
+What runs here is IPython's own terminal UI — its prompt, editing (vi or
+emacs mode), completion menu, history search, auto-suggestions, ``%magics``,
+``?`` help, ``%debug`` — in the same process as the app, so ``lab.mx`` is the
+live instrument. See ``ipython_session.py`` for how a terminal application is
+hosted without a terminal, and ``vterm.py`` / ``terminal_view.py`` for how its
+screen is drawn.
+
+This module is the page around it: the plot panel that matplotlib figures are
+drawn into, the ``lab: ...`` status line, and the glue.
+"""
 
 from __future__ import annotations
 
-import ctypes
-import os
 import re
-import threading
 from typing import TYPE_CHECKING, Any, cast
 
 from IPython.core.displaypub import DisplayPublisher
-from rich.markup import escape
-from rich.text import Text
-from textual import work
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Vertical
-from textual.document._document import Document
-from textual.events import Key
-from textual.widgets import OptionList, RichLog, Static, TextArea
+from textual.widgets import Static
 from textual_plotext import PlotextPlot
-from textual_vim_textarea import Mode, VimTextArea
 
-from ..ipython import ExecutionOutput, IyzeeIPython
+from ..ipython import AppState
+from ..ipython_session import IPythonSession
 from ..plotting import draw_series
+from ..terminal_view import TerminalView
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..app import IyzeeApp
-
-
-def _raise_in_thread(thread_id: int, exc_type: type[BaseException]) -> None:
-    """Asynchronously raise ``exc_type`` inside the thread identified by
-    ``thread_id``.
-
-    There's no stdlib-blessed way to interrupt an arbitrary running
-    thread — ordinary threads have no safe cancellation point — so this
-    uses CPython's ``PyThreadState_SetAsyncExc``, the same low-level hook
-    behind the long-standing "interruptible thread" recipes. The target
-    thread only actually raises at its next bytecode boundary, so a call
-    blocked entirely inside a C extension with no GIL release point
-    (rare for this app's VISA/socket-based instrument calls, which do
-    release it) may not stop immediately.
-    """
-    result = ctypes.pythonapi.PyThreadState_SetAsyncExc(
-        ctypes.c_long(thread_id), ctypes.py_object(exc_type)
-    )
-    if result > 1:
-        # Pending-exception state landed on more than one thread (should
-        # never happen with a single valid id) — undo rather than risk
-        # corrupting an unrelated thread's state.
-        ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), None)
 
 
 class ConsoleScreen(Vertical):
@@ -70,224 +51,132 @@ class ConsoleScreen(Vertical):
         # IyzeeApp at runtime (see ConnectScreen.iyzee_app for why), and
         # that satisfies ipython.AppState structurally.
         app = cast("IyzeeApp", self.app)
-        yield IyzeeConsole(IyzeeIPython(app, history_file=app.console_history_file))
+        yield IyzeeConsole(
+            app,
+            history_file=app.console_history_file,
+            editing_mode=app.console_editing_mode,
+        )
 
     def on_mount(self) -> None:
         self.console = self.query_one(IyzeeConsole)
+        cast("IyzeeApp", self.app).console_session = self.console.session
 
     def on_show(self) -> None:
-        # Screen.AUTO_FOCUS (what used to put focus on #console-input every
-        # time this screen became active) is Screen-only and doesn't exist
-        # for a plain widget, so it's done by hand here instead. Also
-        # purely cosmetic: refresh the status line's "connected: ..." text
-        # — nothing about the shell itself needs refreshing.
-        self.query_one("#console-input").focus()
+        # Screen.AUTO_FOCUS (what used to put focus on the input every time
+        # this screen became active) is Screen-only and doesn't exist for a
+        # plain widget, so it's done by hand here instead. Also refresh the
+        # status line's "lab: ..." text — nothing about the shell itself
+        # needs refreshing.
+        self.query_one(TerminalView).focus()
         self.console.refresh_status()
 
 
-class _ConsoleInput(VimTextArea):
-    """IPython editor: real vim modal editing, plus history navigation and
-    an escape hatch back to the app's own navigation.
-
-    Vim's motions, operators, counts, registers, and command line all come
-    from ``textual_vim_textarea.VimTextArea`` unmodified (see that
-    package's own docs for the full key set) — this subclass only adds two
-    things the base widget doesn't know about: IPython history on Up/Down,
-    and a second Escape to leave the widget entirely.
-
-    Escape is two-stage by design, not an oversight:
-
-    - 1st Escape (from INSERT): handled *inside* VimTextArea itself,
-      which transitions INSERT -> NORMAL and keeps focus. Our own
-      ``on_key`` below never even sees the "after" state for this
-      keystroke — Textual calls a widget's public ``on_key`` before its
-      internal ``_on_key`` (which is what VimTextArea overrides to
-      implement the transition), so at the moment our check runs,
-      ``self.mode`` still reads INSERT. That ordering was verified
-      directly against textual-vim-textarea 1.2.0, not assumed.
-    - 2nd Escape (already NORMAL): our check now sees NORMAL and blurs,
-      handing focus back to Textual's app-level bindings (the same
-      navigation shown in the Footer and command palette).
-
-    This mirrors how nested modal contexts are usually resolved elsewhere
-    (e.g. Neovim's terminal mode needs its own escape *out* of terminal
-    input before window/pane navigation applies) — a single Escape can't
-    mean both things at once without breaking one of them.
-    """
-
-    def __init__(self, console: IyzeeConsole) -> None:
-        super().__init__(
-            id="console-input",
-            placeholder="Python / IPython code  •  Shift+Enter or Ctrl+J to run  •  Tab to complete",
-            soft_wrap=True,
-        )
-        self.console = console
-        # Start ready to type: this is a REPL first, a vim buffer second.
-        # Escape still reaches full vim NORMAL mode (motions, operators,
-        # ':' command line, ...) whenever it's wanted.
-        self.mode = Mode.INSERT
-
-    def watch_mode(self, mode: Mode) -> None:
-        # VimTextArea's own watch_mode only posts a ModeChanged message;
-        # nothing in the UI otherwise shows which mode is active, so a
-        # mode you can't see becomes a mode you mistype into. Surface it
-        # on the console's status line instead.
-        super().watch_mode(mode)
-        self.console.set_vim_mode(mode)
-
-    def on_key(self, event: Key) -> None:
-        if self.console.completions_visible:
-            if event.key in ("up", "down"):
-                self.console.move_completion_highlight(-1 if event.key == "up" else 1)
-                event.stop()
-                return
-            if event.key in ("enter", "tab"):
-                self.console.accept_highlighted_completion()
-                event.stop()
-                return
-            if event.key == "escape":
-                self.console.hide_completions()
-                event.stop()
-                return
-            # Any other keystroke (more typing, backspace, ...) abandons
-            # the list rather than trying to keep it in sync char-by-char
-            # — Tab reopens it against the new text. Falls through so the
-            # key still does its normal thing (e.g. actually types).
-            self.console.hide_completions()
-
-        if event.key in ("ctrl+c", "ctrl+l"):
-            # Base TextArea already binds ctrl+c to "copy selection", so
-            # it never reaches IyzeeConsole's own BINDINGS while this
-            # widget has focus — intercepted here instead, same as the
-            # two-stage Escape below.
-            if event.key == "ctrl+c":
-                self.console.action_interrupt()
-            else:
-                self.console.action_clear()
-            event.stop()
-            return
-
-        if event.key == "escape" and self.mode is Mode.NORMAL:
-            self.blur()
-            event.stop()
-            return
-
-        if self.mode is not Mode.INSERT:
-            # Deliberately not offering history browsing from NORMAL mode:
-            # up/down there are vim cursor motions, not REPL history, to
-            # keep the two mental models from bleeding into each other.
-            return
-
-        cursor_row = self.cursor_location[0]
-        if event.key == "up" and cursor_row == 0:
-            if self.console.history_available:
-                self.console.action_history_previous()
-                event.stop()
-                return
-        elif event.key == "down" and cursor_row == self.document.line_count - 1:
-            if self.console.history_cursor is not None:
-                self.console.action_history_next()
-                event.stop()
-                return
-
-
 class IyzeeConsole(Vertical):
-    """Interactive IPython pane with completion, history, and output."""
+    """IPython's terminal UI, a plot panel, and a status line."""
 
     DEFAULT_CSS = """
-    /* Scrolls (instead of clipping) once the terminal is too short for
-       output + input + status — and, more to the point, with the inline
-       plot open, whose fixed 12 rows would otherwise push the input
-       below the fold with no way to reach it. min-height keeps the
-       output log usable rather than letting it shrink to nothing. */
+    /* Scrolls (instead of clipping) once the page is too short for the
+       terminal plus the plot panel: with a plot showing, its fixed 12 rows
+       would otherwise squeeze the terminal to nothing. min-height keeps the
+       terminal usable rather than letting it shrink away. */
     IyzeeConsole { height: 1fr; min-height: 16; overflow-y: auto; }
-    IyzeeConsole #console-output {
+    IyzeeConsole #console-terminal {
         height: 1fr;
-        min-height: 6;
-        border: round $primary-darken-1;
-        margin: 0 1 1 1;
+        min-height: 8;
+        margin: 0 1 0 1;
     }
     IyzeeConsole #console-plot {
         height: 12;
-        margin: 0 1 1 1;
+        margin: 0 1 0 1;
         border: round $primary-darken-1;
         display: none;
-    }
-    IyzeeConsole #console-input {
-        height: 7;
-        margin: 0 1;
-        border: round $primary;
     }
     IyzeeConsole #console-status {
         height: 2;
         padding: 0 2;
         color: $text-muted;
     }
-    IyzeeConsole #console-completions {
-        height: auto;
-        max-height: 8;
-        margin: 0 1;
-        padding: 0 1;
-        border: round $primary-darken-1;
-        display: none;
-    }
     """
 
-    BINDINGS = [
-        # Shift+Enter only reaches the app in terminals that report modified
-        # Enter keys (kitty, WezTerm, Ghostty, ...); in most others (macOS
-        # Terminal, default tmux, many SSH setups) it arrives as a plain
-        # Enter, i.e. a newline, and would leave no way to run anything.
-        # Ctrl+J is a distinct control character every terminal delivers.
-        Binding("shift+enter,ctrl+j", "execute", "Run", key_display="shift+⏎ / ^j", show=True),
-        # History keys are in the console banner rather than the footer:
-        # with Quit and the page keys also listed, the footer overflowed
-        # 100 columns and silently dropped the F3/F4 entries.
-        Binding("ctrl+p", "history_previous", "History ↑", show=False),
-        Binding("ctrl+n", "history_next", "History ↓", show=False),
-        Binding("tab", "complete", "Complete", show=False),
-        Binding("ctrl+c", "interrupt", "Interrupt", show=True),
-        Binding("ctrl+l", "clear", "Clear", show=True),
-    ]
-
-    def __init__(self, shell: IyzeeIPython) -> None:
+    def __init__(
+        self,
+        app_state: AppState,
+        *,
+        history_file: str | Path | None = None,
+        editing_mode: str = "vi",
+    ) -> None:
         super().__init__()
-        self.shell = shell
-        self._history_cursor: int | None = None
-        self._history_draft = ""
         self._lab_text = ""
-        # Matches _ConsoleInput's initial Mode.INSERT until the first
-        # watch_mode fire (which may happen before this widget is mounted).
-        self._mode_label = "-- INSERT --"
-        self._executing = False
-        self._exec_thread_id: int | None = None
-        self._completions: list[str] = []
-        self._completion_start = 0
+        self._busy = False
+        self._view: TerminalView | None = None
+        # Built here (the UI thread, inside compose) because constructing the
+        # session needs the running event loop to hand its output back to.
+        self.session = IPythonSession(
+            app_state,
+            history_file=history_file,
+            editing_mode=editing_mode,
+            on_output=self._on_output,
+            on_busy=self._on_busy,
+        )
 
     def compose(self) -> ComposeResult:
-        # min_width: RichLog lays lines out at least this wide (default 78), so
-        # in a narrower pane (58 columns at an 80-column terminal) every long
-        # line — a traceback, a banner — needed sideways scrolling instead of
-        # wrapping to the pane.
-        yield RichLog(id="console-output", wrap=True, markup=True, highlight=False, min_width=30)
+        yield TerminalView(id="console-terminal")
         yield PlotextPlot(id="console-plot")
-        yield OptionList(id="console-completions")
-        yield _ConsoleInput(self)
         yield Static("", id="console-status")
 
     def on_mount(self) -> None:
-        self.shell.shell.display_pub = _ConsoleDisplayPublisher(self)
+        self._view = self.query_one(TerminalView)
+        self._view.attach(self.session)
+        shell = self.session.shell
+        shell.display_pub = _ConsoleDisplayPublisher()
+        # IPython's terminal shell restricts the display formatter to
+        # text/plain (a real terminal can't show the rest). This console can
+        # at least turn HTML into text and note images, so let those through.
+        formatter = shell.display_formatter
+        formatter.active_types = list(formatter.format_types)
         self._install_figure_plotting()
-        self._write_banner()
         self.refresh_status()
-        # Deliberately not focusing #console-input here: on_mount now fires
-        # for every page at app startup (ContentSwitcher mounts all of its
-        # children immediately, unlike the old per-page Screens, which only
-        # ever mounted the active one), so this page's on_mount runs even
-        # while some other page is the one actually visible. Focusing here
-        # would steal focus from whichever page the user is really looking
-        # at. ConsoleScreen.on_show() does this instead, since that only
-        # fires when this page actually becomes the visible one.
+        # Started only now, with the view in place to receive its output.
+        # Deliberately not focusing the terminal here: on_mount fires for every
+        # page at app startup (ContentSwitcher mounts all of its children
+        # immediately), so this page's on_mount runs even while some other
+        # page is the one actually visible. Focusing here would steal focus
+        # from whichever page the user is really looking at.
+        # ConsoleScreen.on_show() does this instead.
+        self.session.start()
+
+    def on_unmount(self) -> None:
+        self.session.close()
+
+    # -- session callbacks (UI thread) ----------------------------------------------------
+
+    def _on_output(self, text: str) -> None:
+        if self._view is not None:
+            self._view.feed(text)
+
+    def _on_busy(self, busy: bool) -> None:
+        self._busy = busy
+        if self.is_mounted:
+            self._render_status()
+
+    # -- status line -------------------------------------------------------------------------
+
+    def refresh_status(self) -> None:
+        """Update the "lab: ..." status line. Purely cosmetic — the console's
+        `lab` variable itself always reflects current state without needing
+        this or any other refresh; see LabProxy."""
+        lab = self.session.shell.user_ns.get("lab")
+        connected = ", ".join(lab.connected) if lab is not None else ""
+        self._lab_text = f"lab: {connected or 'nothing connected yet'}"
+        self._render_status()
+
+    def _render_status(self) -> None:
+        state = "running… Ctrl+C interrupts" if self._busy else "Ctrl+C clears the line"
+        self.query_one("#console-status", Static).update(
+            f"{self._lab_text}   ·   {state}   ·   Shift+PageUp/Down or wheel: scrollback"
+        )
+
+    # -- matplotlib figures ---------------------------------------------------------------------
 
     def _install_figure_plotting(self) -> None:
         """Render matplotlib Figures into the plot panel instead of the
@@ -306,7 +195,7 @@ class IyzeeConsole(Vertical):
         """
         from matplotlib.figure import Figure
 
-        formatter = self.shell.shell.display_formatter.formatters["text/plain"]
+        formatter = self.session.shell.display_formatter.formatters["text/plain"]
         formatter.for_type(Figure, self._render_figure)
 
     def _render_figure(self, fig: Any, p: Any, cycle: bool) -> None:
@@ -330,8 +219,9 @@ class IyzeeConsole(Vertical):
             "xlabel": fig.axes[0].get_xlabel() if fig.axes else "",
             "ylabel": fig.axes[0].get_ylabel() if fig.axes else "",
         }
+        # Runs on the shell's thread, not the UI thread.
         self.app.call_from_thread(self._draw_figure, lines, labels)
-        p.text(f"[plotted {len(lines)} line(s) in the panel above the input]")
+        p.text(f"[plotted {len(lines)} line(s) in the plot panel below the terminal]")
 
     def _draw_figure(self, lines: list[tuple[list, list, str]], labels: dict[str, str]) -> None:
         plot = self.query_one("#console-plot", PlotextPlot)
@@ -343,317 +233,25 @@ class IyzeeConsole(Vertical):
             ylabel=labels["ylabel"] or None,
         )
 
-    def refresh_status(self) -> None:
-        """Update the "connected: ..." status line. Purely cosmetic — the
-        console's `lab` variable itself always reflects current state
-        without needing this or any other refresh; see LabProxy."""
-        lab = self.shell.shell.user_ns.get("lab")
-        connected = ", ".join(lab.connected) if lab is not None else ""
-        self._lab_text = f"lab: {connected or 'nothing connected yet'}"
-        self._render_status()
-
-    def set_vim_mode(self, mode: Mode) -> None:
-        """Update the vim mode indicator. Called from
-        `_ConsoleInput.watch_mode` — see that method for why."""
-        self._mode_label = f"-- {mode.value} --"
-        if mode is Mode.NORMAL:
-            # Landing here by pressing Escape is the classic way to get
-            # "stuck" if you don't know vim: letters are commands, not text.
-            self._mode_label += "  i: back to typing · Esc: leave"
-        if self.is_mounted:
-            self._render_status()
-
-    def _render_status(self) -> None:
-        running = "   [bold yellow]running… (Ctrl+C to interrupt)[/]" if self._executing else ""
-        self._set_status(f"{self._mode_label}   {self._lab_text}{running}")
-
-    def _write_banner(self) -> None:
-        output = self.query_one(RichLog)
-        output.write("[bold cyan]iyzee IPython console[/]")
-        output.write("Live Python access: lab.mx / lab.shutter / lab.scope when connected.")
-        output.write("lab.results is the last completed sweep's StepResult list.")
-        output.write("IPython features: Tab completion, ?, ??, %, !, history, and top-level await.")
-        output.write(
-            "Shift+Enter runs the current cell — or Ctrl+J, which works in every terminal "
-            "(many can't tell Shift+Enter from Enter)."
-        )
-        output.write(
-            "↑/↓ or Ctrl+P/Ctrl+N browse IPython history; Ctrl+C interrupts; Ctrl+L clears."
-        )
-        output.write(
-            "The editor is vim-style: Esc switches to NORMAL mode (letters become commands), "
-            "i returns to typing, and Esc again leaves the field."
-        )
-
-    def _set_status(self, text: str) -> None:
-        self.query_one("#console-status", expect_type=Static).update(text)
-
-    def action_execute(self) -> None:
-        if self._executing:
-            # A second Shift+Enter used to silently cancel the first cell
-            # (thanks to `exclusive=True` below) with no feedback at all.
-            # Refusing outright is more honest: nothing is lost, and
-            # Ctrl+C is the explicit, visible way to actually stop it.
-            return
-        text_area = self.query_one(TextArea)
-        source = text_area.text
-        if not source.strip():
-            return
-        self._history_cursor = None
-        self._history_draft = ""
-        self.hide_completions()
-        self.query_one(RichLog).write(
-            f"[bold cyan]In [{self.shell.shell.execution_count}]:[/] {escape(source)}"
-        )
-        text_area.load_text("")
-        self._executing = True
-        self._render_status()
-        self._execute(source)
-
-    @work(thread=True, exclusive=True, group="ipython", exit_on_error=False)
-    def _execute(self, source: str) -> None:
-        self._exec_thread_id = threading.get_ident()
-
-        def stream(line: str) -> None:
-            # Called from this worker thread, once per complete line, as
-            # the cell produces it — marshalled to the UI thread exactly
-            # like every other cross-thread update here (compare
-            # `_ConsoleDisplayPublisher.publish`, which does the same for
-            # `display()` calls). Both now go through `call_from_thread`
-            # from this same worker thread in the order the cell actually
-            # produced them, so a `print()` before a `display()` call in
-            # one cell shows up before it too — previously stdout/stderr
-            # were only flushed once the whole cell finished, so a
-            # `display()` call partway through a cell would visibly jump
-            # ahead of `print()` output that came before it in the source.
-            self.app.call_from_thread(self._write_output_line, line)
-
-        try:
-            result = self.shell.execute(source, on_stdout_line=stream, on_stderr_line=stream)
-        except BaseException as exc:
-            # Normally unreachable: IPython's own `run_cell` catches
-            # everything raised by the executed code, including
-            # KeyboardInterrupt, and reports it through `ExecutionOutput`
-            # instead. But `action_interrupt` below delivers that
-            # KeyboardInterrupt *asynchronously* (see `_raise_in_thread`),
-            # so it can in principle land at a bytecode boundary outside
-            # `run_cell`'s own try/except entirely — e.g. while
-            # `execute()`'s `contextlib.redirect_stdout` block is
-            # unwinding — and escape `shell.execute()` uncaught. Without
-            # this fallback that would skip `_finish_execution` below and
-            # leave the console stuck showing "running…" forever with no
-            # way to submit another cell, since nothing would ever reset
-            # `_executing`. Empirically reproducible: hit this exact path
-            # while testing Ctrl+C against a `time.sleep()` cell. Nothing
-            # streamed this message as it happened (there was no cell
-            # output to stream — `shell.execute()` itself never
-            # returned), so it's written directly here instead, the same
-            # way any other line would be.
-            message = f"{type(exc).__name__}: {exc}"
-            stream(message)
-            result = ExecutionOutput(
-                source=source,
-                stdout="",
-                stderr=message,
-                execution_count=self.shell.shell.execution_count,
-                success=False,
-            )
-        finally:
-            self._exec_thread_id = None
-        self.app.call_from_thread(self._finish_execution, result)
-
-    def _write_output_line(self, line: str) -> None:
-        # IPython formats its own tracebacks (and e.g. `%time` output)
-        # with raw ANSI color codes, not Rich markup — pushing that
-        # through `escape()` used to dump literal `\x1b[31m...` bytes
-        # into the log. `Text.from_ansi` decodes real ANSI SGR sequences
-        # into proper Rich styling instead, so error output renders in
-        # color like a normal terminal rather than as escape-code noise.
-        self.query_one(RichLog).write(Text.from_ansi(line))
-
-    def _finish_execution(self, result: ExecutionOutput) -> None:
-        self._executing = False
-        # stdout/stderr are no longer written here — `_execute` above
-        # streams every line live via `_write_output_line` as the cell
-        # produces it (including `execute()`'s own trailing
-        # `finish_partial_line()` flush and this method's own
-        # `BaseException` fallback), so writing `result.stdout`/`.stderr`
-        # again here would just duplicate everything that's already on
-        # screen. `result` is kept around regardless (rather than
-        # narrowed to just the status fields) since other callers of
-        # `execute()` — direct callers in tests, primarily — still want
-        # the full text back, and this stays the one place that turns an
-        # `ExecutionOutput` into "the cell finished" UI state.
-        state = "ok" if result.success else "error"
-        self._set_status(f"In [{result.execution_count}]  •  {state}")
-        self.query_one(TextArea).focus()
-
-    def action_interrupt(self) -> None:
-        """Raise KeyboardInterrupt inside the running cell's worker thread.
-
-        A no-op when nothing is running — there's nothing to interrupt,
-        and importantly nothing to accidentally interrupt in some *other*,
-        unrelated thread.
-        """
-        if not self._executing or self._exec_thread_id is None:
-            return
-        self.query_one(RichLog).write("[dim]— interrupt requested —[/]")
-        _raise_in_thread(self._exec_thread_id, KeyboardInterrupt)
-
-    def action_clear(self) -> None:
-        """Clear the output log — the console's Ctrl+L, same idea as a
-        terminal's ``clear``. Leaves history/namespace/state untouched."""
-        self.query_one(RichLog).clear()
-
-    def action_complete(self) -> None:
-        text_area = self.query_one(TextArea)
-        source = text_area.text
-        # TextArea.document is typed as the abstract DocumentBase (it could
-        # in principle be a custom document type), but TextArea only ever
-        # constructs a concrete Document (or SyntaxAwareDocument, which
-        # subclasses it) — see textual.widgets._text_area.TextArea.__init__.
-        # The offset<->location helpers below live on that concrete type.
-        document = cast(Document, text_area.document)
-        cursor_pos = document.get_index_from_location(text_area.cursor_location)
-        prefix, matches = self.shell.complete(source, cursor_pos)
-        if not matches:
-            self.hide_completions()
-            return
-
-        # IPython's own completion contract (see `InteractiveShell.complete`):
-        # `prefix` is the exact slice of `source` immediately before the
-        # cursor that every entry in `matches` is a full replacement for
-        # — e.g. completing "lab.ha" returns prefix=".ha",
-        # matches=[".handles"], not "handles". So the replacement span is
-        # simply the last `len(prefix)` characters before the cursor; no
-        # separate word-boundary heuristic needed (a previous version used
-        # one based on whitespace, which is wrong for dotted attribute
-        # access like `lab.<Tab>` — it doesn't treat `.` as a boundary).
-        token_start = cursor_pos - len(prefix)
-        common = os.path.commonprefix(matches)
-        if common and common != prefix:
-            start = document.get_location_from_index(token_start)
-            text_area.replace(common, start, text_area.cursor_location)
-            new_cursor = document.get_location_from_index(token_start + len(common))
-            text_area.move_cursor(new_cursor)
-        self._show_completions(matches, token_start)
-
-    def _show_completions(self, matches: list[str], token_start: int) -> None:
-        """Populate the completion list and make it navigable.
-
-        An ``OptionList`` instead of the old static text readout — Up/Down
-        move a real highlight (intercepted in ``_ConsoleInput.on_key``
-        before either history or vim motions get a look at them, see
-        there for why) and Enter/Tab accept the highlighted match, so
-        narrowing a long candidate list no longer means retyping it letter
-        by letter. ``token_start`` (an index into the source text, not a
-        row/col location — it's recomputed against the *current* document
-        at accept time) is remembered so accepting a match later replaces
-        the right span even after the common-prefix insertion above has
-        already moved the cursor.
-        """
-        self._completions = matches[:200]
-        self._completion_start = token_start
-        option_list = self.query_one("#console-completions", OptionList)
-        option_list.clear_options()
-        option_list.add_options(self._completions)
-        option_list.highlighted = 0
-        option_list.styles.display = "block"
-
-    def hide_completions(self) -> None:
-        self._completions = []
-        self.query_one("#console-completions", OptionList).styles.display = "none"
-
-    @property
-    def completions_visible(self) -> bool:
-        return bool(self._completions)
-
-    def move_completion_highlight(self, delta: int) -> None:
-        option_list = self.query_one("#console-completions", OptionList)
-        count = option_list.option_count
-        if count == 0:
-            return
-        current = option_list.highlighted or 0
-        option_list.highlighted = (current + delta) % count
-
-    def accept_highlighted_completion(self) -> None:
-        option_list = self.query_one("#console-completions", OptionList)
-        index = option_list.highlighted
-        if index is None or not self._completions:
-            self.hide_completions()
-            return
-        match = self._completions[index]
-        text_area = self.query_one(TextArea)
-        document = cast(Document, text_area.document)
-        start = document.get_location_from_index(self._completion_start)
-        text_area.replace(match, start, text_area.cursor_location)
-        new_cursor = document.get_location_from_index(self._completion_start + len(match))
-        text_area.move_cursor(new_cursor)
-        self.hide_completions()
-
-    @property
-    def history_available(self) -> bool:
-        """Whether the IPython session has history entries to browse."""
-        return bool(self.shell.history)
-
-    @property
-    def history_cursor(self) -> int | None:
-        """Current history index, or ``None`` when not browsing history."""
-        return self._history_cursor
-
-    def action_history_previous(self) -> None:
-        history = self.shell.history
-        if not history:
-            return
-        if self._history_cursor is None:
-            self._history_draft = self.query_one(TextArea).text
-            self._history_cursor = len(history)
-        self._history_cursor = max(0, self._history_cursor - 1)
-        self.query_one(TextArea).load_text(history[self._history_cursor])
-
-    def action_history_next(self) -> None:
-        if self._history_cursor is None:
-            return
-        history = self.shell.history
-        self._history_cursor += 1
-        if self._history_cursor >= len(history):
-            self._history_cursor = None
-            self.query_one(TextArea).load_text(self._history_draft)
-        else:
-            self.query_one(TextArea).load_text(history[self._history_cursor])
-
 
 class _ConsoleDisplayPublisher(DisplayPublisher):
-    """Route IPython's rich ``display()`` output into the console pane.
+    """Route IPython's rich ``display()`` output into the terminal.
 
     The base :class:`DisplayPublisher` only ever does anything with the
-    ``text/plain`` entry of a display bundle (``print(data["text/plain"])``)
-    — every other mimetype (``text/html`` from a pandas ``DataFrame``,
-    ``image/png`` from a matplotlib figure, ...) is silently dropped, so
-    ``display(df)`` degraded to a bare ``<DataFrame at 0x...>`` repr with no
-    indication anything was lost.
+    ``text/plain`` entry of a display bundle — every other mimetype
+    (``text/html`` from a pandas ``DataFrame``, ``image/png`` from a
+    matplotlib figure, ...) is silently dropped, so ``display(df)`` degraded
+    to a bare ``<DataFrame at 0x...>`` repr with no indication anything was
+    lost.
 
     This renders ``text/html`` as plain text (tags stripped — a real HTML
     renderer is out of scope here) and gives image mimetypes a one-line
     placeholder instead of vanishing, so "a plot was produced" is at least
-    visible. Actually rendering images inline (sixel/kitty graphics
-    protocols) needs real-terminal verification this pass doesn't have
-    budget for — tracked as a follow-up in
-    ``docs/console-improvements-plan.md``.
+    visible.
 
-    Runs inside the execution worker thread (``IyzeeConsole._execute``),
-    not the UI thread, so writes are marshalled via ``call_from_thread``
-    like every other cross-thread UI update in this widget — including a
-    cell's own stdout/stderr, which (since plan item #4) is streamed live
-    through the same mechanism rather than only flushed once the whole
-    cell finishes, so a ``print()`` before a ``display()`` call in the
-    same cell now appears before it, in the order the cell actually
-    produced them, rather than after.
+    ``publish`` runs on the shell's thread, whose ``sys.stdout`` is the
+    virtual terminal, so this is just ``print``.
     """
-
-    def __init__(self, console: IyzeeConsole) -> None:
-        super().__init__()
-        self.console = console
 
     def publish(
         self,
@@ -661,21 +259,16 @@ class _ConsoleDisplayPublisher(DisplayPublisher):
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        self.console.app.call_from_thread(self._write, data)
-
-    def _write(self, data: dict[str, Any]) -> None:
-        output = self.console.query_one(RichLog)
         if "text/html" in data:
             text = re.sub(r"<[^>]+>", "", data["text/html"]).strip()
-            output.write(escape(text) if text else "[dim](empty)[/]")
+            print(text or "(empty)")
             return
         for mime in data:
             if mime.startswith("image/"):
                 size = len(data[mime])
-                output.write(
-                    f"[dim]\\[{mime}, {size} bytes — inline image display "
-                    "not supported in this console][/]"
+                print(
+                    f"[{mime}, {size} bytes — inline image display not supported in this console]"
                 )
                 return
         if "text/plain" in data:
-            output.write(escape(data["text/plain"]))
+            print(data["text/plain"])

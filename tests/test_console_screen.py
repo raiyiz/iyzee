@@ -1,6 +1,6 @@
 """Integration check that a completed sweep's results actually reach the
 IPython console through `lab` — exercising the real ConsoleScreen/
-IyzeeIPython wiring end-to-end, not just LabProxy in isolation.
+IPythonSession wiring end-to-end, not just LabProxy in isolation.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def test_last_run_reaches_lab_in_the_running_app() -> None:
             await pilot.pause()
 
             console_page = app.query_one(ConsoleScreen)
-            lab = console_page.console.shell.shell.user_ns["lab"]
+            lab = console_page.console.session.shell.user_ns["lab"]
             assert lab.results == [result]
             assert lab.last_run.kind == "bandwidth"
 
@@ -39,7 +39,7 @@ def test_no_last_run_gives_empty_results_not_a_crash() -> None:
             await pilot.pause()
 
             console_page = app.query_one(ConsoleScreen)
-            lab = console_page.console.shell.shell.user_ns["lab"]
+            lab = console_page.console.session.shell.user_ns["lab"]
             assert lab.results == []
             assert lab.last_run is None
 
@@ -57,7 +57,7 @@ def test_disconnecting_mxa_is_immediately_reflected_in_lab_no_refresh_needed() -
             await pilot.press("i")
             await pilot.pause()
             console_page = app.query_one(ConsoleScreen)
-            lab = console_page.console.shell.shell.user_ns["lab"]
+            lab = console_page.console.session.shell.user_ns["lab"]
 
             class FakeHandle:
                 device = object()

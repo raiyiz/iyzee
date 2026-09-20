@@ -25,7 +25,7 @@ src/iyzee/
     ├── ipython.py          # embedded IPython shell, LabProxy
     ├── workers.py          # cross-thread message types (LastRun, StepProgress, ...)
     └── screens/            # ConnectScreen, SweepScreen, TracesScreen, ConsoleScreen
-        └── console.py      # ConsoleScreen + IyzeeConsole, the console's Vim-mode input widget
+        └── console.py      # ConsoleScreen + IyzeeConsole: the page around IPython's terminal UI
 ```
 
 ## Running the TUI
@@ -127,7 +127,7 @@ already just picks a `Step` list and runs it.
 ## Interactive IPython console
 
 The Console screen (`i`) embeds a real IPython shell in the same process as
-the application, with a Vim-mode text editor for input. Connected instruments
+the application, with IPython's own terminal UI (vi or emacs editing). Connected instruments
 and the last sweep's results are reachable through a single `lab` object:
 
 ```python
@@ -175,50 +175,36 @@ completion is disabled: it does static analysis and can't see through
 `lab`'s dynamic attribute lookup, so `lab.<Tab>` would otherwise silently
 return nothing.
 
-Input editing uses [`textual-vim-textarea`](https://pypi.org/project/textual-vim-textarea/)
-(pinned to an exact version — young, single-maintainer package) for real Vim
-motions, operators, counts, and registers, on top of which the console adds
-exactly two things: history on Up/Down at the top/bottom of a multiline cell
-(only in INSERT mode — NORMAL mode's Up/Down stay pure cursor motion, so the
-two mental models don't bleed into each other), and a two-stage Escape:
+**How it works.** The console page runs IPython's own terminal UI (prompt_toolkit's
+prompt: editing, completion menu, history search, auto-suggestions, `%magics`,
+`?` help, `%debug`) *inside the app process*, so `lab.mx` is the live instrument
+rather than a copy across a process boundary. prompt_toolkit only needs a
+"terminal" to read keystrokes from and write escape sequences to, so it is given
+virtual ones (`tui/ipython_session.py`): keystrokes are encoded by
+`tui/termkeys.py` and written to a pipe input, and its output is interpreted by a
+terminal emulator (`tui/vterm.py`, built on `pyte`) and painted by
+`tui/terminal_view.py`, with scrollback (mouse wheel or Shift+PageUp/Down). The
+shell runs in its own thread; `print()` output is routed to the console by
+thread, `input()` prompts on the virtual terminal, and Ctrl+C interrupts the
+running cell. `IyzeeApp(console_editing_mode="vi" | "emacs")` (env
+`IYZEE_EDITING_MODE`) chooses IPython's editing mode; the default is vi.
 
-- **1st Escape** (from INSERT) — handled by the Vim editor itself,
-  transitioning to NORMAL mode while staying focused on the console.
-- **2nd Escape** (already NORMAL) — leaves the console entirely, handing
-  focus back to the app's own navigation.
+Because the terminal owns the keyboard, only the F-keys, Ctrl+Q and the command
+palette (Ctrl+\) reach the app while it has focus — `c`/`s`/`t`/`i` are typing.
+Everything else — Tab, Escape, Ctrl+P/N/R — is IPython's. Ctrl+Z is never
+forwarded (IPython binds it to "suspend", which would stop the whole TUI).
+Not supported: `getpass` (it opens `/dev/tty`), and output from threads the
+cell itself starts goes to Textual's capture rather than the terminal.
 
-This mirrors how other tools resolve a modal editor nested inside modal
-navigation (e.g. Neovim's terminal mode needs its own escape *out* of
-terminal input before window/pane navigation applies) — a single Escape
-can't mean both "leave insert mode" and "leave the widget" without breaking
-one of them. Shift+Enter executes the current cell — or Ctrl+J, which
-every terminal can send (many, e.g. macOS Terminal and default tmux, deliver Shift+Enter as a
-plain Enter); a second Shift+Enter
-while one is still running is a no-op rather than silently cancelling and
-replacing it — the status line shows `running… (Ctrl+C to interrupt)` for
-as long as a cell is in flight, and Ctrl+C raises `KeyboardInterrupt`
-inside it. That's a best-effort interrupt, not a guaranteed one: it can
-only actually stop the cell at a Python bytecode boundary, so a plain
-`time.sleep(n)` cell won't be cut short (it isn't blocked in interpreted
-Python at all while sleeping) even though a busy Python loop will
-interrupt in well under a second. Ctrl+L clears the output log without
-touching history or the namespace, same idea as a terminal's own `clear`.
-Ctrl+P/Ctrl+N remain available as explicit history shortcuts alongside the
-Up/Down-at-boundary behavior above.
-
-Tab completion opens a real, navigable list rather than dumping every
-match as static text: Up/Down move the highlight, Enter or Tab again
-accepts it, Escape closes the list without touching the buffer, and typing
-anything else abandons the list (Tab reopens it against the new text).
 
 Outside editable widgets, `j`/`k` use Textual's own focus traversal
 (`focus_next()`/`focus_previous()` — not a hand-rolled traversal order) and
 Ctrl+\ opens Textual's built-in Command Palette (moved off its default
-Ctrl+P, which the console's own history binding above needs), exposing the
+Ctrl+P, which IPython's history recall in the console needs), exposing the
 app's existing actions without a second command parser or a separately
 maintained modal state machine. Whether a key is "global navigation" or
 "text editing" is decided by Textual itself: a focused widget's own
-bindings (an `Input`'s text-entry keys, the console's Vim motions) take
+bindings (an `Input`'s text-entry keys, the terminal's own keys) take
 priority over `IyzeeApp`'s `BINDINGS`, so there's no hand-maintained mode
 flag that has to be kept in sync with reality — except for priority
 bindings like the command palette's, which are checked before the focus
