@@ -24,8 +24,7 @@ from pathlib import Path
 
 import pytest
 from rich.text import Text
-from textual.containers import ContentSwitcher
-from textual.widgets import Button, DataTable, Input, ListView, RichLog, Select, Static
+from textual.widgets import Button, ContentSwitcher, DataTable, Input, ListView, RichLog, Select, Static
 
 from iyzee.experiment import StepResult, save_step_results
 from iyzee.tui import app as app_mod
