@@ -29,7 +29,7 @@ class AnalyzerConfig:
     span_hz: float = 0
     avg_count: int = 100
     sweep_duration_ms: int = 10
-    res_bw_hz: float = 10e3
+    res_bw_hz: float = 10e4
     avg_type: str = "LOG"
     trig_source: str = "EXT"
 
@@ -170,8 +170,9 @@ def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> l
         center_hz=1e6,
         span_hz=0,
         avg_count=200,
-        sweep_duration_ms=10,
+        sweep_duration_ms=5,
         res_bw_hz=24e3,
+        trig_source="IMM",
     )
     prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
     ctx = ExperimentContext(mx=mx, run_id=uuid.uuid4().hex[:8], config=asdict(config))

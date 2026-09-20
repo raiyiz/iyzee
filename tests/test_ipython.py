@@ -1,4 +1,4 @@
-"""Tests for IyzeeIPython and LabProxy.
+"""Tests for LabProxy and the shell configuration (history, namespace).
 
 Uses a small FakeApp standing in for the real IyzeeApp — LabProxy only
 needs the three attributes in ipython.AppState (handles, instrument_locks,
@@ -7,16 +7,62 @@ last_run), so tests don't need a running Textual app to exercise it.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from IPython.core.interactiveshell import InteractiveShell
+
 from iyzee.experiment import StepResult
 from iyzee.tui.instruments import LockedProxy
-from iyzee.tui.ipython import IyzeeIPython, LabProxy, default_history_file
+from iyzee.tui.ipython import LabProxy, default_history_file, lab_namespace, shell_config
 from iyzee.tui.workers import LastRun
+
+
+@dataclass
+class _Result:
+    stdout: str
+    stderr: str
+    success: bool
+
+
+class IyzeeIPython:
+    """Minimal test harness: a plain InteractiveShell built from the same
+    ``shell_config``/``lab_namespace`` the console's real (terminal) shell
+    uses, with a ``run``-and-capture ``execute``. The terminal shell itself
+    is covered in test_ipython_session.py."""
+
+    def __init__(self, app, namespace=None, history_file=None) -> None:
+        self.shell = InteractiveShell(
+            config=shell_config(history_file), user_ns=lab_namespace(app, namespace)
+        )
+        InteractiveShell._instance = self.shell
+
+    def execute(self, source: str) -> _Result:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            result = self.shell.run_cell(source, store_history=True, silent=False)
+        return _Result(out.getvalue(), err.getvalue(), result.error_in_exec is None)
+
+    def complete(self, source: str, cursor_pos: int):
+        return self.shell.complete(source, line=source, cursor_pos=cursor_pos)
+
+    @property
+    def history(self) -> list[str]:
+        tail = self.shell.history_manager.get_tail(n=500, raw=True, include_latest=True)
+        entries: list[str] = []
+        for _s, _l, cell in tail:
+            cell = cell.rstrip()
+            if cell and (not entries or entries[-1] != cell):
+                entries.append(cell)
+        return entries
+
+    def close(self) -> None:
+        self.shell.atexit_operations()
 
 
 @dataclass
@@ -310,78 +356,3 @@ def test_help_syntax_does_not_hit_the_interactive_pager() -> None:
     assert result.success
     assert "Docstring" in result.stdout
     assert "EOFError" not in result.stdout
-
-
-def test_execute_streams_stdout_one_complete_line_at_a_time() -> None:
-    """`on_stdout_line` is the mechanism the console uses to show output
-    live instead of only once a cell finishes (plan item #4) — this pins
-    down its actual contract: called once per *complete* line, in order,
-    as the cell produces them, before `execute()` returns."""
-    shell = IyzeeIPython(FakeApp())
-    lines: list[str] = []
-
-    result = shell.execute(
-        "print('one')\nprint('two')\nprint('three')",
-        on_stdout_line=lines.append,
-    )
-
-    assert lines == ["one", "two", "three"]
-    # And the callback isn't a replacement for the final captured text --
-    # every other caller (every test above, for instance) still gets the
-    # complete `stdout` back exactly as before.
-    assert result.stdout == "one\ntwo\nthree\n"
-
-
-def test_execute_does_not_fragment_a_single_print_call_across_lines() -> None:
-    """`print("a", "b")` makes several separate `file.write()` calls under
-    the hood (one per argument, one for the separator, one for the
-    trailing newline) -- naively forwarding each `write()` as its own
-    line would turn one logical line of output into several. The
-    callback must only fire once the *line* is complete, not once each
-    underlying `write()` call happens."""
-    shell = IyzeeIPython(FakeApp())
-    lines: list[str] = []
-
-    shell.execute("print('a', 'b', 'c')", on_stdout_line=lines.append)
-
-    assert lines == ["a b c"]
-
-
-def test_execute_flushes_a_trailing_line_with_no_newline() -> None:
-    """`print("...", end="")` never produces a newline of its own -- the
-    callback must still see that partial final line once the cell is
-    done, not lose it entirely."""
-    shell = IyzeeIPython(FakeApp())
-    lines: list[str] = []
-
-    result = shell.execute("print('no newline', end='')", on_stdout_line=lines.append)
-
-    assert lines == ["no newline"]
-    assert result.stdout == "no newline"
-
-
-def test_execute_streams_stdout_and_stderr_independently() -> None:
-    shell = IyzeeIPython(FakeApp())
-    stdout_lines: list[str] = []
-    stderr_lines: list[str] = []
-
-    shell.execute(
-        "import sys\nprint('to stdout')\nprint('to stderr', file=sys.stderr)",
-        on_stdout_line=stdout_lines.append,
-        on_stderr_line=stderr_lines.append,
-    )
-
-    assert stdout_lines == ["to stdout"]
-    assert stderr_lines == ["to stderr"]
-
-
-def test_execute_preserves_intentional_blank_lines_in_streamed_output() -> None:
-    """A bare `print()` is a deliberate blank line, not trailing
-    whitespace to trim -- the streaming callback should pass it through
-    like any other line rather than collapsing or dropping it."""
-    shell = IyzeeIPython(FakeApp())
-    lines: list[str] = []
-
-    shell.execute("print('one')\nprint()\nprint('two')", on_stdout_line=lines.append)
-
-    assert lines == ["one", "", "two"]

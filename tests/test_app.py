@@ -1,7 +1,6 @@
 import asyncio
 
-from textual.widgets import ContentSwitcher, Input, RichLog, TextArea
-from textual_plotext import PlotextPlot
+from textual.widgets import ContentSwitcher
 
 from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.screens.connect import ConnectScreen
@@ -40,7 +39,7 @@ def test_page_navigation_uses_a_shared_content_switcher() -> None:
             assert switcher.current == "console"
             assert isinstance(switcher.get_child_by_id("console"), ConsoleScreen)
             assert app.screen.focused is not None
-            assert app.screen.focused.id == "console-input"
+            assert app.screen.focused.id == "console-terminal"
 
             await pilot.press("f1")
             assert switcher.current == "connect"
@@ -48,7 +47,7 @@ def test_page_navigation_uses_a_shared_content_switcher() -> None:
             await pilot.press("f4")
             assert switcher.current == "console"
             assert app.screen.focused is not None
-            assert app.screen.focused.id == "console-input"
+            assert app.screen.focused.id == "console-terminal"
 
     asyncio.run(scenario())
 
@@ -57,13 +56,13 @@ def test_console_history_file_defaults_to_none_and_is_passed_through(tmp_path) -
     """`IyzeeApp()` with no arguments — every test in this codebase,
     including every other one in this file — must default to no
     persistent history file at all (`console_history_file=None`, which
-    `IyzeeIPython` turns into `:memory:`). Getting this default wrong
+    the session turns into `:memory:`). Getting this default wrong
     would silently reintroduce every InteractiveShell in the whole test
     suite writing to a real, shared, ever-growing SQLite file again — see
     `default_history_file`'s docstring in ipython.py for what that caused
     last time. Also checks the opt-in path actually reaches the console's
     shell: passing a real path through the app constructor should end up
-    configured on the running IyzeeIPython instance, not just stored and
+    configured on the running IPythonSession's shell, not just stored and
     ignored.
     """
 
@@ -73,7 +72,7 @@ def test_console_history_file_defaults_to_none_and_is_passed_through(tmp_path) -
         async with app.run_test() as pilot:
             await pilot.press("i")
             console = app.screen.query_one(IyzeeConsole)
-            assert console.shell.shell.history_manager.hist_file == ":memory:"
+            assert console.session.shell.history_manager.hist_file == ":memory:"
 
     async def real_path_reaches_the_shell() -> None:
         history_file = tmp_path / "console_history.sqlite"
@@ -81,144 +80,7 @@ def test_console_history_file_defaults_to_none_and_is_passed_through(tmp_path) -
         async with app.run_test() as pilot:
             await pilot.press("i")
             console = app.screen.query_one(IyzeeConsole)
-            assert console.shell.shell.history_manager.hist_file == str(history_file)
+            assert console.session.shell.history_manager.hist_file == str(history_file)
 
     asyncio.run(default_is_none())
     asyncio.run(real_path_reaches_the_shell())
-
-
-def test_console_mode_indicator_updates_on_escape_and_i() -> None:
-    """The console's status line is the only UI feedback for which vim
-    mode is active (INSERT vs NORMAL) — regression test for that
-    indicator actually updating on Escape/i."""
-
-    async def scenario() -> None:
-        app = IyzeeApp()
-        async with app.run_test() as pilot:
-            await pilot.press("i")
-            status = app.screen.query_one("#console-status")
-            assert "-- INSERT --" in str(status.render())
-
-            await pilot.press("escape")
-            assert "-- NORMAL --" in str(app.screen.query_one("#console-status").render())
-
-            await pilot.press("i")
-            assert "-- INSERT --" in str(app.screen.query_one("#console-status").render())
-
-    asyncio.run(scenario())
-
-
-def test_console_display_renders_rich_html_output() -> None:
-    """display() with a text/html-only object used to fall back to a bare
-    `<object at 0x...>` repr (base DisplayPublisher only handles
-    text/plain). Regression test that html gets a real (tag-stripped)
-    rendering instead."""
-
-    async def scenario() -> None:
-        app = IyzeeApp()
-        async with app.run_test() as pilot:
-            await pilot.press("i")
-            text_area = app.screen.query_one(TextArea)
-            text_area.load_text(
-                "from IPython.display import display\n"
-                "class Foo:\n"
-                "    def _repr_html_(self):\n"
-                "        return '<b>hello</b> world'\n"
-                "display(Foo())"
-            )
-            await pilot.press("shift+enter")
-            await pilot.pause(0.3)
-            log = app.screen.query_one("#console-output", RichLog)
-            rendered = " ".join(str(seg) for line in log.lines for seg in line)
-            assert "hello world" in rendered
-            assert "object at 0x" not in rendered
-
-    asyncio.run(scenario())
-
-
-def test_console_display_placeholders_image_output() -> None:
-    """Image mimetypes (matplotlib figures, ...) can't be rendered inline
-    in this console — regression test that they get a visible placeholder
-    instead of silently vanishing."""
-
-    async def scenario() -> None:
-        app = IyzeeApp()
-        async with app.run_test() as pilot:
-            await pilot.press("i")
-            text_area = app.screen.query_one(TextArea)
-            text_area.load_text(
-                "from IPython.display import display\n"
-                "display({'text/plain': 'a figure', 'image/png': b'fake'}, raw=True)"
-            )
-            await pilot.press("shift+enter")
-            await pilot.pause(0.3)
-            log = app.screen.query_one("#console-output", RichLog)
-            rendered = " ".join(str(seg) for line in log.lines for seg in line)
-            assert "image/png" in rendered
-            assert "not supported" in rendered
-
-    asyncio.run(scenario())
-
-
-def test_escape_leaves_input_field_for_navigation() -> None:
-    """Plain Input fields (RBW, IP addresses, ...) have no vim mode of
-    their own and, before this, no Escape binding either -- once focused,
-    j/k/c/s/t/i all typed as literal characters instead of navigating or
-    switching screens, with no way out except Tab/click. Regression test
-    that Escape blurs the field and hands control back to the app's own
-    bindings (j/k focus stepping, and the global screen-switch keys)."""
-
-    async def scenario() -> None:
-        app = IyzeeApp()
-        async with app.run_test() as pilot:
-            await pilot.press("s")
-            field = app.screen.query(Input).first()
-            field.focus()
-
-            await pilot.press("j")
-            assert field.value == "j", "j should still type into a focused Input"
-
-            await pilot.press("escape")
-            assert app.screen.focused is not field
-
-            await pilot.press("i")
-            switcher = app.screen.query_one(ContentSwitcher)
-            assert switcher.current == "console", (
-                "global page-switch keys should work again once no Input has focus"
-            )
-
-    asyncio.run(scenario())
-
-
-def test_console_plots_matplotlib_figures_in_place() -> None:
-    """A bare matplotlib Figure used to degrade to the unhelpful
-    `<Figure size ... with N Axes>` text repr with no way to actually see
-    it. Regression test that its line data now renders into the console's
-    plot panel (reusing textual_plotext, already a project dependency and
-    already used the same way by the sweep screen)."""
-
-    async def scenario() -> None:
-        app = IyzeeApp()
-        async with app.run_test() as pilot:
-            await pilot.press("i")
-            text_area = app.screen.query_one(TextArea)
-            text_area.load_text(
-                "import matplotlib\n"
-                "matplotlib.use('Agg')\n"
-                "import matplotlib.pyplot as plt\n"
-                "fig, ax = plt.subplots()\n"
-                "ax.plot([1, 2, 3], [4, 5, 6], label='trace')\n"
-                "fig"
-            )
-            await pilot.press("shift+enter")
-            await pilot.pause(0.3)
-
-            plot = app.screen.query_one("#console-plot", PlotextPlot)
-            assert plot.display is True
-
-            log = app.screen.query_one("#console-output", RichLog)
-            rendered = " ".join(str(seg) for line in log.lines for seg in line)
-            assert "plotted 1 line" in rendered
-            assert "Figure size" not in rendered
-
-    asyncio.run(scenario())

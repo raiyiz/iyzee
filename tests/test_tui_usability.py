@@ -32,7 +32,6 @@ from iyzee.tui.screens import connect as connect_mod
 from iyzee.tui.screens import sweep as sweep_mod
 from iyzee.tui.screens import traces as traces_mod
 from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL, ConnectScreen
-from iyzee.tui.screens.console import IyzeeConsole, _ConsoleInput
 from iyzee.tui.screens.sweep import (
     MAX_POINTS,
     FieldError,
@@ -507,71 +506,6 @@ def test_traces_list_shows_the_time_of_day_not_the_raw_filename(
             item = app.query_one("#traces-list", ListView).children[0]
             label = item.query_one("Label").render().plain
             assert label == "2026-09-18_bandwidth  14:10:05", label
-
-    asyncio.run(scenario())
-
-
-# -- Console ---------------------------------------------------------------------------------
-
-
-def test_ctrl_j_runs_a_cell_for_terminals_without_shift_enter() -> None:
-    async def scenario() -> None:
-        app = app_mod.IyzeeApp()
-        async with app.run_test() as pilot:
-            await pilot.press("i")
-            await pilot.pause()
-            app.screen.query_one(_ConsoleInput).load_text("40 + 2")
-            await pilot.press("ctrl+j")
-            log = app.screen.query_one("#console-output", RichLog)
-            await _wait_until(
-                pilot, lambda: "42" in " ".join(str(s) for line in log.lines for s in line)
-            )
-
-    asyncio.run(scenario())
-
-
-def test_console_explains_the_way_out_of_vim_normal_mode() -> None:
-    async def scenario() -> None:
-        app = app_mod.IyzeeApp()
-        async with app.run_test() as pilot:
-            await pilot.press("i")
-            await pilot.pause()
-            status = app.screen.query_one("#console-status", Static)
-            assert "INSERT" in _text(status)
-
-            await pilot.press("escape")  # first Escape: into NORMAL mode
-            await pilot.pause(0.2)
-            assert "NORMAL" in _text(status)
-            assert "i: back to typing" in _text(status)
-
-    asyncio.run(scenario())
-
-
-def test_console_banner_mentions_the_universal_run_key() -> None:
-    async def scenario() -> None:
-        app = app_mod.IyzeeApp()
-        async with app.run_test() as pilot:
-            await pilot.press("i")
-            await pilot.pause(0.3)
-            log = app.screen.query_one("#console-output", RichLog)
-            banner = " ".join(str(s) for line in log.lines for s in line)
-            assert "Ctrl+J" in banner
-            assert "Ctrl+C" in banner and "NORMAL" in banner
-
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("size", [(80, 24), (100, 30), (60, 24)])
-def test_console_output_wraps_to_the_pane_instead_of_scrolling_sideways(
-    size: tuple[int, int],
-) -> None:
-    async def scenario() -> None:
-        app = app_mod.IyzeeApp()
-        async with app.run_test(size=size) as pilot:
-            await pilot.press("i")
-            await pilot.pause(0.5)
-            log = app.screen.query_one(IyzeeConsole).query_one("#console-output", RichLog)
-            assert log.max_scroll_x == 0
 
     asyncio.run(scenario())
 

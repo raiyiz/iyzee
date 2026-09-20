@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from collections import defaultdict
@@ -19,6 +20,7 @@ from textual.widgets import ContentSwitcher, Footer, Header, Static
 
 from .instruments import INSTRUMENTS, InstrumentHandle
 from .ipython import default_history_file
+from .ipython_session import IPythonSession
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.sweep import SweepScreen
@@ -166,7 +168,12 @@ class IyzeeApp(App):
     }
     DEFAULT_PAGE = "connect"
 
-    def __init__(self, *, console_history_file: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        console_history_file: str | Path | None = None,
+        console_editing_mode: str = "vi",
+    ) -> None:
         super().__init__()
         self.handles: dict[str, InstrumentHandle] = {}
         # One lock per instrument key, shared by every caller that talks to
@@ -201,6 +208,10 @@ class IyzeeApp(App):
         # documents. Real persistence is opt-in, from the real entry point
         # only (see `run()` below).
         self.console_history_file = console_history_file
+        # IPython's own editing mode for the console: "vi" or "emacs".
+        self.console_editing_mode = console_editing_mode
+        # Set by ConsoleScreen; closed on exit (see on_unmount).
+        self.console_session: IPythonSession | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -250,7 +261,14 @@ class IyzeeApp(App):
         able to hang the quit.
         """
         self.shutdown_requested.set()
-        await asyncio.to_thread(self.close_instruments)
+        await asyncio.to_thread(self._close_console_and_instruments)
+
+    def _close_console_and_instruments(self) -> None:
+        # The console first: a cell still running holds instrument locks, and
+        # closing the session interrupts it so close_instruments can get them.
+        if self.console_session is not None:
+            self.console_session.close()
+        self.close_instruments()
 
     def close_instruments(self, timeout: float = 5.0) -> None:
         """Disconnect every connected instrument, in parallel, within ``timeout``.
@@ -308,7 +326,10 @@ def run() -> None:
     `IyzeeApp.__init__` and `default_history_file`'s docstrings for why
     that's deliberately not the default.
     """
-    IyzeeApp(console_history_file=default_history_file()).run()
+    IyzeeApp(
+        console_history_file=default_history_file(),
+        console_editing_mode=os.environ.get("IYZEE_EDITING_MODE", "vi"),
+    ).run()
 
 
 if __name__ == "__main__":
