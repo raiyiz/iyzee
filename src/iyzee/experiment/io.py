@@ -95,8 +95,8 @@ def save_step_results(
 
 
 def difference_series(
-    squeezing: object, shot_noise: object, label: str | None
-) -> tuple[list[float], list[float], str | None] | None:
+    squeezing: object, shot_noise: object, label: str
+) -> tuple[list[float], list[float], str] | None:
     """Compute one squeezing-minus-shot-noise line, ready to plot.
 
     The single source of truth for this computation — before this, the
@@ -130,7 +130,7 @@ def build_figure(results: list[StepResult]):
     to pop up a blocking GUI window.
     """
     fig, ax = plt.subplots()
-    labels = []
+    labels: list[str] = []
 
     for result in results:
         series = difference_series(
