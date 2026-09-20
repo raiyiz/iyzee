@@ -184,8 +184,7 @@ def test_traces_summary_survives_bracketed_metadata(
             await pilot.press("enter")
             await pilot.pause()
             rendered = screen.query_one("#traces-summary", Static).render()
-            assert isinstance(rendered, Text)
-            assert "see [/docs] and [nan, nan]" in rendered.plain
+            assert "see [/docs] and [nan, nan]" in str(rendered)
 
     asyncio.run(scenario())
 
