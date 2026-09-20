@@ -192,11 +192,12 @@ def shell_config(history_file: str | Path | None = None) -> Config:
     config.InteractiveShell.autoawait = True
     config.InteractiveShell.autoindent = True
     config.InteractiveShell.display_page = True
-    # Only caps how much history IPython copies into its own in-memory
-    # `input_hist_raw`/`%history` bookkeeping at startup. Recall (Up/Down,
-    # Ctrl+R) reads the database directly through prompt_toolkit's history
-    # adapter, so this stays 0 to skip a startup query for nothing.
-    config.InteractiveShell.history_load_length = 0
+    # How many entries IPython's prompt loads for Up/Down and Ctrl+R recall
+    # (its prompt_toolkit history adapter reads exactly this many from the
+    # history database). Must NOT be 0: that leaves the prompt with an empty
+    # history, so Up/Down and Ctrl+R find nothing — in the same session as
+    # well as across restarts.
+    config.InteractiveShell.history_load_length = 1000
     if history_file is None:
         config.HistoryManager.hist_file = ":memory:"
     else:

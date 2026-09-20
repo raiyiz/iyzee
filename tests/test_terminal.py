@@ -175,6 +175,66 @@ def test_session_runs_a_real_ipython_in_process() -> None:
     asyncio.run(scenario())
 
 
+def _prompt_line(screen_text) -> str:
+    lines = [line for line in screen_text().splitlines() if "In [" in line]
+    return lines[-1].strip() if lines else ""
+
+
+def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_path) -> None:
+    """Regression: history_load_length = 0 gave IPython's prompt an *empty*
+    recall list, so Up/Down/Ctrl+R found nothing — even in the same session."""
+
+    async def session_run(history_file, commands, check) -> None:
+        screen = VTermScreen(90, 24)
+        text = lambda: "\n".join(screen.text_lines())  # noqa: E731
+        session = IPythonSession(
+            _FakeApp(), rows=24, cols=90, history_file=history_file, on_output=screen.feed
+        )
+        session.start()
+        try:
+            assert await _until(text, "In [1]")
+            for number, command in enumerate(commands, start=2):
+                session.send(command.encode() + b"\r")
+                assert await _until(text, f"In [{number}]"), text()
+            await check(session, text)
+        finally:
+            session.close()
+
+    async def prompt_has(text, needle: str) -> bool:
+        # Poll the *prompt line*, not the whole screen: earlier cells that
+        # contain the same text are still visible above it.
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            if needle in _prompt_line(text):
+                return True
+            await asyncio.sleep(0.03)
+        return False
+
+    async def recalls(session, text) -> None:
+        session.send(b"\x1b[A")
+        assert await prompt_has(text, "y = 22"), text()
+        session.send(b"\x1b[A")
+        assert await prompt_has(text, "x = 11"), text()
+        session.send(b"\x1b[B")  # Down goes forward again
+        assert await prompt_has(text, "y = 22"), text()
+
+    async def recalls_after_restart(session, text) -> None:
+        session.send(b"\x1b[A")
+        assert await prompt_has(text, "b = 2"), text()
+
+    async def scenario() -> None:
+        await session_run(None, ["x = 11", "y = 22"], recalls)  # same session
+        history = tmp_path / "console_history.sqlite"
+        await session_run(history, ["a = 1", "b = 2"], _noop)
+        await session_run(history, [], recalls_after_restart)  # a fresh session, same file
+
+    asyncio.run(scenario())
+
+
+async def _noop(session, text) -> None:
+    return None
+
+
 # -- the page, end to end through real key presses ---------------------------------------
 
 
@@ -224,6 +284,24 @@ def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
             await pilot.press("enter")
             await pilot.press(*_keys("x"), "enter")
             assert await _wait(pilot, app, "Out[3]: 5"), _console_text(app)
+
+    asyncio.run(scenario())
+
+
+def test_up_arrow_recalls_the_previous_command_in_the_console_page() -> None:
+    async def scenario() -> None:
+        app = IyzeeApp()
+        async with app.run_test(size=(110, 32)) as pilot:
+            await pilot.press("i")
+            assert await _wait(pilot, app, "In [1]")
+            await pilot.press(*_keys("1 + 1"), "enter")
+            assert await _wait(pilot, app, "Out[1]: 2")
+            await pilot.press(*_keys("2 + 2"), "enter")
+            assert await _wait(pilot, app, "Out[2]: 4")
+            await pilot.press("up")  # a real Up-arrow key event
+            assert await _wait(pilot, app, "In [3]: 2 + 2"), _console_text(app)
+            await pilot.press("up")
+            assert await _wait(pilot, app, "In [3]: 1 + 1"), _console_text(app)
 
     asyncio.run(scenario())
 
