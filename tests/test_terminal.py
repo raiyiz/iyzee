@@ -215,7 +215,7 @@ def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
             await pilot.press("f1")
             assert app.query_one("#page-switcher", ContentSwitcher).current == "connect"
             await pilot.press("f4")
-            assert app.query_one("#page-switcher").current == "console"
+            assert app.query_one("#page-switcher", ContentSwitcher).current == "console"
 
             # Bracketed paste arrives as one edit, not as typed lines.
             view.post_message(__import__("textual.events", fromlist=["Paste"]).Paste("x = 5"))
