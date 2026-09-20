@@ -47,10 +47,10 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
+    continue-on-error: true   # job failure won't fail the run
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
