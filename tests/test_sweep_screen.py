@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from textual.widgets import Input, Select
+from textual.widgets import Input, RichLog, Select
 
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens.sweep import SweepScreen, _positive_float, _positive_int
@@ -203,9 +203,8 @@ def test_capture_trace_plots_power_vs_frequency(monkeypatch: pytest.MonkeyPatch)
                     break
 
             assert fake_mxa.trace_updates == [(1, True), (1, False)]
-            log_text = " ".join(
-                str(seg) for line in screen.query_one("#sweep-log").lines for seg in line
-            )
+            log = screen.query_one("#sweep-log", RichLog)
+            log_text = " ".join(str(seg) for line in log.lines for seg in line)
             assert "Captured 3 point(s)" in log_text
 
     asyncio.run(scenario())
@@ -216,3 +215,12 @@ class _FakeVisaHandle:
 
     def __init__(self, device) -> None:
         self.device = device
+
+    def connect(self) -> None:
+        raise NotImplementedError
+
+    def disconnect(self) -> None:
+        raise NotImplementedError
+
+    def probe(self) -> str:
+        raise NotImplementedError
