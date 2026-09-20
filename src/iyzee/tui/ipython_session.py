@@ -45,7 +45,7 @@ import sys
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO, cast
 
 import IPython
 from IPython.core.interactiveshell import InteractiveShell
@@ -224,7 +224,7 @@ class IPythonSession:
         self._pipe = self._stack.enter_context(create_pipe_input())
         self._sink = _Sink(on_output or (lambda _text: None), self._loop)
         self._output = Vt100_Output(
-            self._sink,
+            cast(TextIO, self._sink),
             lambda: self._size,
             term="xterm-256color",
             default_color_depth=ColorDepth.DEPTH_24_BIT,
@@ -266,7 +266,7 @@ class IPythonSession:
         # (rather than InteractiveShell.instance(), which would silently
         # *reuse* an existing shell) activates this shell without weakening
         # the isolation between separate sessions.
-        InteractiveShell._instance = self.shell
+        InteractiveShell._instance = self.shell  # type: ignore[assignment]
 
         self.shell.ask_exit = self._ask_exit  # type: ignore[method-assign]
         self._real_prompt_for_code = self.shell.prompt_for_code

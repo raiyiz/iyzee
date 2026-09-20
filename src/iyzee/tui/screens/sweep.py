@@ -62,6 +62,8 @@ from ..workers import LastRun
 from .page import Page
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..app import IyzeeApp
 
 log = logging.getLogger("iyzee.tui")
@@ -492,8 +494,8 @@ class SweepScreen(Page):
     # -- checkpointing ----------------------------------------------------
 
     def _reset_checkpoint(self) -> None:
-        self._savedir = None
-        self._save_path = None
+        self._savedir: Path | None = None
+        self._save_path: Path | None = None
         self._save_warned = False
 
     def _checkpoint(self, kind: str, *, on_ui_thread: bool = False) -> None:
