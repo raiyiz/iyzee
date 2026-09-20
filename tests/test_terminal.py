@@ -15,6 +15,8 @@ from collections import defaultdict
 
 import pytest
 from prompt_toolkit.input.vt100_parser import Vt100Parser
+from rich.text import Text
+from textual.containers import ContentSwitcher
 
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.ipython_session import IPythonSession
@@ -36,9 +38,12 @@ def test_vterm_scrollback_colours_and_cursor() -> None:
     screen = VTermScreen(20, 2)
     screen.feed("\x1b[1;31mred\x1b[0m \x1b[38;2;10;20;30mtrue\x1b[92mbg")
     styles = {seg.text.strip(): seg.style for seg in screen.row_segments(0) if seg.text.strip()}
-    assert styles["red"].color.name == "red" and styles["red"].bold
-    assert styles["true"].color.name == "#0a141e"
-    assert styles["bg"].color.name == "bright_green"
+    red = styles["red"]
+    true = styles["true"]
+    bg = styles["bg"]
+    assert red is not None and red.color is not None and red.color.name == "red" and red.bold
+    assert true is not None and true.color is not None and true.color.name == "#0a141e"
+    assert bg is not None and bg.color is not None and bg.color.name == "bright_green"
 
     screen.feed("\x1b[?25l")  # hidden cursor is not drawn
     assert not any(s.style and s.style.reverse for s in screen.row_segments(0, cursor=True))
@@ -100,7 +105,7 @@ def test_key_encoding_edge_cases() -> None:
 class _FakeApp:
     def __init__(self) -> None:
         self.handles: dict = {}
-        self.instrument_locks = defaultdict(threading.Lock)
+        self.instrument_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
         self.last_run = None
 
 
@@ -117,7 +122,10 @@ def test_session_runs_a_real_ipython_in_process() -> None:
     async def scenario() -> None:
         screen = VTermScreen(90, 24)
         text = lambda: "\n".join(screen.text_lines())  # noqa: E731
-        session = IPythonSession(_FakeApp(), rows=24, cols=90, on_output=screen.feed)
+        def feed_output(output: str) -> None:
+            screen.feed(output)
+
+        session = IPythonSession(_FakeApp(), rows=24, cols=90, on_output=feed_output)
         real_stdout = sys.stdout
         session.start()
         send = lambda s: session.send(s.encode() + b"\r")  # noqa: E731
@@ -202,11 +210,11 @@ def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
 
             # Keys the terminal owns are NOT app bindings while it has focus...
             await pilot.press("c")  # goes into IPython's line, not the app's page switch
-            assert app.query_one("#page-switcher").current == "console"
+            assert app.query_one("#page-switcher", ContentSwitcher).current == "console"
             await pilot.press("backspace")
             # ...but the F-keys still switch pages.
             await pilot.press("f1")
-            assert app.query_one("#page-switcher").current == "connect"
+            assert app.query_one("#page-switcher", ContentSwitcher).current == "connect"
             await pilot.press("f4")
             assert app.query_one("#page-switcher").current == "console"
 
@@ -245,6 +253,7 @@ def test_console_interrupt_scrollback_and_shutdown() -> None:
             await pilot.press("ctrl+c")
             assert await _wait(pilot, app, "KeyboardInterrupt")
 
+        assert session._thread is not None
         assert not session._thread.is_alive(), "leaving the app closes the shell"
 
     asyncio.run(scenario())
