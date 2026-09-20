@@ -15,7 +15,6 @@ from collections import defaultdict
 
 import pytest
 from prompt_toolkit.input.vt100_parser import Vt100Parser
-from rich.text import Text
 from textual.containers import ContentSwitcher
 
 from iyzee.tui.app import IyzeeApp
