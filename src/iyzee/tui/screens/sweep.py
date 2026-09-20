@@ -19,6 +19,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import asdict
 from functools import partial
+from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING, cast
 
@@ -115,6 +116,12 @@ class SweepScreen(Page):
     the Run/Abort buttons ended up unreachable). The responsive reflow
     itself lives in ``app.tcss`` (see ``IyzeeApp.HORIZONTAL_BREAKPOINTS``).
     """
+
+    _abort_event: Event
+    _collected: list[StepResult]
+    _savedir: Path | None
+    _save_path: Path | None
+    _save_warned: bool
 
     @property
     def iyzee_app(self) -> IyzeeApp:
