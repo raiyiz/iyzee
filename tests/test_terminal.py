@@ -121,6 +121,7 @@ def test_session_runs_a_real_ipython_in_process() -> None:
     async def scenario() -> None:
         screen = VTermScreen(90, 24)
         text = lambda: "\n".join(screen.text_lines())  # noqa: E731
+
         def feed_output(output: str) -> None:
             screen.feed(output)
 
