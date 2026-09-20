@@ -32,7 +32,7 @@ def default_history_file() -> Path:
     with anything else IPython-based on the same machine, real or test.
     This function is only ever called from the real entry point
     (``iyzee.tui.app.run``) for exactly that reason — tests construct
-    ``IyzeeApp``/``IyzeeIPython`` with no history file at all, which
+    ``IyzeeApp`` with no history file at all, which
     keeps them on ``:memory:`` (private, thrown away when the process
     exits) without needing to know this function exists.
     """
@@ -49,7 +49,7 @@ class AppState(Protocol):
     to unit test with a small stand-in instead of a full running app.
 
     Declared as read-only ``@property`` members rather than plain
-    attributes: ``LabProxy``/``IyzeeIPython`` only ever read through this
+    attributes: ``LabProxy`` only ever reads through this
     protocol (``.get()``, indexing, ``in``), never assign a whole new
     mapping. Plain (writable) Protocol attributes are checked invariantly
     by mypy, which would reject ``IyzeeApp``'s actual ``dict[str, ...]``

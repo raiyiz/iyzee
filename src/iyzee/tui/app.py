@@ -128,9 +128,11 @@ class IyzeeApp(App):
     # handling, while Footer and the command palette expose the same
     # navigation to mouse and keyboard users.
     #
-    # "escape" and "j"/"k" specifically: Textual's own Input/TextArea
-    # widgets don't bind Escape to anything, so it already bubbles here
-    # untouched — this doesn't intercept a key those widgets wanted.
+    # "escape" and "j"/"k" specifically: Textual's own Input widget
+    # doesn't bind Escape to anything, so it already bubbles here
+    # untouched — this doesn't intercept a key that widget wanted. (The
+    # console's terminal view does want Escape — it is IPython's vi-mode
+    # key — and claims it itself, so it never reaches this binding.)
     # "j"/"k" bind to the same focus_next/focus_previous actions Tab/
     # Shift+Tab already use; an editable widget consumes plain "j"/"k"
     # keystrokes itself (typing the character) before they ever reach
@@ -199,7 +201,7 @@ class IyzeeApp(App):
         # refuses to disconnect instruments meanwhile (the run holds the
         # instrument locks, so a disconnect could only stall behind it).
         self.sweep_running = False
-        # Passed straight through to IyzeeIPython (see ConsoleScreen.compose)
+        # Passed straight through to IPythonSession (see ConsoleScreen.compose)
         # as its `history_file`. Defaults to `None` — `:memory:`, private,
         # nothing persisted — quite deliberately: every test in this
         # codebase constructs `IyzeeApp()` with no arguments, and picking

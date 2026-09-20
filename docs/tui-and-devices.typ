@@ -151,12 +151,12 @@ A failed or unparseable HTTP response raises `WavemeterReadoutError` rather than
 
 == Screens
 
-Four `Screen` subclasses cover the common tasks (`tui/screens/`); `IyzeeApp` (`tui/app.py`) owns which one is currently visible plus the state that has to survive switching between them (`handles`, `instrument_locks`, `last_run`).
+Four pages cover the common tasks (`tui/screens/`) — `ConnectScreen`, `SweepScreen`, `TracesScreen` and `ConsoleScreen`, plain container widgets held by one `ContentSwitcher` (they keep the `*Screen` names from before the sidebar shell replaced Textual's per-page `Screen`s). `IyzeeApp` (`tui/app.py`) owns which one is currently visible plus the state that has to survive switching between them (`handles`, `instrument_locks`, `last_run`).
 
-- *ConnectScreen* — a `DataTable`, one row per `InstrumentSpec`. Pressing Enter connects or disconnects the selected row in a background thread (`@work(thread=True)`), since every device call is blocking I/O and must never run on the UI thread.
-- *SweepScreen* — picks a bandwidth or frequency sweep, builds the `Step` list and `AnalyzerConfig` from the on-screen fields, and calls `run_sequence(steps, ctx, on_step=...)` in a background thread, updating a progress bar and a live `textual-plotext` trace as each step completes.
-- *TracesScreen* — lists and previews previously saved `.npz` runs from `create_dirs()`'s output directory; reads exactly what `save_step_results()` already writes, no separate persistence format.
-- *ConsoleScreen* — hosts the embedded IPython console; see @sec-console.
+- *ConnectScreen* — a `DataTable`, one row per `InstrumentSpec`. Pressing Enter connects or disconnects the selected row in a background thread (`@work(thread=True)`), since every device call is blocking I/O and must never run on the UI thread. Disconnecting asks for a second Enter (and is refused while a sweep runs), and a row that is still connecting ignores Enter, so a device is never opened twice.
+- *SweepScreen* — picks a bandwidth or frequency sweep, builds the `Step` list and `AnalyzerConfig` from the on-screen fields, and calls `run_sequence(steps, ctx, on_step=...)` in a background thread, updating a progress bar and a live `textual-plotext` trace as each step completes. Every point is also written to disk as it arrives (one archive, overwritten atomically), so an interrupted run keeps what it had, and the page shows which instrument still needs connecting.
+- *TracesScreen* — lists and previews previously saved `.npz` runs from `create_dirs()`'s output directory; reads exactly what `save_step_results()` already writes, no separate persistence format. The preview follows the highlighted run.
+- *ConsoleScreen* — hosts IPython's own terminal UI; see @sec-console.
 
 == Instrument registry and locking
 
@@ -166,11 +166,11 @@ Four `Screen` subclasses cover the common tasks (`tui/screens/`); `IyzeeApp` (`t
 
 == Navigation
 
-Key handling relies entirely on Textual's own focus and binding-priority system, with no app-specific policy layer on top: a focused widget's own bindings (an `Input`'s text-entry keys, the console's `VimTextArea` motions) are offered the key first, and it only falls through to `IyzeeApp.BINDINGS` (`j`/`k`/`c`/`s`/`t`/`i`/`q`/`:`, ...) if the widget doesn't handle it. There is no hand-maintained "am I in insert mode" flag to keep in sync with what's actually focused — Textual's dispatch order is the single source of truth for that. `:` opens Textual's built-in Command Palette rather than a hand-rolled command bar or parser.
+Key handling relies entirely on Textual's own focus and binding-priority system, with no app-specific policy layer on top: a focused widget's own bindings (an `Input`'s text-entry keys, the console terminal's own keys) are offered the key first, and it only falls through to `IyzeeApp.BINDINGS` if the widget doesn't handle it. Those are `c`/`s`/`t`/`i` and `F1`–`F4` (switch page; the page you are already on is not offered), `Ctrl+Q` (quit), `j`/`k` (move focus) and `Escape` (leave a text field). There is no hand-maintained "am I in insert mode" flag to keep in sync with what's actually focused — Textual's dispatch order is the single source of truth for that. `Ctrl+\` opens Textual's built-in Command Palette rather than a hand-rolled command bar or parser; it is a priority binding, checked before the focus chain, and is deliberately not `Ctrl+P`, which IPython's history recall uses.
 
 = The console in practice <sec-console>
 
-The Console screen (`i`) embeds a real `IPython.core.interactiveshell.InteractiveShell` in the same process, executed through a background worker (`@work(thread=True)`) so a slow cell can't freeze the UI. Input editing uses `textual-vim-textarea`'s `VimTextArea` for genuine Vim motions/operators/counts; the console layers exactly two things on top — history on Up/Down at a cell's first/last line (INSERT mode only), and a two-stage Escape (1st leaves INSERT for the console's own Vim NORMAL mode and stays focused; 2nd hands focus back to the app). See the top-level README for the full key reference.
+The Console screen (`i`) runs IPython's own terminal UI — prompt_toolkit's prompt, with its editing modes (vi by default; emacs via `IyzeeApp(console_editing_mode=...)` or `IYZEE_EDITING_MODE`), completion menu, history search, auto-suggestions, `%magics`, `?` help and `%debug` — inside the application process, so `lab.mx` is the live instrument rather than a copy across a process boundary. prompt_toolkit is a terminal application, so it is given virtual terminals (`tui/ipython_session.py`): keystrokes are encoded by `tui/termkeys.py` into a pipe input, and its output is interpreted by a `pyte`-based screen (`tui/vterm.py`) that `tui/terminal_view.py` paints, with scrollback. The shell runs in its own thread, so a slow cell can't freeze the UI: `print()` is routed to the console by thread, `input()` prompts on the virtual terminal, and Ctrl+C interrupts the running cell (or clears the line at a prompt). While the terminal has focus only `F1`–`F4`, `Ctrl+Q` and `Ctrl+\` reach the app; Ctrl+Z is never forwarded, because IPython binds it to "suspend", which would stop the whole TUI. See the top-level README for the known limits.
 
 Connected instruments and the last sweep are reachable through one object, `lab` (`tui/ipython.py`'s `LabProxy`), set once when the console is created and never refreshed — every attribute access re-reads the app's actual current state:
 
@@ -193,7 +193,7 @@ lab.connected                          # e.g. ("mx", "shutter")
 1. `uv run iyzee-tui`. The Connect screen is shown first.
 2. Move to the MXA row, press Enter. `ConnectScreen._connect()` builds an `InstrumentSpec`'s handle in a background thread, calls `handle.connect()` (opens the VISA resource) then `handle.probe()` (`*IDN?`), and on success stores the handle in `app.handles["mxa"]`.
 3. Press `s` for the Sweep screen. Pick bandwidth or frequency, adjust the RBW range (or laser offsets), press *Run sweep*. `SweepScreen._run()` holds `instrument_locks["mxa"]` for the whole run, calls `prepare_analyzer()`, then `run_sequence(steps, ctx, on_step=...)` — each step's result updates the progress bar and the live trace plot.
-4. On completion, results are saved via `save_step_results()` and stashed on `app.last_run`.
+4. As each point completes it is saved via `save_step_results()` (one archive, overwritten atomically), and on completion the run is stashed on `app.last_run`.
 5. Press `t` for Traces to browse the saved `.npz` run, or `i` for the Console to inspect it directly: `lab.results[-1].meta`, a quick `np.mean(...)` on a trace, or issuing one more MXA command by hand without leaving the app.
 
 = References
@@ -204,7 +204,7 @@ lab.connected                          # e.g. ("mx", "shutter")
 - LeCroy, *Remote Control Manual*: VICP protocol framing and `WF?`/`INSPECT?` waveform transfer.
 - PyVISA documentation, resource strings and `query_binary_values()`: #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
 - Textual documentation, workers and focus: #link("https://textual.textualize.io/guide/workers/")[Workers guide]
-- `textual-vim-textarea`: #link("https://pypi.org/project/textual-vim-textarea/")[PyPI project page]
+- prompt_toolkit and pyte, which host IPython's terminal UI in the console: #link("https://python-prompt-toolkit.readthedocs.io/")[prompt_toolkit documentation], #link("https://pyte.readthedocs.io/")[pyte documentation]
 
 = Maintenance rule
 

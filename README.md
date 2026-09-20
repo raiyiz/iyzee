@@ -20,11 +20,22 @@ src/iyzee/
 │   ├── procedures.py      # AnalyzerConfig, prepare_analyzer(), acquire_trace(), BandwidthStep, FrequencyStep, run_*_sweep()
 │   └── io.py                # create_dirs(), save_data(), save_step_results(), build_figure(), multiplot()
 └── tui/                    # interactive terminal UI (`iyzee-tui`)
-    ├── app.py              # IyzeeApp: screens, key dispatch, shared app state
+    ├── app.py              # IyzeeApp: nav rail, page switcher, key bindings, shared state, shutdown
+    ├── app.tcss            # layout and responsive rules (width breakpoints)
     ├── instruments.py      # InstrumentSpec registry, LockedProxy
-    ├── ipython.py          # embedded IPython shell, LabProxy
+    ├── ipython.py          # the `lab` namespace (LabProxy), shell configuration, history file location
+    ├── ipython_session.py  # IPython's terminal shell, running in-process on a virtual terminal
+    ├── vterm.py            # terminal screen model (pyte) with scrollback
+    ├── termkeys.py         # Textual key events -> terminal input bytes
+    ├── terminal_view.py    # widget that shows the virtual terminal and types into it
+    ├── plotting.py         # plotext drawing shared by the Sweep, Traces and Console pages
+    ├── text.py             # showing externally produced text safely (markup-safe)
     ├── workers.py          # cross-thread message types (LastRun, StepProgress, ...)
-    └── screens/            # ConnectScreen, SweepScreen, TracesScreen, ConsoleScreen
+    └── screens/            # the four pages
+        ├── page.py         # Page: scrolling base class (content is never clipped)
+        ├── connect.py      # ConnectScreen
+        ├── sweep.py        # SweepScreen
+        ├── traces.py       # TracesScreen
         └── console.py      # ConsoleScreen + IyzeeConsole: the page around IPython's terminal UI
 ```
 
@@ -35,9 +46,11 @@ uv sync
 uv run iyzee-tui
 ```
 
-Four screens cover the common tasks; switch between them with `c` / `s` /
-`t` / `i` (or click), or `Ctrl+Q` to quit (connected instruments are
-disconnected on the way out):
+Four pages cover the common tasks (the classes keep their `*Screen` names, but
+they are plain container widgets inside one `ContentSwitcher`, not Textual
+`Screen`s). Switch between them with `c` / `s` / `t` / `i`, `F1`–`F4`, or by
+clicking the nav rail; `Ctrl+Q` quits (a running cell is interrupted and
+connected instruments are disconnected on the way out):
 
 - **Connect** (`c`) — one row per instrument (MXA, shutter/PSU, wavemeter,
   scope). Enter connects the selected row; on a connected row it asks for a
@@ -45,20 +58,26 @@ disconnected on the way out):
   rail's instrument dots follow connections live.
 - **Sweep** (`s`) — configure and run a bandwidth or frequency sweep, with
   a live progress bar and trace plot. Built directly on `Step`/
-  `run_sequence()` — it doesn't duplicate anything from `experiment/`.
-- **Traces** (`t`) — browse previously recorded `.npz` runs on disk.
-- **Console** (`i`) — an embedded IPython shell with live access to
-  connected instruments and the last sweep's results. See below.
+  `run_sequence()` — it doesn't duplicate anything from `experiment/`. A
+  banner says which instrument still needs connecting, a bad field is marked
+  and focused, and every point is saved to disk as it is measured, so an
+  interrupted run keeps what it had.
+- **Traces** (`t`) — browse previously recorded `.npz` runs on disk; the
+  preview follows the highlighted run.
+- **Console** (`i`) — IPython's own terminal UI, in the app process, with live
+  access to connected instruments and the last sweep's results. See below.
 
-Outside editable widgets, `j`/`k` move focus (Textual's own focus
-traversal) and `:` opens Textual's built-in Command Palette — the app's
-existing actions are exposed there without a second command parser or a
-hand-rolled modal-state machine. A widget that's actually accepting text
-input (an `Input`, the console's text area) keeps ownership of its own
-keys: Textual routes keys to the focused widget first and only falls
-through to `IyzeeApp`'s own `BINDINGS` if that widget doesn't handle them,
-so there's no separately maintained "mode" that could drift out of sync
-with what's really focused.
+**Keyboard.** Outside text-entry widgets, `j`/`k` move focus (Textual's own
+`focus_next()`/`focus_previous()`) and `Escape` leaves a text field. `Ctrl+\`
+opens Textual's built-in Command Palette, exposing the app's actions without a
+second command parser (not `:` or `Ctrl+P` — IPython's history uses `Ctrl+P`).
+Whether a key means "navigation" or "text entry" is decided by Textual itself:
+a focused widget's own keys take priority over `IyzeeApp.BINDINGS`, so there is
+no hand-maintained mode flag to drift out of sync — except for priority
+bindings like the palette's, which are checked before the focus chain; see the
+comment on `IyzeeApp.COMMAND_PALETTE_BINDING`. While the console's terminal has
+focus it owns nearly every key: only `F1`–`F4`, `Ctrl+Q` and `Ctrl+\` reach the
+app (see the console section).
 
 ## How a measurement runs
 
@@ -127,8 +146,8 @@ already just picks a `Step` list and runs it.
 ## Interactive IPython console
 
 The Console screen (`i`) embeds a real IPython shell in the same process as
-the application, with IPython's own terminal UI (vi or emacs editing). Connected instruments
-and the last sweep's results are reachable through a single `lab` object:
+the application, with IPython's own terminal UI (vi or emacs editing). Connected
+instruments and the last sweep's results are reachable through a single `lab` object:
 
 ```python
 lab.mx.set_center_freq(1.5e6)
@@ -154,26 +173,23 @@ background worker makes) is serialized per-instrument, so the console and,
 say, a running sweep can't issue overlapping commands to the same physical
 device from two threads at once.
 
-The console uses IPython's own execution engine rather than a custom Python
-parser — completion, inspection (`?` / `??`), magic commands, history, shell
-commands, and top-level `await` all come from IPython itself. History is
-persistent and cross-session for a real run of the app — Ctrl+P recalls
-commands from a previous run of the app, not just the current one, matching
-a normal shell's own history file — but only ever for a real run: every
-test in this codebase (and any other direct construction) keeps history in
-`:memory:`, private to that one process and thrown away when it exits, by
-default. That split matters — IPython's own default history location
-(`~/.ipython/profile_default/history.sqlite`) is shared by *every*
-`InteractiveShell` on the machine and is exactly what caused a real,
-reproducible test-suite hang before this: a full test run constructs 100+
-shells, each registering its own `atexit` history-session-end write against
-that one ever-growing shared file. See `default_history_file`'s and
-`IyzeeIPython.__init__`'s docstrings in `ipython.py` for the rest of that
-story, and `IyzeeApp.console_history_file`'s for how a real run opts in
-(`iyzee-tui`'s entry point does; nothing else does). Jedi
-completion is disabled: it does static analysis and can't see through
-`lab`'s dynamic attribute lookup, so `lab.<Tab>` would otherwise silently
-return nothing.
+Everything IPython offers comes from IPython itself rather than a
+re-implementation: completion, inspection (`?`/`??`), magics, shell commands,
+top-level `await`, `%debug`, and history — Up/Down and `Ctrl+R` recall commands,
+and history-based auto-suggestions appear as you type. History is persistent
+across runs for a real run of the app only (`iyzee-tui`'s entry point passes
+`default_history_file()` as `IyzeeApp.console_history_file`); everything else —
+every test in this codebase, and any direct construction — keeps it in
+`:memory:`. That split matters: IPython's own default history file
+(`~/.ipython/profile_default/history.sqlite`) is shared by every
+`InteractiveShell` on the machine and caused a real test-suite hang, since a full
+test run builds many shells that each register an `atexit` write against that one
+ever-growing file. See the docstrings of `default_history_file` and
+`shell_config` in `ipython.py`. Jedi completion is disabled: it does static
+analysis and can't see through `lab`'s dynamic attribute lookup, so `lab.<Tab>`
+would silently return nothing; IPython's own completer is instead allowed to look
+through the proxies (`Completer.policy_overrides` in `shell_config`), so
+`lab.mx.<Tab>` completes too.
 
 **How it works.** The console page runs IPython's own terminal UI (prompt_toolkit's
 prompt: editing, completion menu, history search, auto-suggestions, `%magics`,
@@ -196,21 +212,6 @@ forwarded (IPython binds it to "suspend", which would stop the whole TUI).
 Not supported: `getpass` (it opens `/dev/tty`), and output from threads the
 cell itself starts goes to Textual's capture rather than the terminal.
 
-
-Outside editable widgets, `j`/`k` use Textual's own focus traversal
-(`focus_next()`/`focus_previous()` — not a hand-rolled traversal order) and
-Ctrl+\ opens Textual's built-in Command Palette (moved off its default
-Ctrl+P, which IPython's history recall in the console needs), exposing the
-app's existing actions without a second command parser or a separately
-maintained modal state machine. Whether a key is "global navigation" or
-"text editing" is decided by Textual itself: a focused widget's own
-bindings (an `Input`'s text-entry keys, the terminal's own keys) take
-priority over `IyzeeApp`'s `BINDINGS`, so there's no hand-maintained mode
-flag that has to be kept in sync with reality — except for priority
-bindings like the command palette's, which are checked before the focus
-chain at all; see `IyzeeApp.COMMAND_PALETTE_BINDING`'s comment for why
-that one needed moving explicitly rather than trusting the usual
-resolution order.
 
 ## Safety notes
 
@@ -280,6 +281,18 @@ letting one file grow indefinitely. The same applies to `tui/screens/` as
 more screens are added. Keyboard navigation itself doesn't need its own
 module — it's Textual's native focus/binding-priority system end to end,
 with nothing app-specific to maintain there.
+
+## Development
+
+```sh
+uv sync
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
+uv run mypy src tests      # advisory in CI (the job is allowed to fail)
+```
+
+CI (`.github/workflows/ci.yml`) runs the tests, ruff and mypy, and compiles the
+Typst guides; `.gitlab-ci.yml` compiles the guides too.
 
 ## Known gaps
 
