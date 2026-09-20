@@ -133,6 +133,7 @@ class IyzeeConsole(Vertical):
         # text/plain (a real terminal can't show the rest). This console can
         # at least turn HTML into text and note images, so let those through.
         formatter = shell.display_formatter
+        assert formatter is not None
         formatter.active_types = list(formatter.format_types)
         self._install_figure_plotting()
         self.refresh_status()
@@ -195,7 +196,9 @@ class IyzeeConsole(Vertical):
         """
         from matplotlib.figure import Figure
 
-        formatter = self.session.shell.display_formatter.formatters["text/plain"]
+        formatter = self.session.shell.display_formatter
+        assert formatter is not None
+        formatter = formatter.formatters["text/plain"]
         formatter.for_type(Figure, self._render_figure)
 
     def _render_figure(self, fig: Any, p: Any, cycle: bool) -> None:
@@ -255,11 +258,19 @@ class _ConsoleDisplayPublisher(DisplayPublisher):
 
     def publish(
         self,
-        data: dict[str, Any],
-        metadata: dict[str, Any] | None = None,
+        data: Any,
+        metadata: Any = None,
+        source: Any = None,
+        *,
+        transient: Any = None,
+        update: Any = None,
         **kwargs: Any,
     ) -> None:
-        if "text/html" in data:
+        if not isinstance(data, dict):
+            return
+        mime_data = {key: value for key, value in data.items() if isinstance(key, str)}
+        if "text/html" in mime_data:
+            data = mime_data
             text = re.sub(r"<[^>]+>", "", data["text/html"]).strip()
             print(text or "(empty)")
             return
