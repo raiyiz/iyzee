@@ -45,7 +45,7 @@ import sys
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO, cast
 
 import IPython
 from IPython.core.interactiveshell import InteractiveShell
@@ -223,8 +223,8 @@ class IPythonSession:
         self._stack = contextlib.ExitStack()
         self._pipe = self._stack.enter_context(create_pipe_input())
         self._sink = _Sink(on_output or (lambda _text: None), self._loop)
-        self._output = Vt100_Output(  # type: ignore[arg-type]
-            self._sink,
+        self._output = Vt100_Output(
+            cast(TextIO, self._sink),
             lambda: self._size,
             term="xterm-256color",
             default_color_depth=ColorDepth.DEPTH_24_BIT,
