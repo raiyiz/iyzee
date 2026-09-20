@@ -23,7 +23,6 @@ import time
 from pathlib import Path
 
 import pytest
-from rich.text import Text
 from textual.widgets import (
     Button,
     ContentSwitcher,
@@ -100,9 +99,7 @@ async def _enter_on_first_row(app, pilot) -> tuple[ConnectScreen, DataTable]:
 
 
 def _text(widget: Static) -> str:
-    rendered = widget.render()
-    assert isinstance(rendered, Text)
-    return rendered.plain
+    return str(widget.render())
 
 
 def _messages(app) -> list[str]:
@@ -521,9 +518,7 @@ def test_traces_list_shows_the_time_of_day_not_the_raw_filename(
             await pilot.press("t")
             await pilot.pause(0.3)
             item = app.query_one("#traces-list", ListView).children[0]
-            rendered = item.query_one("Label").render()
-            assert isinstance(rendered, Text)
-            label = rendered.plain
+            label = str(item.query_one("Label").render())
             assert label == "2026-09-18_bandwidth  14:10:05", label
 
     asyncio.run(scenario())
