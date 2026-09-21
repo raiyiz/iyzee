@@ -134,3 +134,15 @@ def test_difference_series_computes_x_y_and_label():
 def test_difference_series_returns_none_for_missing_traces():
     assert difference_series(None, [1.0], "pt0") is None
     assert difference_series([1.0], None, "pt0") is None
+
+
+def test_save_data_can_overwrite_a_fixed_file_atomically(tmp_path: Path) -> None:
+    # An explicit, non-timestamp name: unlike a timestamped default it can
+    # only be produced by honouring `path`.
+    target = tmp_path / "checkpoint.npz"
+    assert save_data([(1.0, [1.0], [1.0])], tmp_path, path=target) == target
+    again = save_data([(1.0, [1.0], [1.0]), (2.0, [2.0], [2.0])], tmp_path, path=target)
+    assert again == target
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["checkpoint.npz"], "no stray .part file"
+    with np.load(target, allow_pickle=True) as archive:
+        assert len(archive["data"]) == 2

@@ -10,11 +10,11 @@ from __future__ import annotations
 import contextlib
 import io
 import threading
-from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from helpers import FakeApp, history_manager
 from IPython.core.interactiveshell import InteractiveShell
 
 from iyzee.experiment import StepResult
@@ -40,7 +40,7 @@ class IyzeeIPython:
         self.shell = InteractiveShell(
             config=shell_config(history_file), user_ns=lab_namespace(app, namespace)
         )
-        InteractiveShell._instance = self.shell
+        InteractiveShell._instance = self.shell  # type: ignore[assignment]
 
     def execute(self, source: str) -> _Result:
         out, err = io.StringIO(), io.StringIO()
@@ -53,7 +53,7 @@ class IyzeeIPython:
 
     @property
     def history(self) -> list[str]:
-        tail = self.shell.history_manager.get_tail(n=500, raw=True, include_latest=True)
+        tail = history_manager(self.shell).get_tail(n=500, raw=True, include_latest=True)
         entries: list[str] = []
         for _s, _l, cell in tail:
             cell = cell.rstrip()
@@ -63,17 +63,6 @@ class IyzeeIPython:
 
     def close(self) -> None:
         self.shell.atexit_operations()
-
-
-@dataclass
-class FakeApp:
-    """Minimal stand-in for IyzeeApp satisfying ipython.AppState."""
-
-    handles: dict[str, Any] = field(default_factory=dict)
-    instrument_locks: dict[str, threading.Lock] = field(
-        default_factory=lambda: defaultdict(threading.Lock)
-    )
-    last_run: LastRun | None = None
 
 
 class MxaHandle:
@@ -245,7 +234,7 @@ def test_history_never_touches_a_real_file_on_disk_by_default() -> None:
     symptom show up only much later, as slowdown, rather than as a clear
     test failure."""
     shell = IyzeeIPython(FakeApp())
-    assert shell.shell.history_manager.hist_file == ":memory:"
+    assert history_manager(shell.shell).hist_file == ":memory:"
 
     # And the thing history is actually used for here -- recall for
     # Ctrl+P/Ctrl+N -- behaves identically to a real file for a single
@@ -274,7 +263,7 @@ def test_history_persists_across_instances_given_a_real_file(tmp_path: Path) -> 
     # in a way real usage never hits (a real app's shell only ever gets
     # torn down once, by that automatic call). `writeout_cache()` forces
     # the flush this test needs without that hazard.
-    first_run.shell.history_manager.writeout_cache()
+    history_manager(first_run.shell).writeout_cache()
 
     second_run = IyzeeIPython(FakeApp(), history_file=history_file)
     second_run.execute("today = 2")
