@@ -7,6 +7,7 @@ last_run), so tests don't need a running Textual app to exercise it.
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import io
 import threading
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from helpers import FakeApp, history_manager
+from IPython.core.completer import provisionalcompleter
 from IPython.core.interactiveshell import InteractiveShell
 
 from iyzee.experiment import StepResult
@@ -41,6 +43,12 @@ class IyzeeIPython:
             config=shell_config(history_file), user_ns=lab_namespace(app, namespace)
         )
         InteractiveShell._instance = self.shell  # type: ignore[assignment]
+        # InteractiveShell registers every instance with atexit. This test
+        # harness creates many short-lived shells, so keeping all of those
+        # callbacks until process shutdown makes pytest spend its final
+        # seconds flushing shells that are already finished. The real app
+        # owns one shell and keeps its normal atexit lifecycle.
+        atexit.unregister(self.shell.atexit_operations)
 
     def execute(self, source: str) -> _Result:
         out, err = io.StringIO(), io.StringIO()
@@ -49,7 +57,12 @@ class IyzeeIPython:
         return _Result(out.getvalue(), err.getvalue(), result.error_in_exec is None)
 
     def complete(self, source: str, cursor_pos: int):
-        return self.shell.complete(source, line=source, cursor_pos=cursor_pos)
+        with provisionalcompleter():
+            completions = list(self.shell.Completer.completions(source, cursor_pos))
+        if not completions:
+            return source[:cursor_pos], []
+        start = completions[0].start
+        return source[start:cursor_pos], [completion.text for completion in completions]
 
     @property
     def history(self) -> list[str]:
