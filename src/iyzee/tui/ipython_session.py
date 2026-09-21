@@ -97,7 +97,7 @@ class _Sink(io.TextIOBase):
     encoding = "utf-8"
 
     def __init__(
-        self, deliver: Callable[[str], None], loop: asyncio.AbstractEventLoop | None
+        self, deliver: Callable[[str], object], loop: asyncio.AbstractEventLoop | None
     ) -> None:
         super().__init__()
         self._deliver = deliver
@@ -200,7 +200,7 @@ class IPythonSession:
         editing_mode: str = "vi",
         rows: int = 24,
         cols: int = 80,
-        on_output: Callable[[str], None] | None = None,
+        on_output: Callable[[str], object] | None = None,
         on_busy: Callable[[bool], None] | None = None,
     ) -> None:
         try:
