@@ -130,7 +130,7 @@ def build_figure(results: list[StepResult]):
     to pop up a blocking GUI window.
     """
     fig, ax = plt.subplots()
-    labels = []
+    labels: list[str] = []
 
     for result in results:
         series = difference_series(
@@ -140,7 +140,8 @@ def build_figure(results: list[StepResult]):
             continue
         _x, difference, label = series
         ax.plot(difference)
-        labels.append(label)
+        if label is not None:
+            labels.append(label)
 
     if labels:
         ax.legend(labels, ncol=4, loc="upper center", bbox_to_anchor=(0.5, 1.1))
@@ -153,8 +154,10 @@ def build_figure(results: list[StepResult]):
 def multiplot(results: list[StepResult]) -> None:
     """Build and display the squeezing-minus-shot-noise figure.
 
-    Kept for the script/CLI entry point (``main.py``) and existing callers.
-    Non-interactive callers should use :func:`build_figure` instead.
+    Kept as the public plotting helper used by existing callers; the actual
+    figure construction lives in :func:`build_figure` so callers that need
+    to embed/save it can do so without triggering ``plt.show()`` here.
     """
-    build_figure(results)
+    fig = build_figure(results)
     plt.show()
+    plt.close(fig)
