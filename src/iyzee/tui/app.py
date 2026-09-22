@@ -23,6 +23,7 @@ from .ipython import default_history_file
 from .ipython_session import IPythonSession
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
+from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
 from .screens.traces import TracesScreen
 from .workers import LastRun
@@ -45,6 +46,7 @@ class NavRail(Static):
     PAGES = (
         ("connect", "Connect"),
         ("sweep", "Sweep"),
+        ("scope", "Scope"),
         ("traces", "Traces"),
         ("console", "Console"),
     )
@@ -138,9 +140,22 @@ class IyzeeApp(App):
     # keystrokes itself (typing the character) before they ever reach
     # this binding, so it only fires when nothing is claiming them —
     # i.e. exactly the "outside editable widgets" case.
+    # "o" for the Scope page joins the letter shortcuts (c/s/t/i) rather
+    # than an F-key: F1-F4 are specifically special-cased elsewhere —
+    # terminal_view._APP_KEYS lets exactly those four bypass the console's
+    # embedded terminal and reach the app, and both the in-app help text
+    # and ipython_session's banner document "F1-F4 switch pages". Reusing
+    # one of those four for Scope would silently break whichever page it
+    # displaced when a console cell has focus; adding a fifth would not
+    # reach the app at all from inside the terminal (F5+ are CSI-tilde
+    # sequences, a different wire format _APP_KEYS/termkeys.py don't
+    # handle — see termkeys.py's own comment on this split). So Scope is
+    # reachable everywhere via "o", the nav rail, and the command palette,
+    # just without a dedicated function key.
     BINDINGS = [
         Binding("c", "show_page('connect')", "Connect"),
         Binding("s", "show_page('sweep')", "Sweep"),
+        Binding("o", "show_page('scope')", "Scope"),
         Binding("t", "show_page('traces')", "Traces"),
         Binding("i", "show_page('console')", "Console"),
         Binding("f1", "show_page('connect')", "Connect", priority=True),
@@ -165,6 +180,7 @@ class IyzeeApp(App):
     PAGES = {
         "connect": ConnectScreen,
         "sweep": SweepScreen,
+        "scope": ScopeScreen,
         "traces": TracesScreen,
         "console": ConsoleScreen,
     }
@@ -252,6 +268,8 @@ class IyzeeApp(App):
             nav.refresh_instruments()
         for sweep in self.query(SweepScreen):
             sweep.refresh_readiness()
+        for scope in self.query(ScopeScreen):
+            scope.refresh_readiness()
 
     async def on_unmount(self) -> None:
         """Runs on every way out (Ctrl+Q, ``exit()``, test teardown).

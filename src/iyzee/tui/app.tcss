@@ -199,6 +199,103 @@ Screen {
     border: round $primary-darken-1;
 }
 
+/* -- Scope ---------------------------------------------------------------
+   Reuses several rules already defined above under "Sweep" — .field,
+   .field-grid, #sweep-status's shape (here #scope-status) — since a form
+   field and a "not ready" banner look the same regardless of which page
+   they're on. Only what's genuinely new to this page gets its own rule. */
+
+#scope-status {
+    height: auto;
+    margin: 1 2 0 2;
+    padding: 0 1;
+    border-left: thick $warning;
+    color: $warning;
+    background: $warning 12%;
+}
+
+/* One panel per analog channel: 1 column (narrow), 2 (medium), 4 (wide) —
+   same reflow tiers as .field-grid, but channel panels are bordered boxes
+   rather than bare label+input pairs, so they get their own class. */
+#scope-channels {
+    layout: grid;
+    grid-size: 1;
+    grid-rows: auto;
+    grid-gutter: 1 2;
+    height: auto;
+    margin: 1 2 0 2;
+}
+
+.-medium #scope-channels {
+    grid-size: 2;
+}
+
+.-wide #scope-channels {
+    grid-size: 4;
+}
+
+.channel-panel {
+    height: auto;
+    border: round $primary-darken-1;
+    padding: 0 1 1 1;
+}
+
+.channel-title {
+    padding: 0 0 1 0;
+}
+
+#apply-channels {
+    margin: 0 2 1 2;
+    width: 100%;
+}
+
+#scope-trigger {
+    height: auto;
+    margin: 1 2 0 2;
+    border: round $primary-darken-1;
+    padding: 0 1 1 1;
+}
+
+#apply-trigger {
+    margin-top: 1;
+    width: 100%;
+}
+
+/* "Acquire": alone in its own grid (rather than a plain Button) so it
+   reflows to a fixed width on wide terminals like Sweep's button row,
+   instead of stretching edge to edge. */
+#scope-controls {
+    layout: grid;
+    grid-size: 1;
+    grid-columns: 1fr;
+    grid-rows: auto;
+    grid-gutter: 0 1;
+    height: auto;
+    margin: 1 2;
+}
+
+.-wide #scope-controls {
+    grid-columns: 22;
+}
+
+#scope-controls Button {
+    width: 100%;
+    min-width: 0;
+}
+
+#scope-plot {
+    height: 1fr;
+    min-height: 14;
+    margin: 1 2;
+    border: round $primary;
+}
+
+#scope-log {
+    height: 8;
+    margin: 0 2 1 2;
+    border: round $primary-darken-1;
+}
+
 /* -- Traces ------------------------------------------------------------- */
 
 /* Side by side (list | preview) when there's room; stacked when narrow.
