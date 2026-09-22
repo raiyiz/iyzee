@@ -273,7 +273,9 @@ class ScopeScreen(Page):
         """The live driver, or ``None`` (after notifying) if not connected."""
         handle = self.iyzee_app.handles.get("scope")
         if handle is None:
-            self.notify("Connect the scope first — press F1 for the Connect page.", severity="error")
+            self.notify(
+                "Connect the scope first — press F1 for the Connect page.", severity="error"
+            )
             return None
         return handle.scope
 
