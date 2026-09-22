@@ -10,10 +10,12 @@ scope's current state on open; the fields start at sensible defaults
 device-side parameters) and "Apply" only ever pushes settings outward.
 
 "Acquire" is the read path: it pulls a waveform (``LeCroy.getDataFloats``)
-plus that channel's time axis (``LeCroy.getHorProperties``) for every
-enabled channel and draws them together on one plot, the same way
-``SweepScreen``'s "Capture trace" and ``TracesScreen`` both funnel through
-``plotting.draw_series``.
+for every enabled channel and draws them together on one plot, the same
+way ``SweepScreen``'s "Capture trace" and ``TracesScreen`` both funnel
+through ``plotting.draw_series``. The time axis (``LeCroy.getHorProperties``)
+is read once per acquisition, not once per channel — every analog channel
+shares one timebase, so the answer would be the same each time; see the
+comment in ``_acquire`` for why that matters.
 """
 
 from __future__ import annotations
@@ -431,10 +433,27 @@ class ScopeScreen(Page):
         series: list[tuple[list[float], list[float], str]] = []
         errors: list[tuple[Channel, Exception]] = []
         with self.iyzee_app.instrument_locks["scope"]:
+            # One shared timebase drives every analog channel's acquisition —
+            # they trigger together, off the same clock — so HORIZ_OFFSET/
+            # HORIZ_INTERVAL are the same value on every channel's own
+            # descriptor. getHorProperties() is 3 INSPECT? round-trips;
+            # asking it once per channel (as before) repeated the same 3
+            # questions N times over for an N-channel acquisition, for no
+            # different an answer. Asking once, off the first channel, and
+            # reusing it for all of them cuts that to a flat 3 round-trips
+            # however many channels are enabled — and if the scope can't
+            # answer it, none of the channels could be timestamped anyway,
+            # so every channel is reported failed together rather than
+            # discovering that one at a time.
+            try:
+                _hor_unit, hor_offset, hor_interval = scope.getHorProperties(channel=channels[0])
+            except Exception as exc:  # noqa: BLE001
+                log.exception("scope: failed to read the timebase from %s", channels[0])
+                self._ui(self._finish_acquire, [], [(channel, exc) for channel in channels])
+                return
             for channel in channels:
                 try:
                     _unit, values = scope.getDataFloats(channel=channel)
-                    _hor_unit, hor_offset, hor_interval = scope.getHorProperties(channel=channel)
                     times = [hor_offset + i * hor_interval for i in range(len(values))]
                     series.append((times, list(values), str(channel)))
                 except Exception as exc:  # noqa: BLE001
