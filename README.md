@@ -13,12 +13,12 @@ src/iyzee/
 ├── base.py                # shared VISA lifecycle, instrument IPs, PSU channels
 ├── mxa.py                 # Keysight MXA SCPI/VISA driver
 ├── power.py                # power supply + optical shutter control
-├── scope.py                # LeCroy oscilloscope communication
+├── scope.py                # LeCroy oscilloscope: waveform download + channel/trigger/math control
 ├── wavemeter_readout.py  # wavemeter / laser setpoint control
 ├── experiment/            # composable measurement procedures
 │   ├── core.py             # Step protocol, ExperimentContext, StepResult, run_sequence()
 │   ├── procedures.py      # AnalyzerConfig, prepare_analyzer(), acquire_trace(), BandwidthStep, FrequencyStep, run_*_sweep()
-│   └── io.py                # create_dirs(), save_data(), save_step_results(), build_figure(), multiplot()
+│   └── io.py                # DATA_ROOT (<project root>/data), create_dirs(), save_data(), save_step_results(), build_figure(), multiplot()
 └── tui/                    # interactive terminal UI (`iyzee-tui`)
     ├── app.py              # IyzeeApp: nav rail, page switcher, key bindings, shared state, shutdown
     ├── app.tcss            # layout and responsive rules (width breakpoints)

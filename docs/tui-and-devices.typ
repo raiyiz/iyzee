@@ -131,6 +131,8 @@ Typical commands sent via `LeCroy.send()`:
 
 Because this driver isn't `BaseDevice`-integrated, the TUI's `ScopeHandle` (@sec-instruments) calls `LeCroy.connect(ip)`/`.disconnect()` directly rather than going through the usual `connect()`/`close()` contract, and there's no `*IDN?`-equivalent query to confirm identity — `ScopeHandle.probe()` can only report that the TCP handshake succeeded.
 
+Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and math-function control — `set_volts_per_div()`, `set_coupling()`, `set_trace_display()`, `set_trigger_mode()`/`set_trigger_source()`/`set_trigger_level()`/`set_trigger_slope()`/`set_trigger_coupling()`, and `set_math_equation()` with `set_math_difference()`/`set_math_average()`/`set_math_fft()` convenience wrappers around it. These build the same header-path command strings as the table above (e.g. `C1:COUPLING D50`, `TRIG_SELECT EDGE,SR,C1`, `F1:DEFINE EQN,'C1-C2'`), routed through `LeCroy.send()`; a `query()` helper (`send()` + `readAll()`, trimmed) backs the handful of getters. `Channel`, `MathChannel`, `Coupling`, `TriggerCoupling`, `TriggerSlope`, and `TriggerMode` are `StrEnum`s for the values that are fixed across the LeCroy family this driver targets; bandwidth-limit and math-equation strings stay plain `str` parameters because those vocabularies are genuinely model dependent (see the docstrings for specifics and their sourcing).
+
 == Wavemeter
 
 `wavemeter_readout.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close:
@@ -201,7 +203,7 @@ lab.connected                          # e.g. ("mx", "shutter")
 - Repository implementation: `src/iyzee/base.py`, `src/iyzee/power.py`, `src/iyzee/scope.py`, `src/iyzee/wavemeter_readout.py`, `src/iyzee/tui/`, and the associated tests.
 - #link("mxa-and-measurements.typ")[MXA and measurement guide] — MXA SCPI reference, measurement physics, and the squeezing/shot-noise workflow.
 - Rohde & Schwarz, *HMP Series Power Supply User Manual*: `INST:NSEL`, `INST OUTn`, `OUTP:SEL`, `OUTP:GEN` selection and output semantics.
-- LeCroy, *Remote Control Manual*: VICP protocol framing and `WF?`/`INSPECT?` waveform transfer.
+- LeCroy, *Remote Control Manual*: VICP protocol framing, `WF?`/`INSPECT?` waveform transfer, and (for the channel/trigger/math control added on top of that) the `<channel>:VOLT_DIV`/`OFFSET`/`COUPLING`/`ATTENUATION`/`BANDWIDTH_LIMIT`/`TRACE`/`INVERT_SET`, `TRIG_SELECT`/`TRIG_LEVEL`/`TRIG_SLOPE`/`TRIG_COUPLING`/`TRIG_MODE`/`TRIG_DELAY`, and `DEFINE EQN` command families.
 - PyVISA documentation, resource strings and `query_binary_values()`: #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
 - Textual documentation, workers and focus: #link("https://textual.textualize.io/guide/workers/")[Workers guide]
 - prompt_toolkit and pyte, which host IPython's terminal UI in the console: #link("https://python-prompt-toolkit.readthedocs.io/")[prompt_toolkit documentation], #link("https://pyte.readthedocs.io/")[pyte documentation]

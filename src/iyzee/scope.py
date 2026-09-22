@@ -1,6 +1,7 @@
 import socket
 import struct  # for unpacking c structs
 from ctypes import Structure, c_int, c_ubyte
+from enum import StrEnum
 
 import numpy as np
 
@@ -23,6 +24,80 @@ LECROY_REMOTE_FLAG = 0x40
 LECROY_DATA_FLAG = 0x80
 
 
+class Channel(StrEnum):
+    """Analog input channel identifiers, as used in a command's header path
+    (e.g. ``C1:VOLT_DIV 0.5``)."""
+
+    C1 = "C1"
+    C2 = "C2"
+    C3 = "C3"
+    C4 = "C4"
+
+
+class MathChannel(StrEnum):
+    """Math-function trace identifiers.
+
+    F5-F8 exist on some models (in addition to F1-F4) but aren't covered
+    here; pass their name as a plain string to the methods below if needed
+    — they all take ``Channel | MathChannel | str``.
+    """
+
+    F1 = "F1"
+    F2 = "F2"
+    F3 = "F3"
+    F4 = "F4"
+
+
+class Coupling(StrEnum):
+    """A channel's own vertical input coupling and termination impedance.
+
+    Distinct from :class:`TriggerCoupling`, which is the coupling of the
+    *trigger path*, not of the displayed signal.
+    """
+
+    DC_50 = "D50"
+    DC_1M = "D1M"
+    AC_1M = "A1M"
+    GROUND = "GND"
+
+
+class TriggerCoupling(StrEnum):
+    """Coupling of the trigger path (see :class:`Coupling` for the channel's
+    own vertical coupling)."""
+
+    DC = "DC"
+    AC = "AC"
+    HF_REJECT = "HFREJ"
+    LF_REJECT = "LFREJ"
+
+
+class TriggerSlope(StrEnum):
+    POSITIVE = "POS"
+    NEGATIVE = "NEG"
+
+
+class TriggerMode(StrEnum):
+    """AUTO free-runs if no trigger is found; NORMAL waits indefinitely for
+    one; SINGLE arms for exactly one acquisition and then stops; STOP halts
+    acquisition entirely."""
+
+    AUTO = "AUTO"
+    NORMAL = "NORM"
+    SINGLE = "SINGLE"
+    STOP = "STOP"
+
+
+__all__ = [
+    "Channel",
+    "Coupling",
+    "LeCroy",
+    "MathChannel",
+    "TriggerCoupling",
+    "TriggerMode",
+    "TriggerSlope",
+]
+
+
 class LeCroy:
     """
     Class for remote control and download of LeCroy oscilloscope data
@@ -33,11 +108,24 @@ class LeCroy:
     disconnect() : to end communication
     send(message) : message to device (commands, etc.)
     readAll() : read a full framed response from the device, returns ascii string
+    query(message) : send(message) + readAll(), returns the trimmed response text
 
     getDataBytes(channel="C1", block="DAT1"): binary data download, 8-bit
     getDataWords(channel="C1", block="DAT1"): binary data download, 16-bit
     getDataFloats(channel="C1", block="DAT1"): unit, vertical data (downloads 16-bit binary)
     getHorProperties(channel="C1") : returns (unit, offset, interval) in time dir.
+
+    Also provides channel (vertical), trigger, and math-function control —
+    see the "Channel", "Trigger", and "Math" sections below. Those commands
+    follow the classic LeCroy/Teledyne LeCroy IEEE-488.2-style command set
+    shared by the WaveSurfer, WaveAce, and X-Stream families (documented in
+    Teledyne LeCroy's Remote Control Command Reference manuals), the same
+    family this driver already targets for waveform download (its
+    ``INSPECT?``-based methods above use that exact dialect). They have not
+    been exercised against real hardware in this environment, only checked
+    against that documentation, so verify against your instrument (many
+    commands accept a ``?`` query form to read back what was just set) before
+    relying on them for anything safety-critical.
     """
 
     MAX_TCP_CONNECT = 5  # time in s. to get a conn
@@ -151,6 +239,171 @@ class LeCroy:
             if flg != self.LECROY_DATA_FLAG:  # data flag 0x80
                 break
         return flg, dtstr
+
+    def query(self, message: str) -> str:
+        """Send ``message`` and return the device's response, trimmed.
+
+        A thin building block over :meth:`send`/:meth:`readAll`, used by the
+        getters below. LeCroy responses echo the (short-form) command header
+        before the value — e.g. querying ``C1:COUPLING?`` gets back something
+        like ``C1:COUPLING D50`` — and for commands whose value can include a
+        unit suffix (``TIME_DIV 10 NS``) the two are space-separated tokens.
+        Because the exact response shape is command-specific, this method
+        deliberately does not try to strip the header or split out a unit:
+        it hands back the trimmed response text as-is, the same way the
+        existing ``getHorProperties``/``getDataFloats`` methods each parse
+        their own specific response format rather than relying on one
+        generic parser.
+        """
+        self.send(message)
+        _flag, text = self.readAll()
+        return text.strip()
+
+    # ------------------------------------------------------------------
+    # Channel (vertical) control
+    # ------------------------------------------------------------------
+    def set_volts_per_div(self, channel: Channel, volts_per_div: float) -> None:
+        """Set the vertical scale for ``channel``, in volts/division."""
+        self.send(f"{channel}:VOLT_DIV {volts_per_div}")
+
+    def set_offset(self, channel: Channel, offset_volts: float) -> None:
+        """Set the vertical offset for ``channel``, in volts."""
+        self.send(f"{channel}:OFFSET {offset_volts}")
+
+    def set_coupling(self, channel: Channel, coupling: Coupling) -> None:
+        """Set the input coupling and termination impedance for ``channel``.
+
+        Note this is the channel's own vertical coupling — the signal path
+        that gets displayed and digitized. To couple the *trigger* path
+        instead (which may be a different channel, and can differ from its
+        own vertical coupling), use :meth:`set_trigger_coupling`.
+        """
+        self.send(f"{channel}:COUPLING {coupling}")
+
+    def set_attenuation(self, channel: Channel, factor: float) -> None:
+        """Tell the scope the probe attenuation factor on ``channel`` (e.g.
+        1, 10, or 100), so its vertical readings are scaled correctly."""
+        self.send(f"{channel}:ATTENUATION {factor}")
+
+    def set_bandwidth_limit(self, channel: Channel, limit: str) -> None:
+        """Set the bandwidth limit for ``channel``.
+
+        ``limit`` is a free string, not an enum: ``"OFF"`` and ``"ON"`` are
+        universal, but the specific reduced-bandwidth values it accepts
+        (e.g. ``"20MHZ"``, ``"200MHZ"``, ``"25MHZ"``) are model dependent.
+        Check ``<channel>:BANDWIDTH_LIMIT?`` on the instrument, or its
+        datasheet, for the values it actually supports.
+        """
+        self.send(f"{channel}:BANDWIDTH_LIMIT {limit}")
+
+    def set_trace_display(self, channel: Channel | MathChannel | str, state: bool) -> None:
+        """Show or hide ``channel``'s trace on the display.
+
+        Works for an analog channel or a math trace (anything with a
+        header-path prefix), which is why this accepts ``Channel |
+        MathChannel`` rather than only ``Channel``.
+        """
+        self.send(f"{channel}:TRACE {'ON' if state else 'OFF'}")
+
+    def set_invert(self, channel: Channel | MathChannel | str, state: bool) -> None:
+        """Invert (or un-invert) ``channel``'s waveform."""
+        self.send(f"{channel}:INVERT_SET {'ON' if state else 'OFF'}")
+
+    def get_coupling(self, channel: Channel) -> str:
+        """Return the device's raw response to a coupling query (see
+        :meth:`query` for why this isn't parsed further)."""
+        return self.query(f"{channel}:COUPLING?")
+
+    def get_trace_display(self, channel: Channel | MathChannel | str) -> str:
+        return self.query(f"{channel}:TRACE?")
+
+    # ------------------------------------------------------------------
+    # Trigger control
+    # ------------------------------------------------------------------
+    def set_trigger_mode(self, mode: TriggerMode) -> None:
+        """Set the overall trigger mode (see :class:`TriggerMode`)."""
+        self.send(f"TRIG_MODE {mode}")
+
+    def set_trigger_source(self, source: Channel) -> None:
+        """Arm an Edge trigger on ``source``.
+
+        Only the Edge trigger type is exposed here (the common case, and the
+        one whose remote syntax is stable across the LeCroy family this
+        driver targets). Other trigger types (glitch, width, TV, ...) use
+        their own multi-parameter ``TRIG_SELECT`` forms, not implemented
+        here — use :meth:`send` directly for those, e.g.
+        ``scope.send("TRIG_SELECT GLIT,SR,C1,...")``, consulting your
+        instrument's trigger chapter for the exact parameters it wants.
+        """
+        self.send(f"TRIG_SELECT EDGE,SR,{source}")
+
+    def set_trigger_level(self, source: Channel, level_volts: float) -> None:
+        """Set the trigger level for ``source``, in volts."""
+        self.send(f"{source}:TRIG_LEVEL {level_volts}")
+
+    def set_trigger_slope(self, source: Channel, slope: TriggerSlope) -> None:
+        self.send(f"{source}:TRIG_SLOPE {slope}")
+
+    def set_trigger_coupling(self, source: Channel, coupling: TriggerCoupling) -> None:
+        """Set the coupling of the trigger path fed by ``source``.
+
+        Distinct from that channel's own vertical coupling — see
+        :meth:`set_coupling`.
+        """
+        self.send(f"{source}:TRIG_COUPLING {coupling}")
+
+    def set_trigger_delay(self, delay_seconds: float) -> None:
+        """Position the trigger point in time relative to the acquisition.
+
+        A negative value delays the trigger point (showing more pre-trigger
+        data); a positive value shows less pre-trigger data, or none.
+        """
+        self.send(f"TRIG_DELAY {delay_seconds}")
+
+    def get_trigger_mode(self) -> str:
+        return self.query("TRIG_MODE?")
+
+    def get_trigger_slope(self, source: Channel) -> str:
+        return self.query(f"{source}:TRIG_SLOPE?")
+
+    def get_trigger_coupling(self, source: Channel) -> str:
+        return self.query(f"{source}:TRIG_COUPLING?")
+
+    # ------------------------------------------------------------------
+    # Math function control
+    # ------------------------------------------------------------------
+    def set_math_equation(self, math_channel: MathChannel, equation: str) -> None:
+        """Define what ``math_channel`` computes.
+
+        ``equation`` is written in the instrument's own expression syntax,
+        e.g. ``"C1-C2"`` for a difference, ``"AVG(C1)"`` for averaging,
+        ``"FFT(C1)"`` for a spectrum. The exact set of supported operators
+        and functions (and their exact spelling) is model and firmware
+        dependent — see your instrument's math chapter, or read back
+        ``<math_channel>:DEFINE?`` after setting one up on the front panel to
+        see the syntax it produces for a given operation. This method only
+        forwards the string; :meth:`set_math_difference`,
+        :meth:`set_math_average`, and :meth:`set_math_fft` are thin
+        convenience wrappers around the three operations mentioned above.
+        """
+        self.send(f"{math_channel}:DEFINE EQN,'{equation}'")
+
+    def set_math_difference(
+        self, math_channel: MathChannel, minuend: Channel, subtrahend: Channel
+    ) -> None:
+        """``math_channel`` = ``minuend`` - ``subtrahend``."""
+        self.set_math_equation(math_channel, f"{minuend}-{subtrahend}")
+
+    def set_math_average(self, math_channel: MathChannel, source: Channel) -> None:
+        """``math_channel`` = a running average of ``source``."""
+        self.set_math_equation(math_channel, f"AVG({source})")
+
+    def set_math_fft(self, math_channel: MathChannel, source: Channel) -> None:
+        """``math_channel`` = the FFT (spectrum) of ``source``."""
+        self.set_math_equation(math_channel, f"FFT({source})")
+
+    def get_math_equation(self, math_channel: MathChannel) -> str:
+        return self.query(f"{math_channel}:DEFINE?")
 
     def getDataBytes(self, channel="C1", block="DAT1"):
         """
