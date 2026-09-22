@@ -1,3 +1,8 @@
+# Measurement runs (see experiment.io.DATA_ROOT) — not tracked; there was no
+# entry for this at its previous location either (src/iyzee/data/), which
+# meant a run there would have shown up as untracked files in git status.
+/data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

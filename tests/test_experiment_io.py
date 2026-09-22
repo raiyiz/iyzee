@@ -3,8 +3,10 @@ from pathlib import Path
 
 import numpy as np
 
+import iyzee.experiment.io as io
 from iyzee.experiment.core import StepResult
 from iyzee.experiment.io import (
+    DATA_ROOT,
     create_dirs,
     difference_series,
     multiplot,
@@ -13,14 +15,26 @@ from iyzee.experiment.io import (
 )
 
 
+def test_data_root_is_the_project_root_not_inside_the_package():
+    # A sibling of src/, not e.g. src/iyzee/data — this is the behavior the
+    # "move data/ to the project root" request actually depends on; a
+    # regression here would put runs back inside the package without any of
+    # the other tests (which monkeypatch DATA_ROOT, precisely to avoid ever
+    # touching this real path) noticing.
+    assert (DATA_ROOT.parent / "pyproject.toml").is_file()
+    assert (DATA_ROOT.parent / "src" / "iyzee").is_dir()
+    assert DATA_ROOT.name == "data"
+
+
 def test_create_dirs_is_idempotent(tmp_path, monkeypatch):
-    monkeypatch.setattr("iyzee.experiment.io.Path", lambda *parts: Path(tmp_path, *parts))
+    monkeypatch.setattr(io, "DATA_ROOT", tmp_path)
 
     first = create_dirs("measurement")
     second = create_dirs("measurement")
 
     assert first == second
     assert first.is_dir()
+    assert first.parent == tmp_path
 
 
 def test_save_data_round_trip(tmp_path):

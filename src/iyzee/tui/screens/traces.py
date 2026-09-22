@@ -19,13 +19,17 @@ from textual.widgets import Label, ListItem, ListView, Static
 from textual_plotext import PlotextPlot
 
 from ...experiment import difference_series
+from ...experiment.io import DATA_ROOT
 from ..plotting import draw_series
 from .page import Page
 
-# <package_root>/data — matches iyzee.experiment.io.create_dirs(),
-# without calling it (create_dirs() always creates a fresh dated directory,
-# which we don't want as a side effect of just opening this screen).
-_DATA_ROOT = Path(__file__).resolve().parents[2] / "data"
+# The single source of truth for this path is experiment.io.DATA_ROOT — kept
+# as a separate module-level name (rather than reading io.DATA_ROOT directly
+# everywhere below) so it stays independently monkeypatchable in tests, same
+# as before this file imported it instead of recomputing it. Not read via
+# create_dirs() itself, which always creates a fresh dated directory — a side
+# effect this screen (which only browses existing runs) must not trigger.
+_DATA_ROOT = DATA_ROOT
 
 
 def _run_label(path: Path) -> str:
