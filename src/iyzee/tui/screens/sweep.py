@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from functools import partial
 from threading import Event
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import numpy as np
 from rich.markup import escape
@@ -55,7 +55,6 @@ from ...experiment import (
     run_sequence,
     save_step_results,
 )
-from ..instruments import ShutterHandle, _VisaHandle
 from ..plotting import draw_series
 from ..text import one_line
 from ..workers import LastRun
@@ -121,7 +120,7 @@ class SweepScreen(Page):
     @property
     def iyzee_app(self) -> IyzeeApp:
         """``self.app`` narrowed to the concrete app type (see ConnectScreen.iyzee_app)."""
-        return cast("IyzeeApp", self.app)
+        return self.app
 
     def compose(self) -> ComposeResult:
         yield Static("Sweep", classes="panel-title")
@@ -191,7 +190,7 @@ class SweepScreen(Page):
             missing.append("MXA")
         if kind == "frequency":
             shutter = handles.get("shutter")
-            if shutter is None or cast(ShutterHandle, shutter).shutter is None:
+            if shutter is None or shutter.shutter is None:
                 missing.append("shutter")
         return missing
 
@@ -250,7 +249,6 @@ class SweepScreen(Page):
         # the Connect screen itself needs, but this screen needs the
         # concrete wrapper's .device/.shutter, which aren't on that
         # narrower Protocol.
-        mx_handle = cast(_VisaHandle, mx_handle)
 
         kind = self.query_one("#sweep-type", Select).value
         try:
@@ -259,14 +257,14 @@ class SweepScreen(Page):
                 shutter = None
             else:
                 shutter_handle = self.iyzee_app.handles.get("shutter")
-                if shutter_handle is None or cast(ShutterHandle, shutter_handle).shutter is None:
+                if shutter_handle is None or shutter_handle.shutter is None:
                     self.notify(
                         "Connect the shutter first — press F1 for the Connect page.",
                         severity="error",
                     )
                     return
                 steps, config = self._build_frequency_run()
-                shutter = cast(ShutterHandle, shutter_handle).shutter
+                shutter = shutter_handle.shutter
         except FieldError as exc:
             self._flag_invalid(exc.field_id)
             self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
@@ -439,7 +437,6 @@ class SweepScreen(Page):
         if mx_handle is None:
             self.notify("Connect the MXA first — press F1 for the Connect page.", severity="error")
             return
-        mx_handle = cast(_VisaHandle, mx_handle)
 
         self.iyzee_app.sweep_running = True
         self.query_one("#run-sweep", Button).disabled = True
