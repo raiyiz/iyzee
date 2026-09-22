@@ -13,12 +13,27 @@ import numpy as np
 
 from .core import StepResult
 
+# Where all measurement runs are written and (in the TUI) read back from —
+# <project root>/data, i.e. a sibling of src/, not inside the installed
+# package. That makes it a fixed, predictable place regardless of the
+# current working directory `iyzee`/`iyzee-tui` is launched from, and easy
+# to find, back up or point other tools at, without digging into src/iyzee/.
+#
+# Computed once, from this file's own location (`src/iyzee/experiment/io.py`
+# -> parents[3] is the checkout root), so it agrees with itself everywhere
+# it's used and callers never repeat the path arithmetic (see
+# `tui/screens/traces.py`, which reads from exactly this constant). This
+# assumes a development checkout / editable install (this project's only
+# supported way to run it — see the README); a real wheel installed
+# elsewhere would resolve `parents[3]` to somewhere under site-packages, not
+# a sensible data location.
+DATA_ROOT = Path(__file__).resolve().parents[3] / "data"
+
 
 def create_dirs(name: str = "") -> Path:
-    """Create and return today's measurement-data directory."""
-    package_root = Path(__file__).resolve().parent.parent
+    """Create and return today's measurement-data directory, under DATA_ROOT."""
     today = datetime.now().astimezone().strftime("%Y-%m-%d")
-    data_dir = package_root / "data" / Path(today + "_" + name)
+    data_dir = DATA_ROOT / Path(today + "_" + name)
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
 
@@ -130,7 +145,7 @@ def build_figure(results: list[StepResult]):
     to pop up a blocking GUI window.
     """
     fig, ax = plt.subplots()
-    labels = []
+    labels: list[str] = []
 
     for result in results:
         series = difference_series(
@@ -140,7 +155,12 @@ def build_figure(results: list[StepResult]):
             continue
         _x, difference, label = series
         ax.plot(difference)
-        labels.append(label)
+        # difference_series() types its returned label as `str | None` because
+        # it also accepts `None` in (for a caller with no label at all); here
+        # `result.label` is a plain `str` (StepResult.label is not Optional),
+        # so it comes back unchanged — this is just narrowing that for `legend()`.
+        if label is not None:
+            labels.append(label)
 
     if labels:
         ax.legend(labels, ncol=4, loc="upper center", bbox_to_anchor=(0.5, 1.1))
