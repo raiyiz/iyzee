@@ -264,8 +264,7 @@ class LeCroy:
                 xferd = self.s.send(msgbytes[byteindx:])
             except TimeoutError as exc:
                 raise LeCroyTimeoutError(
-                    f"no response after {self.s.gettimeout()}s "
-                    f"({byteindx}/{msglen} bytes sent)"
+                    f"no response after {self.s.gettimeout()}s ({byteindx}/{msglen} bytes sent)"
                 ) from exc
             if xferd < 0:
                 raise RuntimeError(f"could not write the data block, returned {xferd}")

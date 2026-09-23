@@ -161,9 +161,7 @@ def save_step_results(
     for trace_name in trace_names:
         arrays[f"trace_{trace_name}"] = _stack_trace(results, trace_name)
 
-    points = [
-        {"label": result.label, "x_unit": result.x_unit, **result.meta} for result in results
-    ]
+    points = [{"label": result.label, "x_unit": result.x_unit, **result.meta} for result in results]
     sidecar = {"run_metadata": run_metadata, "points": points}
 
     # ".part", not ".npz.tmp"/".json.tmp": np.savez appends ".npz" to names
@@ -196,9 +194,7 @@ def _stack_trace(results: list[StepResult], trace_name: str) -> np.ndarray:
             continue
         row = np.asarray(trace, dtype=np.float64)
         if row.ndim != 1:
-            raise ValueError(
-                f"trace {trace_name!r} must be one-dimensional, got shape {row.shape}"
-            )
+            raise ValueError(f"trace {trace_name!r} must be one-dimensional, got shape {row.shape}")
         if width is None:
             width = row.shape[0]
         elif row.shape[0] != width:

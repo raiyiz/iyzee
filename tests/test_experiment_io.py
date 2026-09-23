@@ -55,9 +55,7 @@ def _result(x_value=1.0, *, squeezing=None, shot_noise=None, **meta) -> StepResu
 
 
 def test_save_step_results_writes_a_matched_npz_and_json_pair(tmp_path):
-    path = save_step_results(
-        [_result(1.0, squeezing=[3.0, 4.0], shot_noise=[1.0, 1.0])], tmp_path
-    )
+    path = save_step_results([_result(1.0, squeezing=[3.0, 4.0], shot_noise=[1.0, 1.0])], tmp_path)
 
     assert path.suffix == ".npz"
     json_path = path.with_suffix(".json")
