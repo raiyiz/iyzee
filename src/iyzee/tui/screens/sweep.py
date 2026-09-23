@@ -144,7 +144,7 @@ class SweepScreen(Page):
                 yield _field("Steps", Input(value="19", id="rbw-steps"))
             with Grid(id="freq-fields", classes="field-grid"):
                 yield _field("Laser center (THz)", Input(value="377.1052067", id="freq-center"))
-                yield _field("Wavemeter channel", Input(value="1", id="freq-channel"))
+                yield _field("Wavemeter channel", Input(value="4", id="freq-channel"))
                 yield _field("Points", Input(value="5", id="freq-points"))
                 yield _field("Offset step (kHz)", Input(value="10", id="freq-offset-khz"))
         with Grid(id="sweep-controls"):

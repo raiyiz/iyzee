@@ -147,7 +147,7 @@ def bandwidth_sweep_steps(rbw_values_hz=None) -> list[BandwidthStep]:
 
 def frequency_sweep_steps(
     laser_center_thz: float = 377.1052067,
-    wavemeter_channel: int = 1,
+    wavemeter_channel: int = 4,
     relax_time_s: float = 1.5,
     offsets_thz=None,
 ) -> list[FrequencyStep]:
@@ -183,7 +183,7 @@ def run_frequency_sweep(
     mx,
     shutter: ShutterControl,
     laser_center_thz: float = 377.1052067,
-    wavemeter_channel: int = 1,
+    wavemeter_channel: int = 4,
     *,
     on_error: str = "raise",
 ) -> list[StepResult]:
