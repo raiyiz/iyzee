@@ -14,7 +14,6 @@ from .io import (
     create_dirs,
     difference_series,
     multiplot,
-    save_data,
     save_step_results,
 )
 from .procedures import (
@@ -52,6 +51,5 @@ __all__ = [
     "run_bandwidth_sweep",
     "run_frequency_sweep",
     "run_sequence",
-    "save_data",
     "save_step_results",
 ]

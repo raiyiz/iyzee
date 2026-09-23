@@ -18,7 +18,7 @@ src/iyzee/
 ├── experiment/            # composable measurement procedures
 │   ├── core.py             # Step protocol, ExperimentContext, StepResult, run_sequence()
 │   ├── procedures.py      # AnalyzerConfig, prepare_analyzer(), acquire_trace(), BandwidthStep, FrequencyStep, run_*_sweep()
-│   └── io.py                # DATA_ROOT (<project root>/data), create_dirs(), save_data(), save_step_results(), build_figure(), multiplot()
+│   └── io.py                # DATA_ROOT (<project root>/data), create_dirs(), save_step_results(), build_figure(), multiplot()
 └── tui/                    # interactive terminal UI (`iyzee-tui`)
     ├── app.py              # IyzeeApp: nav rail, page switcher, key bindings, shared state, shutdown
     ├── app.tcss            # layout and responsive rules (width breakpoints)

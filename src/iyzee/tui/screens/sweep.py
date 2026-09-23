@@ -499,11 +499,12 @@ class SweepScreen(Page):
         """Write everything collected so far to disk.
 
         Called after every recorded point, from the worker thread. The same
-        file is overwritten each time (atomically — see ``save_data``), so
-        a run leaves exactly one archive, which is complete when the run
-        ends and merely shorter if it doesn't. A failing save (disk full,
-        permissions) must never abort the measurement itself: it is
-        logged, and reported once rather than once per point.
+        file pair is overwritten each time (atomically — see
+        ``save_step_results``), so a run leaves exactly one archive, which
+        is complete when the run ends and merely shorter if it doesn't. A
+        failing save (disk full, permissions) must never abort the
+        measurement itself: it is logged, and reported once rather than
+        once per point.
 
         ``on_ui_thread`` is for the one call made from ``_finish``:
         ``call_from_thread`` raises if used from the UI thread itself, so
@@ -511,9 +512,9 @@ class SweepScreen(Page):
         """
         try:
             if self._savedir is None:
-                self._savedir = create_dirs(name=kind)
+                self._savedir = create_dirs()
             self._save_path = save_step_results(
-                list(self._collected), self._savedir, path=self._save_path
+                list(self._collected), self._savedir, name=kind, path=self._save_path
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("sweep: could not save results")

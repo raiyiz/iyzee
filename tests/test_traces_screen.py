@@ -6,11 +6,12 @@ touch the real ``data/`` directory.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import pytest
 from helpers import async_test, make_result, plain, save_run
 from textual.pilot import Pilot
@@ -45,9 +46,9 @@ def _summary(screen: TracesScreen) -> str:
 
 
 def _write_corrupt_run(root: Path) -> Path:
-    run_dir = root / "2026-09-13_broken"
+    run_dir = root / "2026-09"
     run_dir.mkdir(parents=True)
-    path = run_dir / "20260913T000000.npz"
+    path = run_dir / "13T000000_broken_abc123.npz"
     # Not a real .npz at all — simulates a truncated/interrupted save, which
     # is the realistic way a file like this ends up on disk.
     path.write_bytes(b"not actually a numpy archive")
@@ -55,11 +56,9 @@ def _write_corrupt_run(root: Path) -> Path:
 
 
 def _write_badmeta_run(root: Path) -> Path:
-    path = save_run(root, "2026-09-13_badmeta")
-    with np.load(path, allow_pickle=True) as archive:
-        data, metadata = archive["data"], archive["metadata"]
-    # Metadata that fails json.loads: a hand-edited or partially written archive.
-    np.savez_compressed(path, data=data, metadata=metadata, run_metadata=np.asarray("{not json"))
+    path = save_run(root, "2026-09")
+    # Metadata that fails json.loads: a hand-edited or partially written sidecar.
+    path.with_suffix(".json").write_text("{not json")
     return path
 
 
@@ -150,13 +149,14 @@ async def test_an_empty_folder_explains_itself_and_names_the_folder(
 
 
 @async_test
-async def test_the_list_shows_the_time_of_day_not_the_raw_filename(
+async def test_the_list_shows_the_run_name_and_save_time_not_the_raw_filename(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    run = tmp_path / "2026-09-18_bandwidth"
+    run = tmp_path / "2026-09"
     run.mkdir()
-    saved = save_step_results([make_result()], run)
-    saved.rename(run / "20260918T141005.npz")
+    saved = save_step_results([make_result()], run, name="bandwidth")
+    when = datetime(2026, 9, 18, 14, 10, 5).timestamp()
+    os.utime(saved, (when, when))
     async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
         item = screen.query_one("#traces-list", ListView).children[0]
-        assert item.query_one(Label).render().plain == "2026-09-18_bandwidth  14:10:05"  # type: ignore[union-attr]
+        assert item.query_one(Label).render().plain == "bandwidth  2026-09-18 14:10:05"  # type: ignore[union-attr]

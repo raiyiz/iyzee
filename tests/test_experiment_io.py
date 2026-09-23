@@ -1,16 +1,18 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import iyzee.experiment.io as io
 from iyzee.experiment.core import StepResult
 from iyzee.experiment.io import (
     DATA_ROOT,
+    STEM_PATTERN,
     create_dirs,
     difference_series,
     multiplot,
-    save_data,
     save_step_results,
 )
 
@@ -26,42 +28,54 @@ def test_data_root_is_the_project_root_not_inside_the_package():
     assert DATA_ROOT.name == "data"
 
 
-def test_create_dirs_is_idempotent(tmp_path, monkeypatch):
+def test_create_dirs_is_idempotent_and_groups_by_month(tmp_path, monkeypatch):
     monkeypatch.setattr(io, "DATA_ROOT", tmp_path)
 
-    first = create_dirs("measurement")
-    second = create_dirs("measurement")
+    first = create_dirs()
+    second = create_dirs()
 
     assert first == second
     assert first.is_dir()
     assert first.parent == tmp_path
+    assert first.name == datetime.now().astimezone().strftime("%Y-%m")
 
 
-def test_save_data_round_trip(tmp_path):
-    data = [(1.0, np.array([1.0, 2.0]), np.array([0.5, 1.5]))]
+# -- save_step_results: the numeric .npz + JSON sidecar pair -----------------------------
 
-    path = save_data(data, tmp_path)
 
-    assert path.exists()
+def _result(x_value=1.0, *, squeezing=None, shot_noise=None, **meta) -> StepResult:
+    traces = {}
+    if squeezing is not None:
+        traces["squeezing"] = squeezing
+    if shot_noise is not None:
+        traces["shot_noise"] = shot_noise
+    return StepResult(
+        label=f"x={x_value}", x_value=x_value, x_unit="Hz", traces=traces, meta=dict(meta)
+    )
+
+
+def test_save_step_results_writes_a_matched_npz_and_json_pair(tmp_path):
+    path = save_step_results(
+        [_result(1.0, squeezing=[3.0, 4.0], shot_noise=[1.0, 1.0])], tmp_path
+    )
+
     assert path.suffix == ".npz"
-    with np.load(path, allow_pickle=True) as archive:
-        saved = archive["data"]
-        assert "metadata" not in archive
+    json_path = path.with_suffix(".json")
+    assert json_path.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == [json_path.name, path.name], (
+        "no stray .part file"
+    )
 
-    assert saved.shape == (1, 3)
-    assert saved[0, 0] == 1.0
-    np.testing.assert_array_equal(saved[0, 1], data[0][1])
-    np.testing.assert_array_equal(saved[0, 2], data[0][2])
+    # The .npz alone, with no allow_pickle, must be fully readable: that's
+    # the entire point of splitting the metadata out.
+    with np.load(path, allow_pickle=False) as archive:
+        np.testing.assert_array_equal(archive["x_values"], [1.0])
+        np.testing.assert_array_equal(archive["trace_squeezing"], [[3.0, 4.0]])
+        np.testing.assert_array_equal(archive["trace_shot_noise"], [[1.0, 1.0]])
 
-
-def test_save_data_with_metadata(tmp_path):
-    data = [(1.0, [1.0], [2.0])]
-    metadata = [{"rbw_hz": 1000}]
-
-    path = save_data(data, tmp_path, metadata=metadata)
-
-    with np.load(path, allow_pickle=True) as archive:
-        assert archive["metadata"][0] == metadata[0]
+    sidecar = json.loads(json_path.read_text())
+    assert sidecar["points"] == [{"label": "x=1.0", "x_unit": "Hz"}]
+    assert sidecar["run_metadata"] is None
 
 
 def test_save_step_results_carries_per_point_and_run_metadata(tmp_path):
@@ -77,15 +91,80 @@ def test_save_step_results_carries_per_point_and_run_metadata(tmp_path):
 
     path = save_step_results(results, tmp_path, run_metadata={"software_revision": "abc123"})
 
-    with np.load(path, allow_pickle=True) as archive:
-        data = archive["data"]
-        meta = archive["metadata"]
-        run_meta = json.loads(str(archive["run_metadata"]))
+    with np.load(path, allow_pickle=False) as archive:
+        assert archive["x_values"][0] == 1000.0
 
-    assert data[0, 0] == 1000.0
-    assert meta[0]["label"] == "rbw=1000Hz"
-    assert meta[0]["rbw_hz"] == 1000.0
-    assert run_meta == {"software_revision": "abc123"}
+    sidecar = json.loads(path.with_suffix(".json").read_text())
+    assert sidecar["points"][0]["label"] == "rbw=1000Hz"
+    assert sidecar["points"][0]["rbw_hz"] == 1000.0
+    assert sidecar["run_metadata"] == {"software_revision": "abc123"}
+
+
+def test_save_step_results_can_overwrite_a_fixed_file_pair_atomically(tmp_path: Path) -> None:
+    target = tmp_path / "checkpoint.npz"
+    assert save_step_results([_result(1.0)], tmp_path, path=target) == target
+    again = save_step_results([_result(1.0), _result(2.0)], tmp_path, path=target)
+
+    assert again == target
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "checkpoint.json",
+        "checkpoint.npz",
+    ], "no stray .part file, and the sidecar follows the .npz's chosen name"
+    with np.load(target, allow_pickle=False) as archive:
+        assert len(archive["x_values"]) == 2
+
+
+def test_save_step_results_fills_a_missing_trace_with_nan(tmp_path):
+    results = [
+        _result(1.0, squeezing=[1.0, 2.0], shot_noise=[3.0, 4.0]),
+        _result(2.0, squeezing=[5.0, 6.0]),  # no shot_noise for this point
+    ]
+
+    path = save_step_results(results, tmp_path)
+
+    with np.load(path, allow_pickle=False) as archive:
+        shot_noise = archive["trace_shot_noise"]
+    np.testing.assert_array_equal(shot_noise[0], [3.0, 4.0])
+    assert np.all(np.isnan(shot_noise[1]))
+
+
+def test_save_step_results_rejects_a_trace_whose_length_disagrees_across_points(tmp_path):
+    results = [
+        _result(1.0, squeezing=[1.0, 2.0, 3.0]),
+        _result(2.0, squeezing=[1.0, 2.0]),
+    ]
+
+    with pytest.raises(ValueError, match="squeezing.*inconsistent lengths"):
+        save_step_results(results, tmp_path)
+
+
+def test_save_step_results_names_the_file_from_name_and_a_random_suffix(tmp_path):
+    path = save_step_results([_result(1.0)], tmp_path, name="bandwidth")
+
+    match = STEM_PATTERN.match(path.stem)
+    assert match is not None
+    assert match["name"] == "bandwidth"
+
+
+def test_save_step_results_sanitizes_an_unsafe_name(tmp_path):
+    path = save_step_results([_result(1.0)], tmp_path, name="bandwidth sweep/#1")
+
+    match = STEM_PATTERN.match(path.stem)
+    assert match is not None
+    assert match["name"] == "bandwidth-sweep-1"
+
+
+def test_two_saves_in_the_same_second_do_not_collide(tmp_path):
+    # No time-freezing needed: two calls back-to-back in a test almost
+    # certainly land in the same wall-clock second anyway, so this already
+    # exercises the random suffix's actual job.
+    first = save_step_results([_result(1.0)], tmp_path, name="bandwidth")
+    second = save_step_results([_result(1.0)], tmp_path, name="bandwidth")
+
+    assert first != second
+
+
+# -- multiplot / difference_series -------------------------------------------------------
 
 
 def test_multiplot_handles_empty_data(monkeypatch):
@@ -150,13 +229,8 @@ def test_difference_series_returns_none_for_missing_traces():
     assert difference_series([1.0], None, "pt0") is None
 
 
-def test_save_data_can_overwrite_a_fixed_file_atomically(tmp_path: Path) -> None:
-    # An explicit, non-timestamp name: unlike a timestamped default it can
-    # only be produced by honouring `path`.
-    target = tmp_path / "checkpoint.npz"
-    assert save_data([(1.0, [1.0], [1.0])], tmp_path, path=target) == target
-    again = save_data([(1.0, [1.0], [1.0]), (2.0, [2.0], [2.0])], tmp_path, path=target)
-    assert again == target
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["checkpoint.npz"], "no stray .part file"
-    with np.load(target, allow_pickle=True) as archive:
-        assert len(archive["data"]) == 2
+def test_difference_series_returns_none_for_an_all_nan_trace():
+    # How save_step_results marks a point that had no data for a trace at
+    # all (see test_save_step_results_fills_a_missing_trace_with_nan) —
+    # treated the same as the trace being absent outright.
+    assert difference_series([np.nan, np.nan], [1.0, 1.0], "pt0") is None

@@ -1,7 +1,7 @@
 """Traces screen: browse previously recorded sweep runs.
 
-Reads exactly what ``experiment.io.save_step_results`` already
-writes — the compressed ``.npz`` archives with per-point metadata — so
+Reads exactly what ``experiment.io.save_step_results`` already writes —
+each run's numeric ``.npz`` plus its ``.json`` metadata sidecar — so
 there's no new persistence format to maintain just for browsing.
 """
 
@@ -19,7 +19,7 @@ from textual.widgets import Label, ListItem, ListView, Static
 from textual_plotext import PlotextPlot
 
 from ...experiment import difference_series
-from ...experiment.io import DATA_ROOT
+from ...experiment.io import DATA_ROOT, STEM_PATTERN
 from ..plotting import draw_series
 from .page import Page
 
@@ -27,24 +27,28 @@ from .page import Page
 # as a separate module-level name (rather than reading io.DATA_ROOT directly
 # everywhere below) so it stays independently monkeypatchable in tests, same
 # as before this file imported it instead of recomputing it. Not read via
-# create_dirs() itself, which always creates a fresh dated directory — a side
-# effect this screen (which only browses existing runs) must not trigger.
+# create_dirs() itself: that creates the directory (mkdir) as a side effect,
+# which this screen — which only browses existing runs — must not trigger.
 _DATA_ROOT = DATA_ROOT
 
 
-def _run_label(path: Path) -> str:
-    """List label for one saved run: ``<run folder>  HH:MM:SS``.
+def _run_label(path: Path, mtime: float) -> str:
+    """List label for one saved run: its name (if any) and save time, e.g.
+    ``bandwidth  2026-09-18 14:10:05``.
 
-    Files are named by their save timestamp (``20260918T141005.npz``),
-    which is unreadable at a glance; the time is what tells two runs in the
-    same folder apart. Anything that doesn't parse falls back to the name.
+    The time comes from the file's own mtime (already read by
+    ``refresh_runs`` to sort the list, and reused here rather than parsed
+    back out of the filename — simpler, and still correct for a
+    hand-placed or unusually-named file). Only the run's name, if any, is
+    pulled from the filename (see ``io._new_stem``/``io.STEM_PATTERN``);
+    a file whose stem doesn't have that shape is still listed, just
+    without a name rather than being hidden or treated as an error.
     """
-    folder = escape(path.parent.name)
-    try:
-        when = datetime.strptime(path.stem, "%Y%m%dT%H%M%S")
-    except ValueError:
-        return f"{folder}/{escape(path.name)}"
-    return f"{folder}  {when:%H:%M:%S}"
+    when = datetime.fromtimestamp(mtime).astimezone()
+    match = STEM_PATTERN.match(path.stem)
+    name = match["name"] if match else None
+    prefix = f"{escape(name)}  " if name else ""
+    return f"{prefix}{when:%Y-%m-%d %H:%M:%S}"
 
 
 class TracesScreen(Page):
@@ -93,7 +97,7 @@ class TracesScreen(Page):
         )
         list_view.clear()
         for path in self._paths:
-            list_view.append(ListItem(Label(_run_label(path))))
+            list_view.append(ListItem(Label(_run_label(path, path.stat().st_mtime))))
         if not self._paths:
             self._show_empty()
             return
@@ -136,10 +140,13 @@ class TracesScreen(Page):
         plot = self.query_one("#traces-plot", PlotextPlot)
 
         try:
-            with np.load(path, allow_pickle=True) as archive:
-                data = archive["data"]
-                metadata = archive["metadata"] if "metadata" in archive else None
-                run_metadata = archive["run_metadata"] if "run_metadata" in archive else None
+            with np.load(path, allow_pickle=False) as archive:
+                x_values = archive["x_values"]
+                traces = {
+                    key[len("trace_") :]: archive[key]
+                    for key in archive.files
+                    if key.startswith("trace_")
+                }
         except Exception as exc:  # noqa: BLE001
             summary.update(
                 f"[b]{escape(path.name)}[/b]\n\n[red]Could not read file: {escape(str(exc))}[/red]"
@@ -148,23 +155,34 @@ class TracesScreen(Page):
             plot.refresh()
             return
 
-        lines = [f"[b]{escape(path.name)}[/b]", f"{len(data)} point(s)"]
-        if run_metadata is not None:
-            try:
-                meta = json.loads(str(run_metadata))
-                lines.append("")
-                lines.extend(f"{escape(str(k))}: {escape(str(v))}" for k, v in meta.items())
-            except ValueError, TypeError:
-                pass
+        # A missing or corrupt sidecar (partial write, hand edit) only costs
+        # the per-point labels and the run-metadata summary lines, not the
+        # numeric data above — that's already loaded and shown regardless.
+        points: list[dict] = []
+        run_metadata = None
+        try:
+            sidecar = json.loads(path.with_suffix(".json").read_text())
+            points = sidecar.get("points", [])
+            run_metadata = sidecar.get("run_metadata")
+        except (OSError, ValueError):
+            pass
+
+        lines = [f"[b]{escape(path.name)}[/b]", f"{len(x_values)} point(s)"]
+        if isinstance(run_metadata, dict):
+            lines.append("")
+            lines.extend(f"{escape(str(k))}: {escape(str(v))}" for k, v in run_metadata.items())
         summary.update("\n".join(lines))
 
+        squeezing = traces.get("squeezing")
+        shot_noise = traces.get("shot_noise")
         series = []
-        for index, point in enumerate(data):
-            _x_value, squeezing, shot_noise = point
+        for index in range(len(x_values)):
             label = None
-            if metadata is not None and index < len(metadata):
-                label = metadata[index].get("label")
-            result = difference_series(squeezing, shot_noise, label or f"pt {index}")
+            if index < len(points):
+                label = points[index].get("label")
+            sq = squeezing[index] if squeezing is not None else None
+            sn = shot_noise[index] if shot_noise is not None else None
+            result = difference_series(sq, sn, label or f"pt {index}")
             if result is not None:
                 series.append(result)
         draw_series(

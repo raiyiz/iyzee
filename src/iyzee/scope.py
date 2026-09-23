@@ -6,6 +6,23 @@ from enum import StrEnum
 import numpy as np
 
 
+class LeCroyTimeoutError(TimeoutError):
+    """The scope didn't respond (or accept data) within the configured
+    socket timeout.
+
+    Before a socket timeout was actually applied (see ``LeCroy.connect``),
+    a dead IP, a black-holed connection, or an instrument that simply
+    stopped answering mid-transfer would all hang the calling thread
+    forever instead of raising anything. This is a ``TimeoutError``
+    subclass — exactly what ``socket.timeout`` already is as of Python
+    3.10 — so any existing ``except TimeoutError``/``except OSError``/
+    ``except Exception`` handler still catches it; the point of a
+    dedicated subclass is giving callers something specific to catch, and
+    a message with real numbers in it (how long, how far into the
+    transfer) instead of a bare, contextless timeout.
+    """
+
+
 # c struct for header frame
 class LECROY_TCP_HEADER(Structure):
     """defines LeCroy VICP protocol (TCP header)
@@ -91,6 +108,7 @@ __all__ = [
     "Channel",
     "Coupling",
     "LeCroy",
+    "LeCroyTimeoutError",
     "MathChannel",
     "TriggerCoupling",
     "TriggerMode",
@@ -137,9 +155,6 @@ class LeCroy:
 
     def __init__(self):
         self.CONNECTED = False
-        # In future consider setting blocking connecting for socket
-        # socket.socket.setblocking(False) # blocking by select
-        # socket.socket.settimeout(SOCK_TIMEOUT)
 
     @staticmethod
     def _recv_exact(sock: socket.socket, num_bytes: int) -> bytes:
@@ -148,28 +163,67 @@ class LeCroy:
         A single ``socket.recv()`` call is not guaranteed to return all the
         bytes that are available/requested; it may return fewer. Loop until
         the requested number of bytes has actually been received.
+
+        Each individual ``recv()`` is bounded by the socket's own timeout
+        (set once, in :meth:`connect`) — not the whole loop, so a large,
+        slow-but-still-arriving transfer isn't cut off just for taking a
+        while, but a stall with no data at all for a full timeout period is
+        reported rather than hanging forever.
         """
         chunks = bytearray()
         while len(chunks) < num_bytes:
-            chunk = sock.recv(num_bytes - len(chunks))
+            try:
+                chunk = sock.recv(num_bytes - len(chunks))
+            except TimeoutError as exc:
+                raise LeCroyTimeoutError(
+                    f"no response after {sock.gettimeout()}s "
+                    f"({len(chunks)}/{num_bytes} bytes received)"
+                ) from exc
             if not chunk:
                 raise ConnectionError(f"Socket closed after {len(chunks)}/{num_bytes} bytes")
             chunks.extend(chunk)
         return bytes(chunks)
 
-    def connect(self, IP, delayval=3.0):
+    def connect(self, IP, delayval=None, connect_timeout=None):
         """Connect to the IP, using LeCroy.LECROY_SERVER_PORT as port
         creates a socket at LeCroy.s
+
+        ``connect_timeout`` (default :attr:`MAX_TCP_CONNECT`) bounds the
+        TCP handshake itself: if the scope is off, unplugged, or behind a
+        firewall that silently drops the connection, this raises
+        :class:`LeCroyTimeoutError` instead of blocking forever.
+
+        ``delayval`` (default :attr:`MAC_TCP_READ`) becomes the socket's
+        ongoing timeout for every read/write after that — applied via
+        ``socket.settimeout()``, so :meth:`send` and :meth:`_recv_exact`
+        (and everything built on them: :meth:`readAll`, :meth:`query`,
+        ``getDataFloats``, ...) inherit the same bound automatically.
         """
         if self.CONNECTED:
             print("Already connected!")
             return -2
 
+        if connect_timeout is None:
+            connect_timeout = self.MAX_TCP_CONNECT
+        if delayval is None:
+            delayval = self.MAC_TCP_READ
+
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.s.connect((IP, self.LECROY_SERVER_PORT))
-        # TODO: if scope is turned off, then handle, not wait forever
+        self.s.settimeout(connect_timeout)
+        try:
+            self.s.connect((IP, self.LECROY_SERVER_PORT))
+        except TimeoutError as exc:
+            self.s.close()
+            raise LeCroyTimeoutError(
+                f"no response connecting to {IP}:{self.LECROY_SERVER_PORT} "
+                f"within {connect_timeout}s"
+            ) from exc
+        except OSError:
+            self.s.close()
+            raise
 
         self.SOCK_TIMEOUT = delayval
+        self.s.settimeout(self.SOCK_TIMEOUT)
         self.CONNECTED = True
 
     def disconnect(self):
@@ -195,13 +249,24 @@ class LeCroy:
         )
 
         # write the header first
-        self.s.send(bytes(head))
+        try:
+            self.s.send(bytes(head))
+        except TimeoutError as exc:
+            raise LeCroyTimeoutError(
+                f"no response writing header after {self.s.gettimeout()}s"
+            ) from exc
 
         # write the message
         byteindx = 0
         msgbytes = message.encode("ascii")
         while byteindx < msglen:
-            xferd = self.s.send(msgbytes[byteindx:])
+            try:
+                xferd = self.s.send(msgbytes[byteindx:])
+            except TimeoutError as exc:
+                raise LeCroyTimeoutError(
+                    f"no response after {self.s.gettimeout()}s "
+                    f"({byteindx}/{msglen} bytes sent)"
+                ) from exc
             if xferd < 0:
                 raise RuntimeError(f"could not write the data block, returned {xferd}")
             byteindx += xferd

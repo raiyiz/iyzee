@@ -8,6 +8,7 @@ from iyzee.scope import (
     Channel,
     Coupling,
     LeCroy,
+    LeCroyTimeoutError,
     MathChannel,
     TriggerCoupling,
     TriggerMode,
@@ -52,6 +53,147 @@ def test_recv_exact_raises_on_closed_connection():
 
     with pytest.raises(ConnectionError):
         LeCroy._recv_exact(sock, 100)
+
+
+# -- timeouts: connect(), _recv_exact(), send() must not block forever --------------------
+
+
+class _TimingOutSocket:
+    """A fake socket that always times out, reporting a fixed ``gettimeout()``
+    the way a real socket would once ``settimeout()`` has been applied."""
+
+    def __init__(self, timeout: float = 3.0):
+        self._timeout = timeout
+
+    def gettimeout(self) -> float:
+        return self._timeout
+
+    def recv(self, n: int) -> bytes:
+        raise TimeoutError("timed out")
+
+    def send(self, data: bytes) -> int:
+        raise TimeoutError("timed out")
+
+
+class _PartialThenTimeoutSocket:
+    """Delivers ``data`` two bytes at a time, then times out on every read
+    after that — for checking a timeout mid-transfer reports real progress,
+    not just "it failed"."""
+
+    def __init__(self, data: bytes, timeout: float = 1.5):
+        self._buf = data
+        self._timeout = timeout
+
+    def gettimeout(self) -> float:
+        return self._timeout
+
+    def recv(self, n: int) -> bytes:
+        if not self._buf:
+            raise TimeoutError("timed out")
+        chunk, self._buf = self._buf[:2], self._buf[2:]
+        return chunk
+
+
+def test_lecroy_timeout_error_is_a_timeout_error():
+    # So existing `except TimeoutError`/`except OSError`/`except Exception`
+    # handlers keep catching it even without knowing this subclass exists.
+    assert issubclass(LeCroyTimeoutError, TimeoutError)
+
+
+def test_recv_exact_raises_lecroy_timeout_not_a_bare_timeout():
+    sock = _TimingOutSocket(timeout=3.0)
+
+    with pytest.raises(LeCroyTimeoutError, match=r"3\.0s \(0/10 bytes received\)"):
+        LeCroy._recv_exact(sock, 10)
+
+
+def test_recv_exact_reports_how_far_it_got_before_timing_out():
+    sock = _PartialThenTimeoutSocket(b"abcd", timeout=1.5)
+
+    with pytest.raises(LeCroyTimeoutError, match=r"1\.5s \(4/10 bytes received\)"):
+        LeCroy._recv_exact(sock, 10)
+
+
+def test_send_raises_lecroy_timeout_when_the_header_write_stalls():
+    scope = LeCroy()
+    scope.s = _TimingOutSocket(timeout=2.0)
+
+    with pytest.raises(LeCroyTimeoutError, match=r"writing header after 2\.0s"):
+        scope.send("C1:VDIV 1.0")
+
+
+class _ConnectTimeoutSocket:
+    """Simulates a TCP handshake that never completes (e.g. the scope is
+    off, or a firewall is silently dropping the connection)."""
+
+    def __init__(self, *args, **kwargs):
+        self.timeout = None
+        self.closed = False
+
+    def settimeout(self, value):
+        self.timeout = value
+
+    def connect(self, address):
+        raise TimeoutError("timed out")
+
+    def close(self):
+        self.closed = True
+
+
+def test_connect_raises_lecroy_timeout_instead_of_hanging(monkeypatch):
+    fake_socket = _ConnectTimeoutSocket()
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_socket)
+
+    scope = LeCroy()
+    with pytest.raises(LeCroyTimeoutError, match=rf"within {LeCroy.MAX_TCP_CONNECT}s"):
+        scope.connect("10.0.0.1")
+
+    # The handshake was bounded by MAX_TCP_CONNECT specifically...
+    assert fake_socket.timeout == LeCroy.MAX_TCP_CONNECT
+    # ...and the half-open socket wasn't leaked.
+    assert fake_socket.closed
+    assert scope.CONNECTED is False
+
+
+class _ConnectableSocket:
+    """A fake socket that connects successfully, recording every
+    ``settimeout()`` call so the test can check both timeouts get applied."""
+
+    def __init__(self, *args, **kwargs):
+        self.timeouts: list[float] = []
+        self.connected_to = None
+
+    def settimeout(self, value):
+        self.timeouts.append(value)
+
+    def connect(self, address):
+        self.connected_to = address
+
+
+def test_connect_bounds_the_handshake_then_the_ongoing_socket_timeout(monkeypatch):
+    fake_socket = _ConnectableSocket()
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_socket)
+
+    scope = LeCroy()
+    scope.connect("10.0.0.1")
+
+    assert scope.CONNECTED is True
+    assert fake_socket.connected_to == ("10.0.0.1", LeCroy.LECROY_SERVER_PORT)
+    # settimeout() is called twice: once (MAX_TCP_CONNECT) before connect()
+    # so the handshake itself can't hang, and again (MAC_TCP_READ) once
+    # connected, so every later send()/recv() inherits a bound too.
+    assert fake_socket.timeouts == [LeCroy.MAX_TCP_CONNECT, LeCroy.MAC_TCP_READ]
+
+
+def test_connect_accepts_explicit_timeouts(monkeypatch):
+    fake_socket = _ConnectableSocket()
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_socket)
+
+    scope = LeCroy()
+    scope.connect("10.0.0.1", delayval=7.0, connect_timeout=1.0)
+
+    assert fake_socket.timeouts == [1.0, 7.0]
+    assert scope.SOCK_TIMEOUT == 7.0
 
 
 def test_get_header_assembles_fragmented_header():

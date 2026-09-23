@@ -230,7 +230,7 @@ async def test_sweep_log_keeps_bracketed_error_text(error: str) -> None:
 
 def _sweep_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_run_sequence: Any) -> IyzeeApp:
     """An app wired so pressing Run drives ``fake_run_sequence`` instead of hardware."""
-    monkeypatch.setattr(sweep_mod, "create_dirs", lambda name="": tmp_path)
+    monkeypatch.setattr(sweep_mod, "create_dirs", lambda: tmp_path)
     monkeypatch.setattr(sweep_mod, "prepare_analyzer", lambda *a, **k: None)
     monkeypatch.setattr(sweep_mod, "run_sequence", fake_run_sequence)
     app = app_mod.IyzeeApp()
@@ -252,8 +252,8 @@ def _points_on_disk(directory: Path) -> int:
     assert len(files) <= 1, f"expected a single checkpoint file, found {files}"
     if not files:
         return 0
-    with np.load(files[0], allow_pickle=True) as archive:
-        return len(archive["data"])
+    with np.load(files[0], allow_pickle=False) as archive:
+        return len(archive["x_values"])
 
 
 def _result(index: int) -> Any:
