@@ -63,9 +63,7 @@ def test_save_step_results_writes_data_and_metadata_pair(tmp_path):
             rbw_hz=1000.0,
         )
     ]
-    path = save_step_results(
-        results, tmp_path, run_metadata={"software_revision": "abc123"}
-    )
+    path = save_step_results(results, tmp_path, run_metadata={"software_revision": "abc123"})
 
     assert path.suffix == ".npz"
     json_path = path.with_suffix(".json")
@@ -80,9 +78,7 @@ def test_save_step_results_writes_data_and_metadata_pair(tmp_path):
         np.testing.assert_array_equal(archive["trace_shot_noise"], [[1.0, 1.0]])
 
     sidecar = json.loads(json_path.read_text())
-    assert sidecar["points"] == [
-        {"label": "x=1.0", "x_unit": "Hz", "rbw_hz": 1000.0}
-    ]
+    assert sidecar["points"] == [{"label": "x=1.0", "x_unit": "Hz", "rbw_hz": 1000.0}]
     assert sidecar["run_metadata"] == {"software_revision": "abc123"}
 
 def test_save_step_results_can_overwrite_a_fixed_file_pair_atomically(tmp_path: Path) -> None:
