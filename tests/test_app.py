@@ -130,6 +130,7 @@ async def test_console_history_file_passes_through_the_app(tmp_path: Path) -> No
         console = app.screen.query_one(IyzeeConsole)
         assert history_manager(console.session.shell).hist_file == str(history_file)
 
+
 @async_test
 async def test_exiting_the_app_disconnects_every_connected_instrument() -> None:
     one, two = FakeHandle(), FakeHandle()
