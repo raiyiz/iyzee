@@ -158,7 +158,9 @@ def install(on_record: Callable[[LogEntry], None]) -> TuiLogHandler:
         LOG_ROOT / "iyzee.log", maxBytes=2 * 1024 * 1024, backupCount=5
     )
     file_handler._iyzee_owned = True
-    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(name)s: %(message)s"))
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)-8s %(name)s: %(message)s")
+    )
     logger.addHandler(file_handler)
 
     return handler

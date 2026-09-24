@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 
 import pytest
+from helpers import async_test, wait_until
 from textual.widgets import RichLog, Select
 
-from helpers import async_test, wait_until
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens.log import LogScreen
 
@@ -75,7 +75,9 @@ async def test_log_screen_exception_records_include_a_traceback() -> None:
 
 
 @async_test
-async def test_log_screen_can_browse_a_rotated_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+async def test_log_screen_can_browse_a_rotated_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
     from iyzee.tui import logging_support
 
     log_root = tmp_path / "logs"

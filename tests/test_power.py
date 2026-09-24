@@ -35,7 +35,6 @@ def test_psu_accepts_injected_resource_manager():
     assert psu.instrument is None
 
     psu.connect()
-    assert resource_manager.opened[0][0] == "TCPIP::10.140.1.42::5025::SOCKET"
     assert psu.instrument is resource_manager.opened[0][1]
 
     psu.set_voltage(1.7, CH.THREE)

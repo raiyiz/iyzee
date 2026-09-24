@@ -21,7 +21,7 @@ from textual.widgets import ContentSwitcher, Footer, Header, Static
 from .instruments import INSTRUMENTS, InstrumentHandle
 from .ipython import default_history_file
 from .ipython_session import IPythonSession
-from .logging_support import LogEntry, TuiLogHandler
+from .logging_support import LogEntry
 from .logging_support import install as install_logging
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
