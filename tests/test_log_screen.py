@@ -12,6 +12,12 @@ from iyzee.tui.screens.log import LogScreen
 
 @async_test
 async def test_log_screen_shows_buffered_and_live_records() -> None:
+    """Both delivery paths matter: startup records arrive through the shared
+    buffer, while records emitted after the page is open are appended live.
+
+    Keeping the two cases in one test preserves both lifecycle contracts
+    without maintaining two nearly identical Textual app harnesses.
+    """
     app = IyzeeApp()
     async with app.run_test() as pilot:
         logging.getLogger("iyzee.tui").warning("a warning before opening the log page")
