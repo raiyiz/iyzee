@@ -85,6 +85,8 @@ def test_ipython_executes_and_preserves_the_lab_namespace() -> None:
     result = shell.execute("measurement * 2")
     assert repeated.success and result.success and "42" in result.stdout
     assert isinstance(shell.shell.user_ns["lab"], LabProxy)
+
+
 def test_lab_attribute_reflects_current_handles_live() -> None:
     device = object()
     app = FakeApp(handles={"mxa": MxaHandle(device)})
@@ -198,6 +200,8 @@ def test_memory_history_is_private_to_each_shell_instance() -> None:
 
     second = IyzeeIPython(FakeApp())
     assert second.history == []
+
+
 def test_file_history_persists_and_creates_its_parent(tmp_path: Path) -> None:
     history_file = tmp_path / "not" / "yet" / "created" / "console_history.sqlite"
     assert not history_file.parent.exists()
@@ -211,6 +215,8 @@ def test_file_history_persists_and_creates_its_parent(tmp_path: Path) -> None:
 
     assert history_file.parent.exists()
     assert second_run.history == ["yesterday = 1", "today = 2"]
+
+
 def test_default_history_file_is_under_a_per_user_data_directory() -> None:
     """Deliberately *not* IPython's own default location
     (`~/.ipython/profile_default/history.sqlite`) -- that one's shared by
