@@ -32,7 +32,7 @@ async def test_console_lab_reflects_running_app_state() -> None:
         lab = console_page.console.session.shell.user_ns["lab"]
 
         # The initial empty state is significant: the proxy must consult the
-                # live app rather than assuming a sweep has already happened.
+        # live app rather than assuming a sweep has already happened.
         assert lab.results == []
         assert lab.last_run is None
 
