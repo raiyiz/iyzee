@@ -196,10 +196,10 @@ def test_memory_history_is_private_to_each_shell_instance() -> None:
     """A fresh shell must not inherit input history from another instance.
 
     The app deliberately uses a private ``:memory:`` SQLite database by default.
-That is an isolation boundary, not merely an optimization: IPython's normal
-persistent history points every shell at a shared on-disk database, while this
-application owns the lifecycle of its shell and should not leak commands across
-app instances.
+    That is an isolation boundary, not merely an optimization: IPython's normal
+    persistent history points every shell at a shared on-disk database, while this
+    application owns the lifecycle of its shell and should not leak commands across
+    app instances.
     """
     first = IyzeeIPython(FakeApp())
     first.execute("secret = 1")
