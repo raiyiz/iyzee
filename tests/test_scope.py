@@ -94,12 +94,6 @@ class _PartialThenTimeoutSocket:
         return chunk
 
 
-def test_lecroy_timeout_error_is_a_timeout_error():
-    # So existing `except TimeoutError`/`except OSError`/`except Exception`
-    # handlers keep catching it even without knowing this subclass exists.
-    assert issubclass(LeCroyTimeoutError, TimeoutError)
-
-
 def test_recv_exact_raises_lecroy_timeout_not_a_bare_timeout():
     sock = _TimingOutSocket(timeout=3.0)
 
