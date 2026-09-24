@@ -79,7 +79,6 @@ def test_locked_proxy_passes_through_non_callable_attributes() -> None:
     assert proxy.not_callable == 42
 
 
-
 # -- _VisaHandle ----------------------------------------------------------
 
 
