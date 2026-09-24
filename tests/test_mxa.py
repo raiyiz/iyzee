@@ -52,10 +52,10 @@ def make_mxa():
     return mxa, instrument
 
 
-def test_constructor_accepts_injected_resource_manager():
+def test_constructor_connects_with_the_configured_visa_settings():
     resource_manager = FakeResourceManager()
 
-    mxa = KeysightMXA("10.0.0.1", resource_manager=resource_manager)
+    mxa = KeysightMXA("10.0.0.1", timeout_ms=1234, resource_manager=resource_manager)
 
     assert mxa.rm is resource_manager
     assert resource_manager.opened == []
@@ -63,31 +63,19 @@ def test_constructor_accepts_injected_resource_manager():
 
     mxa.connect()
     assert len(resource_manager.opened) == 1
-    assert mxa.instrument is resource_manager.opened[0][1]
+    instrument = resource_manager.opened[0][1]
+    assert mxa.instrument is instrument
+    assert resource_manager.opened[0][0] == "TCPIP0::10.0.0.1::inst0::INSTR"
+    assert instrument.timeout == 1234
+    assert instrument.read_termination == "\n"
+    assert instrument.write_termination == "\n"
+
+    mxa.connect()
+    assert len(resource_manager.opened) == 1
 
     mxa.close()
     assert mxa.instrument is None
-    assert resource_manager.opened[0][1].close_count == 1
-
-
-def test_constructor_opens_only_when_connect_is_called(monkeypatch):
-    resource_manager = FakeResourceManager()
-    monkeypatch.setattr(base_module.pyvisa, "ResourceManager", lambda: resource_manager)
-
-    mxa = KeysightMXA("10.0.0.1", timeout_ms=1234)
-
-    assert resource_manager.opened == []
-    assert mxa.instrument is None
-
-    mxa.connect()
-    assert len(resource_manager.opened) == 1
-    assert resource_manager.opened[0][0] == "TCPIP0::10.0.0.1::inst0::INSTR"
-    assert mxa.instrument.timeout == 1234
-    assert mxa.instrument.read_termination == "\n"
-    assert mxa.instrument.write_termination == "\n"
-
-    mxa.connect()
-    assert len(resource_manager.opened) == 1
+    assert instrument.close_count == 1
 
 
 def test_context_manager_connects_once_and_closes(monkeypatch):

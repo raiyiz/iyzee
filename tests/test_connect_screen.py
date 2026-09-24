@@ -117,7 +117,7 @@ async def test_enter_on_a_connecting_row_does_not_open_the_device_twice(
 
 
 @async_test
-async def test_disconnect_needs_a_confirming_enter(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_disconnect_requires_a_fresh_second_enter(monkeypatch: pytest.MonkeyPatch) -> None:
     handle = FakeHandle()
     app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
@@ -125,31 +125,25 @@ async def test_disconnect_needs_a_confirming_enter(monkeypatch: pytest.MonkeyPat
         await _row_is(pilot, table, "connected")
         await wait_until(pilot, lambda: not screen._busy)  # the row is usable again
 
-        await pilot.press("enter")  # the first Enter only arms it...
+        await pilot.press("enter")  # first Enter arms it...
         await pilot.pause(0.2)
         assert "fake" in app.handles and handle.disconnect_calls == 0
         assert "Press Enter again to disconnect Fake." in notifications(app)
 
-        await pilot.press("enter")  # ...the second confirms
+        # An expired confirmation must not be enough to disconnect.
+        assert screen._armed is not None
+        screen._armed = (
+            screen._armed[0],
+            time.monotonic() - 1,
+        )  # force the confirmation window to expire
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        assert "fake" in app.handles and handle.disconnect_calls == 0
+
+        # A genuinely fresh second Enter does disconnect.
+        await pilot.press("enter")
         await _row_is(pilot, table, "disconnected")
         assert handle.disconnect_calls == 1 and "fake" not in app.handles
-
-
-@async_test
-async def test_an_expired_confirmation_does_not_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
-    handle = FakeHandle()
-    app = connect_app(monkeypatch, handle)
-    async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
-        await _row_is(pilot, table, "connected")
-        await pilot.press("enter")  # arms
-        await pilot.pause(0.1)
-        assert screen._armed is not None
-        screen._armed = (screen._armed[0], time.monotonic() - 1)  # the window has passed
-
-        await pilot.press("enter")  # must re-arm, not disconnect
-        await pilot.pause(0.2)
-        assert handle.disconnect_calls == 0 and "fake" in app.handles
 
 
 @async_test

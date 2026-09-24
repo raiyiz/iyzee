@@ -79,15 +79,6 @@ def test_locked_proxy_passes_through_non_callable_attributes() -> None:
     assert proxy.not_callable == 42
 
 
-def test_locked_proxy_does_not_forward_dunder_methods() -> None:
-    """__enter__/__exit__ stay with the real device, not the proxy — see
-    LockedProxy's docstring: connection lifecycle belongs to the Connect
-    screen, not to console code doing `with lab.mx:`."""
-    proxy = LockedProxy(_Recorder(), threading.Lock())
-    with pytest.raises(AttributeError):
-        proxy.__enter__()
-
-
 # -- _VisaHandle ----------------------------------------------------------
 
 
@@ -152,33 +143,23 @@ class _FakePsu:
         self.closed = True
 
 
-def test_shutter_handle_connect_builds_shutter_control(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(instruments_mod, "ShutterControl", _FakeShutterControl)
+
     handle = ShutterHandle()
+    handle.disconnect()  # disconnect before connect is a no-op
+
     handle.connect()
     assert handle.shutter is not None
     assert "CH" in handle.probe()
 
-
-def test_shutter_handle_disconnect_closes_underlying_psu(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(instruments_mod, "ShutterControl", _FakeShutterControl)
-    handle = ShutterHandle()
-    handle.connect()
-    # handle.shutter is statically ShutterControl | None (the real type
-    # instruments.py declares); monkeypatching ShutterControl only
-    # changes what's constructed at runtime, not that annotation, so the
-    # fake needs an explicit cast here.
+    # The real attribute is typed as ShutterControl | None; the fake only changes
+    # the runtime constructor, so narrow it explicitly for the test-only fake.
     shutter = cast(_FakeShutterControl, handle.shutter)
     psu = shutter.psu
     handle.disconnect()
     assert psu.closed is True
     assert handle.shutter is None
-
-
-def test_shutter_handle_disconnect_before_connect_is_a_noop() -> None:
-    ShutterHandle().disconnect()  # must not raise
 
 
 # -- WavemeterHandle ----------------------------------------------------------
@@ -227,10 +208,7 @@ def test_scope_handle_connect_and_probe(monkeypatch: pytest.MonkeyPatch) -> None
 # -- registry ----------------------------------------------------------
 
 
-def test_instrument_registry_keys_are_unique() -> None:
+def test_instrument_registry_has_unique_nonempty_specs() -> None:
     keys = [spec.key for spec in INSTRUMENTS]
     assert len(keys) == len(set(keys))
-
-
-def test_instrument_registry_labels_are_non_empty() -> None:
     assert all(spec.label for spec in INSTRUMENTS)

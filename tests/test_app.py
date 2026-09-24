@@ -115,29 +115,32 @@ async def test_nav_rail_keeps_the_dot_on_the_same_line_as_the_name() -> None:
         assert any("Instruments" in line for line in lines), "the block has a heading"
 
 
-@pytest.mark.parametrize("with_file", [False, True])
 @async_test
-async def test_console_history_file_defaults_to_memory_and_a_real_path_is_passed_through(
-    with_file: bool, tmp_path: Path
+async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(
+    tmp_path: Path,
 ) -> None:
-    """`IyzeeApp()` with no arguments — every test in this codebase — must
-    default to no persistent history file at all (`console_history_file=None`,
-    which the session turns into `:memory:`). Getting this default wrong
-    would silently reintroduce every InteractiveShell in the whole test
-    suite writing to a real, shared, ever-growing SQLite file again — see
-    `default_history_file`'s docstring in ipython.py for what that caused
-    last time. Also checks the opt-in path actually reaches the console's
-    shell: a real path passed through the app constructor must end up
-    configured on the running IPythonSession's shell, not just stored.
+    """The app must keep the console history database isolated by default.
+
+    ``IyzeeApp()`` passes ``console_history_file=None`` to the session, which
+    must become ``:memory:`` rather than IPython's shared persistent history.
+    That protects the whole test suite and each app instance from accidentally
+    sharing ``~/.ipython/profile_default/history.sqlite``. The explicit-path
+    case stays here because this test is specifically about the app-to-session
+    wiring; the shell-level tests cover the history implementation itself.
     """
-    history_file = tmp_path / "console_history.sqlite" if with_file else None
+    default_app = IyzeeApp()
+    async with default_app.run_test() as pilot:
+        await pilot.press("i")
+        console = default_app.screen.query_one(IyzeeConsole)
+        assert history_manager(console.session.shell).hist_file == ":memory:"
+
+    history_file = tmp_path / "console_history.sqlite"
     app = IyzeeApp(console_history_file=history_file)
     assert app.console_history_file == history_file
     async with app.run_test() as pilot:
         await pilot.press("i")
         console = app.screen.query_one(IyzeeConsole)
-        expected = str(history_file) if history_file else ":memory:"
-        assert history_manager(console.session.shell).hist_file == expected
+        assert history_manager(console.session.shell).hist_file == str(history_file)
 
 
 @async_test
