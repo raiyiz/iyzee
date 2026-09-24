@@ -351,3 +351,27 @@ Screen {
     height: 30;
     margin: 1 2;
 }
+
+/* -- Log ------------------------------------------------------------------ */
+
+#log-controls {
+    height: auto;
+    margin: 1 2 0 2;
+}
+
+#log-controls Select {
+    width: 1fr;
+}
+
+#log-controls Button {
+    width: auto;
+    min-width: 0;
+    margin-left: 1;
+}
+
+#log-view {
+    height: 1fr;
+    min-height: 12;
+    margin: 1 2;
+    border: round $primary;
+}

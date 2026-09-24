@@ -208,6 +208,7 @@ class ConnectScreen(Page):
                 return
             self.iyzee_app.handles[spec.key] = handle
             outcome = ConnectOutcome(key=spec.key, ok=True, detail=detail)
+            log.info("connected %s (%s)", spec.key, outcome.detail)
             self._ui(self._set_row, outcome.key, "connected", outcome.detail)
         finally:
             self._ui(self._release, spec.key)
@@ -229,6 +230,7 @@ class ConnectScreen(Page):
                         severity="warning",
                         markup=False,
                     )
+            log.info("disconnected %s", spec.key)
             self._ui(self._set_row, spec.key, "disconnected", "-")
         finally:
             self._ui(self._release, spec.key)

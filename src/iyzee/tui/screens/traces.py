@@ -164,7 +164,7 @@ class TracesScreen(Page):
             sidecar = json.loads(path.with_suffix(".json").read_text())
             points = sidecar.get("points", [])
             run_metadata = sidecar.get("run_metadata")
-        except OSError, ValueError:
+        except (OSError, ValueError):
             pass
 
         lines = [f"[b]{escape(path.name)}[/b]", f"{len(x_values)} point(s)"]

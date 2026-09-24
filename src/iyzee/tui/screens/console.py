@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 from IPython.core.displaypub import DisplayPublisher
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.css.query import NoMatches
 from textual.widgets import Static
 from textual_plotext import PlotextPlot
 
@@ -172,8 +173,22 @@ class IyzeeConsole(Vertical):
         self._render_status()
 
     def _render_status(self) -> None:
+        # is_mounted (checked by the one caller, _on_busy) is true as soon
+        # as this widget itself is attached to the DOM — not once its own
+        # compose()-yielded children have finished mounting, which happens
+        # as a separate, slightly later step. IPythonSession's background
+        # thread can report "busy" fast enough to land in that gap (most
+        # reliably right after session.start(), the very last line of
+        # on_mount — see its docstring for why it's last), so
+        # "#console-status" isn't always there yet despite the is_mounted
+        # check passing. Once it exists it stays for the widget's whole
+        # life, so this only ever needs to no-op, never retry.
+        try:
+            status = self.query_one("#console-status", Static)
+        except NoMatches:
+            return
         state = "running… Ctrl+C interrupts" if self._busy else "Ctrl+C clears the line"
-        self.query_one("#console-status", Static).update(
+        status.update(
             f"{self._lab_text}   ·   {state}   ·   Shift+PageUp/Down or wheel: scrollback"
         )
 
@@ -226,7 +241,18 @@ class IyzeeConsole(Vertical):
         p.text(f"[plotted {len(lines)} line(s) in the plot panel below the terminal]")
 
     def _draw_figure(self, lines: list[tuple[list, list, str]], labels: dict[str, str]) -> None:
-        plot = self.query_one("#console-plot", PlotextPlot)
+        # Same defensive shape as _render_status, for the same reason —
+        # see its comment. The actual risk here is lower (this can only
+        # fire once code has *run* in the shell, which requires
+        # session.start() — the last line of on_mount — to have already
+        # returned; #console-plot should reliably exist by then), but the
+        # guard costs nothing and keeps every threaded callback in this
+        # class consistent rather than "safe until someone changes the
+        # ordering upstream and doesn't notice this one relied on it."
+        try:
+            plot = self.query_one("#console-plot", PlotextPlot)
+        except NoMatches:
+            return
         plot.display = True
         draw_series(
             plot,

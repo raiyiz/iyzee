@@ -21,8 +21,11 @@ from textual.widgets import ContentSwitcher, Footer, Header, Static
 from .instruments import INSTRUMENTS, InstrumentHandle
 from .ipython import default_history_file
 from .ipython_session import IPythonSession
+from .logging_support import LogEntry, TuiLogHandler
+from .logging_support import install as install_logging
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
+from .screens.log import LogScreen
 from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
 from .screens.traces import TracesScreen
@@ -49,6 +52,7 @@ class NavRail(Static):
         ("scope", "Scope"),
         ("traces", "Traces"),
         ("console", "Console"),
+        ("log", "Log"),
     )
 
     def compose(self) -> ComposeResult:
@@ -151,13 +155,15 @@ class IyzeeApp(App):
     # sequences, a different wire format _APP_KEYS/termkeys.py don't
     # handle — see termkeys.py's own comment on this split). So Scope is
     # reachable everywhere via "o", the nav rail, and the command palette,
-    # just without a dedicated function key.
+    # just without a dedicated function key. "l" for the Log page (added
+    # later) follows the same reasoning.
     BINDINGS = [
         Binding("c", "show_page('connect')", "Connect"),
         Binding("s", "show_page('sweep')", "Sweep"),
         Binding("o", "show_page('scope')", "Scope"),
         Binding("t", "show_page('traces')", "Traces"),
         Binding("i", "show_page('console')", "Console"),
+        Binding("l", "show_page('log')", "Log"),
         Binding("f1", "show_page('connect')", "Connect", priority=True),
         Binding("f2", "show_page('sweep')", "Sweep", priority=True),
         Binding("f3", "show_page('traces')", "Traces", priority=True),
@@ -183,6 +189,7 @@ class IyzeeApp(App):
         "scope": ScopeScreen,
         "traces": TracesScreen,
         "console": ConsoleScreen,
+        "log": LogScreen,
     }
     DEFAULT_PAGE = "connect"
 
@@ -193,6 +200,15 @@ class IyzeeApp(App):
         console_editing_mode: str = "vi",
     ) -> None:
         super().__init__()
+        # Installed first, before anything else in this constructor can
+        # fail: this is the sink for every log.exception/log.warning/
+        # log.info call anywhere in the app (see logging_support's module
+        # docstring for why nothing showed any of this before). Kept as
+        # self.log_handler, not a module global, so LogScreen reads the
+        # live buffer straight off the running app rather than needing its
+        # own reference to a handler that (in tests) gets replaced every
+        # time a new IyzeeApp() is constructed — see install()'s docstring.
+        self.log_handler = install_logging(self._on_log_entry)
         self.handles: dict[str, InstrumentHandle] = {}
         # One lock per instrument key, shared by every caller that talks to
         # that instrument's hardware: a page's background worker (Connect,
@@ -270,6 +286,27 @@ class IyzeeApp(App):
             sweep.refresh_readiness()
         for scope in self.query(ScopeScreen):
             scope.refresh_readiness()
+
+    def _on_log_entry(self, entry: LogEntry) -> None:
+        """``TuiLogHandler``'s callback — runs on whichever thread just
+        logged something, which is almost never this app's own thread (see
+        ``TuiLogHandler``'s docstring), so hop onto it before touching any
+        widget, the same as every screen's own worker->UI callbacks do.
+
+        ``call_from_thread`` itself refuses to run when it's *already* on
+        the app's thread (a direct call, not from a worker) as well as
+        when the app isn't running yet (a log call during startup, before
+        ``run()``) — both are real, both just mean "call it directly"
+        rather than an error worth surfacing.
+        """
+        try:
+            self.call_from_thread(self._show_log_entry, entry)
+        except RuntimeError:
+            self._show_log_entry(entry)
+
+    def _show_log_entry(self, entry: LogEntry) -> None:
+        for screen in self.query(LogScreen):
+            screen.append_entry(entry)
 
     async def on_unmount(self) -> None:
         """Runs on every way out (Ctrl+Q, ``exit()``, test teardown).
