@@ -72,6 +72,8 @@ def test_save_step_results_writes_data_and_metadata_pair(tmp_path):
         "no stray .part file"
     )
 
+    # The numeric archive is deliberately pickle-free; metadata lives in the JSON
+    # sidecar so loading sweep data never needs unsafe pickle deserialization.
     with np.load(path, allow_pickle=False) as archive:
         np.testing.assert_array_equal(archive["x_values"], [1.0])
         np.testing.assert_array_equal(archive["trace_squeezing"], [[3.0, 4.0]])
@@ -80,6 +82,8 @@ def test_save_step_results_writes_data_and_metadata_pair(tmp_path):
     sidecar = json.loads(json_path.read_text())
     assert sidecar["points"] == [{"label": "x=1.0", "x_unit": "Hz", "rbw_hz": 1000.0}]
     assert sidecar["run_metadata"] == {"software_revision": "abc123"}
+    # Per-point metadata and run-level metadata stay in the sidecar rather than
+    # contaminating the numeric NPZ payload.
 
 
 def test_save_step_results_can_overwrite_a_fixed_file_pair_atomically(tmp_path: Path) -> None:
