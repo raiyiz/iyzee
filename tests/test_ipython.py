@@ -216,7 +216,7 @@ def test_file_history_persists_and_creates_its_parent(tmp_path: Path) -> None:
     IPython may buffer recent history entries in memory, so this test flushes
     the first shell's cache explicitly before constructing the second shell. That
     proves persistence without calling ``atexit_operations`` twice on one shell,
-which is not how the real app lifecycle behaves.
+    which is not how the real app lifecycle behaves.
     """
     history_file = tmp_path / "not" / "yet" / "created" / "console_history.sqlite"
     assert not history_file.parent.exists()
