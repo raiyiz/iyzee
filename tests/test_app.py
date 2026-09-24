@@ -125,8 +125,8 @@ async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(
     must become ``:memory:`` rather than IPython's shared persistent history.
     That protects the whole test suite and each app instance from accidentally
     sharing ``~/.ipython/profile_default/history.sqlite``. The explicit-path
-case stays here because this test is specifically about the app-to-session
-wiring; the shell-level tests cover the history implementation itself.
+    case stays here because this test is specifically about the app-to-session
+    wiring; the shell-level tests cover the history implementation itself.
     """
     default_app = IyzeeApp()
     async with default_app.run_test() as pilot:
