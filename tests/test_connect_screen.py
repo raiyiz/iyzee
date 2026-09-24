@@ -132,7 +132,7 @@ async def test_disconnect_requires_a_fresh_second_enter(monkeypatch: pytest.Monk
 
         # An expired confirmation must not be enough to disconnect.
         assert screen._armed is not None
-        screen._armed = (screen._armed[0], time.monotonic() - 1)
+        screen._armed = (screen._armed[0], time.monotonic() - 1)  # force the confirmation window to expire
         await pilot.press("enter")
         await pilot.pause(0.2)
         assert "fake" in app.handles and handle.disconnect_calls == 0
