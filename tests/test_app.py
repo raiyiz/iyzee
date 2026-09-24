@@ -116,12 +116,22 @@ async def test_nav_rail_keeps_the_dot_on_the_same_line_as_the_name() -> None:
 
 
 @async_test
-async def test_console_history_file_passes_through_the_app(tmp_path: Path) -> None:
-    """An explicitly supplied history path must reach the running console.
+async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(tmp_path: Path) -> None:
+    """The app must keep the console history database isolated by default.
 
-    The shell-level tests cover the default ``:memory:`` behavior; this one
-    only protects the app-to-session wiring.
+    ``IyzeeApp()`` passes ``console_history_file=None`` to the session, which
+    must become ``:memory:`` rather than IPython's shared persistent history.
+That protects the whole test suite and each app instance from accidentally
+sharing ``~/.ipython/profile_default/history.sqlite``. The explicit-path
+case stays here because this test is specifically about the app-to-session
+wiring; the shell-level tests cover the history implementation itself.
     """
+    default_app = IyzeeApp()
+    async with default_app.run_test() as pilot:
+        await pilot.press("i")
+        console = default_app.screen.query_one(IyzeeConsole)
+        assert history_manager(console.session.shell).hist_file == ":memory:"
+
     history_file = tmp_path / "console_history.sqlite"
     app = IyzeeApp(console_history_file=history_file)
     assert app.console_history_file == history_file
@@ -129,7 +139,6 @@ async def test_console_history_file_passes_through_the_app(tmp_path: Path) -> No
         await pilot.press("i")
         console = app.screen.query_one(IyzeeConsole)
         assert history_manager(console.session.shell).hist_file == str(history_file)
-
 
 @async_test
 async def test_exiting_the_app_disconnects_every_connected_instrument() -> None:
