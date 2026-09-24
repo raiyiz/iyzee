@@ -153,6 +153,8 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
     assert handle.shutter is not None
     assert "CH" in handle.probe()
 
+    # The real attribute is typed as ShutterControl | None; the fake only changes
+    # the runtime constructor, so narrow it explicitly for the test-only fake.
     shutter = cast(_FakeShutterControl, handle.shutter)
     psu = shutter.psu
     handle.disconnect()
