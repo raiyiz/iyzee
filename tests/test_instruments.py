@@ -159,6 +159,7 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
     assert psu.closed is True
     assert handle.shutter is None
 
+
 # -- WavemeterHandle ----------------------------------------------------------
 
 
