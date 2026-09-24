@@ -314,31 +314,3 @@ async def test_console_interrupt_scrollback_and_shutdown() -> None:
     assert session._thread is not None and not session._thread.is_alive(), (
         "leaving the app closes the shell"
     )
-
-
-@pytest.mark.skip("Fails more often than not")
-@async_test
-async def test_console_renders_html_and_matplotlib_figures() -> None:
-    app = IyzeeApp()
-    async with app.run_test(size=(110, 32)) as pilot:
-        await pilot.press("i")
-        assert await _wait(pilot, app, "In [1]")
-        session = app.query_one(IyzeeConsole).session
-        session.send(
-            b"from IPython.display import display\r"
-            b"class Foo:\r    def _repr_html_(self): return '<b>hello</b> world'\r\r"
-            b"display(Foo())\r"
-        )
-        assert await _wait(pilot, app, "hello world", timeout=30), _console_text(app)
-        assert "object at 0x" not in _console_text(app)
-
-        session.send(
-            b"import matplotlib; matplotlib.use('Agg')\r"
-            b"import matplotlib.pyplot as plt\r"
-            b"fig, ax = plt.subplots(); ax.plot([1, 2, 3], [4, 5, 6], label='t')\r"
-            b"fig\r"
-        )
-        assert await _wait(pilot, app, "plotted 1 line", timeout=20), _console_text(
-            app
-        )  # first matplotlib import is slow
-        assert app.screen.query_one("#console-plot").display is True

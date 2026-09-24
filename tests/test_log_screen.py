@@ -11,7 +11,7 @@ from iyzee.tui.screens.log import LogScreen
 
 
 @async_test
-async def test_log_screen_shows_a_record_logged_before_it_was_ever_opened() -> None:
+async def test_log_screen_shows_buffered_and_live_records() -> None:
     app = IyzeeApp()
     async with app.run_test() as pilot:
         logging.getLogger("iyzee.tui").warning("a warning before opening the log page")
@@ -20,19 +20,9 @@ async def test_log_screen_shows_a_record_logged_before_it_was_ever_opened() -> N
 
         screen = app.query_one(LogScreen)
         view = screen.query_one("#log-view", RichLog)
-        assert len(view.lines) >= 1
+        assert any("a warning before opening the log page" in line.text for line in view.lines)
 
-
-@async_test
-async def test_log_screen_shows_a_record_logged_live_while_open() -> None:
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        await pilot.press("l")
-        await pilot.pause(0.3)
-        screen = app.query_one(LogScreen)
-        view = screen.query_one("#log-view", RichLog)
         before = len(view.lines)
-
         logging.getLogger("iyzee.tui").info("an info event while on the log page")
         await wait_until(pilot, lambda: len(view.lines) > before)
 

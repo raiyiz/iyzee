@@ -115,30 +115,20 @@ async def test_nav_rail_keeps_the_dot_on_the_same_line_as_the_name() -> None:
         assert any("Instruments" in line for line in lines), "the block has a heading"
 
 
-@pytest.mark.parametrize("with_file", [False, True])
 @async_test
-async def test_console_history_file_defaults_to_memory_and_a_real_path_is_passed_through(
-    with_file: bool, tmp_path: Path
-) -> None:
-    """`IyzeeApp()` with no arguments — every test in this codebase — must
-    default to no persistent history file at all (`console_history_file=None`,
-    which the session turns into `:memory:`). Getting this default wrong
-    would silently reintroduce every InteractiveShell in the whole test
-    suite writing to a real, shared, ever-growing SQLite file again — see
-    `default_history_file`'s docstring in ipython.py for what that caused
-    last time. Also checks the opt-in path actually reaches the console's
-    shell: a real path passed through the app constructor must end up
-    configured on the running IPythonSession's shell, not just stored.
+async def test_console_history_file_passes_through_the_app(tmp_path: Path) -> None:
+    """An explicitly supplied history path must reach the running console.
+
+    The shell-level tests cover the default ``:memory:`` behavior; this one
+    only protects the app-to-session wiring.
     """
-    history_file = tmp_path / "console_history.sqlite" if with_file else None
+    history_file = tmp_path / "console_history.sqlite"
     app = IyzeeApp(console_history_file=history_file)
     assert app.console_history_file == history_file
     async with app.run_test() as pilot:
         await pilot.press("i")
         console = app.screen.query_one(IyzeeConsole)
-        expected = str(history_file) if history_file else ":memory:"
-        assert history_manager(console.session.shell).hist_file == expected
-
+        assert history_manager(console.session.shell).hist_file == str(history_file)
 
 @async_test
 async def test_exiting_the_app_disconnects_every_connected_instrument() -> None:

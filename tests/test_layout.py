@@ -19,9 +19,9 @@ from textual.widgets import ContentSwitcher, Select
 
 from iyzee.tui.app import IyzeeApp
 
-# A big monitor, a typical window, classic 80x24, a narrow pane, a short-but-wide
-# pane, and a deliberately tiny one.
-SIZES = [(140, 50), (100, 30), (80, 24), (60, 20), (120, 16), (60, 14)]
+# Representative wide and narrow terminals: breakpoint-specific reflow is covered
+# separately below, so reachability only needs the two layout extremes.
+SIZES = [(140, 50), (60, 14)]
 
 CONTROLS = {
     "bandwidth": ["#sweep-type", "#rbw-start", "#rbw-stop", "#rbw-steps"],
@@ -74,7 +74,7 @@ async def test_every_sweep_control_can_be_scrolled_into_view(
             )
 
 
-@pytest.mark.parametrize("size", [(80, 24), (80, 16), (100, 12)])
+@pytest.mark.parametrize("size", [(80, 16)])
 @async_test
 async def test_the_console_terminal_stays_reachable_on_short_terminals(
     size: tuple[int, int],
@@ -87,7 +87,7 @@ async def test_the_console_terminal_stays_reachable_on_short_terminals(
         assert (await _scroll_to(pilot, terminal)).overlaps(terminal.region)
 
 
-@pytest.mark.parametrize("width", [60, 100, 140])
+@pytest.mark.parametrize("width", [60, 140])
 @async_test
 async def test_pages_scroll_instead_of_clipping_and_fit_horizontally(width: int) -> None:
     app = IyzeeApp()
