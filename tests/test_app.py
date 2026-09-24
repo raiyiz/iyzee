@@ -116,7 +116,9 @@ async def test_nav_rail_keeps_the_dot_on_the_same_line_as_the_name() -> None:
 
 
 @async_test
-async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(tmp_path: Path) -> None:
+async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(
+    tmp_path: Path,
+) -> None:
     """The app must keep the console history database isolated by default.
 
     ``IyzeeApp()`` passes ``console_history_file=None`` to the session, which
