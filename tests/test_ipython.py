@@ -193,6 +193,14 @@ def test_lab_tab_completion_actually_works() -> None:
 
 
 def test_memory_history_is_private_to_each_shell_instance() -> None:
+    """A fresh shell must not inherit input history from another instance.
+
+    The app deliberately uses a private ``:memory:`` SQLite database by default.
+That is an isolation boundary, not merely an optimization: IPython's normal
+persistent history points every shell at a shared on-disk database, while this
+application owns the lifecycle of its shell and should not leak commands across
+app instances.
+    """
     first = IyzeeIPython(FakeApp())
     first.execute("secret = 1")
     assert first.history == ["secret = 1"]
@@ -203,6 +211,13 @@ def test_memory_history_is_private_to_each_shell_instance() -> None:
 
 
 def test_file_history_persists_and_creates_its_parent(tmp_path: Path) -> None:
+    """An explicit history file is opt-in and must survive a shell restart.
+
+    IPython may buffer recent history entries in memory, so this test flushes
+the first shell's cache explicitly before constructing the second shell. That
+proves persistence without calling ``atexit_operations`` twice on one shell,
+which is not how the real app lifecycle behaves.
+    """
     history_file = tmp_path / "not" / "yet" / "created" / "console_history.sqlite"
     assert not history_file.parent.exists()
 
