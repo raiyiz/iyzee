@@ -81,6 +81,7 @@ def test_save_step_results_writes_data_and_metadata_pair(tmp_path):
     assert sidecar["points"] == [{"label": "x=1.0", "x_unit": "Hz", "rbw_hz": 1000.0}]
     assert sidecar["run_metadata"] == {"software_revision": "abc123"}
 
+
 def test_save_step_results_can_overwrite_a_fixed_file_pair_atomically(tmp_path: Path) -> None:
     target = tmp_path / "checkpoint.npz"
     assert save_step_results([_result(1.0)], tmp_path, path=target) == target
