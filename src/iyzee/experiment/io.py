@@ -137,11 +137,11 @@ def save_numeric_recording(
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     json_path = path.with_suffix(".json")
     sidecar = {
+        **dict(metadata),
         "format": "iyzee.numeric-recording",
         "format_version": 1,
         "data_file": path.name,
         "data_sha256": digest,
-        **dict(metadata),
     }
     partial_json = json_path.with_name(json_path.name + ".part")
     partial_json.write_text(json.dumps(sidecar, indent=2, default=str))
