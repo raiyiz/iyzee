@@ -169,7 +169,7 @@ def test_lab_tab_completion_actually_works() -> None:
     see through LabProxy's dynamic __getattr__ -- without use_jedi=False
     this silently returns zero completions for `lab.<Tab>`, which would
     make `lab`'s whole attribute set undiscoverable in practice."""
-    app = FakeApp(handles={"mxa": MxaHandle(object())})
+    app = FakeApp(handles={"mxa": FakeHandle(device=object())})
     shell = IyzeeIPython(app)
     _text, matches = shell.complete("lab.", 4)
     assert {".mx", ".results", ".last_run", ".connected"} <= set(matches)
