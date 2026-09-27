@@ -27,11 +27,9 @@ from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Vertical
-from textual.widget import Widget
 from textual.widgets import (
     Button,
     Input,
-    Label,
     ProgressBar,
     RichLog,
     Select,
@@ -58,7 +56,7 @@ from ...experiment import (
 from ..plotting import draw_series
 from ..text import one_line
 from ..workers import LastRun
-from .page import Page
+from .page import FieldError, Page, _field
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -75,26 +73,6 @@ log = logging.getLogger("iyzee.tui")
 MAX_POINTS = 1000
 
 
-class FieldError(ValueError):
-    """A form field failed validation; ``field_id`` says which one.
-
-    A ValueError subclass so callers that only care *that* the form is
-    invalid keep working, while the screen can point at the offending field.
-    """
-
-    def __init__(self, field_id: str, message: str) -> None:
-        super().__init__(message)
-        self.field_id = field_id
-
-
-def _field(label: str, widget: Widget, *, id: str | None = None) -> Vertical:
-    """A label stacked over its input, as one grid cell of the sweep form.
-
-    Grouping the pair in a single container is what lets ``app.tcss``
-    reflow the form as a grid (1/2/4 columns depending on width) without
-    ever separating a label from the field it belongs to.
-    """
-    return Vertical(Label(label), widget, classes="field", id=id)
 
 
 class SweepAborted(Exception):
@@ -117,10 +95,6 @@ class SweepScreen(Page):
     itself lives in ``app.tcss`` (see ``IyzeeApp.HORIZONTAL_BREAKPOINTS``).
     """
 
-    @property
-    def iyzee_app(self) -> IyzeeApp:
-        """``self.app`` narrowed to the concrete app type (see ConnectScreen.iyzee_app)."""
-        return self.app
 
     def compose(self) -> ComposeResult:
         yield Static("Sweep", classes="panel-title")
@@ -176,9 +150,6 @@ class SweepScreen(Page):
         self.query_one("#freq-fields").display = event.value == "frequency"
         self.refresh_readiness()
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        # Editing a field you were told is wrong clears the marker.
-        event.input.remove_class("-invalid")
 
     # -- readiness ---------------------------------------------------------
 
@@ -300,20 +271,7 @@ class SweepScreen(Page):
         self.iyzee_app.sweep_running = True
         self._run(mx_handle.device, shutter, steps, config, kind)
 
-    def _flag_invalid(self, field_id: str) -> None:
-        """Mark one input as wrong and put the cursor in it, ready to fix."""
-        for widget in self.query("Input.-invalid"):
-            widget.remove_class("-invalid")
-        widget = self.query_one(f"#{field_id}", Input)
-        widget.add_class("-invalid")
-        widget.focus()
 
-    def _read(self, field_id: str, parse, label: str, **kwargs):
-        """Parse one form field, tagging any failure with the field's id."""
-        try:
-            return parse(self.query_one(f"#{field_id}", Input).value, label, **kwargs)
-        except ValueError as exc:
-            raise FieldError(field_id, str(exc)) from exc
 
     def _build_bandwidth_run(self) -> tuple[Sequence[Step], AnalyzerConfig]:
         start = self._read("rbw-start", _positive_float, "RBW start")
