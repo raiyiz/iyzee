@@ -331,7 +331,7 @@ class ScopeScreen(Page):
             return
         self.query_one("#acquire-waveforms", Button).disabled = True
         log_widget = self.query_one("#scope-log", RichLog)
-        log_widget.write(f"Acquiring {", ".join(str(c) for c in channels)}…")
+        log_widget.write("Acquiring " + ", ".join(str(c) for c in channels) + "…")
         self._acquire(scope, channels, channel_settings, trigger_settings)
 
     @work(thread=True, exclusive=True, group="scope-acquire", exit_on_error=False)
