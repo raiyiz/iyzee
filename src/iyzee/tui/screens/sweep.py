@@ -91,7 +91,6 @@ class SweepScreen(Page):
     itself lives in ``app.tcss`` (see ``IyzeeApp.HORIZONTAL_BREAKPOINTS``).
     """
 
-
     def compose(self) -> ComposeResult:
         yield Static("Sweep", classes="panel-title")
         # Shown only while something the selected sweep needs isn't
@@ -145,7 +144,6 @@ class SweepScreen(Page):
         self.query_one("#bw-fields").display = event.value == "bandwidth"
         self.query_one("#freq-fields").display = event.value == "frequency"
         self.refresh_readiness()
-
 
     # -- readiness ---------------------------------------------------------
 
@@ -266,7 +264,6 @@ class SweepScreen(Page):
         self.query_one("#capture-trace", Button).disabled = True
         self.iyzee_app.sweep_running = True
         self._run(mx_handle.device, shutter, steps, config, kind)
-
 
 
     def _build_bandwidth_run(self) -> tuple[Sequence[Step], AnalyzerConfig]:
