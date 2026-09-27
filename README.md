@@ -69,12 +69,13 @@ instruments are disconnected on the way out):
   banner says which instrument still needs connecting, a bad field is marked
   and focused, and every point is saved to disk as it is measured, so an
   interrupted run keeps what it had.
-- **Scope** (`o`) — configure the LeCroy's channels and trigger, and use
-  **Acquire & save** to record enabled-channel waveforms. Each acquisition is
-  persisted under `data/YYYY-MM/` as a numeric `.npz` plus JSON manifest, then
-  plotted live. The reusable operations live in `scope_workflows.py` (see
-  "Design direction" below), so acquisition and configuration logic are not
-  tied to the Textual screen.
+- **Scope** (`o`) — connect to the LeCroy and the page automatically retrieves
+  its current channel/trigger state once, so the form starts from the actual
+  instrument configuration. Edit only what you need; **Apply channel settings**
+  and **Apply trigger** write only fields that differ from the retrieved
+  baseline. *Retrieve current settings* re-syncs after a front-panel change.
+  **Acquire & save** records enabled-channel waveforms under `data/YYYY-MM/`
+  as a numeric `.npz` plus JSON manifest, then plots them live.
 - **Traces** (`t`) — browse previously recorded `.npz` runs on disk; the
   preview follows the highlighted run.
 - **Console** (`i`) — IPython's own terminal UI, in the app process, with live
