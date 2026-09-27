@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import math
 import uuid
 from collections.abc import Sequence
 from dataclasses import asdict
@@ -56,7 +55,7 @@ from ...experiment import (
 from ..plotting import draw_series
 from ..text import one_line
 from ..workers import LastRun
-from .page import FieldError, Page, _field
+from .page import FieldError, Page, _field, _positive_float, _positive_int
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -297,17 +296,6 @@ class SweepScreen(Page):
 
     # -- the run itself, off the UI thread -----------------------------------
 
-    def _ui(self, callback, *args, **kwargs) -> None:
-        """Call back into the UI thread from the sweep worker, without
-        letting a now-stale widget reference (e.g. the user switched away
-        from this screen mid-sweep) turn into an unhandled worker
-        exception. See ``ConnectScreen._ui`` for the same pattern.
-        """
-        try:
-            self.app.call_from_thread(callback, *args, **kwargs)
-        except Exception:
-            log.exception("sweep screen: UI update from worker thread failed")
-
     @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
     def _run(self, mx, shutter, steps: Sequence[Step], config: AnalyzerConfig, kind: str) -> None:
         # Hold the MXA's lock (and the shutter's, for a frequency sweep) for
@@ -520,27 +508,3 @@ class SweepScreen(Page):
         )
 
 
-def _positive_float(raw: str, field: str) -> float:
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise ValueError(f"{field} must be a number") from exc
-    # float() happily parses "nan" and "inf"; neither is a usable setting,
-    # and nan even slips past a `<= 0` check because it compares false.
-    if not math.isfinite(value):
-        raise ValueError(f"{field} must be a finite number")
-    if value <= 0:
-        raise ValueError(f"{field} must be positive")
-    return value
-
-
-def _positive_int(raw: str, field: str, *, maximum: int | None = None) -> int:
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"{field} must be a whole number") from exc
-    if value <= 0:
-        raise ValueError(f"{field} must be positive")
-    if maximum is not None and value > maximum:
-        raise ValueError(f"{field} must be at most {maximum}")
-    return value
