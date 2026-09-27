@@ -159,8 +159,8 @@ The shared `tui/screens/page.py` base owns page mechanics that are not domain-sp
 
 - *ConnectScreen* — a `DataTable`, one row per `InstrumentSpec`. Pressing Enter connects or disconnects the selected row in a background thread (`@work(thread=True)`), since every device call is blocking I/O and must never run on the UI thread. Disconnecting asks for a second Enter (and is refused while a sweep runs), and a row that is still connecting ignores Enter, so a device is never opened twice.
 - *SweepScreen* — picks a bandwidth or frequency sweep, builds the `Step` list and `AnalyzerConfig` from the on-screen fields, and calls `run_sequence(steps, ctx, on_step=...)` in a background thread, updating a progress bar and a live `textual-plotext` trace as each step completes. Every point is also written to disk as it arrives (one archive, overwritten atomically), so an interrupted run keeps what it had, and the page shows which instrument still needs connecting.
-- *ScopeScreen* — form and plot only: one panel per analog channel, a trigger section, and an "Acquire" button. Reading the form, calling the operation, and formatting the result for display is all this screen does — the operations themselves (`apply_channel_settings()`, `apply_trigger_settings()`, `acquire_waveforms()`) live in `iyzee.scope_workflows`, not here. See @sec-convention.
-- *TracesScreen* — lists and previews previously saved `.npz` runs from `create_dirs()`'s output directory; reads exactly what `save_step_results()` already writes, no separate persistence format. The preview follows the highlighted run.
+- *ScopeScreen* — form and plot plus durable capture: one panel per analog channel, a trigger section, and an "Acquire & save" button. The screen snapshots the requested and last-successfully-applied configuration, calls `acquire_scope_recording()`, writes the result immediately, and then plots it. The reusable acquisition and persistence logic lives in `iyzee.scope_workflows`; the screen contains no waveform serialization logic. See @sec-convention.
+- *TracesScreen* — lists and previews persisted Sweep and Scope recordings from `create_dirs()`'s output directory. Sweep records use the existing `save_step_results()` schema; Scope records use `save_scope_acquisition()` with the same numeric-NPZ + JSON-manifest storage primitive.
 - *ConsoleScreen* — hosts IPython's own terminal UI; see @sec-console.
 - *LogScreen* — the app's own logging (`tui/logging_support.py`), live by default, with a level filter and a way to browse older rotated log files.
 
@@ -203,6 +203,20 @@ lab.connected                          # e.g. ("mx", "shutter")
 ```
 
 `lab.mx` calls go through the same `LockedProxy` the Connect/Sweep screens use, so they're serialized against a running sweep automatically. Disconnect the MXA on the Connect screen and the very next `lab.mx` access raises a clear `AttributeError` — there is nothing cached to go stale, because nothing was ever copied out of `app.handles` in the first place.
+
+= Scope waveform recording
+
+The Scope page's *Acquire & save* is a measurement-recording operation, not just a plotting convenience. One click creates a new file pair under `data/YYYY-MM/` (a fresh random suffix means a normal acquisition never overwrites an earlier one):
+
+- the `.npz` contains numeric arrays only — one `time_<channel>` array, one calibrated `value_<channel>` array, and, for the real LeCroy driver, the exact signed 16-bit `raw_<channel>` samples returned by the scope;
+- the `.json` manifest identifies the recording (`measurement_id`, UTC start/end timestamps, software/Python versions, VICP address/port/timeout), records the requested TUI configuration and the last configuration known to have been successfully applied, and describes every returned waveform;
+- per-channel metadata includes the scope-reported engineering unit, horizontal offset and sample interval, vertical gain and vertical offset, sample/finite counts, minimum/maximum value and sample/time index, peak-to-peak, RMS, standard deviation and maximum absolute value;
+- partial acquisition is preserved: channels that fail are listed under `errors` while successfully returned channels are still saved;
+- the NPZ is SHA-256 hashed after writing and the digest is recorded in the manifest, so a copied or archived data file can be checked for accidental modification.
+
+The calibrated values are derived from the scope's own reported `VERTICAL_GAIN` and `VERTICAL_OFFSET`; the TUI's V/div and offset fields are recorded as configuration provenance, not silently treated as instrument readback. This distinction matters because the legacy LeCroy driver cannot currently verify every vertical/trigger setting after it is written.
+
+The storage layer is shared with experiment sweeps through `experiment.io.save_numeric_recording()`, so atomic `.part` replacement, pickle-free numeric archives, JSON manifests and checksum handling remain one implementation rather than two persistence systems.
 
 = Typical session, start to finish
 
