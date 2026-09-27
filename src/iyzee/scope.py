@@ -403,8 +403,7 @@ class LeCroy:
         with self.transaction():
             self.send("CFMT DEF9,BYTE,BIN")
             self.send(f"{channel}:WF? {block}")
-            self._recv_exact(self.s, 38)
-            data = self._transport.read_data_until_eoi()
+            data = self._transport.read_definite_block()
             return list(struct.iter_unpack("b", data))
 
     def getDataWords(self, channel="C1", block="DAT1"):
@@ -413,20 +412,9 @@ class LeCroy:
             self.send("CFMT DEF9,WORD,BIN")
             self.send(f"{channel}:WF? {block}")
             self.send("CORD LO")
-            rethead = self._recv_exact(self.s, 38)
-
-            if rethead[-11:-9] != b"#9":
-                raise RuntimeError("incorrectly returned header")
-            try:
-                exp_bytes = int(rethead[-9:].decode("ascii"))
-            except ValueError as exc:
-                raise VICPProtocolError("invalid binary waveform block length") from exc
-            if exp_bytes % 2:
-                raise VICPProtocolError(f"odd number of waveform bytes expected: {exp_bytes}")
-
-            data = self._transport.read_data_until_eoi()
-            if len(data) != exp_bytes:
-                raise VICPProtocolError(f"Expected {exp_bytes} bytes, got {len(data)}")
+            data = self._transport.read_definite_block()
+            if len(data) % 2:
+                raise VICPProtocolError(f"odd number of waveform bytes received: {len(data)}")
             return struct.unpack(f"<{len(data) // 2}h", data)
 
     def getDataFloatsDetailed(self, channel="C1", block="DAT1"):
