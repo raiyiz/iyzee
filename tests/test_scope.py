@@ -348,56 +348,78 @@ def test_send_serializes_vicp_header_and_message():
     assert sock.sent[8:] == b"C1:VDIV 1.0"
 
 
-def test_get_data_bytes_reassembles_fragmented_waveform():
+def test_get_data_bytes_reads_a_variable_length_definite_block():
     scope = LeCroy()
-    preamble = b"x" * 38
-    waveform = vicp_frame(0x80, bytes([0, 1, 255])) + vicp_frame(0x01, b"\n")
-    scope.s = FragmentingFakeSocket(preamble + waveform, chunk_size=2)
+    response = (
+        vicp_frame(0x80, b"C1:WF DAT1,#9")
+        + vicp_frame(0x80, b"0000000003")
+        + vicp_frame(0x80, bytes([0, 1, 255]))
+        + vicp_frame(0x81, b"\n")
+    )
+    scope.s = FragmentingFakeSocket(response, chunk_size=2)
 
     result = scope.getDataBytes(channel="C1", block="DAT1")
 
     assert result == [(0,), (1,), (-1,)]
 
 
-def test_get_data_words_reassembles_fragmented_waveform():
+def test_get_data_words_reads_definite_block_data_and_validates_word_size():
     scope = LeCroy()
     data = struct.pack("<2h", -123, 456)
-    preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
-    waveform = vicp_frame(0x80, data) + vicp_frame(0x01, b"\n")
-    scope.s = FragmentingFakeSocket(preamble + waveform, chunk_size=2)
+    response = (
+        vicp_frame(0x80, b"C1:WF DAT1,#9000000004")
+        + vicp_frame(0x80, data[:1])
+        + vicp_frame(0x80, data[1:])
+        + vicp_frame(0x81, b"\n")
+    )
+    scope.s = FragmentingFakeSocket(response, chunk_size=2)
 
     result = scope.getDataWords(channel="C1", block="DAT1")
 
     assert result == (-123, 456)
 
 
-def test_get_data_words_rejects_malformed_waveform_header():
+def test_get_data_words_rejects_missing_definite_block_header():
     scope = LeCroy()
-    scope.s = FragmentingFakeSocket(b"x" * 38, chunk_size=3)
+    scope.s = FragmentingFakeSocket(
+        vicp_frame(0x81, b"C1:WF DAT1,not-a-binary-block")
+    )
 
-    with pytest.raises(RuntimeError, match="incorrectly returned header"):
+    with pytest.raises(VICPProtocolError, match="without a DEF9 block"):
+        scope.getDataWords(channel="C1", block="DAT1")
+
+
+def test_get_data_words_rejects_invalid_definite_block_count():
+    scope = LeCroy()
+    scope.s = FragmentingFakeSocket(
+        vicp_frame(0x81, b"C1:WF DAT1,#9not-a-num")
+    )
+
+    with pytest.raises(VICPProtocolError, match="invalid DEF9 byte count"):
         scope.getDataWords(channel="C1", block="DAT1")
 
 
 def test_get_data_words_rejects_short_waveform_data():
     scope = LeCroy()
     data = struct.pack("<h", 123)
-    preamble = b"x" * 27 + b"#9" + f"{len(data) + 2:09d}".encode("ascii")
-    waveform = vicp_frame(0x80, data) + vicp_frame(0x01, b"\n")
-    scope.s = FragmentingFakeSocket(preamble + waveform, chunk_size=2)
+    response = (
+        vicp_frame(0x80, b"C1:WF DAT1,#9000000004")
+        + vicp_frame(0x80, data)
+        + vicp_frame(0x81, b"\n")
+    )
+    scope.s = FragmentingFakeSocket(response, chunk_size=2)
 
-    with pytest.raises(AssertionError, match="Expected 4 bytes, got 2"):
+    with pytest.raises(VICPProtocolError, match="Expected 4 bytes, got 2"):
         scope.getDataWords(channel="C1", block="DAT1")
 
 
 def test_get_data_floats_applies_vertical_scaling_and_unit():
     scope = LeCroy()
     data = struct.pack("<2h", 100, -50)
-    preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
     responses = (
-        preamble
+        vicp_frame(0x80, b"C1:WF DAT1,#9000000004")
         + vicp_frame(0x80, data)
-        + vicp_frame(0x01, b"\n")
+        + vicp_frame(0x81, b"\n")
         + vicp_frame(0x01, b'VALUE: 0.25"\n')
         + vicp_frame(0x01, b'VALUE: 2.0"\n')
         + vicp_frame(0x01, b'Unit Name = V"\n')
@@ -431,11 +453,10 @@ def test_get_horizontal_properties_reads_unit_offset_and_interval():
 def test_get_data_floats_detailed_retains_raw_codes_and_calibration():
     scope = LeCroy()
     data = struct.pack("<2h", 100, -50)
-    preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
     responses = (
-        preamble
+        vicp_frame(0x80, b"C1:WF DAT1,#9000000004")
         + vicp_frame(0x80, data)
-        + vicp_frame(0x01, b"\n")
+        + vicp_frame(0x81, b"\n")
         + vicp_frame(0x01, b'VALUE: 0.25"\n')
         + vicp_frame(0x01, b'VALUE: 2.0"\n')
         + vicp_frame(0x01, b'Unit Name = V"\n')
