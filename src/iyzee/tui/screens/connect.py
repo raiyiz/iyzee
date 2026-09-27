@@ -140,7 +140,6 @@ class ConnectScreen(Page):
         self._busy.discard(key)
         self._update_hint()
 
-
     # Not ``exclusive``: that cancels the previous worker in the group, so
     # connecting a second instrument used to "cancel" the first one's
     # worker mid-connect. Per-instrument re-entry is prevented by
