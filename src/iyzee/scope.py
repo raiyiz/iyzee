@@ -6,7 +6,7 @@ from typing import Iterator
 
 import numpy as np
 
-from .vicp import VICPProtocolError, VICPTimeoutError, VICPTransport, recv_exact
+from .vicp import VICPFrame, VICPProtocolError, VICPTimeoutError, VICPTransport, recv_exact
 
 
 class LeCroyTimeoutError(VICPTimeoutError):
@@ -98,6 +98,7 @@ __all__ = [
     "TriggerCoupling",
     "TriggerMode",
     "TriggerSlope",
+    "VICPFrame",
     "VICPProtocolError",
     "VICPTransport",
 ]
