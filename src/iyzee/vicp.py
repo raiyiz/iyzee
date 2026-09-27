@@ -56,8 +56,7 @@ def recv_exact(
             chunk = recv(num_bytes - len(chunks))
         except TimeoutError as exc:
             raise timeout_error(
-                f"no response after {gettimeout()}s "
-                f"({len(chunks)}/{num_bytes} bytes received)"
+                f"no response after {gettimeout()}s ({len(chunks)}/{num_bytes} bytes received)"
             ) from exc
         if not chunk:
             raise ConnectionError(f"Socket closed after {len(chunks)}/{num_bytes} bytes")
@@ -78,8 +77,7 @@ def send_all(sock: object, data: bytes, *, timeout_error: type[TimeoutError]) ->
             count = send(data[sent:])
         except TimeoutError as exc:
             raise timeout_error(
-                f"no response after {gettimeout()}s "
-                f"({sent}/{len(data)} bytes sent)"
+                f"no response after {gettimeout()}s ({sent}/{len(data)} bytes sent)"
             ) from exc
         if count is None:
             raise ConnectionError("socket send() returned None")
@@ -174,8 +172,7 @@ class VICPTransport:
             except TimeoutError as exc:
                 sock.close()
                 raise self._timeout_error(
-                    f"no response connecting to {address}:{self.port} "
-                    f"within {connect_timeout}s"
+                    f"no response connecting to {address}:{self.port} within {connect_timeout}s"
                 ) from exc
             except OSError:
                 sock.close()
