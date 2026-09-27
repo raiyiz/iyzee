@@ -82,9 +82,11 @@ class FakeHandle:
         self.probe_error = probe_error
         self.disconnect_error = disconnect_error
         self.connect_delay = connect_delay
-        self.device = device if device is not None else object()
         self.shutter = object()
         self.scope = scope if scope is not None else object()
+        self.device = (
+            device if device is not None else self.scope if scope is not None else object()
+        )
         self.connect_calls = 0
         self.disconnect_calls = 0
         self.lock = threading.Lock()
