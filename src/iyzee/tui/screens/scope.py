@@ -113,14 +113,12 @@ def _channel_panel(channel: Channel) -> Vertical:
 
 
 class ScopeScreen(Page):
-    """Configure the scope's channels and trigger, then plot what it sees.
+    """Configure the scope, record enabled channels, then plot the result.
 
     Mirrors ``SweepScreen``'s overall shape (form -> controls -> plot ->
     log) but for the scope specifically: one panel per analog channel,
-    one trigger section, an Apply button for each (they're independent
-    commands on the instrument, so a mistake in one doesn't block the
-    other), and an "Acquire" that downloads and plots a waveform per
-    enabled channel.
+    one trigger section, independent Apply buttons, and an "Acquire & save"
+    action that records the selected waveforms before plotting them.
     """
 
     def compose(self) -> ComposeResult:
@@ -311,7 +309,7 @@ class ScopeScreen(Page):
         log_widget.write(f"[red]Trigger: {escape(one_line(error))}[/red]")
         self.notify(f"Trigger settings failed: {one_line(error)}", severity="error", markup=False)
 
-    # -- acquire: download and plot a waveform per enabled channel ---------
+    # -- acquire: record enabled channels, persist the result, then plot ---
 
     def _start_acquire(self) -> None:
         scope = self._scope()
@@ -333,6 +331,9 @@ class ScopeScreen(Page):
         self.query_one("#acquire-waveforms", Button).disabled = True
         log_widget = self.query_one("#scope-log", RichLog)
         log_widget.write("Acquiring " + ", ".join(str(c) for c in channels) + "…")
+        # Snapshot the requested and known-applied configuration before the
+        # worker starts. The form may change while acquisition runs; the
+        # manifest must describe the configuration associated with this capture.
         applied_channel_settings = self._last_applied_channel_settings
         applied_trigger_settings = self._last_applied_trigger_settings
         self._acquire(
@@ -363,6 +364,8 @@ class ScopeScreen(Page):
             applied_trigger_settings=applied_trigger_settings,
             lock=self.iyzee_app.handles["scope"].lock,
         )
+        # acquire_scope_recording releases the instrument lock before this
+        # point, so persistence cannot block another caller from using the scope.
         path = None
         save_error: Exception | None = None
         try:
