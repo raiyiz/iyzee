@@ -69,11 +69,12 @@ instruments are disconnected on the way out):
   banner says which instrument still needs connecting, a bad field is marked
   and focused, and every point is saved to disk as it is measured, so an
   interrupted run keeps what it had.
-- **Scope** (`o`) — configure the LeCroy's channels and trigger, and plot
-  live waveforms. The form/buttons are here; the actual operations live in
-  `scope_workflows.py` (see "Design direction" below) so the same channel
-  and trigger configuration, and the same acquisition, are usable from a
-  script or `lab.scope` without this screen.
+- **Scope** (`o`) — configure the LeCroy's channels and trigger, and use
+  **Acquire & save** to record enabled-channel waveforms. Each acquisition is
+  persisted under `data/YYYY-MM/` as a numeric `.npz` plus JSON manifest, then
+  plotted live. The reusable operations live in `scope_workflows.py` (see
+  "Design direction" below), so acquisition and configuration logic are not
+  tied to the Textual screen.
 - **Traces** (`t`) — browse previously recorded `.npz` runs on disk; the
   preview follows the highlighted run.
 - **Console** (`i`) — IPython's own terminal UI, in the app process, with live
@@ -276,11 +277,12 @@ Two technical guides, both Typst source compiled to PDF in CI:
 - GitLab CI publishes the same documentation set as pipeline artifacts; the
   repository does not currently declare its GitLab mirror URL.
 
-For a reproducible measurement, the relevant analyzer settings should travel
-with the data: frequency range and points, RBW/VBW, detector, averaging,
-sweep time, attenuation/reference level, trigger state, and calibration
-context. `StepResult.meta` and `save_step_results()`'s per-point metadata are
-how that happens in practice.
+For a reproducible measurement, the relevant instrument state should travel
+with the data. Sweep records carry frequency/range and analyzer settings in
+`StepResult.meta` and the JSON sidecar; Scope records carry requested and
+known-applied channel/trigger configuration, scope-reported calibration and
+timebase metadata, raw waveform codes when available, and derived statistics
+beside the numeric arrays.
 
 ## Design direction
 
