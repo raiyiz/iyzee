@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import contextlib
 import io
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from helpers import FakeApp, history_manager
+from helpers import FakeApp, FakeHandle, history_manager
 from IPython.core.interactiveshell import InteractiveShell
 
 from iyzee.experiment import StepResult
@@ -65,17 +64,6 @@ class IyzeeIPython:
         self.shell.atexit_operations()
 
 
-class MxaHandle:
-    def __init__(self, device: Any) -> None:
-        self.device = device
-        self.lock = threading.Lock()
-
-
-class ScopeHandle:
-    def __init__(self, scope: Any) -> None:
-        self.scope = scope
-        self.lock = threading.Lock()
-
 
 def test_ipython_executes_and_preserves_the_lab_namespace() -> None:
     marker = object()
@@ -92,7 +80,7 @@ def test_ipython_executes_and_preserves_the_lab_namespace() -> None:
 
 def test_lab_attribute_reflects_current_handles_live() -> None:
     device = object()
-    app = FakeApp(handles={"mxa": MxaHandle(device)})
+    app = FakeApp(handles={"mxa": FakeHandle(device=device)})
     shell = IyzeeIPython(app)
 
     output = shell.execute("lab.mx")
@@ -108,14 +96,14 @@ def test_lab_attribute_reflects_current_handles_live() -> None:
 
 def test_lab_mx_is_wrapped_in_locked_proxy() -> None:
     device = object()
-    app = FakeApp(handles={"mxa": MxaHandle(device)})
+    app = FakeApp(handles={"mxa": FakeHandle(device=device)})
     lab = LabProxy(app)
     assert isinstance(lab.mx, LockedProxy)
     assert repr(lab.mx) == repr(device)
 
 
 def test_lab_scope_unwraps_the_scope_attribute() -> None:
-    app = FakeApp(handles={"scope": ScopeHandle("scope-device")})
+    app = FakeApp(handles={"scope": FakeHandle(scope="scope-device")})
     lab = LabProxy(app)
     assert repr(lab.scope) == repr("scope-device")
 
