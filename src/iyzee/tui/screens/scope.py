@@ -32,6 +32,7 @@ from textual.containers import Grid, Vertical
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 from textual_plotext import PlotextPlot
 
+from ...experiment import create_dirs
 from ...scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from ...scope_workflows import (
     ChannelError,
@@ -43,7 +44,6 @@ from ...scope_workflows import (
     apply_trigger_settings,
     save_scope_acquisition,
 )
-from ...experiment import create_dirs
 from ..plotting import draw_series
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
