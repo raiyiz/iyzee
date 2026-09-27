@@ -70,12 +70,12 @@ instruments are disconnected on the way out):
   and focused, and every point is saved to disk as it is measured, so an
   interrupted run keeps what it had.
 - **Scope** (`o`) — connect to the LeCroy and the page automatically retrieves
-  its current channel/trigger state once, so the form starts from the actual
-  instrument configuration. Edit only what you need; **Apply channel settings**
-  and **Apply trigger** write only fields that differ from the retrieved
-  baseline. *Retrieve current settings* re-syncs after a front-panel change.
-  **Acquire & save** records enabled-channel waveforms under `data/YYYY-MM/`
-  as a numeric `.npz` plus JSON manifest, then plots them live.
+  its current channel/trigger state once. The page shows whether the form is
+  synchronized, highlights local edits, and enables each Apply action only when
+  there is a delta to send. Apply writes only changed fields; *Retrieve current
+  settings* re-syncs after a front-panel change. **Acquire & save** is available
+  only for a synchronized, clean state and records enabled-channel waveforms
+  under `data/YYYY-MM/` as a numeric `.npz` plus JSON manifest.
 - **Traces** (`t`) — browse previously recorded `.npz` runs on disk; the
   preview follows the highlighted run.
 - **Console** (`i`) — IPython's own terminal UI, in the app process, with live
