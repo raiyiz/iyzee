@@ -14,8 +14,8 @@ src/iyzee/
 ├── mxa.py                 # Keysight MXA SCPI/VISA driver
 ├── power.py                # power supply + optical shutter control
 ├── scope.py                # LeCroy oscilloscope: waveform download + channel/trigger/math control
-├── scope_workflows.py     # scope operations (apply channel/trigger settings, acquire waveforms) —
-│                           # plain functions/dataclasses on top of scope.py, no Textual; see
+├── scope_workflows.py     # scope operations + durable waveform recordings — plain
+│                           # functions/dataclasses on top of scope.py, no Textual; see
 │                           # "Design direction" below
 ├── wavemeter_readout.py  # wavemeter / laser setpoint control
 ├── experiment/            # composable measurement procedures
