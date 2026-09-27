@@ -76,6 +76,10 @@ class _LockedHandle:
     def __init__(self) -> None:
         self._lock = threading.Lock()
 
+    @property
+    def lock(self) -> threading.Lock:
+        return self._lock
+
 
 
 class _VisaHandle(_LockedHandle):
