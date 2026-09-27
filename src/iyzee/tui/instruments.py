@@ -28,7 +28,6 @@ from ..scope import LeCroy
 from ..wavemeter_readout import WavemeterReadoutError, single_readout
 
 
-
 class InstrumentHandle(Protocol):
     """What the Connect screen — and anything else that talks to this
     instrument, TUI or not — needs from any device adapter."""
@@ -89,7 +88,6 @@ class _LockedHandle:
     @property
     def lock(self) -> threading.Lock:
         return self._lock
-
 
 
 class _VisaHandle(_LockedHandle):
@@ -214,7 +212,6 @@ class ScopeHandle(_LockedHandle):
     @property
     def scope(self) -> LeCroy:
         return self._scope
-
 
 
 @dataclass(frozen=True)
