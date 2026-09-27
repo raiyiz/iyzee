@@ -27,6 +27,7 @@ from ..power import ShutterControl
 from ..scope import LeCroy
 from ..wavemeter_readout import WavemeterReadoutError, single_readout
 
+
 class InstrumentHandle(Protocol):
     """What the Connect screen — and anything else that talks to this
     instrument, TUI or not — needs from any device adapter."""
@@ -86,6 +87,7 @@ class _LockedHandle:
     @property
     def lock(self) -> threading.Lock:
         return self._lock
+
 
 class _VisaHandle(_LockedHandle):
     """Adapter for any :class:`~iyzee.base.BaseDevice` (MXA, raw PSU)."""
@@ -207,6 +209,7 @@ class ScopeHandle(_LockedHandle):
     def scope(self) -> LeCroy:
         return self._scope
 
+
 @dataclass(frozen=True)
 class InstrumentSpec:
     """One row in the Connect screen: a name plus how to build its handle."""
@@ -273,6 +276,7 @@ class LockedProxy:
 
     def __repr__(self) -> str:
         return repr(object.__getattribute__(self, "_target"))
+
 
 INSTRUMENTS: list[InstrumentSpec] = [
     InstrumentSpec("mxa", "Keysight MXA", lambda: _VisaHandle(KeysightMXA()), short="MXA"),
