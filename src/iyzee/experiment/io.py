@@ -105,6 +105,7 @@ def _sha256_file(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
+
 def save_numeric_recording(
     arrays: Mapping[str, np.ndarray],
     savedir: Path,
