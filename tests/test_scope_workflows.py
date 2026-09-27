@@ -12,9 +12,9 @@ from iyzee.scope_workflows import (
     TriggerSettings,
     acquire_scope_recording,
     acquire_waveforms,
-    save_scope_acquisition,
     apply_channel_settings,
     apply_trigger_settings,
+    save_scope_acquisition,
 )
 
 
