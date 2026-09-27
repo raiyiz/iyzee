@@ -105,8 +105,10 @@ class ScopeAcquisition:
     completed_at_utc: str
     instrument_address: str | None
     socket_timeout_s: float | None
-    channel_settings: tuple[ChannelSettings, ...]
-    trigger_settings: TriggerSettings | None
+    requested_channel_settings: tuple[ChannelSettings, ...]
+    requested_trigger_settings: TriggerSettings | None
+    applied_channel_settings: tuple[ChannelSettings, ...] | None
+    applied_trigger_settings: TriggerSettings | None
     waveforms: tuple[ScopeWaveform, ...]
     errors: tuple[ChannelError, ...]
 
@@ -218,6 +220,8 @@ def acquire_scope_recording(
     *,
     channel_settings: Sequence[ChannelSettings] = (),
     trigger_settings: TriggerSettings | None = None,
+    applied_channel_settings: Sequence[ChannelSettings] | None = None,
+    applied_trigger_settings: TriggerSettings | None = None,
     lock: threading.Lock | None = None,
 ) -> ScopeAcquisition:
     """Acquire complete waveforms and the metadata needed to interpret them."""
@@ -239,8 +243,12 @@ def acquire_scope_recording(
                 completed_at_utc=_utc_now(),
                 instrument_address=getattr(scope, "address", None),
                 socket_timeout_s=getattr(scope, "SOCK_TIMEOUT", None),
-                channel_settings=tuple(channel_settings),
-                trigger_settings=trigger_settings,
+                requested_channel_settings=tuple(channel_settings),
+                requested_trigger_settings=trigger_settings,
+                applied_channel_settings=(
+                    tuple(applied_channel_settings) if applied_channel_settings is not None else None
+                ),
+                applied_trigger_settings=applied_trigger_settings,
                 waveforms=(),
                 errors=tuple(errors),
             )
@@ -285,8 +293,12 @@ def acquire_scope_recording(
         completed_at_utc=_utc_now(),
         instrument_address=getattr(scope, "address", None),
         socket_timeout_s=getattr(scope, "SOCK_TIMEOUT", None),
-        channel_settings=tuple(channel_settings),
-        trigger_settings=trigger_settings,
+        requested_channel_settings=tuple(channel_settings),
+        requested_trigger_settings=trigger_settings,
+        applied_channel_settings=(
+            tuple(applied_channel_settings) if applied_channel_settings is not None else None
+        ),
+        applied_trigger_settings=applied_trigger_settings,
         waveforms=tuple(waveforms),
         errors=tuple(errors),
     )
@@ -338,10 +350,10 @@ def save_scope_acquisition(
             "offset": s.offset,
             "coupling": s.coupling.value,
         }
-    trigger = None
-    if recording.trigger_settings is not None:
-        s = recording.trigger_settings
-        trigger = {
+    def trigger_config(s: TriggerSettings | None) -> dict[str, object] | None:
+        if s is None:
+            return None
+        return {
             "source": s.source.value,
             "mode": s.mode.value,
             "slope": s.slope.value,
@@ -363,8 +375,16 @@ def save_scope_acquisition(
             "socket_timeout_s": recording.socket_timeout_s,
         },
         "configuration": {
-            "channel_settings": [channel_config(s) for s in recording.channel_settings],
-            "trigger_settings": trigger,
+            "requested_channel_settings": [
+                channel_config(s) for s in recording.requested_channel_settings
+            ],
+            "requested_trigger_settings": trigger_config(recording.requested_trigger_settings),
+            "applied_channel_settings": (
+                [channel_config(s) for s in recording.applied_channel_settings]
+                if recording.applied_channel_settings is not None
+                else None
+            ),
+            "applied_trigger_settings": trigger_config(recording.applied_trigger_settings),
         },
         "waveforms": channel_metadata,
         "errors": [{"channel": e.channel.value, "error": str(e.error)} for e in recording.errors],
