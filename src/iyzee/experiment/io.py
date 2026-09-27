@@ -97,6 +97,14 @@ def _new_stem(name: str = "") -> str:
     return "_".join(part for part in (timestamp, slug, token) if part)
 
 
+def _sha256_file(path: Path) -> str:
+    """Return a SHA-256 digest without loading the whole file into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
 def save_numeric_recording(
     arrays: Mapping[str, np.ndarray],
     savedir: Path,
@@ -134,7 +142,7 @@ def save_numeric_recording(
         np.savez_compressed(handle, **normalized)
     partial_npz.replace(path)
 
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = _sha256_file(path)
     json_path = path.with_suffix(".json")
     sidecar = {
         **dict(metadata),
