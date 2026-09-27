@@ -24,7 +24,6 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 from rich.markup import escape
 from textual import work
@@ -89,6 +88,50 @@ TRIGGER_COUPLING_CHOICES = [
 ]
 
 
+def _finite_float(raw: str, field: str) -> float:
+    """Parse raw as a finite float.
+
+    Unlike SweepScreen's _positive_float, this allows zero and negative
+    values — offsets and trigger levels are routinely negative.
+    """
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be a number") from exc
+    # float() happily parses "nan"/"inf"; neither is a usable setting.
+    if not math.isfinite(value):
+        raise ValueError(f"{field} must be a finite number")
+    return value
+
+
+def _positive_float(raw: str, field: str) -> float:
+    value = _finite_float(raw, field)
+    if value <= 0:
+        raise ValueError(f"{field} must be positive")
+    return value
+
+
+def _channel_panel(channel: Channel) -> Vertical:
+    color = CHANNEL_COLORS[channel]
+    return Vertical(
+        Static(f"[{color} b]{channel}[/{color} b]", classes="channel-title"),
+        Checkbox("Show", value=channel == Channel.C1, id=f"{channel}-enable"),
+        _field("V/div", Input(value="0.5", id=f"{channel}-vdiv")),
+        _field("Offset (V)", Input(value="0.0", id=f"{channel}-offset")),
+        _field(
+            "Coupling",
+            Select(
+                COUPLING_CHOICES,
+                value=Coupling.DC_1M.value,
+                allow_blank=False,
+                id=f"{channel}-coupling",
+            ),
+        ),
+        classes="channel-panel",
+        id=f"{channel}-panel",
+    )
+
+
 class ScopeScreen(Page):
     """Configure the scope's channels and trigger, then plot what it sees.
 
@@ -99,7 +142,6 @@ class ScopeScreen(Page):
     other), and an "Acquire" that downloads and plots a waveform per
     enabled channel.
     """
-
 
     def compose(self) -> ComposeResult:
         yield Static("Scope", classes="panel-title")
@@ -191,6 +233,39 @@ class ScopeScreen(Page):
             return None
         return handle.scope
 
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "apply-channels":
+            self._start_apply_channels()
+        elif event.button.id == "apply-trigger":
+            self._start_apply_trigger()
+        elif event.button.id == "acquire-waveforms":
+            self._start_acquire()
+
+    # -- channel settings ------------------------------------------------
+
+    def _read_channel_settings(self) -> list[ChannelSettings]:
+        settings = []
+        for channel in CHANNELS:
+            vdiv = self._read(f"{channel}-vdiv", _positive_float, f"{channel} V/div")
+            offset = self._read(f"{channel}-offset", _finite_float, f"{channel} offset")
+            coupling = Coupling(self.query_one(f"#{channel}-coupling", Select).value)
+            enabled = self.query_one(f"#{channel}-enable", Checkbox).value
+            settings.append(ChannelSettings(channel, enabled, vdiv, offset, coupling))
+        return settings
+
+    def _start_apply_channels(self) -> None:
+        scope = self._scope()
+        if scope is None:
+            return
+        try:
+            settings = self._read_channel_settings()
+        except FieldError as exc:
+            self._flag_invalid(exc.field_id)
+            self.notify(f"Invalid channel settings: {exc}", severity="error", markup=False)
+            return
+        self.query_one("#apply-channels", Button).disabled = True
+        self._apply_channels(scope, settings)
 
     @work(thread=True, exclusive=True, group="scope-apply-channels", exit_on_error=False)
     def _apply_channels(self, scope: LeCroy, settings: Sequence[ChannelSettings]) -> None:
