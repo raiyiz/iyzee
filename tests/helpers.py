@@ -75,6 +75,7 @@ class FakeHandle:
         disconnect_error: str | None = None,
         connect_delay: float = 0.0,
         device: object | None = None,
+        scope: object | None = None,
     ) -> None:
         self._probe = probe
         self.connect_error = connect_error
@@ -83,6 +84,7 @@ class FakeHandle:
         self.connect_delay = connect_delay
         self.device = device if device is not None else object()
         self.shutter = object()
+        self.scope = scope if scope is not None else object()
         self.connect_calls = 0
         self.disconnect_calls = 0
         self.lock = threading.Lock()
