@@ -32,7 +32,7 @@ class AnalyzerConfig:
     sweep_duration_ms: int = 10
     res_bw_hz: float = 10e4
     avg_type: str = "LOG"
-    trig_source: str = "EXT"
+    trig_source: str = "IMM"
 
 
 def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
