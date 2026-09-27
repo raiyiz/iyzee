@@ -164,6 +164,25 @@ def frequency_sweep_steps(
     ]
 
 
+def _run_steps(
+    mx,
+    steps: list[BandwidthStep] | list[FrequencyStep],
+    config: AnalyzerConfig,
+    *,
+    shutter: ShutterControl | None = None,
+    on_error: str = "raise",
+) -> list[StepResult]:
+    """Configure the MXA, build one run context, and execute its steps."""
+    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
+    ctx = ExperimentContext(
+        mx=mx,
+        run_id=uuid.uuid4().hex[:8],
+        shutter=shutter,
+        config=asdict(config),
+    )
+    return _run_steps(mx, steps, config, shutter=shutter, on_error=on_error)
+
+
 def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> list[StepResult]:
     """Measure squeezing/shot-noise traces using the caller-owned MXA."""
     config = AnalyzerConfig(
@@ -174,9 +193,12 @@ def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> l
         res_bw_hz=24e3,
         trig_source="IMM",
     )
-    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
-    ctx = ExperimentContext(mx=mx, run_id=uuid.uuid4().hex[:8], config=asdict(config))
-    return run_sequence(bandwidth_sweep_steps(rbw_values_hz), ctx, on_error=on_error)
+    return _run_steps(
+        mx,
+        bandwidth_sweep_steps(rbw_values_hz),
+        config,
+        on_error=on_error,
+    )
 
 
 def run_frequency_sweep(
@@ -196,13 +218,6 @@ def run_frequency_sweep(
         res_bw_hz=24e3,
     )
     relax_time_s = config.sweep_duration_ms * config.avg_count / 1000
-    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
-    ctx = ExperimentContext(
-        mx=mx,
-        run_id=uuid.uuid4().hex[:8],
-        shutter=shutter,
-        config=asdict(config),
-    )
     steps = frequency_sweep_steps(
         laser_center_thz=laser_center_thz,
         wavemeter_channel=wavemeter_channel,
