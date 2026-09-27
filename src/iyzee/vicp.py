@@ -266,11 +266,11 @@ class VICPTransport:
 
             for _ in range(self.MAX_MESSAGE_FRAMES):
                 frame = self._read_frame()
-                payload = frame.payload if frame.is_data else b''
+                payload = frame.payload if frame.is_data else b""
 
                 if expected is None:
                     header.extend(payload)
-                    marker_index = header.find(b'#9')
+                    marker_index = header.find(b"#9")
                     if marker_index >= 0:
                         count_start = marker_index + 2
                         count_end = count_start + 9
@@ -283,9 +283,7 @@ class VICPTransport:
 
                         count_field = bytes(header[count_start:count_end])
                         if not count_field.isdigit():
-                            raise VICPProtocolError(
-                                f"invalid DEF9 byte count {count_field!r}"
-                            )
+                            raise VICPProtocolError(f"invalid DEF9 byte count {count_field!r}")
                         expected = int(count_field)
                         data.extend(header[count_end:])
                         header.clear()
@@ -304,10 +302,8 @@ class VICPTransport:
                             "VICP binary response reached EOI without a DEF9 block"
                         )
                     if len(data) != expected:
-                        raise VICPProtocolError(
-                            f"Expected {expected} bytes, got {len(data)}"
-                        )
-                    if trailing not in (b'', b'\n', b'\r\n'):
+                        raise VICPProtocolError(f"Expected {expected} bytes, got {len(data)}")
+                    if trailing not in (b"", b"\n", b"\r\n"):
                         raise VICPProtocolError(
                             f"unexpected bytes after DEF9 block: {bytes(trailing)!r}"
                         )
