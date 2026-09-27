@@ -366,10 +366,11 @@ class SweepScreen(Page):
         # through it would be just as broken as interleaving two sweeps.
         # This is the same lock instruments.LockedProxy acquires per call
         # for console code, and ConnectScreen acquires around connect/
-        # disconnect (see IyzeeApp.instrument_locks).
-        locks = [self.iyzee_app.instrument_locks["mxa"]]
+        # disconnect — each handle's own .lock (see InstrumentHandle.lock),
+        # not a table IyzeeApp used to keep separately.
+        locks = [self.iyzee_app.handles["mxa"].lock]
         if shutter is not None:
-            locks.append(self.iyzee_app.instrument_locks["shutter"])
+            locks.append(self.iyzee_app.handles["shutter"].lock)
 
         with contextlib.ExitStack() as stack:
             for lock in locks:
@@ -454,7 +455,7 @@ class SweepScreen(Page):
         # what does the spectrum look like right now" check, not a
         # replacement for a real sweep. Trace 1 is this codebase's
         # convention for the primary trace (see procedures.TRACE_SQZ).
-        with self.iyzee_app.instrument_locks["mxa"]:
+        with self.iyzee_app.handles["mxa"].lock:
             try:
                 power = acquire_trace(mx, TRACE_SQZ)
                 freq = mx.get_frequency_axis()

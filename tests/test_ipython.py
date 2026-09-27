@@ -1,14 +1,15 @@
 """Tests for LabProxy and the shell configuration (history, namespace).
 
 Uses a small FakeApp standing in for the real IyzeeApp — LabProxy only
-needs the three attributes in ipython.AppState (handles, instrument_locks,
-last_run), so tests don't need a running Textual app to exercise it.
+needs the two attributes in ipython.AppState (handles, last_run), so
+tests don't need a running Textual app to exercise it.
 """
 
 from __future__ import annotations
 
 import contextlib
 import io
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -67,11 +68,13 @@ class IyzeeIPython:
 class MxaHandle:
     def __init__(self, device: Any) -> None:
         self.device = device
+        self.lock = threading.Lock()
 
 
 class ScopeHandle:
     def __init__(self, scope: Any) -> None:
         self.scope = scope
+        self.lock = threading.Lock()
 
 
 def test_ipython_executes_and_preserves_the_lab_namespace() -> None:

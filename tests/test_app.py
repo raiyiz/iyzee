@@ -178,7 +178,7 @@ def test_close_instruments_waits_for_a_busy_instrument_but_never_hangs(
     app = IyzeeApp()
     busy, idle = FakeHandle(), FakeHandle()
     app.handles["busy"], app.handles["idle"] = busy, idle
-    lock = app.instrument_locks["busy"]
+    lock = busy.lock
     lock.acquire()
     if release_lock_after is not None:
         threading.Timer(release_lock_after, lock.release).start()

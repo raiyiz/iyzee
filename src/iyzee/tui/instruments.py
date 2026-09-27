@@ -29,7 +29,8 @@ from ..wavemeter_readout import WavemeterReadoutError, single_readout
 
 
 class InstrumentHandle(Protocol):
-    """What the Connect screen needs from any device adapter."""
+    """What the Connect screen — and anything else that talks to this
+    instrument, TUI or not — needs from any device adapter."""
 
     def connect(self) -> None:
         """Open the link. Raises on failure."""
@@ -48,12 +49,29 @@ class InstrumentHandle(Protocol):
         """
         ...
 
+    @property
+    def lock(self) -> threading.Lock:
+        """Serializes every call to this instrument's hardware, from
+        whichever caller — a screen's background worker, the IPython
+        console (via :class:`LockedProxy`), or a plain script holding this
+        same handle directly.
+
+        Owned by the handle, not by :class:`~iyzee.tui.app.IyzeeApp`
+        (which used to keep a separate ``dict[str, threading.Lock]``
+        alongside ``handles``): a handle built and connected outside any
+        running app — the whole point of a script/console-first design —
+        still comes with correct synchronization for free, rather than
+        safety being something only the TUI happens to provide.
+        """
+        ...
+
 
 class _VisaHandle:
     """Adapter for any :class:`~iyzee.base.BaseDevice` (MXA, raw PSU)."""
 
     def __init__(self, device) -> None:
         self._device = device
+        self._lock = threading.Lock()
 
     def connect(self) -> None:
         self._device.connect()
@@ -72,6 +90,10 @@ class _VisaHandle:
         """The wrapped device (e.g. a live :class:`~iyzee.mxa.KeysightMXA`)."""
         return self._device
 
+    @property
+    def lock(self) -> threading.Lock:
+        return self._lock
+
 
 class ShutterHandle:
     """Adapter for :class:`~iyzee.power.ShutterControl`.
@@ -85,6 +107,7 @@ class ShutterHandle:
         self._chan = chan
         self._ip = ip
         self._shutter: ShutterControl | None = None
+        self._lock = threading.Lock()
 
     def connect(self) -> None:
         self._shutter = ShutterControl(chan=self._chan, ip=self._ip)
@@ -102,6 +125,10 @@ class ShutterHandle:
         """The live :class:`ShutterControl`, once connected."""
         return self._shutter
 
+    @property
+    def lock(self) -> threading.Lock:
+        return self._lock
+
 
 class WavemeterHandle:
     """Adapter for the wavemeter's stateless HTTP API.
@@ -113,6 +140,7 @@ class WavemeterHandle:
 
     def __init__(self, channel: int = 0) -> None:
         self._channel = channel
+        self._lock = threading.Lock()
 
     def connect(self) -> None:
         return None
@@ -127,6 +155,10 @@ class WavemeterHandle:
             raise ConnectionError(str(exc)) from exc
         return f"ch{self._channel} = {freq:.6f} THz"
 
+    @property
+    def lock(self) -> threading.Lock:
+        return self._lock
+
 
 class ScopeHandle:
     """Adapter for the legacy :class:`~iyzee.scope.LeCroy` raw-socket driver.
@@ -139,6 +171,7 @@ class ScopeHandle:
     def __init__(self, ip: IP = IP.SCOPE) -> None:
         self._ip = ip
         self._scope = LeCroy()
+        self._lock = threading.Lock()
 
     def connect(self) -> None:
         self._scope.connect(str(self._ip))
@@ -152,6 +185,10 @@ class ScopeHandle:
     @property
     def scope(self) -> LeCroy:
         return self._scope
+
+    @property
+    def lock(self) -> threading.Lock:
+        return self._lock
 
 
 @dataclass(frozen=True)
@@ -188,7 +225,8 @@ class LockedProxy:
     Wraps a device so attribute access passes straight through, but
     calling any method acquires ``lock`` for the call's duration — the
     same :class:`threading.Lock` a screen holds around its own hardware
-    calls to this instrument (``IyzeeApp.instrument_locks``).
+    calls to this instrument (the owning handle's own ``.lock``; see
+    :class:`InstrumentHandle`).
 
     Deliberately does *not* forward dunder methods such as ``__enter__``
     or ``__getitem__``: connection lifecycle belongs to the Connect

@@ -13,7 +13,6 @@ import functools
 import os
 import threading
 import time
-from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -86,6 +85,7 @@ class FakeHandle:
         self.shutter = object()
         self.connect_calls = 0
         self.disconnect_calls = 0
+        self.lock = threading.Lock()
 
     @property
     def connected(self) -> bool:
@@ -118,9 +118,6 @@ class FakeApp:
     """Minimal stand-in for ``IyzeeApp`` satisfying ``ipython.AppState``."""
 
     handles: dict[str, Any] = field(default_factory=dict)
-    instrument_locks: dict[str, threading.Lock] = field(
-        default_factory=lambda: defaultdict(threading.Lock)
-    )
     last_run: LastRun | None = None
 
 

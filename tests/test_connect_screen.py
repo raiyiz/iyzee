@@ -3,8 +3,8 @@ and what it shows.
 
 INSTRUMENTS is monkeypatched to a single fake spec (see ``helpers.connect_app``)
 so these never touch real hardware or the real drivers — only
-``connect.INSTRUMENTS`` (what the page iterates) and ``app.handles`` /
-``app.instrument_locks`` (what it mutates) are exercised.
+``connect.INSTRUMENTS`` (what the page iterates) and ``app.handles``/the
+fake handle's own ``.lock`` (what it mutates and acquires) are exercised.
 """
 
 from __future__ import annotations

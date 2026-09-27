@@ -50,7 +50,7 @@ class _Recorder:
 def test_locked_proxy_serializes_calls_across_threads() -> None:
     """Two threads calling through the same proxy must never interleave —
     this is the exact guarantee SweepScreen and the console rely on when
-    they hold the same instrument_locks entry (see LockedProxy's docstring)."""
+    they hold the same handle's lock (see LockedProxy's docstring)."""
     lock = threading.Lock()
     recorder = _Recorder()
     proxy = LockedProxy(recorder, lock)

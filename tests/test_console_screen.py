@@ -6,6 +6,8 @@ protects the connection between the live Textual app and the terminal shell.
 
 from __future__ import annotations
 
+import threading
+
 from helpers import async_test
 
 from iyzee.experiment import StepResult
@@ -44,6 +46,7 @@ async def test_console_lab_reflects_running_app_state() -> None:
 
         class FakeHandle:
             device = object()
+            lock = threading.Lock()
 
             def connect(self) -> None:
                 raise NotImplementedError

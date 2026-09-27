@@ -1,6 +1,15 @@
 """Scope screen: configure the LeCroy's channels and trigger, and plot
 live waveforms.
 
+The actual operations ("push these channel settings", "acquire every
+enabled channel") live in ``iyzee.scope_workflows``, not here — this
+screen's job is the form (reading/validating ``Input``/``Select`` widgets
+into a ``ChannelSettings``/``TriggerSettings``), the buttons, the plot,
+and reporting the result. See ``scope_workflows``'s module docstring for
+why: the same operations this screen's buttons trigger are meant to be
+identically usable from a script or the IPython console, which they
+cannot be if the logic lives on a Textual widget.
+
 Unlike the MXA/shutter/wavemeter, the scope driver (:class:`iyzee.scope.LeCroy`)
 is write-only for most vertical/trigger settings — it has no ``*IDN?``-style
 readback for volts/div, offset, or trigger level (see ``ScopeHandle``'s
@@ -8,14 +17,6 @@ docstring in ``instruments.py``). So this form doesn't try to read the
 scope's current state on open; the fields start at sensible defaults
 (matching ``SweepScreen``'s form, which does the same for its own
 device-side parameters) and "Apply" only ever pushes settings outward.
-
-"Acquire" is the read path: it pulls a waveform (``LeCroy.getDataFloats``)
-for every enabled channel and draws them together on one plot, the same
-way ``SweepScreen``'s "Capture trace" and ``TracesScreen`` both funnel
-through ``plotting.draw_series``. The time axis (``LeCroy.getHorProperties``)
-is read once per acquisition, not once per channel — every analog channel
-shares one timebase, so the answer would be the same each time; see the
-comment in ``_acquire`` for why that matters.
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from rich.markup import escape
@@ -35,6 +35,14 @@ from textual.widgets import Button, Checkbox, Input, Label, RichLog, Select, Sta
 from textual_plotext import PlotextPlot
 
 from ...scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
+from ...scope_workflows import (
+    ChannelError,
+    ChannelSettings,
+    TriggerSettings,
+    acquire_waveforms,
+    apply_channel_settings,
+    apply_trigger_settings,
+)
 from ..plotting import draw_series
 from ..text import one_line
 from .page import Page
@@ -131,24 +139,6 @@ def _positive_float(raw: str, field: str) -> float:
     if value <= 0:
         raise ValueError(f"{field} must be positive")
     return value
-
-
-@dataclass(frozen=True)
-class _ChannelSettings:
-    channel: Channel
-    enabled: bool
-    volts_per_div: float
-    offset: float
-    coupling: Coupling
-
-
-@dataclass(frozen=True)
-class _TriggerSettings:
-    source: Channel
-    mode: TriggerMode
-    slope: TriggerSlope
-    coupling: TriggerCoupling
-    level_volts: float
 
 
 def _channel_panel(channel: Channel) -> Vertical:
@@ -316,14 +306,14 @@ class ScopeScreen(Page):
 
     # -- channel settings ------------------------------------------------
 
-    def _read_channel_settings(self) -> list[_ChannelSettings]:
+    def _read_channel_settings(self) -> list[ChannelSettings]:
         settings = []
         for channel in CHANNELS:
             vdiv = self._read(f"{channel}-vdiv", _positive_float, f"{channel} V/div")
             offset = self._read(f"{channel}-offset", _finite_float, f"{channel} offset")
             coupling = Coupling(self.query_one(f"#{channel}-coupling", Select).value)
             enabled = self.query_one(f"#{channel}-enable", Checkbox).value
-            settings.append(_ChannelSettings(channel, enabled, vdiv, offset, coupling))
+            settings.append(ChannelSettings(channel, enabled, vdiv, offset, coupling))
         return settings
 
     def _start_apply_channels(self) -> None:
@@ -340,39 +330,29 @@ class ScopeScreen(Page):
         self._apply_channels(scope, settings)
 
     @work(thread=True, exclusive=True, group="scope-apply-channels", exit_on_error=False)
-    def _apply_channels(self, scope: LeCroy, settings: Sequence[_ChannelSettings]) -> None:
-        errors: list[tuple[Channel, Exception]] = []
-        with self.iyzee_app.instrument_locks["scope"]:
-            for s in settings:
-                try:
-                    scope.set_volts_per_div(s.channel, s.volts_per_div)
-                    scope.set_offset(s.channel, s.offset)
-                    scope.set_coupling(s.channel, s.coupling)
-                    scope.set_trace_display(s.channel, s.enabled)
-                except Exception as exc:  # noqa: BLE001 - surfaced to the UI, not swallowed
-                    log.exception("scope: failed to apply %s settings", s.channel)
-                    errors.append((s.channel, exc))
+    def _apply_channels(self, scope: LeCroy, settings: Sequence[ChannelSettings]) -> None:
+        errors = apply_channel_settings(scope, settings, lock=self.iyzee_app.handles["scope"].lock)
         self._ui(self._finish_apply_channels, errors)
 
-    def _finish_apply_channels(self, errors: Sequence[tuple[Channel, Exception]]) -> None:
+    def _finish_apply_channels(self, errors: Sequence[ChannelError]) -> None:
         self.query_one("#apply-channels", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         if not errors:
             log_widget.write("Channel settings applied.")
             return
-        for channel, exc in errors:
-            log_widget.write(f"[red]{channel}: {escape(one_line(exc))}[/red]")
+        for err in errors:
+            log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
         self.notify("Some channel settings failed to apply — see the log.", severity="error")
 
     # -- trigger settings --------------------------------------------------
 
-    def _read_trigger_settings(self) -> _TriggerSettings:
+    def _read_trigger_settings(self) -> TriggerSettings:
         level = self._read("trig-level", _finite_float, "Trigger level")
         source = Channel(self.query_one("#trig-source", Select).value)
         mode = TriggerMode(self.query_one("#trig-mode", Select).value)
         slope = TriggerSlope(self.query_one("#trig-slope", Select).value)
         coupling = TriggerCoupling(self.query_one("#trig-coupling", Select).value)
-        return _TriggerSettings(source, mode, slope, coupling, level)
+        return TriggerSettings(source, mode, slope, coupling, level)
 
     def _start_apply_trigger(self) -> None:
         scope = self._scope()
@@ -388,18 +368,13 @@ class ScopeScreen(Page):
         self._apply_trigger(scope, settings)
 
     @work(thread=True, exclusive=True, group="scope-apply-trigger", exit_on_error=False)
-    def _apply_trigger(self, scope: LeCroy, settings: _TriggerSettings) -> None:
+    def _apply_trigger(self, scope: LeCroy, settings: TriggerSettings) -> None:
         error: Exception | None = None
-        with self.iyzee_app.instrument_locks["scope"]:
-            try:
-                scope.set_trigger_mode(settings.mode)
-                scope.set_trigger_source(settings.source)
-                scope.set_trigger_slope(settings.source, settings.slope)
-                scope.set_trigger_coupling(settings.source, settings.coupling)
-                scope.set_trigger_level(settings.source, settings.level_volts)
-            except Exception as exc:  # noqa: BLE001
-                log.exception("scope: failed to apply trigger settings")
-                error = exc
+        try:
+            apply_trigger_settings(scope, settings, lock=self.iyzee_app.handles["scope"].lock)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("scope: failed to apply trigger settings")
+            error = exc
         self._ui(self._finish_apply_trigger, error)
 
     def _finish_apply_trigger(self, error: Exception | None) -> None:
@@ -430,46 +405,20 @@ class ScopeScreen(Page):
 
     @work(thread=True, exclusive=True, group="scope-acquire", exit_on_error=False)
     def _acquire(self, scope: LeCroy, channels: Sequence[Channel]) -> None:
-        series: list[tuple[list[float], list[float], str]] = []
-        errors: list[tuple[Channel, Exception]] = []
-        with self.iyzee_app.instrument_locks["scope"]:
-            # One shared timebase drives every analog channel's acquisition —
-            # they trigger together, off the same clock — so HORIZ_OFFSET/
-            # HORIZ_INTERVAL are the same value on every channel's own
-            # descriptor. getHorProperties() is 3 INSPECT? round-trips;
-            # asking it once per channel (as before) repeated the same 3
-            # questions N times over for an N-channel acquisition, for no
-            # different an answer. Asking once, off the first channel, and
-            # reusing it for all of them cuts that to a flat 3 round-trips
-            # however many channels are enabled — and if the scope can't
-            # answer it, none of the channels could be timestamped anyway,
-            # so every channel is reported failed together rather than
-            # discovering that one at a time.
-            try:
-                _hor_unit, hor_offset, hor_interval = scope.getHorProperties(channel=channels[0])
-            except Exception as exc:  # noqa: BLE001
-                log.exception("scope: failed to read the timebase from %s", channels[0])
-                self._ui(self._finish_acquire, [], [(channel, exc) for channel in channels])
-                return
-            for channel in channels:
-                try:
-                    _unit, values = scope.getDataFloats(channel=channel)
-                    times = [hor_offset + i * hor_interval for i in range(len(values))]
-                    series.append((times, list(values), str(channel)))
-                except Exception as exc:  # noqa: BLE001
-                    log.exception("scope: failed to acquire %s", channel)
-                    errors.append((channel, exc))
+        series, errors = acquire_waveforms(
+            scope, channels, lock=self.iyzee_app.handles["scope"].lock
+        )
         self._ui(self._finish_acquire, series, errors)
 
     def _finish_acquire(
         self,
         series: Sequence[tuple[list[float], list[float], str]],
-        errors: Sequence[tuple[Channel, Exception]],
+        errors: Sequence[ChannelError],
     ) -> None:
         self.query_one("#acquire-waveforms", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
-        for channel, exc in errors:
-            log_widget.write(f"[red]{channel}: {escape(one_line(exc))}[/red]")
+        for err in errors:
+            log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
         if series:
             plot = self.query_one("#scope-plot", PlotextPlot)
             draw_series(

@@ -7,7 +7,6 @@ import logging
 import os
 import threading
 import time
-from collections import defaultdict
 from pathlib import Path
 from typing import cast
 
@@ -210,16 +209,13 @@ class IyzeeApp(App):
         # time a new IyzeeApp() is constructed — see install()'s docstring.
         self.log_handler = install_logging(self._on_log_entry)
         self.handles: dict[str, InstrumentHandle] = {}
-        # One lock per instrument key, shared by every caller that talks to
-        # that instrument's hardware: a page's background worker (Connect,
-        # Sweep) and the IPython console via LockedProxy (see
-        # instruments.LockedProxy and ipython.namespace_from_handles). This
-        # is what stops the console and a page from issuing overlapping
-        # commands to the same physical instrument from two threads at once.
-        # defaultdict so any caller can address a key before that
-        # instrument has ever been connected, without pre-populating one
-        # lock per entry in instruments.INSTRUMENTS here.
-        self.instrument_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+        # No per-app lock table anymore — each InstrumentHandle owns its
+        # own threading.Lock (see instruments.InstrumentHandle.lock) so
+        # that a page's background worker (Connect, Sweep), the IPython
+        # console (via LockedProxy — see ipython.namespace_from_handles),
+        # and a handle used entirely outside this app all get the same
+        # correct synchronization for free, rather than it only existing
+        # because IyzeeApp happens to be running.
         # The most recently completed sweep, if any — set by
         # SweepScreen._finish, read by ConsoleScreen to expose `results` in
         # the console namespace. See workers.LastRun.
@@ -343,7 +339,7 @@ class IyzeeApp(App):
         deadline = time.monotonic() + timeout
 
         def close(key: str, handle: InstrumentHandle) -> None:
-            lock = self.instrument_locks[key]
+            lock = handle.lock
             if not lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
                 log.warning("shutdown: %s still busy after %.0fs, not disconnecting", key, timeout)
                 return

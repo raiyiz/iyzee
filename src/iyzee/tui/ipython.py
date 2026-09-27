@@ -4,7 +4,6 @@ its locking, and its configuration. (Running the shell lives in
 
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
 
@@ -45,7 +44,7 @@ class AppState(Protocol):
     A structural (duck-typed) view rather than importing ``IyzeeApp``
     directly — ``app.py`` imports the console screen, which imports this
     module, so importing ``IyzeeApp`` back here would be a cycle. Anything
-    with these three attributes works, which is also what makes this easy
+    with these two attributes works, which is also what makes this easy
     to unit test with a small stand-in instead of a full running app.
 
     Declared as read-only ``@property`` members rather than plain
@@ -60,9 +59,6 @@ class AppState(Protocol):
 
     @property
     def handles(self) -> Mapping[str, Any]: ...
-
-    @property
-    def instrument_locks(self) -> Mapping[str, threading.Lock]: ...
 
     @property
     def last_run(self) -> LastRun | None: ...
@@ -100,8 +96,8 @@ class LabProxy:
       with zero interaction with app state, forever.
 
     Add a new instrument by adding one entry to ``_INSTRUMENT_KEYS``
-    below (attribute name -> ``app.handles``/``app.instrument_locks``
-    key) — nothing else needs to change.
+    below (attribute name -> ``app.handles`` key) — nothing else needs to
+    change.
     """
 
     _INSTRUMENT_KEYS = {"mx": "mxa", "shutter": "shutter", "scope": "scope"}
@@ -120,7 +116,7 @@ class LabProxy:
                     f"lab.{name} is not connected — connect it on the Connect screen first"
                 )
             device = _device_from_handle(name, handle)
-            return LockedProxy(device, app.instrument_locks[key])
+            return LockedProxy(device, handle.lock)
         if name == "results":
             return app.last_run.results if app.last_run is not None else []
         if name == "last_run":

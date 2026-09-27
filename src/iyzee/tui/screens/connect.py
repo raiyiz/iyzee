@@ -41,9 +41,9 @@ class ConnectScreen(Page):
         """``self.app`` narrowed to the concrete app type.
 
         ``Widget.app`` is typed as ``App[Any]`` in Textual's stubs, which
-        doesn't know about ``handles``/``instrument_locks`` — this app is
-        always an ``IyzeeApp`` at runtime (``IyzeeApp().run()`` is the
-        only entry point), so the cast is safe.
+        doesn't know about ``handles`` — this app is always an
+        ``IyzeeApp`` at runtime (``IyzeeApp().run()`` is the only entry
+        point), so the cast is safe.
         """
         return cast("IyzeeApp", self.app)
 
@@ -182,9 +182,9 @@ class ConnectScreen(Page):
     def _connect(self, spec: InstrumentSpec) -> None:
         try:
             self._ui(self._set_row, spec.key, "connecting...", "-")
+            handle = spec.build()
             try:
-                with self.iyzee_app.instrument_locks[spec.key]:
-                    handle = spec.build()
+                with handle.lock:
                     try:
                         handle.connect()
                         detail = handle.probe()
@@ -220,7 +220,7 @@ class ConnectScreen(Page):
             self._ui(self._set_row, spec.key, "disconnecting...", "-")
             if handle is not None:
                 try:
-                    with self.iyzee_app.instrument_locks[spec.key]:
+                    with handle.lock:
                         handle.disconnect()
                 except Exception as exc:  # noqa: BLE001
                     log.exception("error closing %s", spec.key)
