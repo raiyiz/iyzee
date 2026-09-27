@@ -397,111 +397,59 @@ class LeCroy:
         return self.query(f"{math_channel}:DEFINE?")
 
     def getDataBytes(self, channel="C1", block="DAT1"):
-        """
-        Simplest data retrieval, by byte values (low precision)
-        Use only for verification (should work regardless of data packing)
-        Channel can be "C1" or "C2",
-        data type "DAT1" for first block or "DAT2" for second (special, look at doc.)
-        returns list of values in 8-bit signed precision
-        """
-        self.send("CFMT DEF9,BYTE,BIN")  # by 1 byte, binary
-        # gets all the data of specified block on specified channel (waveform)
-        self.send(f"{channel}:WF? {block}")
-        self._recv_exact(self.s, 38)  # two data lines with headers 2*(8+11) characters
-        dta = b""
-        while True:
-            flg, aln = self.__getHeader()
-            if flg != self.LECROY_DATA_FLAG:
-                en = self._recv_exact(self.s, aln)
-                if en != b"\n":
-                    print(
-                        f"unexpected return, instead newline got {en} \n next length was {aln}, flag {flg}"
-                    )
-                break
-            # loop until all aln data is transferred
-            dta += self._recv_exact(self.s, aln)
-        # aa = [struct.unpack("b", ov) for ov in dta]
-        aa = [iup for iup in struct.iter_unpack("b", dta)]
-        return aa
+        """Return waveform samples as signed 8-bit values."""
+        with self.transaction():
+            self.send("CFMT DEF9,BYTE,BIN")
+            self.send(f"{channel}:WF? {block}")
+            self._recv_exact(self.s, 38)
+            data = self._transport.read_data_until_eoi()
+            return list(struct.iter_unpack("b", data))
 
     def getDataWords(self, channel="C1", block="DAT1"):
-        """
-        return data in tuple of word values (-32768 to 32767)
-        Reads header, and double checks:
-        1: that the data stream ended correctly (!LECROY_DATA_FLAG flag with "\n" end),
-        2: length of the byte vector matches the specified length in the header
-        channel : "C1" or "C2"
-        block : "DAT1" (mostly), or "DAT2"
+        """Return waveform samples as signed 16-bit values."""
+        with self.transaction():
+            self.send("CFMT DEF9,WORD,BIN")
+            self.send(f"{channel}:WF? {block}")
+            self.send("CORD LO")
+            rethead = self._recv_exact(self.s, 38)
 
-        returns list of values (16-bit signed)
-        """
+            if rethead[-11:-9] != b"#9":
+                raise RuntimeError("incorrectly returned header")
+            try:
+                exp_bytes = int(rethead[-9:].decode("ascii"))
+            except ValueError as exc:
+                raise VICPProtocolError("invalid binary waveform block length") from exc
+            if exp_bytes % 2:
+                raise VICPProtocolError(f"odd number of waveform bytes expected: {exp_bytes}")
 
-        self.send("CFMT DEF9,WORD,BIN")  # by 2-byte word
-        self.send(f"{channel}:WF? {block}")  # gets all the data on C2 waveform data
-        self.send("CORD LO")  # <LSB><MSB>
-        # rethead : first 10 bytes ascii string (like response)
-        # followed by #9 xxxx xxxxx where x are 9 numbers to give len. of bin. blck
-        # so ... #9002000004 means 2000004 bytes in binary array
-        # or in our (2-byte word) case 1 000 002 numbers
-        rethead = self._recv_exact(self.s, 38)  # two data lines with headers 2*(8+11) characters
-
-        if rethead[-11:-9] != b"#9":
-            # we are not in a correct place, abort!
-            raise RuntimeError("incorrectly returned header")
-        # get the number of bytes expected by conv to str, lstrip leading 0
-        exp_bytes = int(rethead[-9:].decode("ascii").lstrip("0"))  # check later
-        if (exp_bytes % 2) != 0:
-            # incorrect, should be an even number of bytes
-            raise RuntimeError("odd number of bytes expected")
-
-        # accumulate the data from the socket
-        dta = b""  # bytes data accumulator
-        while True:
-            flg, alen = self.__getHeader()  # flg=LECROY_DATA_FLAG : more data coming
-            if flg != self.LECROY_DATA_FLAG:
-                # no more data expected
-                en = self._recv_exact(self.s, alen)
-                # does it end correctly
-                if en != b"\n":
-                    print(
-                        f"unexpected return, instead newline got {en} \n next length was {alen}, flag {flg}"
-                    )
-                break
-            # loop until all alen data is transferred
-            dta += self._recv_exact(self.s, alen)  # if the local accum. is done, only then append
-
-        # we have byte values now
-        # check if the length is correct
-        if len(dta) != exp_bytes:
-            raise AssertionError(f"Expected {exp_bytes} bytes, got {len(dta)}")
-        return struct.unpack(f"<{len(dta) // 2}h", dta)
+            data = self._transport.read_data_until_eoi()
+            if len(data) != exp_bytes:
+                raise VICPProtocolError(f"Expected {exp_bytes} bytes, got {len(data)}")
+            return struct.unpack(f"<{len(data) // 2}h", data)
 
     def getDataFloatsDetailed(self, channel="C1", block="DAT1"):
-        """Return calibrated waveform data together with its raw ADC codes.
-
-        The returned mapping contains the exact 16-bit samples received from
-        the scope plus the vertical calibration coefficients and engineering
-        unit used to produce ``values``. ``getDataFloats`` remains the
-        compatibility API for callers that only need ``(unit, values)``.
-        """
-        word_values = np.array(self.getDataWords(channel=channel, block=block), dtype=np.int16)
-        self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
-        _r1, r2 = self.readAll()
-        vertical_offset = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        self.send(f'{channel}:INSPECT? "VERTICAL_GAIN"')
-        _r1, r2 = self.readAll()
-        vertical_gain = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        self.send(f'{channel}:INSPECT? "VERTUNIT"')
-        _r1, r2 = self.readAll()
-        unit = r2.split("Unit Name = ")[-1].split('"\n')[0]
-        values = vertical_gain * word_values.astype(np.float64) - vertical_offset
-        return {
-            "unit": unit,
-            "values": values,
-            "raw_codes": word_values,
-            "vertical_gain": vertical_gain,
-            "vertical_offset": vertical_offset,
-        }
+        """Return calibrated waveform data together with raw ADC codes."""
+        with self.transaction():
+            word_values = np.array(
+                self.getDataWords(channel=channel, block=block), dtype=np.int16
+            )
+            self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
+            _r1, r2 = self.readAll()
+            vertical_offset = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
+            self.send(f'{channel}:INSPECT? "VERTICAL_GAIN"')
+            _r1, r2 = self.readAll()
+            vertical_gain = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
+            self.send(f'{channel}:INSPECT? "VERTUNIT"')
+            _r1, r2 = self.readAll()
+            unit = r2.split("Unit Name = ")[-1].split('"\n')[0]
+            values = vertical_gain * word_values.astype(np.float64) - vertical_offset
+            return {
+                "unit": unit,
+                "values": values,
+                "raw_codes": word_values,
+                "vertical_gain": vertical_gain,
+                "vertical_offset": vertical_offset,
+            }
 
     def getDataFloats(self, channel="C1", block="DAT1"):
         """Return one waveform in engineering units as ``(unit, values)``.
@@ -514,27 +462,19 @@ class LeCroy:
         return data["unit"], data["values"]
 
     def getHorProperties(self, channel="C1"):
-        """
-        return the time vector data for the measurement for channel "channel"
-        for single sweep waveforms, for data point i, we have the horiz.
-        time from trigger being
-        t[i] = HORIZ_INTERVAL * i + HORIZ_OFFSET
-        in specified HORIZ_UNIT units
-        returns (HORUNIT, HORIZ_OFFSET, HORIZ_INTERVAL)
-        where
-        HORUNIT (string) is horizontal unit
-        HORIZ_OFFSET (double) is trigger offset for the first sweep of the trigger,
-                                 seconds b.w. the trig. and 1st data point
-        HORIZ_INTERVAL (float) is sampling interal for time domain waveforms
-        """
-        self.send(f'{channel}:INSPECT? "HORUNIT"')
-        _r1, r2 = self.readAll()
-        HORUNIT = r2.split("Unit Name = ")[-1].split('"\n')[0]
-        self.send(f'{channel}:INSPECT? "HORIZ_OFFSET"')
-        _r1, r2 = self.readAll()
-        HOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        self.send(f'{channel}:INSPECT? "HORIZ_INTERVAL"')
-        _r1, r2 = self.readAll()
-        HInV = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
+        """Return the horizontal unit, offset, and sample interval."""
+        with self.transaction():
+            self.send(f'{channel}:INSPECT? "HORUNIT"')
+            _r1, r2 = self.readAll()
+            horunit = r2.split("Unit Name = ")[-1].split('"\n')[0]
 
-        return (HORUNIT, HOS, HInV)
+            self.send(f'{channel}:INSPECT? "HORIZ_OFFSET"')
+            _r1, r2 = self.readAll()
+            offset = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
+
+            self.send(f'{channel}:INSPECT? "HORIZ_INTERVAL"')
+            _r1, r2 = self.readAll()
+            interval = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
+
+            return horunit, offset, interval
+
