@@ -251,6 +251,72 @@ class VICPTransport:
                 f"message exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
             )
 
+    def read_definite_block(self) -> bytes:
+        """Read an IEEE 488.2 definite-length binary block through VICP EOI.
+
+        LeCroy DEF9 waveform responses place an ASCII #9 marker and a
+        nine-digit byte count before the binary payload. The marker and count
+        may span VICP frames, so parsing must not depend on a fixed prefix.
+        """
+        with self._lock:
+            header = bytearray()
+            data = bytearray()
+            expected: int | None = None
+            trailing = bytearray()
+
+            for _ in range(self.MAX_MESSAGE_FRAMES):
+                frame = self._read_frame()
+                payload = frame.payload if frame.is_data else b''
+
+                if expected is None:
+                    header.extend(payload)
+                    marker_index = header.find(b'#9')
+                    if marker_index >= 0:
+                        count_start = marker_index + 2
+                        count_end = count_start + 9
+                        if len(header) < count_end:
+                            if frame.is_eoi:
+                                raise VICPProtocolError(
+                                    "VICP definite-length block ended inside its length header"
+                                )
+                            continue
+
+                        count_field = bytes(header[count_start:count_end])
+                        if not count_field.isdigit():
+                            raise VICPProtocolError(
+                                f"invalid DEF9 byte count {count_field!r}"
+                            )
+                        expected = int(count_field)
+                        data.extend(header[count_end:])
+                        header.clear()
+                elif payload:
+                    remaining = expected - len(data)
+                    if remaining > 0:
+                        take = min(remaining, len(payload))
+                        data.extend(payload[:take])
+                        trailing.extend(payload[take:])
+                    else:
+                        trailing.extend(payload)
+
+                if frame.is_eoi:
+                    if expected is None:
+                        raise VICPProtocolError(
+                            "VICP binary response reached EOI without a DEF9 block"
+                        )
+                    if len(data) != expected:
+                        raise VICPProtocolError(
+                            f"Expected {expected} bytes, got {len(data)}"
+                        )
+                    if trailing not in (b'', b'\n', b'\r\n'):
+                        raise VICPProtocolError(
+                            f"unexpected bytes after DEF9 block: {bytes(trailing)!r}"
+                        )
+                    return bytes(data)
+
+            raise VICPProtocolError(
+                f"binary response exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
+            )
+
     def read_data_until_eoi(self) -> bytes:
         """Read DATA frames through EOI, ignoring non-DATA terminator payloads."""
         with self._lock:
