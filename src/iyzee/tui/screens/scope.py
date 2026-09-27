@@ -89,10 +89,10 @@ TRIGGER_COUPLING_CHOICES = [
 
 
 def _finite_float(raw: str, field: str) -> float:
-    """Parse raw as a finite float.
+    """Parse ``raw`` as a finite float.
 
-    Unlike SweepScreen's _positive_float, this allows zero and negative
-    values — offsets and trigger levels are routinely negative.
+    Unlike ``SweepScreen``'s ``_positive_float``, this allows zero and
+    negative values — offsets and trigger levels are routinely negative.
     """
     try:
         value = float(raw)
