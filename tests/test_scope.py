@@ -1,5 +1,6 @@
 import socket
 import struct
+import threading
 
 import numpy as np
 import pytest
@@ -13,6 +14,9 @@ from iyzee.scope import (
     TriggerCoupling,
     TriggerMode,
     TriggerSlope,
+    VICPFrame,
+    VICPProtocolError,
+    VICPTransport,
 )
 
 
@@ -108,6 +112,46 @@ def test_recv_exact_reports_how_far_it_got_before_timing_out():
         LeCroy._recv_exact(sock, 10)
 
 
+def test_vicp_transport_transaction_is_reentrant():
+    transport = VICPTransport()
+
+    with transport.transaction():
+        with transport.transaction():
+            assert transport.connected is False
+
+
+def test_vicp_transport_transactions_are_serialized():
+    transport = VICPTransport()
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_entered = threading.Event()
+
+    def first() -> None:
+        with transport.transaction():
+            first_entered.set()
+            assert release_first.wait(2.0)
+
+    def second() -> None:
+        assert first_entered.wait(2.0)
+        with transport.transaction():
+            second_entered.set()
+
+    first_thread = threading.Thread(target=first)
+    second_thread = threading.Thread(target=second)
+    first_thread.start()
+    assert first_entered.wait(2.0)
+    second_thread.start()
+
+    assert not second_entered.wait(0.05)
+    release_first.set()
+
+    first_thread.join(timeout=2.0)
+    second_thread.join(timeout=2.0)
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert second_entered.is_set()
+
+
 def test_send_raises_lecroy_timeout_when_the_header_write_stalls():
     scope = LeCroy()
     scope.s = _TimingOutSocket(timeout=2.0)
@@ -132,6 +176,27 @@ class _ConnectTimeoutSocket:
 
     def close(self):
         self.closed = True
+
+
+def test_vicp_transport_command_length_counts_encoded_bytes():
+    transport = VICPTransport(max_command_length=1)
+    transport.attach_socket(FragmentingFakeSocket(b""))
+
+    with pytest.raises(ValueError, match="maximum is 1"):
+        transport.send_command("é")
+
+
+def test_vicp_transport_failed_connect_leaves_state_unpublished(monkeypatch):
+    fake_socket = _ConnectTimeoutSocket()
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_socket)
+
+    transport = VICPTransport()
+
+    with pytest.raises(LeCroyTimeoutError):
+        transport.connect("10.0.0.1")
+
+    assert not transport.connected
+    assert transport.address is None
 
 
 def test_connect_raises_lecroy_timeout_instead_of_hanging(monkeypatch):
@@ -190,15 +255,29 @@ def test_connect_accepts_explicit_timeouts(monkeypatch):
     assert scope.SOCK_TIMEOUT == 7.0
 
 
-def test_get_header_assembles_fragmented_header():
-    scope = LeCroy()
-    header = vicp_frame(0x80, b"")[:8]
-    scope.s = FragmentingFakeSocket(header, chunk_size=2)
+def test_vicp_transport_reads_fragmented_frame():
+    transport = VICPTransport()
+    transport.attach_socket(
+        FragmentingFakeSocket(vicp_frame(0x81, b"hello"), chunk_size=2)
+    )
 
-    flag, length = scope._LeCroy__getHeader()
+    frame = transport.read_frame()
 
-    assert flag == 0x80
-    assert length == 0
+    assert isinstance(frame, VICPFrame)
+    assert frame.flags == 0x81
+    assert frame.is_data
+    assert frame.is_eoi
+    assert frame.payload == b"hello"
+
+
+def test_vicp_transport_rejects_unknown_header_version():
+    transport = VICPTransport()
+    transport.attach_socket(
+        FragmentingFakeSocket(struct.pack("B3BI", 0x01, 2, 0, 0, 0), chunk_size=2)
+    )
+
+    with pytest.raises(VICPProtocolError, match="unsupported VICP header version 2"):
+        transport.read_frame()
 
 
 def test_read_all_reassembles_fragmented_vicp_frames():
@@ -210,6 +289,34 @@ def test_read_all_reassembles_fragmented_vicp_frames():
 
     assert flag == 0x01
     assert text == "hello world"
+
+
+def test_vicp_transport_handles_partial_sends():
+    class PartialSendSocket(FragmentingFakeSocket):
+        def send(self, data: bytes) -> int:
+            count = min(2, len(data))
+            self.sent.extend(data[:count])
+            return count
+
+    sock = PartialSendSocket(b"")
+    transport = VICPTransport()
+    transport.attach_socket(sock)
+
+    transport.send_command("C1:TEST")
+
+    assert b"C1:TEST" in bytes(sock.sent)
+
+
+def test_vicp_transport_rejects_zero_progress_send():
+    class StalledSocket(FragmentingFakeSocket):
+        def send(self, data: bytes) -> int:
+            return 0
+
+    transport = VICPTransport()
+    transport.attach_socket(StalledSocket(b""))
+
+    with pytest.raises(ConnectionError, match="no progress"):
+        transport.send_command("C1:TEST")
 
 
 def test_send_serializes_vicp_header_and_message():
