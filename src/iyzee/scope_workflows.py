@@ -38,8 +38,8 @@ from pathlib import Path
 
 import numpy as np
 
-from .scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from .experiment.io import save_numeric_recording
+from .scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 
 log = logging.getLogger("iyzee.scope_workflows")
 
