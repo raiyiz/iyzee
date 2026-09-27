@@ -141,7 +141,9 @@ class TracesScreen(Page):
             lines.append(f"Started: {escape(str(metadata['started_at_utc']))}")
         instrument = metadata.get("instrument")
         if isinstance(instrument, dict):
-            lines.append("Instrument: " + escape(str(instrument.get("address") or "address unknown")))
+            lines.append(
+                "Instrument: " + escape(str(instrument.get("address") or "address unknown"))
+            )
         series = []
         for waveform in metadata.get("waveforms", []):
             if not isinstance(waveform, dict):
@@ -166,9 +168,7 @@ class TracesScreen(Page):
         summary.update("\n".join(lines))
         plot = self.query_one("#traces-plot", PlotextPlot)
         if series:
-            first = next(
-                (w for w in metadata.get("waveforms", []) if isinstance(w, dict)), {}
-            )
+            first = next((w for w in metadata.get("waveforms", []) if isinstance(w, dict)), {})
             draw_series(
                 plot,
                 series,
