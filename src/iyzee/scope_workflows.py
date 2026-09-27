@@ -278,7 +278,13 @@ def apply_channel_settings(
     One channel's failure doesn't stop the rest. The whole batch is held under
     one lock acquisition so another caller cannot interleave a reconfiguration.
     """
-    baseline = None if current_settings is None else dict(current_settings) if isinstance(current_settings, Mapping) else {s.channel: s for s in current_settings}
+    baseline = (
+        None
+        if current_settings is None
+        else dict(current_settings)
+        if isinstance(current_settings, Mapping)
+        else {s.channel: s for s in current_settings}
+    )
     errors: list[ChannelError] = []
     with _locked(lock):
         for desired in settings:
