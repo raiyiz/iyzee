@@ -16,9 +16,11 @@ all. Files written that way are not supported by this version.)
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -95,7 +97,58 @@ def _new_stem(name: str = "") -> str:
     return "_".join(part for part in (timestamp, slug, token) if part)
 
 
-def save_step_results(
+def save_numeric_recording(
+    arrays: Mapping[str, np.ndarray],
+    savedir: Path,
+    metadata: Mapping[str, Any],
+    *,
+    name: str = "",
+    path: Path | None = None,
+) -> Path:
+    """Persist numeric arrays plus a JSON manifest as one recording.
+
+    The NPZ contains only numeric arrays and is always loaded with
+    ``allow_pickle=False``. The sidecar is plain JSON and includes a SHA-256
+    digest of the finished NPZ so copied data can be checked for accidental
+    modification. Both files are replaced atomically, using the same
+    ``.part`` convention as the experiment checkpoints.
+
+    This is the storage primitive for both experiment sweeps and scope
+    acquisitions; higher layers own their own metadata schemas, but the
+    failure-safe file handling stays in one place.
+    """
+    if path is None:
+        path = savedir / f"{_new_stem(name)}.npz"
+
+    normalized: dict[str, np.ndarray] = {}
+    for key, value in arrays.items():
+        array = np.asarray(value)
+        if array.dtype.hasobject:
+            raise TypeError(f"recording array {key!r} has object dtype")
+        if not np.issubdtype(array.dtype, np.number):
+            raise TypeError(f"recording array {key!r} must be numeric, got {array.dtype}")
+        normalized[key] = array
+
+    partial_npz = path.with_name(path.name + ".part")
+    with partial_npz.open("wb") as handle:
+        np.savez_compressed(handle, **normalized)
+    partial_npz.replace(path)
+
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    json_path = path.with_suffix(".json")
+    sidecar = {
+        "format": "iyzee.numeric-recording",
+        "format_version": 1,
+        "data_file": path.name,
+        "data_sha256": digest,
+        **dict(metadata),
+    }
+    partial_json = json_path.with_name(json_path.name + ".part")
+    partial_json.write_text(json.dumps(sidecar, indent=2, default=str))
+    partial_json.replace(json_path)
+    return path
+
+
     results: list[StepResult],
     savedir: Path,
     run_metadata: dict[str, Any] | None = None,
@@ -164,19 +217,13 @@ def save_step_results(
     points = [{"label": result.label, "x_unit": result.x_unit, **result.meta} for result in results]
     sidecar = {"run_metadata": run_metadata, "points": points}
 
-    # ".part", not ".npz.tmp"/".json.tmp": np.savez appends ".npz" to names
-    # that lack it (writing through a file object avoids that), and Traces
-    # globs *.npz, so an in-flight file must not match either way.
-    partial_npz = path.with_name(path.name + ".part")
-    with partial_npz.open("wb") as handle:
-        np.savez_compressed(handle, **arrays)
-    partial_npz.replace(path)
-
-    partial_json = json_path.with_name(json_path.name + ".part")
-    partial_json.write_text(json.dumps(sidecar, indent=2, default=str))
-    partial_json.replace(json_path)
-
-    return path
+    return save_numeric_recording(
+        arrays,
+        savedir,
+        {"run_metadata": run_metadata, "points": points},
+        name=name,
+        path=path,
+    )
 
 
 def _stack_trace(results: list[StepResult], trace_name: str) -> np.ndarray:
