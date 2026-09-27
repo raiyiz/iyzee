@@ -176,7 +176,7 @@ Handles that expose a live instrument use the same `.device` property regardless
 
 == Design convention: screens display and control, they don't implement <sec-convention>
 
-A page's job is the form, the buttons, the plot, and reporting a result — not the operation itself. `iyzee.scope_workflows` is the template: it holds `ChannelSettings`/`TriggerSettings` (plain frozen dataclasses) and `apply_channel_settings()`/`apply_trigger_settings()`/`acquire_waveforms()` (plain functions taking the driver directly, with no Textual import and an optional `lock=` parameter). `ScopeScreen` reads and validates the form, then calls one of these; the same call works unmodified from a script with its own `LeCroy` instance, or from the console as `apply_channel_settings(lab.scope, [...])`.
+A page's job is the form, the buttons, the plot, and reporting a result — not the operation itself. `iyzee.scope_workflows` is the template: it holds `ChannelSettings`/`TriggerSettings` (plain frozen dataclasses), configuration helpers, `acquire_scope_recording()`, and `save_scope_acquisition()` (plain functions taking the driver directly, with no Textual import and an optional `lock=` parameter). `ScopeScreen` reads and validates the form, then calls these operations; the acquisition record is built first and persisted before the completed result is reported in the UI. The lower-level acquisition function works unmodified from a script with its own `LeCroy` instance, while `save_scope_acquisition()` provides the durable recording boundary.
 
 This is now the standing convention for any screen with real device-orchestration logic, not just a one-off fix for the scope screen: put the operation in a plain module beside the driver it operates on (mirroring how `experiment/` sits beside `mxa.py`), and keep the screen itself to reading input, calling the function, and displaying the result. A screen that grows private methods doing hardware sequencing is a sign the operation belongs in that sibling module instead.
 
@@ -206,7 +206,7 @@ lab.connected                          # e.g. ("mx", "shutter")
 
 = Scope waveform recording
 
-The Scope page's *Acquire & save* is a measurement-recording operation, not just a plotting convenience. One click creates a new file pair under `data/YYYY-MM/` (a fresh random suffix means a normal acquisition never overwrites an earlier one):
+The Scope page's *Acquire & save* is a measurement-recording operation, not just a plotting convenience. One click acquires the selected analog channels from the scope's `DAT1` waveform block and creates a new file pair under `data/YYYY-MM/` (a fresh random suffix means a normal acquisition never overwrites an earlier one):
 
 - the `.npz` contains numeric arrays only — one `time_<channel>` array, one calibrated `value_<channel>` array, and, for the real LeCroy driver, the exact signed 16-bit `raw_<channel>` samples returned by the scope;
 - the `.json` manifest identifies the recording (`measurement_id`, UTC start/end timestamps, software/Python versions, VICP address/port/timeout), records the requested TUI configuration and the last configuration known to have been successfully applied, and describes every returned waveform;
@@ -214,9 +214,9 @@ The Scope page's *Acquire & save* is a measurement-recording operation, not just
 - partial acquisition is preserved: channels that fail are listed under `errors` while successfully returned channels are still saved;
 - the NPZ is SHA-256 hashed after writing and the digest is recorded in the manifest, so a copied or archived data file can be checked for accidental modification.
 
-The calibrated values are derived from the scope's own reported `VERTICAL_GAIN` and `VERTICAL_OFFSET`; the TUI's V/div and offset fields are recorded as configuration provenance, not silently treated as instrument readback. This distinction matters because the legacy LeCroy driver cannot currently verify every vertical/trigger setting after it is written.
+The calibrated values are derived from the scope's own reported `VERTICAL_GAIN` and `VERTICAL_OFFSET` (equivalently, `values = gain * raw_codes - offset`); the TUI's V/div and offset fields are recorded as configuration provenance, not silently treated as instrument readback. The raw signed 16-bit arrays are the preserved sample data when available; the scalar statistics in the manifest are convenience summaries derived from those calibrated arrays. This distinction matters because the legacy LeCroy driver cannot currently verify every vertical/trigger setting after it is written.
 
-The storage layer is shared with experiment sweeps through `experiment.io.save_numeric_recording()`, so atomic `.part` replacement, pickle-free numeric archives, JSON manifests and checksum handling remain one implementation rather than two persistence systems.
+The storage layer is shared with experiment sweeps through `experiment.io.save_numeric_recording()`, so atomic `.part` replacement, pickle-free numeric archives, JSON manifests and checksum handling remain one implementation rather than two persistence systems. The SHA-256 digest covers the completed NPZ itself; it lets a later analysis/archive step verify that the numeric payload has not changed since it was written.
 
 = Typical session, start to finish
 
@@ -224,7 +224,8 @@ The storage layer is shared with experiment sweeps through `experiment.io.save_n
 2. Move to the MXA row, press Enter. `ConnectScreen._connect()` builds an `InstrumentSpec`'s handle in a background thread, calls `handle.connect()` (opens the VISA resource) then `handle.probe()` (`*IDN?`), and on success stores the handle in `app.handles["mxa"]`.
 3. Press `s` for the Sweep screen. Pick bandwidth or frequency, adjust the RBW range (or laser offsets), press *Run sweep*. `SweepScreen._run()` holds `app.handles["mxa"].lock` for the whole run, calls `prepare_analyzer()`, then `run_sequence(steps, ctx, on_step=...)` — each step's result updates the progress bar and the live trace plot.
 4. As each point completes it is saved via `save_step_results()` (one archive, overwritten atomically), and on completion the run is stashed on `app.last_run`.
-5. Press `t` for Traces to browse the saved `.npz` run, or `i` for the Console to inspect it directly: `lab.results[-1].meta`, a quick `np.mean(...)` on a trace, or issuing one more MXA command by hand without leaving the app.
+5. Press `o` for Scope. Apply the channel and trigger settings you intend to use, then press *Acquire & save*. The selected `DAT1` waveforms are captured, written as the NPZ/JSON recording pair, and then plotted; a partial acquisition is still preserved with per-channel errors in the manifest.
+6. Press `t` for Traces to browse the saved Sweep or Scope recordings, or `i` for the Console to inspect live instruments and analysis results.
 
 = References
 
