@@ -306,9 +306,7 @@ def test_apply_channel_settings_does_nothing_when_form_matches_baseline():
     scope = FakeScope()
     baseline = [_settings(Channel.C1)]
 
-    errors = apply_channel_settings(
-        scope, [_settings(Channel.C1)], current_settings=baseline
-    )
+    errors = apply_channel_settings(scope, [_settings(Channel.C1)], current_settings=baseline)
 
     assert errors == []
     assert scope.calls == []
