@@ -587,6 +587,7 @@ class LeCroy:
         """
         data = self.getDataFloatsDetailed(channel=channel, block=block)
         return data["unit"], data["values"]
+
     def getHorProperties(self, channel="C1"):
         """
         return the time vector data for the measurement for channel "channel"
