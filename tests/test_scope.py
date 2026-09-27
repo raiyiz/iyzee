@@ -16,6 +16,7 @@ from iyzee.scope import (
     TriggerSlope,
     VICPFrame,
     VICPProtocolError,
+    VICPTimeoutError,
     VICPTransport,
 )
 
@@ -187,7 +188,7 @@ def test_vicp_transport_failed_connect_leaves_state_unpublished(monkeypatch):
 
     transport = VICPTransport()
 
-    with pytest.raises(LeCroyTimeoutError):
+    with pytest.raises(VICPTimeoutError):
         transport.connect("10.0.0.1")
 
     assert not transport.connected
@@ -352,7 +353,7 @@ def test_get_data_bytes_reads_a_variable_length_definite_block():
     scope = LeCroy()
     response = (
         vicp_frame(0x80, b"C1:WF DAT1,#9")
-        + vicp_frame(0x80, b"0000000003")
+        + vicp_frame(0x80, b"000000003")
         + vicp_frame(0x80, bytes([0, 1, 255]))
         + vicp_frame(0x81, b"\n")
     )
@@ -367,7 +368,7 @@ def test_get_data_words_reads_definite_block_data_and_validates_word_size():
     scope = LeCroy()
     data = struct.pack("<2h", -123, 456)
     response = (
-        vicp_frame(0x80, b"C1:WF DAT1,#9000000004")
+        vicp_frame(0x80, b"C1:WF DAT1,#900000004")
         + vicp_frame(0x80, data[:1])
         + vicp_frame(0x80, data[1:])
         + vicp_frame(0x81, b"\n")
