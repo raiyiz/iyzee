@@ -12,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from rich.markup import escape
 from textual import work
@@ -36,16 +36,6 @@ DETAIL_COL = "detail"
 class ConnectScreen(Page):
     """Table of instruments with live connect/disconnect status."""
 
-    @property
-    def iyzee_app(self) -> IyzeeApp:
-        """``self.app`` narrowed to the concrete app type.
-
-        ``Widget.app`` is typed as ``App[Any]`` in Textual's stubs, which
-        doesn't know about ``handles`` — this app is always an
-        ``IyzeeApp`` at runtime (``IyzeeApp().run()`` is the only entry
-        point), so the cast is safe.
-        """
-        return cast("IyzeeApp", self.app)
 
     def compose(self) -> ComposeResult:
         yield Static("Instruments", classes="panel-title")
@@ -156,23 +146,6 @@ class ConnectScreen(Page):
         self._busy.discard(key)
         self._update_hint()
 
-    def _ui(self, callback, *args, **kwargs) -> None:
-        """Call back into the UI thread from a worker, without ever letting
-        that call blow up the worker itself.
-
-        If the user has switched screens (or the table has been torn down
-        for some other reason) by the time a background connect/disconnect
-        finishes, the widget this tries to update may be gone. Textual
-        propagates any exception raised inside a ``call_from_thread``
-        callback back to the calling (worker) thread; left unguarded, that
-        turns an ordinary "switched screens mid-connect" moment into an
-        unhandled worker exception, which is a much worse failure mode
-        than just skipping a now-irrelevant UI update.
-        """
-        try:
-            self.app.call_from_thread(callback, *args, **kwargs)
-        except Exception:
-            log.exception("connect screen: UI update from worker thread failed")
 
     # Not ``exclusive``: that cancels the previous worker in the group, so
     # connecting a second instrument used to "cancel" the first one's
