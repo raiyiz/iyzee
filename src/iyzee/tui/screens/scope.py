@@ -301,9 +301,7 @@ class ScopeScreen(Page):
             error = exc
         self._ui(self._finish_apply_trigger, settings, error)
 
-    def _finish_apply_trigger(
-        self, settings: TriggerSettings, error: Exception | None
-    ) -> None:
+    def _finish_apply_trigger(self, settings: TriggerSettings, error: Exception | None) -> None:
         self.query_one("#apply-trigger", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         if error is None:
@@ -402,6 +400,10 @@ class ScopeScreen(Page):
         if path is not None:
             log_widget.write(f"Saved acquisition: {escape(str(path))}")
         if save_error is not None:
-            self.notify(f"Acquired traces but could not save them: {one_line(save_error)}", severity="error", markup=False)
+            self.notify(
+                f"Acquired traces but could not save them: {one_line(save_error)}",
+                severity="error",
+                markup=False,
+            )
         elif recording.errors and not recording.waveforms:
             self.notify("Acquisition failed — see the log.", severity="error")
