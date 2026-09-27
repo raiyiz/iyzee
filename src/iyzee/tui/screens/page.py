@@ -17,6 +17,7 @@ UI mechanics without hiding the actual behavior each screen performs.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
@@ -53,6 +54,37 @@ def _field(label: str, widget: Widget, *, id: str | None = None) -> Vertical:
     """
     return Vertical(Label(label), widget, classes="field", id=id)
 
+
+def _finite_float(raw: str, field: str) -> float:
+    """Parse ``raw`` as a finite float, rejecting NaN and infinities."""
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be a number") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"{field} must be a finite number")
+    return value
+
+
+def _positive_float(raw: str, field: str) -> float:
+    """Parse ``raw`` as a finite, strictly positive float."""
+    value = _finite_float(raw, field)
+    if value <= 0:
+        raise ValueError(f"{field} must be positive")
+    return value
+
+
+def _positive_int(raw: str, field: str, *, maximum: int | None = None) -> int:
+    """Parse ``raw`` as a strictly positive integer, optionally bounded."""
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an integer") from exc
+    if value <= 0:
+        raise ValueError(f"{field} must be positive")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{field} must be at most {maximum}")
+    return value
 
 class Page(VerticalScroll, can_focus=False):
     """A page that scrolls instead of clipping when its content doesn't fit.
@@ -127,3 +159,12 @@ class Page(VerticalScroll, can_focus=False):
     def on_input_changed(self, event: Input.Changed) -> None:
         """Editing a previously invalid input clears its error marker."""
         event.input.remove_class("-invalid")
+
+    def refresh_readiness(self) -> None:
+        """Hook for pages whose controls depend on connected instruments.
+
+        Pages without connection-dependent controls deliberately do nothing;
+        ``IyzeeApp.instruments_changed()`` can therefore refresh every page
+        through one base-class contract instead of knowing which pages care.
+        """
+        return None
