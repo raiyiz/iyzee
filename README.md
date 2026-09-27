@@ -336,15 +336,3 @@ uv run mypy src tests      # advisory in CI (the job is allowed to fail)
 
 CI (`.github/workflows/ci.yml`) runs the tests, ruff and mypy, and compiles the
 Typst guides; `.gitlab-ci.yml` compiles the guides too.
-
-## Known gaps
-
-- `scope.py`'s `LeCroy` driver is not integrated with `BaseDevice`'s
-  connection lifecycle (no context-manager support, no injectable transport
-  beyond the low-level socket helpers already covered by tests). The TUI's
-  Connect screen and `lab.scope` both expose it regardless, but no `Step`
-  type drives it yet — adding one is the natural next slice once it's
-  `BaseDevice`-integrated.
-- Aborting a running sweep (Sweep screen) stops after the current step
-  finishes, not mid-step — fine for the MXA's quick per-point calls today,
-  but worth revisiting if a future `Step` type has a long blocking call.
