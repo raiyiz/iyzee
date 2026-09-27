@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-
 from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Horizontal
@@ -31,7 +30,6 @@ _LEVEL_CHOICES = [
     ("Error", str(logging.ERROR)),
 ]
 
-
 class LogScreen(Page):
     """The session's captured log, live, plus older rotated files to browse.
 
@@ -44,7 +42,6 @@ class LogScreen(Page):
     grow, and switching back to "Live session" is what to do next rather
     than waiting on it.
     """
-
 
     def compose(self) -> ComposeResult:
         yield Static("Log", classes="panel-title")
