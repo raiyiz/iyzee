@@ -508,6 +508,12 @@ class ScopeScreen(Page):
         scope = self._scope()
         if scope is None:
             return
+        if self._retrieve_in_flight or not self._settings_synced:
+            self.notify(
+                "Scope settings are not synchronized yet; retrieve the current settings first.",
+                severity="warning",
+            )
+            return
         channels = [
             channel for channel in CHANNELS if self.query_one(f"#{channel}-enable", Checkbox).value
         ]
