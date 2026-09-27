@@ -28,6 +28,7 @@ from ..scope import LeCroy
 from ..wavemeter_readout import WavemeterReadoutError, single_readout
 
 
+
 class InstrumentHandle(Protocol):
     """What the Connect screen — and anything else that talks to this
     instrument, TUI or not — needs from any device adapter."""
@@ -74,6 +75,7 @@ class InstrumentHandle(Protocol):
         """
         ...
 
+
 class _LockedHandle:
     """Base for handles whose instrument access must be serialized.
 
@@ -87,6 +89,7 @@ class _LockedHandle:
     @property
     def lock(self) -> threading.Lock:
         return self._lock
+
 
 
 class _VisaHandle(_LockedHandle):
@@ -112,6 +115,7 @@ class _VisaHandle(_LockedHandle):
     def device(self):
         """The wrapped device (e.g. a live :class:`~iyzee.mxa.KeysightMXA`)."""
         return self._device
+
 
 class ShutterHandle(_LockedHandle):
     """Adapter for :class:`~iyzee.power.ShutterControl`.
@@ -148,6 +152,7 @@ class ShutterHandle(_LockedHandle):
         """The live :class:`ShutterControl`, once connected."""
         return self.device
 
+
 class WavemeterHandle(_LockedHandle):
     """Adapter for the wavemeter's stateless HTTP API.
 
@@ -177,6 +182,7 @@ class WavemeterHandle(_LockedHandle):
         except WavemeterReadoutError as exc:
             raise ConnectionError(str(exc)) from exc
         return f"ch{self._channel} = {freq:.6f} THz"
+
 
 class ScopeHandle(_LockedHandle):
     """Adapter for the legacy :class:`~iyzee.scope.LeCroy` raw-socket driver.
@@ -210,6 +216,7 @@ class ScopeHandle(_LockedHandle):
         return self._scope
 
 
+
 @dataclass(frozen=True)
 class InstrumentSpec:
     """One row in the Connect screen: a name plus how to build its handle."""
@@ -227,6 +234,7 @@ class InstrumentSpec:
 
     def build(self) -> InstrumentHandle:
         return self.make()
+
 
 class LockedProxy:
     """Serializes calls to a live device shared between a screen worker
