@@ -30,6 +30,7 @@ _LEVEL_CHOICES = [
     ("Error", str(logging.ERROR)),
 ]
 
+
 class LogScreen(Page):
     """The session's captured log, live, plus older rotated files to browse.
 
