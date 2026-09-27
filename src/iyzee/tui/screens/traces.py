@@ -1,8 +1,10 @@
-"""Traces screen: browse previously recorded sweep runs.
+"""Traces screen: browse persisted Sweep and Scope recordings.
 
-Reads exactly what ``experiment.io.save_step_results`` already writes —
-each run's numeric ``.npz`` plus its ``.json`` metadata sidecar — so
-there's no new persistence format to maintain just for browsing.
+Reads the shared numeric ``.npz`` plus JSON-manifest storage produced by
+``experiment.io``: sweep checkpoints keep their existing schema, while
+Scope acquisitions use channel-specific time/value arrays and optional raw
+waveform codes. There is one persistence format to browse, not a second
+Traces-only representation.
 """
 
 from __future__ import annotations
