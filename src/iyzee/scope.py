@@ -477,4 +477,3 @@ class LeCroy:
             interval = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
 
             return horunit, offset, interval
-
