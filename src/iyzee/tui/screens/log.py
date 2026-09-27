@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+
 
 from rich.markup import escape
 from textual.app import ComposeResult
@@ -21,9 +21,6 @@ from textual.widgets import Button, RichLog, Select, Static
 from .. import logging_support
 from ..logging_support import LogEntry
 from .page import Page
-
-if TYPE_CHECKING:
-    from ..app import IyzeeApp
 
 _LIVE = "__live__"
 
@@ -48,9 +45,6 @@ class LogScreen(Page):
     than waiting on it.
     """
 
-    @property
-    def iyzee_app(self) -> IyzeeApp:
-        return cast("IyzeeApp", self.app)
 
     def compose(self) -> ComposeResult:
         yield Static("Log", classes="panel-title")
