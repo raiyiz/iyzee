@@ -42,6 +42,7 @@ PAGE_SPECS = (
     ("log", "Log", LogScreen),
 )
 
+
 class NavRail(Static):
     """Persistent left-hand page list + a per-instrument connection dot.
 
