@@ -39,7 +39,7 @@ import logging
 import platform
 import threading
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -236,33 +236,53 @@ def _trigger_source(raw: str) -> str:
 
 
 def apply_channel_settings(
-    scope: LeCroy, settings: Sequence[ChannelSettings], *, lock: threading.Lock | None = None
+    scope: LeCroy,
+    settings: Sequence[ChannelSettings],
+    *,
+    current_settings: Mapping[Channel, ChannelSettings] | Sequence[ChannelSettings] | None = None,
+    lock: threading.Lock | None = None,
 ) -> list[ChannelError]:
-    """Push every channel's vertical settings to the scope.
+    """Apply channel settings, optionally writing only fields that changed.
 
-    One channel's failure doesn't stop the rest — a typo in channel 3's
-    coupling shouldn't also block channel 1 from getting its volts/div.
-    Returns the list of failures (empty if everything succeeded) rather
-    than raising, so a caller can decide how to report a partial failure
-    instead of losing the channels that *did* apply.
+    With ``current_settings`` supplied, it is the known baseline returned by
+    :func:`read_channel_settings` (or a previously successful apply). Each
+    channel is compared field-by-field and only changed values are written.
+    This lets a caller edit one field in a complete retrieved snapshot without
+    re-sending unrelated settings.
 
-    Held under one lock acquisition for the whole batch, not once per
-    channel: this is one logical "reconfigure the scope" operation, and a
-    console command interleaving partway through it would leave the scope
-    in a mixed state just as broken as two callers reconfiguring it at
-    once.
+    A channel missing from the supplied baseline is deliberately skipped and
+    reported as an error: without a trustworthy baseline, writing its form
+    defaults could silently overwrite a setting already on the instrument.
+    Omitting ``current_settings`` preserves the original full-write behavior
+    for standalone callers that explicitly want to configure every field.
+
+    One channel's failure doesn't stop the rest. The whole batch is held under
+    one lock acquisition so another caller cannot interleave a reconfiguration.
     """
+    baseline = None if current_settings is None else dict(current_settings) if isinstance(current_settings, Mapping) else {s.channel: s for s in current_settings}
     errors: list[ChannelError] = []
     with _locked(lock):
-        for s in settings:
+        for desired in settings:
+            current = baseline.get(desired.channel) if baseline is not None else None
+            if baseline is not None and current is None:
+                error = RuntimeError(
+                    f"{desired.channel} has no retrieved baseline; refusing to overwrite it"
+                )
+                log.warning("scope: %s", error)
+                errors.append(ChannelError(desired.channel, error))
+                continue
             try:
-                scope.set_volts_per_div(s.channel, s.volts_per_div)
-                scope.set_offset(s.channel, s.offset)
-                scope.set_coupling(s.channel, s.coupling)
-                scope.set_trace_display(s.channel, s.enabled)
+                if current is None or desired.volts_per_div != current.volts_per_div:
+                    scope.set_volts_per_div(desired.channel, desired.volts_per_div)
+                if current is None or desired.offset != current.offset:
+                    scope.set_offset(desired.channel, desired.offset)
+                if current is None or desired.coupling != current.coupling:
+                    scope.set_coupling(desired.channel, desired.coupling)
+                if current is None or desired.enabled != current.enabled:
+                    scope.set_trace_display(desired.channel, desired.enabled)
             except Exception as exc:  # noqa: BLE001 - collected, not swallowed
-                log.exception("scope: failed to apply %s settings", s.channel)
-                errors.append(ChannelError(s.channel, exc))
+                log.exception("scope: failed to apply %s settings", desired.channel)
+                errors.append(ChannelError(desired.channel, exc))
     return errors
 
 
@@ -300,21 +320,44 @@ def read_channel_settings(
 
 
 def apply_trigger_settings(
-    scope: LeCroy, settings: TriggerSettings, *, lock: threading.Lock | None = None
+    scope: LeCroy,
+    settings: TriggerSettings,
+    *,
+    current_settings: TriggerSettings | None = None,
+    lock: threading.Lock | None = None,
 ) -> None:
-    """Push the trigger configuration to the scope.
+    """Apply trigger settings, optionally writing only fields that changed.
 
-    Raises on failure, unlike :func:`apply_channel_settings` — there's
-    only one trigger, so unlike a batch of channels there's nothing that
-    could partially succeed; a caller just needs to know it worked or it
-    didn't.
+    With a retrieved ``current_settings`` baseline, unchanged fields are left
+    alone. If the trigger source changes, only source-specific fields that
+    also differ from the old baseline are written on the new source; the new
+    source's existing slope/coupling/level are otherwise preserved. This
+    avoids copying the old source's configuration onto the newly selected
+    source by accident.
+
+    Omitting ``current_settings`` keeps the original behavior: write the full
+    trigger configuration supplied by the caller. Failures still raise because
+    there is only one trigger configuration to report.
     """
     with _locked(lock):
-        scope.set_trigger_mode(settings.mode)
-        scope.set_trigger_source(settings.source)
-        scope.set_trigger_slope(settings.source, settings.slope)
-        scope.set_trigger_coupling(settings.source, settings.coupling)
-        scope.set_trigger_level(settings.source, settings.level_volts)
+        if current_settings is None:
+            scope.set_trigger_mode(settings.mode)
+            scope.set_trigger_source(settings.source)
+            scope.set_trigger_slope(settings.source, settings.slope)
+            scope.set_trigger_coupling(settings.source, settings.coupling)
+            scope.set_trigger_level(settings.source, settings.level_volts)
+            return
+
+        if settings.mode != current_settings.mode:
+            scope.set_trigger_mode(settings.mode)
+        if settings.source != current_settings.source:
+            scope.set_trigger_source(settings.source)
+        if settings.slope != current_settings.slope:
+            scope.set_trigger_slope(settings.source, settings.slope)
+        if settings.coupling != current_settings.coupling:
+            scope.set_trigger_coupling(settings.source, settings.coupling)
+        if settings.level_volts != current_settings.level_volts:
+            scope.set_trigger_level(settings.source, settings.level_volts)
 
 
 def read_trigger_settings(scope: LeCroy, *, lock: threading.Lock | None = None) -> TriggerSettings:
