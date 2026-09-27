@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 
 from rich.markup import escape
 from textual import work
@@ -35,11 +36,14 @@ from ...scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, Tr
 from ...scope_workflows import (
     ChannelError,
     ChannelSettings,
+    ScopeAcquisition,
     TriggerSettings,
-    acquire_waveforms,
+    acquire_scope_recording,
     apply_channel_settings,
     apply_trigger_settings,
+    save_scope_acquisition,
 )
+from ..experiment import create_dirs
 from ..plotting import draw_series
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
@@ -178,6 +182,8 @@ class ScopeScreen(Page):
         plot.plt.title("Scope waveforms")
         plot.plt.xlabel("Time (s)")
         plot.plt.ylabel("Voltage (V)")
+        self._last_applied_channel_settings: tuple[ChannelSettings, ...] | None = None
+        self._last_applied_trigger_settings: TriggerSettings | None = None
         self.refresh_readiness()
 
     def on_show(self) -> None:
@@ -244,12 +250,15 @@ class ScopeScreen(Page):
     @work(thread=True, exclusive=True, group="scope-apply-channels", exit_on_error=False)
     def _apply_channels(self, scope: LeCroy, settings: Sequence[ChannelSettings]) -> None:
         errors = apply_channel_settings(scope, settings, lock=self.iyzee_app.handles["scope"].lock)
-        self._ui(self._finish_apply_channels, errors)
+        self._ui(self._finish_apply_channels, settings, errors)
 
-    def _finish_apply_channels(self, errors: Sequence[ChannelError]) -> None:
+    def _finish_apply_channels(
+        self, settings: Sequence[ChannelSettings], errors: Sequence[ChannelError]
+    ) -> None:
         self.query_one("#apply-channels", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         if not errors:
+            self._last_applied_channel_settings = tuple(settings)
             log_widget.write("Channel settings applied.")
             return
         for err in errors:
@@ -287,12 +296,15 @@ class ScopeScreen(Page):
         except Exception as exc:  # noqa: BLE001
             log.exception("scope: failed to apply trigger settings")
             error = exc
-        self._ui(self._finish_apply_trigger, error)
+        self._ui(self._finish_apply_trigger, settings, error)
 
-    def _finish_apply_trigger(self, error: Exception | None) -> None:
+    def _finish_apply_trigger(
+        self, settings: TriggerSettings, error: Exception | None
+    ) -> None:
         self.query_one("#apply-trigger", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         if error is None:
+            self._last_applied_trigger_settings = settings
             log_widget.write("Trigger settings applied.")
             return
         log_widget.write(f"[red]Trigger: {escape(one_line(error))}[/red]")
@@ -310,36 +322,69 @@ class ScopeScreen(Page):
         if not channels:
             self.notify("Enable at least one channel first.", severity="warning")
             return
+        try:
+            channel_settings = tuple(self._read_channel_settings())
+            trigger_settings = self._read_trigger_settings()
+        except FieldError as exc:
+            self._flag_invalid(exc.field_id)
+            self.notify(f"Invalid scope configuration: {exc}", severity="error", markup=False)
+            return
         self.query_one("#acquire-waveforms", Button).disabled = True
         log_widget = self.query_one("#scope-log", RichLog)
-        log_widget.write(f"Acquiring {', '.join(str(c) for c in channels)}…")
-        self._acquire(scope, channels)
+        log_widget.write(f"Acquiring {", ".join(str(c) for c in channels)}…")
+        self._acquire(scope, channels, channel_settings, trigger_settings)
 
     @work(thread=True, exclusive=True, group="scope-acquire", exit_on_error=False)
-    def _acquire(self, scope: LeCroy, channels: Sequence[Channel]) -> None:
-        series, errors = acquire_waveforms(
-            scope, channels, lock=self.iyzee_app.handles["scope"].lock
+    def _acquire(
+        self,
+        scope: LeCroy,
+        channels: Sequence[Channel],
+        channel_settings: Sequence[ChannelSettings],
+        trigger_settings: TriggerSettings,
+    ) -> None:
+        recording = acquire_scope_recording(
+            scope,
+            channels,
+            channel_settings=channel_settings,
+            trigger_settings=trigger_settings,
+            lock=self.iyzee_app.handles["scope"].lock,
         )
-        self._ui(self._finish_acquire, series, errors)
-
+        path = None
+        save_error: Exception | None = None
+        try:
+            path = save_scope_acquisition(recording, create_dirs())
+        except Exception as exc:  # noqa: BLE001 - acquisition stays available in memory
+            log.exception("scope: failed to save acquisition")
+            save_error = exc
+        self._ui(self._finish_acquire, recording, path, save_error)
     def _finish_acquire(
         self,
-        series: Sequence[tuple[list[float], list[float], str]],
-        errors: Sequence[ChannelError],
+        recording: ScopeAcquisition,
+        path: Path | None,
+        save_error: Exception | None,
     ) -> None:
         self.query_one("#acquire-waveforms", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
-        for err in errors:
+        for err in recording.errors:
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
-        if series:
+        if recording.waveforms:
             plot = self.query_one("#scope-plot", PlotextPlot)
+            series = [
+                (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
+                for waveform in recording.waveforms
+            ]
+            first = recording.waveforms[0]
             draw_series(
                 plot,
                 series,
                 title="Scope waveforms",
-                xlabel="Time (s)",
-                ylabel="Voltage (V)",
+                xlabel=f"Time ({first.time_unit})",
+                ylabel=f"Signal ({first.value_unit})",
             )
-            log_widget.write(f"Acquired {len(series)} channel(s).")
-        elif errors:
+            log_widget.write(f"Acquired {len(recording.waveforms)} channel(s).")
+        if path is not None:
+            log_widget.write(f"Saved acquisition: {escape(str(path))}")
+        if save_error is not None:
+            self.notify(f"Acquired traces but could not save them: {one_line(save_error)}", severity="error", markup=False)
+        elif recording.errors and not recording.waveforms:
             self.notify("Acquisition failed — see the log.", severity="error")
