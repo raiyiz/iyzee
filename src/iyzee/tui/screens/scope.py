@@ -335,7 +335,16 @@ class ScopeScreen(Page):
         self.query_one("#acquire-waveforms", Button).disabled = True
         log_widget = self.query_one("#scope-log", RichLog)
         log_widget.write("Acquiring " + ", ".join(str(c) for c in channels) + "…")
-        self._acquire(scope, channels, channel_settings, trigger_settings)
+        applied_channel_settings = self._last_applied_channel_settings
+        applied_trigger_settings = self._last_applied_trigger_settings
+        self._acquire(
+            scope,
+            channels,
+            channel_settings,
+            trigger_settings,
+            applied_channel_settings,
+            applied_trigger_settings,
+        )
 
     @work(thread=True, exclusive=True, group="scope-acquire", exit_on_error=False)
     def _acquire(
@@ -344,14 +353,16 @@ class ScopeScreen(Page):
         channels: Sequence[Channel],
         channel_settings: Sequence[ChannelSettings],
         trigger_settings: TriggerSettings,
+        applied_channel_settings: Sequence[ChannelSettings] | None,
+        applied_trigger_settings: TriggerSettings | None,
     ) -> None:
         recording = acquire_scope_recording(
             scope,
             channels,
             channel_settings=channel_settings,
             trigger_settings=trigger_settings,
-            applied_channel_settings=self._last_applied_channel_settings,
-            applied_trigger_settings=self._last_applied_trigger_settings,
+            applied_channel_settings=applied_channel_settings,
+            applied_trigger_settings=applied_trigger_settings,
             lock=self.iyzee_app.handles["scope"].lock,
         )
         path = None
