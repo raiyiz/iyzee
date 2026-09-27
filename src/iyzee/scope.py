@@ -1,12 +1,15 @@
 import socket
-import struct  # for unpacking c structs
-from ctypes import Structure, c_int, c_ubyte
+import struct
+from contextlib import contextmanager
 from enum import StrEnum
+from typing import Iterator
 
 import numpy as np
 
+from .vicp import VICPProtocolError, VICPTimeoutError, VICPTransport, recv_exact
 
-class LeCroyTimeoutError(TimeoutError):
+
+class LeCroyTimeoutError(VICPTimeoutError):
     """The scope didn't respond (or accept data) within the configured
     socket timeout.
 
@@ -21,24 +24,6 @@ class LeCroyTimeoutError(TimeoutError):
     a message with real numbers in it (how long, how far into the
     transfer) instead of a bare, contextless timeout.
     """
-
-
-# c struct for header frame
-class LECROY_TCP_HEADER(Structure):
-    """defines LeCroy VICP protocol (TCP header)
-    _fields_ are byte, byte[3] and int (4-byte)
-    """
-
-    _fields_ = [("bEOI_Flag", c_ubyte), ("reserved", c_ubyte * 3), ("iLength", c_int)]
-
-
-# various flags just in case in hex
-LECROY_EOI_FLAG = 0x01
-LECROY_SRQ_FLAG = 0x08
-LECROY_CLEAR_FLAG = 0x10
-LECROY_LOCKOUT_FLAG = 0x20
-LECROY_REMOTE_FLAG = 0x40
-LECROY_DATA_FLAG = 0x80
 
 
 class Channel(StrEnum):
@@ -113,6 +98,8 @@ __all__ = [
     "TriggerCoupling",
     "TriggerMode",
     "TriggerSlope",
+    "VICPProtocolError",
+    "VICPTransport",
 ]
 
 
@@ -154,176 +141,85 @@ class LeCroy:
     LECROY_DATA_FLAG = 0x80
 
     def __init__(self):
-        self.CONNECTED = False
-        self.address = None
+        self._transport = VICPTransport(
+            port=self.LECROY_SERVER_PORT,
+            connect_timeout=self.MAX_TCP_CONNECT,
+            io_timeout=self.MAC_TCP_READ,
+            max_command_length=self.CMD_BUF_LEN,
+            timeout_error=LeCroyTimeoutError,
+        )
+
+    @property
+    def connected(self) -> bool:
+        return self._transport.connected
+
+    @property
+    def CONNECTED(self) -> bool:
+        """Compatibility alias for the historical all-caps state attribute."""
+        return self.connected
+
+    @property
+    def address(self) -> str | None:
+        return self._transport.address
+
+    @property
+    def SOCK_TIMEOUT(self) -> float:
+        return self._transport.io_timeout
+
+    @property
+    def s(self) -> socket.socket | object | None:
+        """Compatibility access to the underlying socket for existing fakes."""
+        return self._transport.socket
+
+    @s.setter
+    def s(self, sock: object) -> None:
+        self._transport.attach_socket(sock)
 
     @staticmethod
-    def _recv_exact(sock: socket.socket, num_bytes: int) -> bytes:
-        """Read exactly ``num_bytes`` from ``sock``.
+    def _recv_exact(sock: object, num_bytes: int) -> bytes:
+        return recv_exact(sock, num_bytes, timeout_error=LeCroyTimeoutError)
 
-        A single ``socket.recv()`` call is not guaranteed to return all the
-        bytes that are available/requested; it may return fewer. Loop until
-        the requested number of bytes has actually been received.
-
-        Each individual ``recv()`` is bounded by the socket's own timeout
-        (set once, in :meth:`connect`) — not the whole loop, so a large,
-        slow-but-still-arriving transfer isn't cut off just for taking a
-        while, but a stall with no data at all for a full timeout period is
-        reported rather than hanging forever.
-        """
-        chunks = bytearray()
-        while len(chunks) < num_bytes:
-            try:
-                chunk = sock.recv(num_bytes - len(chunks))
-            except TimeoutError as exc:
-                raise LeCroyTimeoutError(
-                    f"no response after {sock.gettimeout()}s "
-                    f"({len(chunks)}/{num_bytes} bytes received)"
-                ) from exc
-            if not chunk:
-                raise ConnectionError(f"Socket closed after {len(chunks)}/{num_bytes} bytes")
-            chunks.extend(chunk)
-        return bytes(chunks)
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Serialize a complete logical operation on the Scope connection."""
+        with self._transport.transaction():
+            yield
 
     def connect(self, IP, delayval=None, connect_timeout=None):
-        """Connect to the IP, using LeCroy.LECROY_SERVER_PORT as port
-        creates a socket at LeCroy.s
-
-        ``connect_timeout`` (default :attr:`MAX_TCP_CONNECT`) bounds the
-        TCP handshake itself: if the scope is off, unplugged, or behind a
-        firewall that silently drops the connection, this raises
-        :class:`LeCroyTimeoutError` instead of blocking forever.
-
-        ``delayval`` (default :attr:`MAC_TCP_READ`) becomes the socket's
-        ongoing timeout for every read/write after that — applied via
-        ``socket.settimeout()``, so :meth:`send` and :meth:`_recv_exact`
-        (and everything built on them: :meth:`readAll`, :meth:`query`,
-        ``getDataFloats``, ...) inherit the same bound automatically.
-        """
-        if self.CONNECTED:
+        """Connect to the IP with bounded handshake and I/O timeouts."""
+        if self.connected:
             print("Already connected!")
             return -2
 
-        if connect_timeout is None:
-            connect_timeout = self.MAX_TCP_CONNECT
-        if delayval is None:
-            delayval = self.MAC_TCP_READ
-
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.s.settimeout(connect_timeout)
-        try:
-            self.s.connect((IP, self.LECROY_SERVER_PORT))
-        except TimeoutError as exc:
-            self.s.close()
-            raise LeCroyTimeoutError(
-                f"no response connecting to {IP}:{self.LECROY_SERVER_PORT} "
-                f"within {connect_timeout}s"
-            ) from exc
-        except OSError:
-            self.s.close()
-            raise
-
-        self.SOCK_TIMEOUT = delayval
-        self.s.settimeout(self.SOCK_TIMEOUT)
-        self.address = IP
-        self.CONNECTED = True
-
-    def disconnect(self):
-        """Disconnect from socket LeCroy.s"""
-        if not self.CONNECTED:
-            return -2
-
-        self.s.close()
-        self.CONNECTED = False
-
-    def send(self, message):
-        """Send a message through the socket to LeCroy oscilloscope.
-        Sends message length in header frame and then writes to the
-        socket until all is received by the oscilloscope
-        returns 0 if abnormal exit
-        """
-        msglen = len(message)
-        # set the header info
-        head = LECROY_TCP_HEADER(
-            self.LECROY_DATA_FLAG | self.LECROY_EOI_FLAG,
-            (1, 0, 0),
-            socket.htonl(msglen),
+        delayval = self.MAC_TCP_READ if delayval is None else delayval
+        connect_timeout = self.MAX_TCP_CONNECT if connect_timeout is None else connect_timeout
+        self._transport.connect(
+            IP,
+            connect_timeout=connect_timeout,
+            io_timeout=delayval,
         )
 
-        # write the header first
-        try:
-            self.s.send(bytes(head))
-        except TimeoutError as exc:
-            raise LeCroyTimeoutError(
-                f"no response writing header after {self.s.gettimeout()}s"
-            ) from exc
+    def disconnect(self):
+        """Disconnect from the Scope and clear connection state."""
+        if not self.connected:
+            return -2
+        self._transport.close()
 
-        # write the message
-        byteindx = 0
-        msgbytes = message.encode("ascii")
-        while byteindx < msglen:
-            try:
-                xferd = self.s.send(msgbytes[byteindx:])
-            except TimeoutError as exc:
-                raise LeCroyTimeoutError(
-                    f"no response after {self.s.gettimeout()}s ({byteindx}/{msglen} bytes sent)"
-                ) from exc
-            if xferd < 0:
-                raise RuntimeError(f"could not write the data block, returned {xferd}")
-            byteindx += xferd
-
-    def __translate(self, data):
-        """Takes the device header (data) and finds the flag and data length
-        the device has specified in the usual Byte, Byte[3], Int format
-        See the documentation for possible eofflags
-        returns (eofflag, datalen)
-        """
-        headdata = struct.unpack("B3BI", data)  # get response (header from device)
-        datalen = socket.ntohl(headdata[-1])  # data length to be captured
-        eofflag = headdata[0]
-        return (eofflag, datalen)
-
-    def __getHeader(self):
-        """
-        Receive a 8-byte header from socket LeCroy.s
-        translate it and return the (eofflag, datalen)
-        """
-        data = self._recv_exact(self.s, 8)
-        return self.__translate(data)
+    def send(self, message):
+        """Send one VICP command frame."""
+        self._transport.send_command(message)
 
     def readAll(self):
-        """Read all that the device gives us (ascii) on Lecroy.s socket
-        1) Get header from device (flag, len)
-        2) receive len bytes and decode it
-        returns the flag of the last transmission frame and complete data string in ascii
-        NB! assumes all data frame transfers can be done in one go
-        """
-        dtstr = ""
-        while True:
-            flg, lnt = self.__getHeader()  # find how
-            dtstr += self._recv_exact(self.s, lnt).decode("ascii")  # gather data
-            if flg != self.LECROY_DATA_FLAG:  # data flag 0x80
-                break
-        return flg, dtstr
+        """Read all response frames through EOI and return ``(flags, text)``."""
+        flag, data = self._transport.read_message()
+        try:
+            return flag, data.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise VICPProtocolError("VICP response was not valid ASCII") from exc
 
     def query(self, message: str) -> str:
-        """Send ``message`` and return the device's response, trimmed.
-
-        A thin building block over :meth:`send`/:meth:`readAll`, used by the
-        getters below. LeCroy responses echo the (short-form) command header
-        before the value — e.g. querying ``C1:COUPLING?`` gets back something
-        like ``C1:COUPLING D50`` — and for commands whose value can include a
-        unit suffix (``TIME_DIV 10 NS``) the two are space-separated tokens.
-        Because the exact response shape is command-specific, this method
-        deliberately does not try to strip the header or split out a unit:
-        it hands back the trimmed response text as-is, the same way the
-        existing ``getHorProperties``/``getDataFloats`` methods each parse
-        their own specific response format rather than relying on one
-        generic parser.
-        """
-        self.send(message)
-        _flag, text = self.readAll()
-        return text.strip()
+        """Send ``message`` and atomically return the trimmed response text."""
+        return self._transport.query(message)
 
     # ------------------------------------------------------------------
     # Channel (vertical) control
