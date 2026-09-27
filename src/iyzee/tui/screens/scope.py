@@ -206,7 +206,7 @@ class ScopeScreen(Page):
                 "Connect the scope first — press F1 for the Connect page.", severity="error"
             )
             return None
-        return handle.scope
+        return handle.device
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "apply-channels":
