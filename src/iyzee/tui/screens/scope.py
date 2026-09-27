@@ -372,6 +372,7 @@ class ScopeScreen(Page):
         """Return whether the scope object is still the connected instance."""
         handle = self.iyzee_app.handles.get("scope")
         return handle is not None and handle.device is scope
+
     def _scope(self) -> LeCroy | None:
         """The live driver, or ``None`` (after notifying) if not connected."""
         handle = self.iyzee_app.handles.get("scope")
