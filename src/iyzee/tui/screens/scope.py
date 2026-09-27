@@ -347,6 +347,8 @@ class ScopeScreen(Page):
             channels,
             channel_settings=channel_settings,
             trigger_settings=trigger_settings,
+            applied_channel_settings=self._last_applied_channel_settings,
+            applied_trigger_settings=self._last_applied_trigger_settings,
             lock=self.iyzee_app.handles["scope"].lock,
         )
         path = None
