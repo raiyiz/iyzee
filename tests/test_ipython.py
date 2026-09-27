@@ -100,8 +100,8 @@ def test_lab_mx_is_wrapped_in_locked_proxy() -> None:
     assert repr(lab.mx) == repr(device)
 
 
-def test_lab_scope_unwraps_the_scope_attribute() -> None:
-    app = FakeApp(handles={"scope": FakeHandle(scope="scope-device")})
+def test_lab_scope_uses_the_handle_device() -> None:
+    app = FakeApp(handles={"scope": FakeHandle(device="scope-device")})
     lab = LabProxy(app)
     assert repr(lab.scope) == repr("scope-device")
 
