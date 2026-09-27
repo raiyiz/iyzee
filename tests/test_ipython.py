@@ -11,8 +11,6 @@ import contextlib
 import io
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
 from helpers import FakeApp, FakeHandle, history_manager
 from IPython.core.interactiveshell import InteractiveShell
 
@@ -132,7 +130,7 @@ def test_lab_is_read_only() -> None:
 
 
 def test_lab_connected_and_dir_reflect_current_state() -> None:
-    app = FakeApp(handles={"mxa": MxaHandle(object())})
+    app = FakeApp(handles={"mxa": FakeHandle(device=object())})
     lab = LabProxy(app)
     assert lab.connected == ("mx",)
     # dir() always lists the full possible set, connected or not
@@ -156,7 +154,7 @@ def test_lab_device_tab_completion_works() -> None:
 
         def single_sweep_wait(self) -> None: ...
 
-    app = FakeApp(handles={"mxa": MxaHandle(Device())})
+    app = FakeApp(handles={"mxa": FakeHandle(device=Device())})
     shell = IyzeeIPython(app)
 
     _prefix, matches = shell.complete("lab.mx.", len("lab.mx."))
