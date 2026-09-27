@@ -37,6 +37,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import platform
+import re
 import threading
 import uuid
 from collections.abc import Mapping, Sequence
@@ -207,17 +208,35 @@ def _value(raw: str) -> str:
     return raw.strip().split()[-1]
 
 
-def _parse_volts(raw: str) -> float:
-    """Parse a LeCroy voltage reply (e.g. ``"5.00E-01V"``) to a float.
+_VOLTAGE_RE = re.compile(
+    r"(?P<number>[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?)[ \t]*(?P<unit>[fpnumkMGT]?V)?\s*$"
+)
 
-    Numeric vertical/trigger replies carry a trailing unit letter per the
-    LeCroy remote command reference; stripped here rather than passed to
-    ``float()`` as-is, which would raise on it.
+
+def _parse_volts(raw: str) -> float:
+    """Parse a LeCroy voltage reply into volts.
+
+    The manuals show both compact responses such as ``5.00E-01V`` and
+    responses where the number and unit are separated, such as
+    ``200E-3 V``. Accept both forms, plus common SI voltage prefixes, while
+    treating a missing unit as volts.
     """
-    token = _value(raw)
-    if token and token[-1].isalpha():
-        token = token[:-1]
-    return float(token)
+    match = _VOLTAGE_RE.search(raw.strip())
+    if match is None:
+        raise ValueError(f"could not parse voltage from scope response: {raw!r}")
+    scale = {
+        "fV": 1e-15,
+        "pV": 1e-12,
+        "nV": 1e-9,
+        "uV": 1e-6,
+        "mV": 1e-3,
+        "V": 1.0,
+        "kV": 1e3,
+        "MV": 1e6,
+        "GV": 1e9,
+    }
+    unit = match.group("unit") or "V"
+    return float(match.group("number")) * scale[unit]
 
 
 def _trigger_source(raw: str) -> str:
