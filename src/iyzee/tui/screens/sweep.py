@@ -265,7 +265,6 @@ class SweepScreen(Page):
         self.iyzee_app.sweep_running = True
         self._run(mx_handle.device, shutter, steps, config, kind)
 
-
     def _build_bandwidth_run(self) -> tuple[Sequence[Step], AnalyzerConfig]:
         start = self._read("rbw-start", _positive_float, "RBW start")
         stop = self._read("rbw-stop", _positive_float, "RBW stop")
