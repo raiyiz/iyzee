@@ -221,7 +221,11 @@ class ScopeScreen(Page):
 
     def _channel_baseline(self, channel: Channel) -> ChannelSettings | None:
         return next(
-            (setting for setting in self._last_applied_channel_settings or () if setting.channel == channel),
+            (
+                setting
+                for setting in self._last_applied_channel_settings or ()
+                if setting.channel == channel
+            ),
             None,
         )
 
@@ -298,7 +302,9 @@ class ScopeScreen(Page):
             missing_channels = [
                 str(channel) for channel in CHANNELS if self._channel_baseline(channel) is None
             ]
-            missing = missing_channels + ([] if self._last_applied_trigger_settings is not None else ["trigger"])
+            missing = missing_channels + (
+                [] if self._last_applied_trigger_settings is not None else ["trigger"]
+            )
             detail = f" — missing: {', '.join(missing)}" if missing else ""
             status.update("Scope state is not fully synchronized" + detail + ".")
             status.remove_class("scope-dirty")
