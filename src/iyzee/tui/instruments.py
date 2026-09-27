@@ -49,6 +49,15 @@ class InstrumentHandle(Protocol):
         ...
 
     @property
+    def device(self) -> Any | None:
+        """The live underlying device, if this handle exposes one.
+
+        Stateless adapters such as the wavemeter return ``None``; the
+        Connect/Sweep/Scope/console paths only use handles with a live device.
+        """
+        ...
+
+    @property
     def lock(self) -> threading.Lock:
         """Serializes every call to this instrument's hardware, from
         whichever caller — a screen's background worker, the IPython
@@ -153,6 +162,11 @@ class WavemeterHandle(_LockedHandle):
         return None
 
     def disconnect(self) -> None:
+        return None
+
+    @property
+    def device(self) -> None:
+        """The wavemeter has no persistent live device object."""
         return None
 
     def probe(self) -> str:
