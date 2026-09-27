@@ -305,6 +305,28 @@ def test_get_horizontal_properties_reads_unit_offset_and_interval():
     assert interval == pytest.approx(0.001)
 
 
+def test_get_data_floats_detailed_retains_raw_codes_and_calibration():
+    scope = LeCroy()
+    data = struct.pack("<2h", 100, -50)
+    preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
+    responses = (
+        preamble
+        + vicp_frame(0x80, data)
+        + vicp_frame(0x01, b"\n")
+        + vicp_frame(0x01, b'VALUE: 0.25"\n')
+        + vicp_frame(0x01, b'VALUE: 2.0"\n')
+        + vicp_frame(0x01, b'Unit Name = V"\n')
+    )
+    scope.s = FragmentingFakeSocket(responses, chunk_size=2)
+
+    detailed = scope.getDataFloatsDetailed(channel="C1", block="DAT1")
+
+    assert detailed["unit"] == "V"
+    np.testing.assert_array_equal(detailed["raw_codes"], [100, -50])
+    np.testing.assert_allclose(detailed["values"], [199.75, -100.25])
+    assert detailed["vertical_gain"] == 2.0
+    assert detailed["vertical_offset"] == 0.25
+
 # -- channel / trigger / math control --------------------------------------------------------
 
 
