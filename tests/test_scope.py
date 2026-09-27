@@ -381,9 +381,7 @@ def test_get_data_words_reads_definite_block_data_and_validates_word_size():
 
 def test_get_data_words_rejects_missing_definite_block_header():
     scope = LeCroy()
-    scope.s = FragmentingFakeSocket(
-        vicp_frame(0x81, b"C1:WF DAT1,not-a-binary-block")
-    )
+    scope.s = FragmentingFakeSocket(vicp_frame(0x81, b"C1:WF DAT1,not-a-binary-block"))
 
     with pytest.raises(VICPProtocolError, match="without a DEF9 block"):
         scope.getDataWords(channel="C1", block="DAT1")
@@ -391,9 +389,7 @@ def test_get_data_words_rejects_missing_definite_block_header():
 
 def test_get_data_words_rejects_invalid_definite_block_count():
     scope = LeCroy()
-    scope.s = FragmentingFakeSocket(
-        vicp_frame(0x81, b"C1:WF DAT1,#9not-a-num")
-    )
+    scope.s = FragmentingFakeSocket(vicp_frame(0x81, b"C1:WF DAT1,#9not-a-num"))
 
     with pytest.raises(VICPProtocolError, match="invalid DEF9 byte count"):
         scope.getDataWords(channel="C1", block="DAT1")
