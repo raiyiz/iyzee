@@ -25,6 +25,7 @@ from .logging_support import install as install_logging
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.log import LogScreen
+from .screens.page import Page
 from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
 from .screens.traces import TracesScreen
@@ -276,13 +277,11 @@ class IyzeeApp(App):
         return True
 
     def instruments_changed(self) -> None:
-        """Something connected or disconnected: refresh everything that shows it."""
+        """Refresh every mounted view whose state depends on connections."""
         for nav in self.query(NavRail):
             nav.refresh_instruments()
-        for sweep in self.query(SweepScreen):
-            sweep.refresh_readiness()
-        for scope in self.query(ScopeScreen):
-            scope.refresh_readiness()
+        for page in self.query(Page):
+            page.refresh_readiness()
 
     def _on_log_entry(self, entry: LogEntry) -> None:
         """``TuiLogHandler``'s callback — runs on whichever thread just
