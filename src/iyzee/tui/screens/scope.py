@@ -419,13 +419,16 @@ class ScopeScreen(Page):
         self._settings_synced = not channel_errors and trigger_error is None
         if self._settings_synced:
             log_widget.write("Scope settings synchronized from the instrument.")
+        else:
+            self._mark_scope_dirty()
+            if not silent:
+                self.notify(
+                    "Some settings couldn't be retrieved — see the log; values that did read "
+                    "back are filled in and the others are left alone.",
+                    severity="warning",
+                )
+            return
         self._mark_scope_dirty()
-        elif not silent:
-            self.notify(
-                "Some settings couldn't be retrieved — see the log; values that did read "
-                "back are filled in and the others are left alone.",
-                severity="warning",
-            )
 
     # -- channel settings ------------------------------------------------
     def _read_channel_settings(self) -> list[ChannelSettings]:
