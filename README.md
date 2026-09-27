@@ -36,7 +36,7 @@ src/iyzee/
     ├── text.py             # showing externally produced text safely (markup-safe)
     ├── workers.py          # cross-thread message types (LastRun, StepProgress, ...)
     └── screens/            # the six pages
-        ├── page.py         # Page: scrolling base class (content is never clipped)
+        ├── page.py         # shared page base, form validation, and worker→UI plumbing
         ├── connect.py      # ConnectScreen
         ├── sweep.py        # SweepScreen
         ├── scope.py        # ScopeScreen — form/plot only; operations live in scope_workflows.py
