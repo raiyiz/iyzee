@@ -614,14 +614,22 @@ class ScopeScreen(Page):
         self._last_applied_channel_settings = (
             tuple(known[channel] for channel in CHANNELS if channel in known) or None
         )
+        for setting in settings:
+            if setting.channel not in error_channels:
+                for field in ("enable", "vdiv", "offset", "coupling"):
+                    field_id = f"{setting.channel}-{field}"
+                    self._dirty_fields.discard(field_id)
+                    self.query_one(f"#{field_id}").remove_class("scope-dirty")
+        self._settings_synced = (
+            all(self._channel_baseline(channel) is not None for channel in CHANNELS)
+            and self._last_applied_trigger_settings is not None
+        )
         if errors:
-            self._settings_synced = False
             for err in errors:
                 log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
             self.notify("Some channel changes failed — see the log.", severity="error")
             self._refresh_scope_ui()
             return
-        self._settings_synced = True
         self._refresh_scope_ui()
         log_widget.write(
             "Applied changed channel fields: "
@@ -741,7 +749,9 @@ class ScopeScreen(Page):
         finally:
             self._suppress_dirty_events = False
         self._last_applied_trigger_settings = verified
-        self._settings_synced = True
+        self._settings_synced = all(
+            self._channel_baseline(channel) is not None for channel in CHANNELS
+        )
         for field_id in (
             "trig-source",
             "trig-mode",
