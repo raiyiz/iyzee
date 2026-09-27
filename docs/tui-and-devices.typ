@@ -79,9 +79,9 @@ Both paths build a list of `Step` objects and hand them to `run_sequence()`; not
   align: (left, left, left),
   [*`IP` member*], [*Address*], [*Instrument*],
   [`NOISE_ANALYZER`], [`10.140.1.40`], [Keysight MXA signal analyzer],
-  [`POWER_SUPPLY`], [`10.140.1.42`], [Rohde & Schwarz HMP4040 (shutter driver)],
+  [`POWER_SUPPLY`], [`10.140.1.15`], [Rohde & Schwarz HMP4040 (shutter driver)],
   [`SCOPE`], [`10.140.1.220`], [LeCroy oscilloscope],
-  [`WAVEMETER`], [`10.140.1.119`], [WS-7 wavemeter HTTP switch server],
+  [`WAVEMETER`], [`10.140.1.215`], [WS-7 wavemeter HTTP switch server],
 )
 
 These are lab-network fixtures, not configuration — they live as a `StrEnum` in `base.py` (`IP`) precisely so a driver's constructor default (`ip: IP = IP.NOISE_ANALYZER`, etc.) is self-documenting about which physical box it talks to.
