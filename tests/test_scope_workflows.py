@@ -314,6 +314,16 @@ def test_apply_channel_settings_does_nothing_when_form_matches_baseline():
     assert scope.calls == []
 
 
+def test_read_channel_settings_accepts_space_separated_voltage_units():
+    scope = FakeScope()
+    scope.get_volts_per_div = lambda channel: f"{channel}:VOLT_DIV 200E-3 V"
+    scope.get_offset = lambda channel: f"{channel}:OFFSET -500mV"
+    settings, errors = read_channel_settings(scope, [Channel.C1])
+
+    assert errors == []
+    assert settings == [ChannelSettings(Channel.C1, True, 0.2, -0.5, Coupling.DC_1M)]
+
+
 # -- read_channel_settings ----------------------------------------------------------------
 
 
