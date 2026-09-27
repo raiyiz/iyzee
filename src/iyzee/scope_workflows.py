@@ -29,12 +29,12 @@ import logging
 import platform
 import threading
 import uuid
-from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError, version
-from pathlib import Path
 from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 import numpy as np
 
