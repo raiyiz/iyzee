@@ -141,10 +141,7 @@ class TracesScreen(Page):
             lines.append(f"Started: {escape(str(metadata['started_at_utc']))}")
         instrument = metadata.get("instrument")
         if isinstance(instrument, dict):
-            lines.append(
-                "Instrument: "
-                + escape(str(instrument.get("address") or "address unknown"))
-            )
+            lines.append("Instrument: " + escape(str(instrument.get("address") or "address unknown")))
         series = []
         for waveform in metadata.get("waveforms", []):
             if not isinstance(waveform, dict):
@@ -169,7 +166,9 @@ class TracesScreen(Page):
         summary.update("\n".join(lines))
         plot = self.query_one("#traces-plot", PlotextPlot)
         if series:
-            first = next((w for w in metadata.get("waveforms", []) if isinstance(w, dict)), {})
+            first = next(
+                (w for w in metadata.get("waveforms", []) if isinstance(w, dict)), {}
+            )
             draw_series(
                 plot,
                 series,
@@ -180,6 +179,7 @@ class TracesScreen(Page):
         else:
             plot.plt.clear_data()
             plot.refresh()
+
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.list_view.id != "traces-list":
             return
@@ -224,7 +224,9 @@ class TracesScreen(Page):
             self._show_scope_recording(path, arrays, sidecar)
             return
         if x_values is None:
-            summary.update(f"[b]{escape(path.name)}[/b]\n\n[red]Missing x_values in recording.[/red]")
+            summary.update(
+                f"[b]{escape(path.name)}[/b]\n\n[red]Missing x_values in recording.[/red]"
+            )
             plot.plt.clear_data()
             plot.refresh()
             return
