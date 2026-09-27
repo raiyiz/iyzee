@@ -86,6 +86,7 @@ def _positive_int(raw: str, field: str, *, maximum: int | None = None) -> int:
         raise ValueError(f"{field} must be at most {maximum}")
     return value
 
+
 class Page(VerticalScroll, can_focus=False):
     """A page that scrolls instead of clipping when its content doesn't fit.
 
