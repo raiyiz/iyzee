@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
 from ..mxa import KeysightMXA
@@ -166,7 +167,7 @@ def frequency_sweep_steps(
 
 def _run_steps(
     mx,
-    steps: list[BandwidthStep] | list[FrequencyStep],
+    steps: Sequence[Step],
     config: AnalyzerConfig,
     *,
     shutter: ShutterControl | None = None,
@@ -180,7 +181,7 @@ def _run_steps(
         shutter=shutter,
         config=asdict(config),
     )
-    return _run_steps(mx, steps, config, shutter=shutter, on_error=on_error)
+    return run_sequence(steps, ctx, on_error=on_error)
 
 
 def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> list[StepResult]:
@@ -223,4 +224,4 @@ def run_frequency_sweep(
         wavemeter_channel=wavemeter_channel,
         relax_time_s=relax_time_s,
     )
-    return run_sequence(steps, ctx, on_error=on_error)
+    return _run_steps(mx, steps, config, shutter=shutter, on_error=on_error)
