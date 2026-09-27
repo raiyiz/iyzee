@@ -506,5 +506,3 @@ class SweepScreen(Page):
             f"Saved {len(self._collected)} point(s) to {path.parent.name}/{path.name}",
             markup=False,
         )
-
-
