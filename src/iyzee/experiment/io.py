@@ -149,6 +149,7 @@ def save_numeric_recording(
     return path
 
 
+def save_step_results(
     results: list[StepResult],
     savedir: Path,
     run_metadata: dict[str, Any] | None = None,
@@ -205,8 +206,6 @@ def save_numeric_recording(
     """
     if path is None:
         path = savedir / f"{_new_stem(name)}.npz"
-    json_path = path.with_suffix(".json")
-
     trace_names = list(dict.fromkeys(name for result in results for name in result.traces))
     arrays: dict[str, np.ndarray] = {
         "x_values": np.asarray([result.x_value for result in results], dtype=np.float64)
@@ -215,7 +214,6 @@ def save_numeric_recording(
         arrays[f"trace_{trace_name}"] = _stack_trace(results, trace_name)
 
     points = [{"label": result.label, "x_unit": result.x_unit, **result.meta} for result in results]
-    sidecar = {"run_metadata": run_metadata, "points": points}
 
     return save_numeric_recording(
         arrays,
