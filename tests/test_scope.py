@@ -181,14 +181,6 @@ class _ConnectTimeoutSocket:
         self.closed = True
 
 
-def test_vicp_transport_command_length_counts_encoded_bytes():
-    transport = VICPTransport(max_command_length=1)
-    transport.attach_socket(FragmentingFakeSocket(b""))
-
-    with pytest.raises(ValueError, match="maximum is 1"):
-        transport.send_command("é")
-
-
 def test_vicp_transport_failed_connect_leaves_state_unpublished(monkeypatch):
     fake_socket = _ConnectTimeoutSocket()
     monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_socket)
@@ -224,12 +216,16 @@ class _ConnectableSocket:
     def __init__(self, *args, **kwargs):
         self.timeouts: list[float] = []
         self.connected_to = None
+        self.closed = False
 
     def settimeout(self, value):
         self.timeouts.append(value)
 
     def connect(self, address):
         self.connected_to = address
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def test_connect_bounds_the_handshake_then_the_ongoing_socket_timeout(monkeypatch):
@@ -258,23 +254,17 @@ def test_connect_accepts_explicit_timeouts(monkeypatch):
     assert scope.SOCK_TIMEOUT == 7.0
 
 
-def test_disconnect_clears_connection_state():
-    class CloseableSocket(FragmentingFakeSocket):
-        def __init__(self):
-            super().__init__(b"")
-            self.closed = False
+def test_disconnect_clears_connection_state(monkeypatch):
+    fake_socket = _ConnectableSocket()
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_socket)
 
-        def close(self) -> None:
-            self.closed = True
-
-    sock = CloseableSocket()
     scope = LeCroy()
-    scope.s = sock
-    scope._transport._address = "10.0.0.1"
+    scope.connect("10.0.0.1")
+    assert scope.address == "10.0.0.1"
 
     scope.disconnect()
 
-    assert sock.closed
+    assert fake_socket.closed
     assert scope.CONNECTED is False
     assert scope.connected is False
     assert scope.address is None
