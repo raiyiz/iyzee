@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import json
 import threading
 
+import numpy as np
 import pytest
 
 from iyzee.scope import Channel, Coupling, TriggerCoupling, TriggerMode, TriggerSlope
 from iyzee.scope_workflows import (
     ChannelSettings,
     TriggerSettings,
+    acquire_scope_recording,
     acquire_waveforms,
+    save_scope_acquisition,
     apply_channel_settings,
     apply_trigger_settings,
 )
@@ -80,6 +84,67 @@ def _settings(channel: Channel, **overrides) -> ChannelSettings:
     defaults.update(overrides)
     return ChannelSettings(**defaults)
 
+
+class DetailedFakeScope(FakeScope):
+    def getDataFloatsDetailed(self, channel, block):
+        unit, values = self.getDataFloats(channel)
+        raw = np.asarray([10 + i for i in range(len(values))], dtype=np.int16)
+        return {
+            "unit": unit,
+            "values": np.asarray(values, dtype=np.float64),
+            "raw_codes": raw,
+            "vertical_gain": 0.25,
+            "vertical_offset": 0.5,
+        }
+
+def test_acquire_scope_recording_retains_calibration_and_statistics():
+    scope = DetailedFakeScope()
+    settings = (_settings(Channel.C1), _settings(Channel.C2))
+    trigger = TriggerSettings(
+        source=Channel.C1,
+        mode=TriggerMode.SINGLE,
+        slope=TriggerSlope.POSITIVE,
+        coupling=TriggerCoupling.DC,
+        level_volts=0.1,
+    )
+
+    recording = acquire_scope_recording(
+        scope,
+        [Channel.C1, Channel.C2],
+        channel_settings=settings,
+        trigger_settings=trigger,
+    )
+
+    assert recording.errors == ()
+    assert recording.requested_channel_settings == settings
+    assert recording.requested_trigger_settings == trigger
+    waveform = recording.waveforms[0]
+    np.testing.assert_array_equal(waveform.raw_codes, [10, 11, 12])
+    np.testing.assert_allclose(waveform.time, [0.0, 1e-6, 2e-6])
+    assert waveform.vertical_gain == 0.25
+    assert waveform.vertical_offset == 0.5
+    assert waveform.stats["max"] == 3.0
+    assert waveform.stats["max_index"] == 2
+    assert waveform.stats["max_time"] == pytest.approx(2e-6)
+    assert waveform.stats["min"] == 1.0
+    assert waveform.stats["peak_to_peak"] == 2.0
+
+
+def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path):
+    scope = DetailedFakeScope()
+    recording = acquire_scope_recording(scope, [Channel.C1], channel_settings=(_settings(Channel.C1),))
+
+    path = save_scope_acquisition(recording, tmp_path)
+    with np.load(path, allow_pickle=False) as archive:
+        np.testing.assert_array_equal(archive["raw_C1"], [10, 11, 12])
+        np.testing.assert_allclose(archive["value_C1"], [1.0, 2.0, 3.0])
+        np.testing.assert_allclose(archive["time_C1"], [0.0, 1e-6, 2e-6])
+    manifest = json.loads(path.with_suffix(".json").read_text())
+    assert manifest["kind"] == "scope-acquisition"
+    assert manifest["schema_version"] == 1
+    assert manifest["measurement_id"] == recording.measurement_id
+    assert manifest["waveforms"][0]["stats"]["max"] == 3.0
+    assert len(manifest["data_sha256"]) == 64
 
 # -- apply_channel_settings ---------------------------------------------------------------
 
