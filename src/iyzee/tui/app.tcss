@@ -260,6 +260,16 @@ Screen {
     border: round $accent;
 }
 
+.channel-panel .scope-dirty,
+#scope-trigger .scope-dirty {
+    border: round $accent;
+}
+
+.channel-panel.scope-dirty Checkbox,
+#scope-trigger.scope-dirty Select {
+    color: $accent;
+}
+
 .channel-title {
     padding: 0 0 1 0;
 }
