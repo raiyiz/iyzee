@@ -5,8 +5,8 @@ The lab's devices are deliberately heterogeneous at the driver level —
 (:class:`~iyzee.base.BaseDevice`), the wavemeter is a stateless HTTP API,
 and the scope is a raw-socket legacy driver. Rather than teaching the TUI
 about each of those, every device is wrapped in a small adapter that
-implements the same three operations: ``connect()``, ``disconnect()``, and
-``probe()`` (a cheap call that both confirms the link is alive and returns
+implements the same lifecycle operations: ``connect()``, ``disconnect()``,
+and ``probe()`` (a cheap call that both confirms the link is alive and returns
 a short human-readable status string).
 
 Adding a new instrument to the Connect screen is: write one adapter class
