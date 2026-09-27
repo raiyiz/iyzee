@@ -357,6 +357,7 @@ class ScopeScreen(Page):
             log.exception("scope: failed to save acquisition")
             save_error = exc
         self._ui(self._finish_acquire, recording, path, save_error)
+
     def _finish_acquire(
         self,
         recording: ScopeAcquisition,
