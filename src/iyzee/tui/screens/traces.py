@@ -192,10 +192,11 @@ class TracesScreen(Page):
 
         try:
             with np.load(path, allow_pickle=False) as archive:
-                x_values = archive["x_values"]
+                arrays = {key: archive[key] for key in archive.files}
+                x_values = arrays.get("x_values")
                 traces = {
-                    key[len("trace_") :]: archive[key]
-                    for key in archive.files
+                    key[len("trace_") :]: value
+                    for key, value in arrays.items()
                     if key.startswith("trace_")
                 }
         except Exception as exc:  # noqa: BLE001
@@ -220,7 +221,12 @@ class TracesScreen(Page):
             pass
 
         if sidecar.get("kind") == "scope-acquisition":
-            self._show_scope_recording(path, traces, sidecar)
+            self._show_scope_recording(path, arrays, sidecar)
+            return
+        if x_values is None:
+            summary.update(f"[b]{escape(path.name)}[/b]\n\n[red]Missing x_values in recording.[/red]")
+            plot.plt.clear_data()
+            plot.refresh()
             return
         lines = [f"[b]{escape(path.name)}[/b]", f"{len(x_values)} point(s)"]
         if isinstance(run_metadata, dict):
