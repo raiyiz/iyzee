@@ -280,6 +280,7 @@ def test_apply_channel_settings_works_with_no_lock_at_all():
 
 # -- selective channel apply ---------------------------------------------------------------
 
+
 def test_apply_channel_settings_only_writes_changed_fields_against_baseline():
     scope = FakeScope()
     baseline = [_settings(Channel.C1)]
@@ -389,6 +390,7 @@ def test_apply_trigger_settings_raises_rather_than_collecting_errors():
 
 
 # -- selective trigger apply ----------------------------------------------------------------
+
 
 def test_apply_trigger_settings_only_writes_changed_field():
     scope = FakeScope()
