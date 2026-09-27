@@ -451,24 +451,46 @@ class ScopeScreen(Page):
         lock,
     ) -> None:
         error: Exception | None = None
+        verified: TriggerSettings | None = None
+        verification_error: Exception | None = None
         try:
             apply_trigger_settings(
                 scope, settings, current_settings=baseline, lock=lock
             )
+            verified = read_trigger_settings(scope, lock=lock)
         except Exception as exc:  # noqa: BLE001
             log.exception("scope: failed to apply trigger settings")
             error = exc
-        self._ui(self._finish_apply_trigger, settings, error)
+        if error is None and verified is None:
+            verification_error = RuntimeError("trigger readback returned no settings")
+        self._ui(self._finish_apply_trigger, settings, error, verified, verification_error)
 
-    def _finish_apply_trigger(self, settings: TriggerSettings, error: Exception | None) -> None:
+    def _finish_apply_trigger(
+        self,
+        settings: TriggerSettings,
+        error: Exception | None,
+        verified: TriggerSettings | None,
+        verification_error: Exception | None,
+    ) -> None:
         self.query_one("#apply-trigger", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
-        if error is None:
-            self._last_applied_trigger_settings = settings
-            log_widget.write("Trigger settings applied.")
+        if error is not None:
+            log_widget.write(f"[red]Trigger: {escape(one_line(error))}[/red]")
+            self.notify(f"Trigger settings failed: {one_line(error)}", severity="error", markup=False)
             return
-        log_widget.write(f"[red]Trigger: {escape(one_line(error))}[/red]")
-        self.notify(f"Trigger settings failed: {one_line(error)}", severity="error", markup=False)
+        if verification_error is not None or verified is None:
+            log_widget.write(
+                "[yellow]Trigger settings were written, but readback failed; "
+                "retrieve current settings to resync.[/yellow]"
+            )
+            self.notify(
+                "Trigger settings were applied but could not be verified.",
+                severity="warning",
+            )
+            return
+        self._last_applied_trigger_settings = verified
+        self._apply_retrieved_trigger_settings(verified)
+        log_widget.write("Trigger settings applied and verified.")
 
     # -- acquire: record enabled channels, persist the result, then plot ---
 
