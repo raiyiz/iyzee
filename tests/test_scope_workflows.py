@@ -136,7 +136,9 @@ def test_acquire_scope_recording_retains_calibration_and_statistics():
 
 def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path):
     scope = DetailedFakeScope()
-    recording = acquire_scope_recording(scope, [Channel.C1], channel_settings=(_settings(Channel.C1),))
+    recording = acquire_scope_recording(
+        scope, [Channel.C1], channel_settings=(_settings(Channel.C1),)
+    )
 
     path = save_scope_acquisition(recording, tmp_path)
     with np.load(path, allow_pickle=False) as archive:
@@ -150,6 +152,7 @@ def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path
     assert manifest["waveforms"][0]["stats"]["max"] == 3.0
     assert manifest["configuration"]["applied_channel_settings"] is None
     assert len(manifest["data_sha256"]) == 64
+
 
 # -- apply_channel_settings ---------------------------------------------------------------
 
