@@ -46,9 +46,6 @@ from ..plotting import draw_series
 from ..text import one_line
 from .page import FieldError, Page, _field
 
-if TYPE_CHECKING:
-    from ..app import IyzeeApp
-
 log = logging.getLogger("iyzee.tui")
 
 CHANNELS: tuple[Channel, ...] = (Channel.C1, Channel.C2, Channel.C3, Channel.C4)
@@ -90,8 +87,6 @@ TRIGGER_COUPLING_CHOICES = [
     ("HF reject", TriggerCoupling.HF_REJECT.value),
     ("LF reject", TriggerCoupling.LF_REJECT.value),
 ]
-
-
 
 
 class ScopeScreen(Page):
