@@ -1,6 +1,7 @@
 import socket
 import struct
 import threading
+import threading
 
 import numpy as np
 import pytest
@@ -156,7 +157,10 @@ def test_send_raises_lecroy_timeout_when_the_header_write_stalls():
     scope = LeCroy()
     scope.s = _TimingOutSocket(timeout=2.0)
 
-    with pytest.raises(LeCroyTimeoutError, match=r"writing header after 2\.0s"):
+    with pytest.raises(
+        LeCroyTimeoutError,
+        match=r"no response after 2\.0s \(0/\d+ bytes sent\)",
+    ):
         scope.send("C1:VDIV 1.0")
 
 
