@@ -292,9 +292,7 @@ def read_channel_settings(
                 offset = _parse_volts(scope.get_offset(channel))
                 coupling = Coupling(_value(scope.get_coupling(channel)))
                 enabled = _value(scope.get_trace_display(channel)) == "ON"
-                settings.append(
-                    ChannelSettings(channel, enabled, volts_per_div, offset, coupling)
-                )
+                settings.append(ChannelSettings(channel, enabled, volts_per_div, offset, coupling))
             except Exception as exc:  # noqa: BLE001 - collected, not swallowed
                 log.exception("scope: failed to read %s settings", channel)
                 errors.append(ChannelError(channel, exc))
