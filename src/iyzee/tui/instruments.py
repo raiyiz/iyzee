@@ -66,12 +66,24 @@ class InstrumentHandle(Protocol):
         ...
 
 
-class _VisaHandle:
+class _LockedHandle:
+    """Base for handles whose instrument access must be serialized.
+
+    Every concrete adapter gets one lock owned by the handle itself; callers
+    do not need a second lock table to coordinate access to the same device.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+
+
+
+class _VisaHandle(_LockedHandle):
     """Adapter for any :class:`~iyzee.base.BaseDevice` (MXA, raw PSU)."""
 
     def __init__(self, device) -> None:
+        super().__init__()
         self._device = device
-        self._lock = threading.Lock()
 
     def connect(self) -> None:
         self._device.connect()
@@ -95,7 +107,7 @@ class _VisaHandle:
         return self._lock
 
 
-class ShutterHandle:
+class ShutterHandle(_LockedHandle):
     """Adapter for :class:`~iyzee.power.ShutterControl`.
 
     ``ShutterControl.__init__`` opens the PSU connection eagerly (it has
@@ -104,10 +116,10 @@ class ShutterHandle:
     """
 
     def __init__(self, chan: CH = CH.THREE, ip: IP = IP.POWER_SUPPLY) -> None:
+        super().__init__()
         self._chan = chan
         self._ip = ip
         self._shutter: ShutterControl | None = None
-        self._lock = threading.Lock()
 
     def connect(self) -> None:
         self._shutter = ShutterControl(chan=self._chan, ip=self._ip)
@@ -121,16 +133,21 @@ class ShutterHandle:
         return f"shutter ready on CH{int(self._chan)}"
 
     @property
+    def device(self) -> ShutterControl | None:
+        """The underlying live shutter controller, once connected."""
+        return self._shutter
+
+    @property
     def shutter(self) -> ShutterControl | None:
         """The live :class:`ShutterControl`, once connected."""
-        return self._shutter
+        return self.device
 
     @property
     def lock(self) -> threading.Lock:
         return self._lock
 
 
-class WavemeterHandle:
+class WavemeterHandle(_LockedHandle):
     """Adapter for the wavemeter's stateless HTTP API.
 
     There is no persistent connection to open — ``connect()`` is a no-op,
@@ -139,8 +156,8 @@ class WavemeterHandle:
     """
 
     def __init__(self, channel: int = 0) -> None:
+        super().__init__()
         self._channel = channel
-        self._lock = threading.Lock()
 
     def connect(self) -> None:
         return None
@@ -160,7 +177,7 @@ class WavemeterHandle:
         return self._lock
 
 
-class ScopeHandle:
+class ScopeHandle(_LockedHandle):
     """Adapter for the legacy :class:`~iyzee.scope.LeCroy` raw-socket driver.
 
     This driver predates :class:`~iyzee.base.BaseDevice` and has no
@@ -169,9 +186,9 @@ class ScopeHandle:
     """
 
     def __init__(self, ip: IP = IP.SCOPE) -> None:
+        super().__init__()
         self._ip = ip
         self._scope = LeCroy()
-        self._lock = threading.Lock()
 
     def connect(self) -> None:
         self._scope.connect(str(self._ip))
@@ -181,6 +198,11 @@ class ScopeHandle:
 
     def probe(self) -> str:
         return f"socket connected @ {self._ip}"
+
+    @property
+    def device(self) -> LeCroy:
+        """The underlying live LeCroy driver."""
+        return self._scope
 
     @property
     def scope(self) -> LeCroy:
