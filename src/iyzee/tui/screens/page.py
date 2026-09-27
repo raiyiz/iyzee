@@ -55,30 +55,36 @@ def _field(label: str, widget: Widget, *, id: str | None = None) -> Vertical:
 
 
 class Page(VerticalScroll, can_focus=False):
-    """Scrollable base and shared plumbing for all interactive pages.
+    """A page that scrolls instead of clipping when its content doesn't fit.
 
-    A plain Vertical hides whatever overflows it, which is how controls ended
-    up below the fold with no way to reach them. VerticalScroll makes the
-    same content reachable on short terminals; the horizontal axis is
-    enabled in app.tcss.
+    A plain ``Vertical`` hides whatever overflows it, which is how
+    controls ended up below the fold with no way to reach them. This
+    scrolls on demand (the horizontal axis is enabled in ``app.tcss``).
 
-    can_focus=False is deliberate. VerticalScroll is focusable by default,
-    and Textual's auto-focus would otherwise pick the page container itself,
-    stealing focus from the widget a page actually wants focused (Connect's
-    instrument table, for example). Scrolling still works through the mouse
-    wheel, scrollbars, and bubbled PageUp/PageDown bindings.
+    ``can_focus=False`` is deliberate. ``VerticalScroll`` is focusable by
+    default, and Textual's auto-focus picks the *first* focusable widget
+    on a page — which would become the page container itself, stealing
+    focus from the widget the page actually wants focused (Connect's
+    instrument table, so that Enter connects). Scrolling doesn't need the
+    container to hold focus: the mouse wheel and scrollbars always work,
+    Tab/``j``/``k`` scroll the newly focused widget into view, and
+    PageUp/PageDown bubble up from any focused child to this container's
+    scroll bindings.
 
     The remaining helpers are UI mechanics shared by multiple pages:
 
-    * iyzee_app narrows Textual's generic Widget.app type once, in one place.
-    * _ui safely schedules a worker's UI callback and treats a page being
-      torn down or replaced as an ordinary race, not an unhandled worker
-      exception.
-    * _read turns ordinary ValueError parser failures into the page-shared
-      FieldError that also identifies which input to fix.
-    * _flag_invalid gives that field a visible -invalid marker and moves
-      focus to it; editing any input clears its marker again via
-      on_input_changed.
+    * ``iyzee_app`` narrows Textual's generic ``Widget.app`` type once, in
+      one place, while preserving the concrete ``IyzeeApp`` type for pages.
+    * ``_ui`` safely schedules a worker's UI callback. A background
+      operation can finish after its page is replaced or unmounted, and
+      Textual propagates callback exceptions back to the worker thread;
+      logging and skipping that stale update is safer than surfacing an
+      unrelated worker failure.
+    * ``_read``/``FieldError`` and ``_flag_invalid`` centralize form
+      validation: parser failures still identify the offending field,
+      the same input is marked/focused, and editing clears the marker.
+    * ``_field`` keeps a label and its control together so ``app.tcss`` can
+      reflow forms without separating them.
     """
 
     @property
