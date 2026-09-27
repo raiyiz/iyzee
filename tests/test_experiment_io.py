@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -80,6 +81,9 @@ def test_save_step_results_writes_data_and_metadata_pair(tmp_path):
         np.testing.assert_array_equal(archive["trace_shot_noise"], [[1.0, 1.0]])
 
     sidecar = json.loads(json_path.read_text())
+    assert sidecar["format"] == "iyzee.numeric-recording"
+    assert len(sidecar["data_sha256"]) == 64
+    assert sidecar["data_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
     assert sidecar["points"] == [{"label": "x=1.0", "x_unit": "Hz", "rbw_hz": 1000.0}]
     assert sidecar["run_metadata"] == {"software_revision": "abc123"}
     # Per-point metadata and run-level metadata stay in the sidecar rather than
