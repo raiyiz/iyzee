@@ -214,6 +214,21 @@ Screen {
     background: $warning 12%;
 }
 
+#scope-sync-status {
+    height: auto;
+    margin: 0 2 1 2;
+    padding: 0 1;
+    border-left: thick $primary;
+    color: $text-muted;
+    background: $primary 8%;
+}
+
+#scope-sync-status.scope-dirty {
+    border-left: thick $accent;
+    color: $accent;
+    background: $accent 10%;
+}
+
 /* One panel per analog channel: 1 column (narrow), 2 (medium), 4 (wide) —
    same reflow tiers as .field-grid, but channel panels are bordered boxes
    rather than bare label+input pairs, so they get their own class. */
@@ -238,6 +253,21 @@ Screen {
     height: auto;
     border: round $primary-darken-1;
     padding: 0 1 1 1;
+}
+
+.channel-panel.scope-dirty,
+#scope-trigger.scope-dirty {
+    border: round $accent;
+}
+
+.channel-panel .scope-dirty,
+#scope-trigger .scope-dirty {
+    border: round $accent;
+}
+
+.channel-panel.scope-dirty Checkbox,
+#scope-trigger.scope-dirty Select {
+    color: $accent;
 }
 
 .channel-title {

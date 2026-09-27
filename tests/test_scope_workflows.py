@@ -278,6 +278,51 @@ def test_apply_channel_settings_works_with_no_lock_at_all():
     assert errors == []
 
 
+# -- selective channel apply ---------------------------------------------------------------
+
+
+def test_apply_channel_settings_only_writes_changed_fields_against_baseline():
+    scope = FakeScope()
+    baseline = [_settings(Channel.C1)]
+    desired = [_settings(Channel.C1, offset=0.2)]
+
+    errors = apply_channel_settings(scope, desired, current_settings=baseline)
+
+    assert errors == []
+    assert scope.calls == [("set_offset", Channel.C1, 0.2)]
+
+
+def test_apply_channel_settings_refuses_unsynchronized_channel():
+    scope = FakeScope()
+    baseline = [_settings(Channel.C1)]
+    desired = [_settings(Channel.C2, offset=0.2)]
+
+    errors = apply_channel_settings(scope, desired, current_settings=baseline)
+
+    assert [error.channel for error in errors] == [Channel.C2]
+    assert scope.calls == []
+
+
+def test_apply_channel_settings_does_nothing_when_form_matches_baseline():
+    scope = FakeScope()
+    baseline = [_settings(Channel.C1)]
+
+    errors = apply_channel_settings(scope, [_settings(Channel.C1)], current_settings=baseline)
+
+    assert errors == []
+    assert scope.calls == []
+
+
+def test_read_channel_settings_accepts_space_separated_voltage_units():
+    scope = FakeScope()
+    scope.get_volts_per_div = lambda channel: f"{channel}:VOLT_DIV 200E-3 V"
+    scope.get_offset = lambda channel: f"{channel}:OFFSET -500mV"
+    settings, errors = read_channel_settings(scope, [Channel.C1])
+
+    assert errors == []
+    assert settings == [ChannelSettings(Channel.C1, True, 0.2, -0.5, Coupling.DC_1M)]
+
+
 # -- read_channel_settings ----------------------------------------------------------------
 
 
@@ -342,6 +387,68 @@ def test_apply_trigger_settings_raises_rather_than_collecting_errors():
 
     with pytest.raises(RuntimeError, match="nope"):
         apply_trigger_settings(scope, settings)
+
+
+# -- selective trigger apply ----------------------------------------------------------------
+
+
+def test_apply_trigger_settings_only_writes_changed_field():
+    scope = FakeScope()
+    baseline = scope.trigger_state
+    desired = TriggerSettings(
+        source=Channel.C1,
+        mode=TriggerMode.AUTO,
+        slope=TriggerSlope.POSITIVE,
+        coupling=TriggerCoupling.DC,
+        level_volts=0.25,
+    )
+
+    apply_trigger_settings(scope, desired, current_settings=baseline)
+
+    assert scope.calls == [("set_trigger_level", Channel.C1, 0.25)]
+
+
+def test_apply_trigger_settings_changes_source_without_copying_old_source_settings():
+    scope = FakeScope()
+    baseline = TriggerSettings(
+        source=Channel.C1,
+        mode=TriggerMode.NORMAL,
+        slope=TriggerSlope.NEGATIVE,
+        coupling=TriggerCoupling.AC,
+        level_volts=-0.3,
+    )
+    desired = TriggerSettings(
+        source=Channel.C2,
+        mode=TriggerMode.NORMAL,
+        slope=TriggerSlope.NEGATIVE,
+        coupling=TriggerCoupling.AC,
+        level_volts=-0.3,
+    )
+
+    apply_trigger_settings(scope, desired, current_settings=baseline)
+
+    assert scope.calls == [("set_trigger_source", Channel.C2)]
+
+
+def test_apply_trigger_settings_without_baseline_keeps_full_write_behavior():
+    scope = FakeScope()
+    desired = TriggerSettings(
+        source=Channel.C2,
+        mode=TriggerMode.SINGLE,
+        slope=TriggerSlope.NEGATIVE,
+        coupling=TriggerCoupling.AC,
+        level_volts=0.1,
+    )
+
+    apply_trigger_settings(scope, desired)
+
+    assert scope.calls == [
+        ("set_trigger_mode", TriggerMode.SINGLE),
+        ("set_trigger_source", Channel.C2),
+        ("set_trigger_slope", Channel.C2, TriggerSlope.NEGATIVE),
+        ("set_trigger_coupling", Channel.C2, TriggerCoupling.AC),
+        ("set_trigger_level", Channel.C2, 0.1),
+    ]
 
 
 # -- read_trigger_settings -----------------------------------------------------------------
