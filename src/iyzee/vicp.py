@@ -7,8 +7,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterator
 
-
-
 VICP_EOI_FLAG = 0x01
 VICP_DATA_FLAG = 0x80
 
