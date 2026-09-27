@@ -125,10 +125,17 @@ def _stats(time: np.ndarray, values: np.ndarray) -> dict[str, float | int | None
     }
     if indices.size == 0:
         return base | {
-            "min": None, "max": None, "mean": None, "rms": None,
-            "stddev": None, "peak_to_peak": None, "max_abs": None,
-            "min_index": None, "max_index": None,
-            "min_time": None, "max_time": None,
+            "min": None,
+            "max": None,
+            "mean": None,
+            "rms": None,
+            "stddev": None,
+            "peak_to_peak": None,
+            "max_abs": None,
+            "min_index": None,
+            "max_index": None,
+            "min_time": None,
+            "max_time": None,
         }
     data = values[indices]
     min_pos = int(indices[np.argmin(data)])
@@ -156,6 +163,8 @@ def _software_version() -> str:
         return version("iyzee")
     except PackageNotFoundError:
         return "unknown"
+
+
 def _locked(lock: threading.Lock | None) -> AbstractContextManager[object]:
     """``lock`` if given, else a no-op context — so a script with its own
     private ``LeCroy`` never needs to construct a throwaway lock just to
@@ -245,7 +254,9 @@ def acquire_scope_recording(
                 requested_channel_settings=tuple(channel_settings),
                 requested_trigger_settings=trigger_settings,
                 applied_channel_settings=(
-                    tuple(applied_channel_settings) if applied_channel_settings is not None else None
+                    tuple(applied_channel_settings)
+                    if applied_channel_settings is not None
+                    else None
                 ),
                 applied_trigger_settings=applied_trigger_settings,
                 waveforms=(),
@@ -341,6 +352,8 @@ def save_scope_acquisition(
                 "raw_array": f"raw_{key}" if waveform.raw_codes is not None else None,
             }
         )
+
+
     def channel_config(s: ChannelSettings) -> dict[str, object]:
         return {
             "channel": s.channel.value,
@@ -388,7 +401,10 @@ def save_scope_acquisition(
         "waveforms": channel_metadata,
         "errors": [{"channel": e.channel.value, "error": str(e.error)} for e in recording.errors],
         "data_semantics": {
-            "value_arrays": "engineering units using the scope-reported VERTICAL_GAIN and VERTICAL_OFFSET",
+            "value_arrays": (
+                "engineering units using the scope-reported "
+                "VERTICAL_GAIN and VERTICAL_OFFSET"
+            ),
             "raw_arrays": "signed 16-bit waveform codes returned by the scope when available",
             "time_arrays": "scope horizontal offset plus sample index multiplied by horizontal interval",
         },
