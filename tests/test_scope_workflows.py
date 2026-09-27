@@ -14,6 +14,8 @@ from iyzee.scope_workflows import (
     acquire_waveforms,
     apply_channel_settings,
     apply_trigger_settings,
+    read_channel_settings,
+    read_trigger_settings,
     save_scope_acquisition,
 )
 
@@ -24,16 +26,36 @@ class FakeScope:
     (looping, partial-failure collection, shared-timebase reuse) without a
     real socket or VICP framing (see ``test_scope.py`` for that layer)."""
 
-    def __init__(self, *, fail_channels: frozenset = frozenset(), fail_hor: bool = False):
+    def __init__(
+        self,
+        *,
+        fail_channels: frozenset = frozenset(),
+        fail_hor: bool = False,
+        fail_reads: frozenset = frozenset(),
+    ):
         self.calls: list[tuple] = []
         self._fail_channels = fail_channels
         self._fail_hor = fail_hor
+        self._fail_reads = fail_reads
         self._data = {
             Channel.C1: [1.0, 2.0, 3.0],
             Channel.C2: [4.0, 5.0, 6.0],
             Channel.C3: [7.0, 8.0],
             Channel.C4: [9.0, 10.0],
         }
+        # What read_channel_settings()/read_trigger_settings() see on the
+        # "instrument" — set_* calls don't update this; tests set it
+        # directly to control what a read returns.
+        self.channel_state: dict[Channel, ChannelSettings] = {
+            channel: _settings(channel) for channel in Channel
+        }
+        self.trigger_state = TriggerSettings(
+            source=Channel.C1,
+            mode=TriggerMode.AUTO,
+            slope=TriggerSlope.POSITIVE,
+            coupling=TriggerCoupling.DC,
+            level_volts=0.0,
+        )
 
     def set_volts_per_div(self, channel, value):
         self.calls.append(("set_volts_per_div", channel, value))
@@ -64,13 +86,58 @@ class FakeScope:
     def set_trigger_level(self, source, level):
         self.calls.append(("set_trigger_level", source, level))
 
+    def _check_readable(self, channel: Channel) -> None:
+        if channel in self._fail_reads:
+            raise RuntimeError(f"{channel} did not respond to the query")
+
+    def get_volts_per_div(self, channel):
+        self.calls.append(("get_volts_per_div", channel))
+        self._check_readable(channel)
+        return f"{channel}:VOLT_DIV {self.channel_state[channel].volts_per_div:.2E}V"
+
+    def get_offset(self, channel):
+        self.calls.append(("get_offset", channel))
+        self._check_readable(channel)
+        return f"{channel}:OFFSET {self.channel_state[channel].offset:.2E}V"
+
+    def get_coupling(self, channel):
+        self.calls.append(("get_coupling", channel))
+        self._check_readable(channel)
+        return f"{channel}:COUPLING {self.channel_state[channel].coupling.value}"
+
+    def get_trace_display(self, channel):
+        self.calls.append(("get_trace_display", channel))
+        self._check_readable(channel)
+        state = "ON" if self.channel_state[channel].enabled else "OFF"
+        return f"{channel}:TRACE {state}"
+
+    def get_trigger_source(self):
+        self.calls.append(("get_trigger_source",))
+        return f"TRIG_SELECT EDGE,SR,{self.trigger_state.source},HT,OFF"
+
+    def get_trigger_mode(self):
+        self.calls.append(("get_trigger_mode",))
+        return f"TRIG_MODE {self.trigger_state.mode.value}"
+
+    def get_trigger_slope(self, source):
+        self.calls.append(("get_trigger_slope", source))
+        return f"{source}:TRIG_SLOPE {self.trigger_state.slope.value}"
+
+    def get_trigger_coupling(self, source):
+        self.calls.append(("get_trigger_coupling", source))
+        return f"{source}:TRIG_COUPLING {self.trigger_state.coupling.value}"
+
+    def get_trigger_level(self, source):
+        self.calls.append(("get_trigger_level", source))
+        return f"{source}:TRIG_LEVEL {self.trigger_state.level_volts:.2E}V"
+
     def getHorProperties(self, channel):
         self.calls.append(("getHorProperties", channel))
         if self._fail_hor:
             raise RuntimeError("scope did not respond")
         return ("S", 0.0, 1e-6)
 
-    def getDataFloats(self, channel):
+    def getDataFloats(self, channel, block="DAT1"):
         self.calls.append(("getDataFloats", channel))
         if channel in self._fail_channels:
             raise RuntimeError(f"{channel} refused to send data")
@@ -211,6 +278,31 @@ def test_apply_channel_settings_works_with_no_lock_at_all():
     assert errors == []
 
 
+# -- read_channel_settings ----------------------------------------------------------------
+
+
+def test_read_channel_settings_reads_every_field_per_channel():
+    scope = FakeScope()
+    scope.channel_state[Channel.C1] = _settings(
+        Channel.C1, enabled=False, volts_per_div=1.0, offset=-0.25, coupling=Coupling.DC_50
+    )
+
+    settings, errors = read_channel_settings(scope, [Channel.C1])
+
+    assert errors == []
+    assert settings == [ChannelSettings(Channel.C1, False, 1.0, -0.25, Coupling.DC_50)]
+
+
+def test_read_channel_settings_continues_past_one_channels_failure():
+    scope = FakeScope(fail_reads=frozenset({Channel.C1}))
+
+    settings, errors = read_channel_settings(scope, [Channel.C1, Channel.C2])
+
+    assert [s.channel for s in settings] == [Channel.C2]
+    assert [e.channel for e in errors] == [Channel.C1]
+    assert isinstance(errors[0].error, RuntimeError)
+
+
 # -- apply_trigger_settings ----------------------------------------------------------------
 
 
@@ -250,6 +342,38 @@ def test_apply_trigger_settings_raises_rather_than_collecting_errors():
 
     with pytest.raises(RuntimeError, match="nope"):
         apply_trigger_settings(scope, settings)
+
+
+# -- read_trigger_settings -----------------------------------------------------------------
+
+
+def test_read_trigger_settings_reads_every_field_off_the_armed_source():
+    scope = FakeScope()
+    scope.trigger_state = TriggerSettings(
+        source=Channel.C2,
+        mode=TriggerMode.NORMAL,
+        slope=TriggerSlope.NEGATIVE,
+        coupling=TriggerCoupling.AC,
+        level_volts=-0.3,
+    )
+
+    settings = read_trigger_settings(scope)
+
+    assert settings == scope.trigger_state
+    # Slope/coupling/level were all queried off the source TRIG_SELECT?
+    # reported, C2 — not the default C1.
+    assert ("get_trigger_slope", Channel.C2) in scope.calls
+    assert ("get_trigger_level", Channel.C2) in scope.calls
+
+
+def test_read_trigger_settings_raises_rather_than_collecting_errors():
+    """Mirrors apply_trigger_settings: one trigger, nothing to partially
+    read."""
+    scope = FakeScope()
+    scope.get_trigger_mode = lambda: (_ for _ in ()).throw(RuntimeError("nope"))
+
+    with pytest.raises(RuntimeError, match="nope"):
+        read_trigger_settings(scope)
 
 
 # -- acquire_waveforms ----------------------------------------------------------------------

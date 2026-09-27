@@ -380,6 +380,16 @@ class LeCroy:
         :meth:`query` for why this isn't parsed further)."""
         return self.query(f"{channel}:COUPLING?")
 
+    def get_volts_per_div(self, channel: Channel) -> str:
+        """Return the device's raw response to a volts/div query (see
+        :meth:`query` for why this isn't parsed further)."""
+        return self.query(f"{channel}:VOLT_DIV?")
+
+    def get_offset(self, channel: Channel) -> str:
+        """Return the device's raw response to a vertical-offset query
+        (see :meth:`query` for why this isn't parsed further)."""
+        return self.query(f"{channel}:OFFSET?")
+
     def get_trace_display(self, channel: Channel | MathChannel | str) -> str:
         return self.query(f"{channel}:TRACE?")
 
@@ -428,6 +438,25 @@ class LeCroy:
 
     def get_trigger_mode(self) -> str:
         return self.query("TRIG_MODE?")
+
+    def get_trigger_source(self) -> str:
+        """Return the device's raw response to ``TRIG_SELECT?``.
+
+        Unlike the other trigger getters, this reads back a whole
+        multi-field line (trigger type, source, and qualifiers), not a
+        single value — LeCroy's ``TRIG_SELECT?`` is the only query that
+        reports which channel :meth:`set_trigger_source` last armed, and
+        it echoes the full trigger-type description that command family
+        uses. :func:`iyzee.scope_workflows.read_trigger_settings` parses
+        out just the source field, assuming the ``EDGE,SR,<source>,...``
+        shape :meth:`set_trigger_source` itself writes.
+        """
+        return self.query("TRIG_SELECT?")
+
+    def get_trigger_level(self, source: Channel) -> str:
+        """Return the device's raw response to a trigger-level query (see
+        :meth:`query` for why this isn't parsed further)."""
+        return self.query(f"{source}:TRIG_LEVEL?")
 
     def get_trigger_slope(self, source: Channel) -> str:
         return self.query(f"{source}:TRIG_SLOPE?")

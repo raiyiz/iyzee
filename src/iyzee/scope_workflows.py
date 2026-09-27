@@ -12,6 +12,17 @@ the IPython console::
     scope.connect("10.0.0.5")
     apply_channel_settings(scope, [ChannelSettings(Channel.C1, True, 0.5, 0.0, Coupling.DC_1M)])
 
+``read_channel_settings()``/``read_trigger_settings()`` are the read
+counterparts: they turn the scope's *current* state back into the same
+``ChannelSettings``/``TriggerSettings`` dataclasses, so a caller can read
+what's actually configured, change only the field it cares about, and
+apply the result straight back — without re-typing every other field just
+to avoid clobbering it. The parsing involved (turning replies like
+``"5.00E-01V"`` into floats/enums) follows the LeCroy remote command
+reference the rest of this module's setters are written against, but —
+like those setters — has not been exercised against real hardware; verify
+against your instrument before relying on it for anything safety-critical.
+
 ``lock`` on every function here is optional: a script with its own
 private ``LeCroy`` (nothing else could be contending for it) doesn't need
 one. Pass a handle's own lock (``instruments.InstrumentHandle.lock``) when
@@ -185,6 +196,45 @@ def _locked(lock: threading.Lock | None) -> AbstractContextManager[object]:
     return lock if lock is not None else contextlib.nullcontext()
 
 
+def _value(raw: str) -> str:
+    """The value half of a raw query reply.
+
+    The scope echoes the query's own header back as part of its answer
+    (e.g. ``"C1:VOLT_DIV 5.00E-01V"`` for a ``C1:VOLT_DIV?``) — this is
+    the last whitespace-separated token, i.e. the part after that echoed
+    header.
+    """
+    return raw.strip().split()[-1]
+
+
+def _parse_volts(raw: str) -> float:
+    """Parse a LeCroy voltage reply (e.g. ``"5.00E-01V"``) to a float.
+
+    Numeric vertical/trigger replies carry a trailing unit letter per the
+    LeCroy remote command reference; stripped here rather than passed to
+    ``float()`` as-is, which would raise on it.
+    """
+    token = _value(raw)
+    if token and token[-1].isalpha():
+        token = token[:-1]
+    return float(token)
+
+
+def _trigger_source(raw: str) -> str:
+    """Pull the source channel out of a ``TRIG_SELECT?`` reply.
+
+    The reply is comma-separated — trigger type, a qualifier, then the
+    source, then further qualifiers (e.g.
+    ``"TRIG_SELECT EDGE,SR,C1,HT,OFF"``, matching the
+    ``"EDGE,SR,{source}"`` shape :meth:`~iyzee.scope.LeCroy.set_trigger_source`
+    itself writes) — so the source is the third comma field of the value.
+    """
+    fields = _value(raw).split(",")
+    if len(fields) < 3:
+        raise ValueError(f"unexpected TRIG_SELECT? reply, can't find a source field: {raw!r}")
+    return fields[2]
+
+
 def apply_channel_settings(
     scope: LeCroy, settings: Sequence[ChannelSettings], *, lock: threading.Lock | None = None
 ) -> list[ChannelError]:
@@ -216,6 +266,41 @@ def apply_channel_settings(
     return errors
 
 
+def read_channel_settings(
+    scope: LeCroy, channels: Sequence[Channel], *, lock: threading.Lock | None = None
+) -> tuple[list[ChannelSettings], list[ChannelError]]:
+    """Read every channel's current vertical settings back from the scope.
+
+    The read counterpart of :func:`apply_channel_settings`: same batching
+    shape (one lock acquisition for the whole read, one channel's failure
+    doesn't stop the rest), same ``ChannelSettings`` shape out as
+    ``apply_channel_settings`` takes in — so the values this returns can
+    be edited (change one field, leave the rest as read) and passed
+    straight back to ``apply_channel_settings`` without reconstructing
+    anything by hand.
+
+    Returns ``(settings, errors)``, in the same order as ``channels``
+    minus any that failed; a channel present in ``errors`` is simply
+    absent from ``settings`` rather than the whole read failing.
+    """
+    settings: list[ChannelSettings] = []
+    errors: list[ChannelError] = []
+    with _locked(lock):
+        for channel in channels:
+            try:
+                volts_per_div = _parse_volts(scope.get_volts_per_div(channel))
+                offset = _parse_volts(scope.get_offset(channel))
+                coupling = Coupling(_value(scope.get_coupling(channel)))
+                enabled = _value(scope.get_trace_display(channel)) == "ON"
+                settings.append(
+                    ChannelSettings(channel, enabled, volts_per_div, offset, coupling)
+                )
+            except Exception as exc:  # noqa: BLE001 - collected, not swallowed
+                log.exception("scope: failed to read %s settings", channel)
+                errors.append(ChannelError(channel, exc))
+    return settings, errors
+
+
 def apply_trigger_settings(
     scope: LeCroy, settings: TriggerSettings, *, lock: threading.Lock | None = None
 ) -> None:
@@ -232,6 +317,23 @@ def apply_trigger_settings(
         scope.set_trigger_slope(settings.source, settings.slope)
         scope.set_trigger_coupling(settings.source, settings.coupling)
         scope.set_trigger_level(settings.source, settings.level_volts)
+
+
+def read_trigger_settings(scope: LeCroy, *, lock: threading.Lock | None = None) -> TriggerSettings:
+    """Read the scope's current trigger configuration back.
+
+    The read counterpart of :func:`apply_trigger_settings`, including its
+    error handling: raises on failure rather than collecting errors —
+    there's one trigger, not a batch, so there's nothing to partially
+    read.
+    """
+    with _locked(lock):
+        source = Channel(_trigger_source(scope.get_trigger_source()))
+        mode = TriggerMode(_value(scope.get_trigger_mode()))
+        slope = TriggerSlope(_value(scope.get_trigger_slope(source)))
+        coupling = TriggerCoupling(_value(scope.get_trigger_coupling(source)))
+        level_volts = _parse_volts(scope.get_trigger_level(source))
+    return TriggerSettings(source, mode, slope, coupling, level_volts)
 
 
 def acquire_scope_recording(

@@ -397,6 +397,18 @@ def test_query_sends_the_command_and_returns_the_trimmed_response():
             "C1:COUPLING A1M",
         ),
         (
+            lambda s: s.get_volts_per_div(Channel.C1),
+            "C1:VOLT_DIV?",
+            b"C1:VOLT_DIV 5.00E-01V\n",
+            "C1:VOLT_DIV 5.00E-01V",
+        ),
+        (
+            lambda s: s.get_offset(Channel.C2),
+            "C2:OFFSET?",
+            b"C2:OFFSET 0.00E+00V\n",
+            "C2:OFFSET 0.00E+00V",
+        ),
+        (
             lambda s: s.get_trace_display(Channel.C2),
             "C2:TRACE?",
             b"C2:TRACE ON\n",
@@ -409,6 +421,12 @@ def test_query_sends_the_command_and_returns_the_trimmed_response():
             "TRIG_MODE AUTO",
         ),
         (
+            lambda s: s.get_trigger_source(),
+            "TRIG_SELECT?",
+            b"TRIG_SELECT EDGE,SR,C1,HT,OFF\n",
+            "TRIG_SELECT EDGE,SR,C1,HT,OFF",
+        ),
+        (
             lambda s: s.get_trigger_slope(Channel.C1),
             "C1:TRIG_SLOPE?",
             b"C1:TRIG_SLOPE NEG\n",
@@ -419,6 +437,12 @@ def test_query_sends_the_command_and_returns_the_trimmed_response():
             "C1:TRIG_COUPLING?",
             b"C1:TRIG_COUPLING DC\n",
             "C1:TRIG_COUPLING DC",
+        ),
+        (
+            lambda s: s.get_trigger_level(Channel.C1),
+            "C1:TRIG_LEVEL?",
+            b"C1:TRIG_LEVEL 0.00E+00V\n",
+            "C1:TRIG_LEVEL 0.00E+00V",
         ),
         (
             lambda s: s.get_math_equation(MathChannel.F1),
