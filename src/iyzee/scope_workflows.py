@@ -1,6 +1,5 @@
-"""Scope workflow operations: what "apply these channel settings" or
-"acquire every enabled channel's waveform" means on top of the raw
-:class:`~iyzee.scope.LeCroy` driver.
+"""Scope workflow operations: configuration, acquisition, and persistence
+on top of the raw :class:`~iyzee.scope.LeCroy` driver.
 
 Plain functions and dataclasses, no Textual import — the same operations
 ``ScopeScreen``'s buttons trigger are usable identically from a script or
@@ -68,10 +67,11 @@ class TriggerSettings:
 
 @dataclass(frozen=True)
 class ChannelError:
-    """One channel's operation failed; carries which channel and why —
-    used by both :func:`apply_channel_settings` (a channel whose settings
-    couldn't be pushed) and :func:`acquire_waveforms` (a channel whose
-    waveform couldn't be downloaded)."""
+    """One channel's operation failed; carries which channel and why.
+
+    Used by configuration and acquisition helpers so partial hardware failures
+    can be reported without discarding successful channels. The acquisition
+    path preserves these errors in the scientific recording manifest."""
 
     channel: Channel
     error: Exception
@@ -79,7 +79,12 @@ class ChannelError:
 
 @dataclass(frozen=True)
 class ScopeWaveform:
-    """One channel's calibrated waveform and the scope's conversion data."""
+    """One channel's time series plus the scope data needed to interpret it.
+
+    ``values`` are calibrated engineering-unit samples. ``raw_codes`` preserves
+    the signed 16-bit waveform codes when the detailed LeCroy transfer path is
+    available; the gain/offset fields describe the conversion used for
+    ``values``."""
 
     channel: Channel
     time: np.ndarray
@@ -96,7 +101,11 @@ class ScopeWaveform:
 
 @dataclass(frozen=True)
 class ScopeAcquisition:
-    """A complete scope acquisition suitable for persistent scientific recording."""
+    """In-memory scope record ready to be persisted as a scientific measurement.
+
+    The object deliberately separates requested configuration from the subset
+    known to have been applied successfully. A failed channel remains visible in
+    ``errors`` while successful waveforms stay available for saving and plotting."""
 
     measurement_id: str
     started_at_utc: str
@@ -116,6 +125,11 @@ def _utc_now() -> str:
 
 
 def _stats(time: np.ndarray, values: np.ndarray) -> dict[str, float | int | None]:
+    """Calculate descriptive statistics without modifying recorded samples.
+
+    Non-finite values remain in the saved array but are excluded from the
+    scalar summary statistics.
+    """
     finite = np.isfinite(values)
     indices = np.flatnonzero(finite)
     base: dict[str, float | int | None] = {
@@ -230,7 +244,17 @@ def acquire_scope_recording(
     applied_trigger_settings: TriggerSettings | None = None,
     lock: threading.Lock | None = None,
 ) -> ScopeAcquisition:
-    """Acquire complete waveforms and the metadata needed to interpret them."""
+    """Acquire enabled ``DAT1`` waveforms and capture their interpretation metadata.
+
+    The returned object contains per-channel time axes, calibrated values,
+    optional raw signed 16-bit samples, scope-reported calibration data, and
+    descriptive statistics. It also carries the requested configuration and
+    the last configuration known to have been applied. This function does
+    not write to disk; :func:`save_scope_acquisition` owns persistence.
+
+    Acquisition is deliberately tolerant of per-channel failures: a channel
+    that cannot be downloaded is recorded as an error while other channels
+    are retained."""
     if not channels:
         raise ValueError("at least one channel is required")
     started = _utc_now()
@@ -315,7 +339,12 @@ def acquire_scope_recording(
 def acquire_waveforms(
     scope: LeCroy, channels: Sequence[Channel], *, lock: threading.Lock | None = None
 ) -> tuple[list[tuple[list[float], list[float], str]], list[ChannelError]]:
-    """Compatibility/presentation wrapper over :func:`acquire_scope_recording`."""
+    """Return the legacy plot-series shape without adding persistence.
+
+    New callers that need a durable scientific record should use
+    :func:`acquire_scope_recording` followed by :func:`save_scope_acquisition`.
+    This wrapper remains for existing presentation/script callers that only
+    need ``(x, y, label)`` series."""
     recording = acquire_scope_recording(scope, channels, lock=lock)
     series = [
         (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
@@ -331,7 +360,16 @@ def save_scope_acquisition(
     name: str = "scope",
     path: Path | None = None,
 ) -> Path:
-    """Save one scope acquisition as numeric NPZ arrays plus a JSON manifest."""
+    """Persist one scope acquisition as numeric NPZ arrays plus a JSON manifest.
+
+    Each successful channel contributes ``time_<channel>`` and
+    ``value_<channel>`` arrays, plus ``raw_<channel>`` when raw ADC codes were
+    retained. The manifest records acquisition identity/timing, instrument
+    transport details, requested vs. successfully-applied configuration,
+    calibration/timebase metadata, descriptive statistics, and per-channel
+    errors. Persistence itself is delegated to the shared numeric-recording
+    primitive in :mod:`iyzee.experiment.io`.
+    """
     arrays: dict[str, np.ndarray] = {}
     channel_metadata: list[dict[str, object]] = []
     for waveform in recording.waveforms:
