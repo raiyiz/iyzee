@@ -319,7 +319,10 @@ def acquire_waveforms(
 ) -> tuple[list[tuple[list[float], list[float], str]], list[ChannelError]]:
     """Compatibility/presentation wrapper over :func:`acquire_scope_recording`."""
     recording = acquire_scope_recording(scope, channels, lock=lock)
-    series = [(waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel)) for waveform in recording.waveforms]
+    series = [
+        (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
+        for waveform in recording.waveforms
+    ]
     return series, list(recording.errors)
 
 
@@ -378,7 +381,11 @@ def save_scope_acquisition(
         "measurement_id": recording.measurement_id,
         "started_at_utc": recording.started_at_utc,
         "completed_at_utc": recording.completed_at_utc,
-        "software": {"name": "iyzee", "version": _software_version(), "python": platform.python_version()},
+        "software": {
+            "name": "iyzee",
+            "version": _software_version(),
+            "python": platform.python_version(),
+        },
         "instrument": {
             "driver": "iyzee.scope.LeCroy",
             "protocol": "LeCroy VICP",
@@ -401,10 +408,7 @@ def save_scope_acquisition(
         "waveforms": channel_metadata,
         "errors": [{"channel": e.channel.value, "error": str(e.error)} for e in recording.errors],
         "data_semantics": {
-            "value_arrays": (
-                "engineering units using the scope-reported "
-                "VERTICAL_GAIN and VERTICAL_OFFSET"
-            ),
+            "value_arrays": "engineering units using the scope-reported VERTICAL_GAIN and VERTICAL_OFFSET",
             "raw_arrays": "signed 16-bit waveform codes returned by the scope when available",
             "time_arrays": "scope horizontal offset plus sample index multiplied by horizontal interval",
         },
