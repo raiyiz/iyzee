@@ -207,7 +207,6 @@ class ScopeScreen(Page):
     def on_show(self) -> None:
         self.refresh_readiness()
 
-
     # -- readiness -----------------------------------------------------------
 
     def refresh_readiness(self) -> None:
@@ -232,7 +231,6 @@ class ScopeScreen(Page):
             )
             return None
         return handle.scope
-
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "apply-channels":
