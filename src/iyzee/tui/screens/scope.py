@@ -721,8 +721,7 @@ class ScopeScreen(Page):
             self.notify(
                 f"Trigger settings failed: {one_line(error)}", severity="error", markup=False
             )
-            self._update_sync_status()
-            self._update_apply_buttons()
+            self._refresh_scope_ui()
             return
         if verification_error is not None or verified is None:
             self._settings_synced = False
