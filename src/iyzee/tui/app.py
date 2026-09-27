@@ -33,6 +33,15 @@ from .workers import LastRun
 log = logging.getLogger("iyzee.tui")
 
 
+PAGE_SPECS = (
+    ("connect", "Connect", ConnectScreen),
+    ("sweep", "Sweep", SweepScreen),
+    ("scope", "Scope", ScopeScreen),
+    ("traces", "Traces", TracesScreen),
+    ("console", "Console", ConsoleScreen),
+    ("log", "Log", LogScreen),
+)
+
 class NavRail(Static):
     """Persistent left-hand page list + a per-instrument connection dot.
 
@@ -45,14 +54,9 @@ class NavRail(Static):
     dropped, and they are also refreshed on every page switch.
     """
 
-    PAGES = (
-        ("connect", "Connect"),
-        ("sweep", "Sweep"),
-        ("scope", "Scope"),
-        ("traces", "Traces"),
-        ("console", "Console"),
-        ("log", "Log"),
-    )
+    # Page ids, labels, and widget classes share one registry so adding a
+    # page cannot leave the nav rail and ContentSwitcher out of sync.
+    PAGES = tuple((page_id, label) for page_id, label, _screen in PAGE_SPECS)
 
     def compose(self) -> ComposeResult:
         yield Static("iyzee", id="nav-title")
@@ -182,14 +186,10 @@ class IyzeeApp(App):
     # Screen per page). This is what makes a persistent NavRail possible —
     # MODES/switch_mode() tears down and rebuilds the whole screen on every
     # switch, so nothing outside the switched screen could ever persist.
-    PAGES = {
-        "connect": ConnectScreen,
-        "sweep": SweepScreen,
-        "scope": ScopeScreen,
-        "traces": TracesScreen,
-        "console": ConsoleScreen,
-        "log": LogScreen,
-    }
+    # Mount every page once; navigation labels come from the same registry
+    # used by NavRail.PAGES above. Key bindings remain explicit because F1-F4
+    # intentionally cover only four pages.
+    PAGES = {page_id: screen for page_id, _label, screen in PAGE_SPECS}
     DEFAULT_PAGE = "connect"
 
     def __init__(
