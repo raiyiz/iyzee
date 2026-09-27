@@ -458,10 +458,11 @@ def test_get_data_floats_detailed_retains_raw_codes_and_calibration():
 # -- channel / trigger / math control --------------------------------------------------------
 
 
-def sent_message(sock: FragmentingFakeSocket) -> str:
-    """Decode the ascii payload of the (single) VICP frame `sock` received."""
-    _flag, _r1, _r2, _r3, length = struct.unpack("B3BI", bytes(sock.sent[:8]))
-    return bytes(sock.sent[8 : 8 + socket.ntohl(length)]).decode("ascii")
+def sent_message(sock: object) -> str:
+    """Decode the ASCII payload of the single VICP frame received."""
+    sent = getattr(sock, "sent")
+    _flag, _r1, _r2, _r3, length = struct.unpack("B3BI", bytes(sent[:8]))
+    return bytes(sent[8 : 8 + socket.ntohl(length)]).decode("ascii")
 
 
 @pytest.mark.parametrize(
