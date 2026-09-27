@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
+
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
