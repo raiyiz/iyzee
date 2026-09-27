@@ -363,6 +363,10 @@ class ScopeScreen(Page):
             self._settings_synced = False
             self._settings_busy = False
             self._retrieve_in_flight = False
+            if hasattr(self, "_dirty_fields"):
+                self._dirty_fields.clear()
+                for widget in self.query(".scope-dirty"):
+                    widget.remove_class("scope-dirty")
             status.update("Not ready: connect the Scope first — press F1 for the Connect page.")
         elif not self._settings_synced and not self._retrieve_in_flight:
             self._start_retrieve(silent=True)
@@ -576,6 +580,7 @@ class ScopeScreen(Page):
         if handle is None:
             self._ui(
                 self._finish_apply_channels,
+                scope,
                 settings,
                 [ChannelError(settings[0].channel, RuntimeError("scope disconnected"))],
                 baseline,
@@ -614,11 +619,10 @@ class ScopeScreen(Page):
             for err in errors:
                 log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
             self.notify("Some channel changes failed — see the log.", severity="error")
-            self._update_sync_status()
-            self._update_apply_buttons()
+            self._refresh_scope_ui()
             return
         self._settings_synced = True
-        self._mark_scope_dirty()
+        self._refresh_scope_ui()
         log_widget.write(
             "Applied changed channel fields: "
             + ", ".join(str(setting.channel) for setting in settings)
