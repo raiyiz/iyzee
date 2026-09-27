@@ -362,6 +362,10 @@ class ScopeScreen(Page):
             self._start_retrieve(silent=True)
         status.display = not connected
 
+    def _scope_is_current(self, scope: LeCroy) -> bool:
+        """Return whether the scope object is still the connected instance."""
+        handle = self.iyzee_app.handles.get("scope")
+        return handle is not None and handle.device is scope
     def _scope(self) -> LeCroy | None:
         """The live driver, or ``None`` (after notifying) if not connected."""
         handle = self.iyzee_app.handles.get("scope")
@@ -413,6 +417,7 @@ class ScopeScreen(Page):
             trigger_error = exc
         self._ui(
             self._finish_retrieve,
+            scope,
             channel_settings,
             channel_errors,
             trigger_settings,
@@ -444,12 +449,19 @@ class ScopeScreen(Page):
 
     def _finish_retrieve(
         self,
+        scope: LeCroy,
         channel_settings: Sequence[ChannelSettings],
         channel_errors: Sequence[ChannelError],
         trigger_settings: TriggerSettings | None,
         trigger_error: Exception | None,
         silent: bool,
     ) -> None:
+        if not self._scope_is_current(scope):
+            self._settings_busy = False
+            self._retrieve_in_flight = False
+            self.query_one("#retrieve-settings", Button).disabled = False
+            self._refresh_scope_ui()
+            return
         self._settings_busy = False
         self._retrieve_in_flight = False
         self.query_one("#retrieve-settings", Button).disabled = False
@@ -565,14 +577,20 @@ class ScopeScreen(Page):
         errors = apply_channel_settings(
             scope, settings, current_settings=baseline, lock=handle.lock
         )
-        self._ui(self._finish_apply_channels, settings, errors, baseline)
+        self._ui(self._finish_apply_channels, scope, settings, errors, baseline)
 
     def _finish_apply_channels(
         self,
+        scope: LeCroy,
         settings: Sequence[ChannelSettings],
         errors: Sequence[ChannelError],
         baseline: Sequence[ChannelSettings],
     ) -> None:
+        if not self._scope_is_current(scope):
+            self._settings_busy = False
+            self.query_one("#apply-channels", Button).disabled = False
+            self._refresh_scope_ui()
+            return
         self._settings_busy = False
         self.query_one("#apply-channels", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
@@ -661,15 +679,28 @@ class ScopeScreen(Page):
             error = exc
         if error is None and verified is None:
             verification_error = RuntimeError("trigger readback returned no settings")
-        self._ui(self._finish_apply_trigger, settings, error, verified, verification_error)
+        self._ui(
+            self._finish_apply_trigger,
+            scope,
+            settings,
+            error,
+            verified,
+            verification_error,
+        )
 
     def _finish_apply_trigger(
         self,
+        scope: LeCroy,
         settings: TriggerSettings,
         error: Exception | None,
         verified: TriggerSettings | None,
         verification_error: Exception | None,
     ) -> None:
+        if not self._scope_is_current(scope):
+            self._settings_busy = False
+            self.query_one("#apply-trigger", Button).disabled = False
+            self._refresh_scope_ui()
+            return
         self._settings_busy = False
         self.query_one("#apply-trigger", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
