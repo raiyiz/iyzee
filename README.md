@@ -25,7 +25,7 @@ src/iyzee/
 └── tui/                    # interactive terminal UI (`iyzee-tui`)
     ├── app.py              # IyzeeApp: nav rail, page switcher, key bindings, shared state, shutdown
     ├── app.tcss            # layout and responsive rules (width breakpoints)
-    ├── instruments.py      # InstrumentSpec registry, InstrumentHandle (each owns its own lock), LockedProxy
+    ├── instruments.py      # InstrumentSpec registry, uniform InstrumentHandle (.device + lock), LockedProxy
     ├── ipython.py          # the `lab` namespace (LabProxy), shell configuration, history file location
     ├── ipython_session.py  # IPython's terminal shell, running in-process on a virtual terminal
     ├── logging_support.py  # captures the app's own logging: session buffer + rotating file history
@@ -36,7 +36,7 @@ src/iyzee/
     ├── text.py             # showing externally produced text safely (markup-safe)
     ├── workers.py          # cross-thread message types (LastRun, StepProgress, ...)
     └── screens/            # the six pages
-        ├── page.py         # shared page base, form validation, and worker→UI plumbing
+        ├── page.py         # shared page base, form helpers/validation, readiness hook, and worker→UI plumbing
         ├── connect.py      # ConnectScreen
         ├── sweep.py        # SweepScreen
         ├── scope.py        # ScopeScreen — form/plot only; operations live in scope_workflows.py
