@@ -61,8 +61,6 @@ from .page import FieldError, Page, _field
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from ..app import IyzeeApp
-
 log = logging.getLogger("iyzee.tui")
 
 
@@ -71,8 +69,6 @@ log = logging.getLogger("iyzee.tui")
 # exists to turn a stray extra zero (or 10**9) into a clear message instead
 # of a frozen UI and gigabytes of linspace.
 MAX_POINTS = 1000
-
-
 
 
 class SweepAborted(Exception):
