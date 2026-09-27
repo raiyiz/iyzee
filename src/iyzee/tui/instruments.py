@@ -12,6 +12,8 @@ a short human-readable status string).
 Adding a new instrument to the Connect screen is: write one adapter class
 here, add one :class:`InstrumentSpec` to ``INSTRUMENTS`` below. No screen
 code changes required.
+All handles also expose ``.lock`` for shared serialization. Handles with a
+live driver expose that driver as ``.device``; stateless adapters may return ``None``.
 """
 
 from __future__ import annotations
