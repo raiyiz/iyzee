@@ -327,6 +327,7 @@ def test_get_data_floats_detailed_retains_raw_codes_and_calibration():
     assert detailed["vertical_gain"] == 2.0
     assert detailed["vertical_offset"] == 0.25
 
+
 # -- channel / trigger / math control --------------------------------------------------------
 
 
