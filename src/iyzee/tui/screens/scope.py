@@ -187,6 +187,8 @@ class ScopeScreen(Page):
         plot.plt.ylabel("Voltage (V)")
         self._last_applied_channel_settings: tuple[ChannelSettings, ...] | None = None
         self._last_applied_trigger_settings: TriggerSettings | None = None
+        self._settings_synced = False
+        self._retrieve_in_flight = False
         self.refresh_readiness()
 
     def on_show(self) -> None:
@@ -195,18 +197,24 @@ class ScopeScreen(Page):
     # -- readiness -----------------------------------------------------------
 
     def refresh_readiness(self) -> None:
-        """Show, at the top of the page, why nothing here will work yet.
+        """Keep connection readiness and scope-state synchronization current.
 
-        Same pattern as ``SweepScreen.refresh_readiness``: the buttons stay
-        enabled so pressing one still explains what's missing, rather than
-        a disabled button that gives no way to ask "why?".
+        A newly connected scope is read automatically once so the form starts
+        from the instrument's real state instead of its UI defaults. The
+        explicit *Retrieve current settings* button remains useful after a
+        front-panel change or whenever the user wants a fresh baseline for
+        fine-grained edits.
         """
         status = self.query_one("#scope-status", Static)
         connected = "scope" in self.iyzee_app.handles
         if not connected:
             self._last_applied_channel_settings = None
             self._last_applied_trigger_settings = None
+            self._settings_synced = False
+            self._retrieve_in_flight = False
             status.update("Not ready: connect the Scope first — press F1 for the Connect page.")
+        elif not self._settings_synced and not self._retrieve_in_flight:
+            self._start_retrieve(silent=True)
         status.display = not connected
 
     def _scope(self) -> LeCroy | None:
@@ -231,18 +239,23 @@ class ScopeScreen(Page):
 
     # -- retrieve current settings ------------------------------------------
 
-    def _start_retrieve(self) -> None:
+    def _start_retrieve(self, *, silent: bool = False) -> None:
         scope = self._scope()
-        if scope is None:
+        if scope is None or self._retrieve_in_flight:
             return
+        self._retrieve_in_flight = True
         self.query_one("#retrieve-settings", Button).disabled = True
-        log_widget = self.query_one("#scope-log", RichLog)
-        log_widget.write("Retrieving current settings…")
-        self._retrieve(scope)
+        if not silent:
+            self.query_one("#scope-log", RichLog).write("Retrieving current settings…")
+        handle = self.iyzee_app.handles.get("scope")
+        if handle is None:
+            self._retrieve_in_flight = False
+            self.query_one("#retrieve-settings", Button).disabled = False
+            return
+        self._retrieve(scope, handle.lock, silent)
 
     @work(thread=True, exclusive=True, group="scope-retrieve", exit_on_error=False)
-    def _retrieve(self, scope: LeCroy) -> None:
-        lock = self.iyzee_app.handles["scope"].lock
+    def _retrieve(self, scope: LeCroy, lock, silent: bool) -> None:
         channel_settings, channel_errors = read_channel_settings(scope, CHANNELS, lock=lock)
         trigger_settings: TriggerSettings | None = None
         trigger_error: Exception | None = None
@@ -257,14 +270,14 @@ class ScopeScreen(Page):
             channel_errors,
             trigger_settings,
             trigger_error,
+            silent,
         )
 
     def _apply_retrieved_channel_settings(self, settings: ChannelSettings) -> None:
         """Write one channel's retrieved values into its form fields.
 
         Only touches the fields for ``settings.channel`` — a channel that
-        failed to read (see ``read_channel_settings``) keeps whatever was
-        already in its form, rather than being blanked out.
+        failed to read keeps whatever was already in its form.
         """
         channel = settings.channel
         self.query_one(f"#{channel}-enable", Checkbox).value = settings.enabled
@@ -288,34 +301,30 @@ class ScopeScreen(Page):
         channel_errors: Sequence[ChannelError],
         trigger_settings: TriggerSettings | None,
         trigger_error: Exception | None,
+        silent: bool,
     ) -> None:
+        self._retrieve_in_flight = False
         self.query_one("#retrieve-settings", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         for settings in channel_settings:
             self._apply_retrieved_channel_settings(settings)
         for err in channel_errors:
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
-        # A clean read of every channel is exactly as trustworthy a record
-        # of "what's actually on the scope" as a successful Apply — so it's
-        # fine to treat it the same way for the acquisition manifest.
-        if not channel_errors:
-            self._last_applied_channel_settings = tuple(channel_settings)
+        self._last_applied_channel_settings = tuple(channel_settings) or None
         if trigger_settings is not None:
             self._apply_retrieved_trigger_settings(trigger_settings)
-            self._last_applied_trigger_settings = trigger_settings
-        elif trigger_error is not None:
-            log_widget.write(f"[red]Trigger: {escape(one_line(trigger_error))}[/red]")
-        if not channel_errors and trigger_error is None:
-            log_widget.write("Retrieved current settings from the scope.")
-        else:
+        self._last_applied_trigger_settings = trigger_settings
+        self._settings_synced = not channel_errors and trigger_error is None
+        if self._settings_synced:
+            log_widget.write("Scope settings synchronized from the instrument.")
+        elif not silent:
             self.notify(
-                "Some settings couldn't be retrieved — see the log; anything that did read "
-                "back is filled in, the rest is left as it was.",
+                "Some settings couldn't be retrieved — see the log; values that did read "
+                "back are filled in and the others are left alone.",
                 severity="warning",
             )
 
     # -- channel settings ------------------------------------------------
-
     def _read_channel_settings(self) -> list[ChannelSettings]:
         settings = []
         for channel in CHANNELS:
@@ -330,33 +339,74 @@ class ScopeScreen(Page):
         scope = self._scope()
         if scope is None:
             return
+        baseline = self._last_applied_channel_settings
+        if baseline is None:
+            self.notify("Retrieve current settings before changing channel settings.", severity="warning")
+            return
         try:
             settings = self._read_channel_settings()
         except FieldError as exc:
             self._flag_invalid(exc.field_id)
             self.notify(f"Invalid channel settings: {exc}", severity="error", markup=False)
             return
+        known = {setting.channel: setting for setting in baseline}
+        apply_settings = [setting for setting in settings if setting.channel in known]
+        skipped = [setting.channel for setting in settings if setting.channel not in known]
+        if skipped:
+            self.notify(
+                "Skipped unsynchronized channels: " + ", ".join(map(str, skipped))
+                + ". Retrieve current settings for them first.",
+                severity="warning",
+            )
+        changed = [setting for setting in apply_settings if setting != known[setting.channel]]
+        if not changed:
+            self.query_one("#scope-log", RichLog).write("No channel changes to apply.")
+            return
         self.query_one("#apply-channels", Button).disabled = True
-        self._apply_channels(scope, settings)
+        self._apply_channels(scope, changed, baseline)
 
     @work(thread=True, exclusive=True, group="scope-apply-channels", exit_on_error=False)
-    def _apply_channels(self, scope: LeCroy, settings: Sequence[ChannelSettings]) -> None:
-        errors = apply_channel_settings(scope, settings, lock=self.iyzee_app.handles["scope"].lock)
-        self._ui(self._finish_apply_channels, settings, errors)
+    def _apply_channels(
+        self,
+        scope: LeCroy,
+        settings: Sequence[ChannelSettings],
+        baseline: Sequence[ChannelSettings],
+    ) -> None:
+        handle = self.iyzee_app.handles.get("scope")
+        if handle is None:
+            self._ui(self._finish_apply_channels, settings, [ChannelError(settings[0].channel, RuntimeError("scope disconnected"))], baseline)
+            return
+        errors = apply_channel_settings(
+            scope, settings, current_settings=baseline, lock=handle.lock
+        )
+        self._ui(self._finish_apply_channels, settings, errors, baseline)
 
     def _finish_apply_channels(
-        self, settings: Sequence[ChannelSettings], errors: Sequence[ChannelError]
+        self,
+        settings: Sequence[ChannelSettings],
+        errors: Sequence[ChannelError],
+        baseline: Sequence[ChannelSettings],
     ) -> None:
         self.query_one("#apply-channels", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
-        if not errors:
-            self._last_applied_channel_settings = tuple(settings)
-            log_widget.write("Channel settings applied.")
+        error_channels = {err.channel for err in errors}
+        known = {setting.channel: setting for setting in baseline}
+        for setting in settings:
+            if setting.channel not in error_channels:
+                known[setting.channel] = setting
+        self._last_applied_channel_settings = tuple(
+            known[channel] for channel in CHANNELS if channel in known
+        ) or None
+        if errors:
+            for err in errors:
+                log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
+            self.notify("Some channel changes failed — see the log.", severity="error")
             return
-        for err in errors:
-            log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
-        self._last_applied_channel_settings = None
-        self.notify("Some channel settings failed to apply — see the log.", severity="error")
+        log_widget.write(
+            "Applied changed channel fields: "
+            + ", ".join(str(setting.channel) for setting in settings)
+            + "."
+        )
 
     # -- trigger settings --------------------------------------------------
 
@@ -372,20 +422,39 @@ class ScopeScreen(Page):
         scope = self._scope()
         if scope is None:
             return
+        baseline = self._last_applied_trigger_settings
+        if baseline is None:
+            self.notify("Retrieve current settings before changing trigger settings.", severity="warning")
+            return
         try:
             settings = self._read_trigger_settings()
         except FieldError as exc:
             self._flag_invalid(exc.field_id)
             self.notify(f"Invalid trigger settings: {exc}", severity="error", markup=False)
             return
+        if settings == baseline:
+            self.query_one("#scope-log", RichLog).write("No trigger changes to apply.")
+            return
         self.query_one("#apply-trigger", Button).disabled = True
-        self._apply_trigger(scope, settings)
+        handle = self.iyzee_app.handles.get("scope")
+        if handle is None:
+            self.query_one("#apply-trigger", Button).disabled = False
+            return
+        self._apply_trigger(scope, settings, baseline, handle.lock)
 
     @work(thread=True, exclusive=True, group="scope-apply-trigger", exit_on_error=False)
-    def _apply_trigger(self, scope: LeCroy, settings: TriggerSettings) -> None:
+    def _apply_trigger(
+        self,
+        scope: LeCroy,
+        settings: TriggerSettings,
+        baseline: TriggerSettings,
+        lock,
+    ) -> None:
         error: Exception | None = None
         try:
-            apply_trigger_settings(scope, settings, lock=self.iyzee_app.handles["scope"].lock)
+            apply_trigger_settings(
+                scope, settings, current_settings=baseline, lock=lock
+            )
         except Exception as exc:  # noqa: BLE001
             log.exception("scope: failed to apply trigger settings")
             error = exc
