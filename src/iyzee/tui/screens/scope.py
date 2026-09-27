@@ -265,6 +265,7 @@ class ScopeScreen(Page):
             return
         for err in errors:
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
+        self._last_applied_channel_settings = None
         self.notify("Some channel settings failed to apply — see the log.", severity="error")
 
     # -- trigger settings --------------------------------------------------
