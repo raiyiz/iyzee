@@ -173,7 +173,7 @@ class ScopeScreen(Page):
                 yield _field("Level (V)", Input(value="0.0", id="trig-level"))
             yield Button("Apply trigger", id="apply-trigger")
         with Grid(id="scope-controls"):
-            yield Button("Acquire", id="acquire-waveforms", variant="success")
+            yield Button("Acquire & save", id="acquire-waveforms", variant="success")
         yield PlotextPlot(id="scope-plot")
         yield RichLog(id="scope-log", highlight=False, markup=True)
 
@@ -201,6 +201,8 @@ class ScopeScreen(Page):
         status = self.query_one("#scope-status", Static)
         connected = "scope" in self.iyzee_app.handles
         if not connected:
+            self._last_applied_channel_settings = None
+            self._last_applied_trigger_settings = None
             status.update("Not ready: connect the Scope first — press F1 for the Connect page.")
         status.display = not connected
 
