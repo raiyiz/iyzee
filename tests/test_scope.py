@@ -273,9 +273,7 @@ def test_disconnect_clears_connection_state(monkeypatch):
 
 def test_vicp_transport_reads_fragmented_frame():
     transport = VICPTransport()
-    transport.attach_socket(
-        FragmentingFakeSocket(vicp_frame(0x81, b"hello"), chunk_size=2)
-    )
+    transport.attach_socket(FragmentingFakeSocket(vicp_frame(0x81, b"hello"), chunk_size=2))
 
     frame = transport.read_frame()
 
@@ -343,9 +341,7 @@ def test_send_serializes_vicp_header_and_message():
 
     sock = scope.s
     assert isinstance(sock, FragmentingFakeSocket)
-    flag, reserved_1, reserved_2, reserved_3, length = struct.unpack(
-        "B3BI", sock.sent[:8]
-    )
+    flag, reserved_1, reserved_2, reserved_3, length = struct.unpack("B3BI", sock.sent[:8])
     assert flag == LeCroy.LECROY_DATA_FLAG | LeCroy.LECROY_EOI_FLAG
     assert (reserved_1, reserved_2, reserved_3) == (1, 0, 0)
     assert socket.ntohl(length) == len("C1:VDIV 1.0")
