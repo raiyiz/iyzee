@@ -117,9 +117,7 @@ class Page(VerticalScroll, can_focus=False):
         widget.add_class("-invalid")
         widget.focus()
 
-    def _read(
-        self, field_id: str, parse: Callable[..., T], label: str, **kwargs: object
-    ) -> T:
+    def _read(self, field_id: str, parse: Callable[..., T], label: str, **kwargs: object) -> T:
         """Parse an Input and attach its field id to ValueError."""
         try:
             return parse(self.query_one(f"#{field_id}", Input).value, label, **kwargs)

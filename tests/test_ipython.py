@@ -11,6 +11,7 @@ import contextlib
 import io
 from dataclasses import dataclass
 from pathlib import Path
+
 from helpers import FakeApp, FakeHandle, history_manager
 from IPython.core.interactiveshell import InteractiveShell
 
@@ -60,7 +61,6 @@ class IyzeeIPython:
 
     def close(self) -> None:
         self.shell.atexit_operations()
-
 
 
 def test_ipython_executes_and_preserves_the_lab_namespace() -> None:

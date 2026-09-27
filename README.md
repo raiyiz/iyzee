@@ -176,6 +176,7 @@ lab.mx.single_sweep_wait()
 trace = lab.mx.get_trace_data(1)
 
 from iyzee.scope_workflows import ChannelSettings, apply_channel_settings
+
 apply_channel_settings(lab.scope, [ChannelSettings(Channel.C1, True, 0.5, 0.0, Coupling.DC_1M)])
 
 lab.results[-1].traces["squeezing"]  # last completed sweep
