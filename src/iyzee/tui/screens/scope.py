@@ -195,8 +195,6 @@ class ScopeScreen(Page):
         self._dirty_fields: set[str] = set()
         self.refresh_readiness()
         self._refresh_scope_ui()
-        self._update_sync_status()
-        self._update_apply_buttons()
 
     def on_show(self) -> None:
         self.refresh_readiness()
@@ -489,7 +487,7 @@ class ScopeScreen(Page):
         if self._settings_synced:
             log_widget.write("Scope settings synchronized from the instrument.")
         else:
-            self._mark_scope_dirty()
+            self._refresh_scope_ui()
             if not silent:
                 self.notify(
                     "Some settings couldn't be retrieved — see the log; values that did read "
@@ -497,7 +495,7 @@ class ScopeScreen(Page):
                     severity="warning",
                 )
             return
-        self._mark_scope_dirty()
+        self._refresh_scope_ui()
 
     # -- channel settings ------------------------------------------------
     def _read_channel_settings(self) -> list[ChannelSettings]:
