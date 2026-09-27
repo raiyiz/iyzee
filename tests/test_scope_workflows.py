@@ -113,11 +113,15 @@ def test_acquire_scope_recording_retains_calibration_and_statistics():
         [Channel.C1, Channel.C2],
         channel_settings=settings,
         trigger_settings=trigger,
+        applied_channel_settings=settings,
+        applied_trigger_settings=trigger,
     )
 
     assert recording.errors == ()
     assert recording.requested_channel_settings == settings
     assert recording.requested_trigger_settings == trigger
+    assert recording.applied_channel_settings == settings
+    assert recording.applied_trigger_settings == trigger
     waveform = recording.waveforms[0]
     np.testing.assert_array_equal(waveform.raw_codes, [10, 11, 12])
     np.testing.assert_allclose(waveform.time, [0.0, 1e-6, 2e-6])
@@ -144,6 +148,7 @@ def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path
     assert manifest["schema_version"] == 1
     assert manifest["measurement_id"] == recording.measurement_id
     assert manifest["waveforms"][0]["stats"]["max"] == 3.0
+    assert manifest["configuration"]["applied_channel_settings"] is None
     assert len(manifest["data_sha256"]) == 64
 
 # -- apply_channel_settings ---------------------------------------------------------------
