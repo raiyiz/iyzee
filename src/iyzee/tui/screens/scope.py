@@ -43,7 +43,7 @@ from ...scope_workflows import (
     apply_trigger_settings,
     save_scope_acquisition,
 )
-from ..experiment import create_dirs
+from ...experiment import create_dirs
 from ..plotting import draw_series
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
