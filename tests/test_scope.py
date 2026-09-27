@@ -1,7 +1,6 @@
 import socket
 import struct
 import threading
-import threading
 
 import numpy as np
 import pytest
@@ -259,6 +258,29 @@ def test_connect_accepts_explicit_timeouts(monkeypatch):
     assert scope.SOCK_TIMEOUT == 7.0
 
 
+def test_disconnect_clears_connection_state():
+    class CloseableSocket(FragmentingFakeSocket):
+        def __init__(self):
+            super().__init__(b"")
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    sock = CloseableSocket()
+    scope = LeCroy()
+    scope.s = sock
+    scope._transport._address = "10.0.0.1"
+
+    scope.disconnect()
+
+    assert sock.closed
+    assert scope.CONNECTED is False
+    assert scope.connected is False
+    assert scope.address is None
+    assert scope.s is None
+
+
 def test_vicp_transport_reads_fragmented_frame():
     transport = VICPTransport()
     transport.attach_socket(
@@ -329,11 +351,15 @@ def test_send_serializes_vicp_header_and_message():
 
     scope.send("C1:VDIV 1.0")
 
-    flag, reserved_1, reserved_2, reserved_3, length = struct.unpack("B3BI", scope.s.sent[:8])
+    sock = scope.s
+    assert isinstance(sock, FragmentingFakeSocket)
+    flag, reserved_1, reserved_2, reserved_3, length = struct.unpack(
+        "B3BI", sock.sent[:8]
+    )
     assert flag == LeCroy.LECROY_DATA_FLAG | LeCroy.LECROY_EOI_FLAG
     assert (reserved_1, reserved_2, reserved_3) == (1, 0, 0)
     assert socket.ntohl(length) == len("C1:VDIV 1.0")
-    assert scope.s.sent[8:] == b"C1:VDIV 1.0"
+    assert sock.sent[8:] == b"C1:VDIV 1.0"
 
 
 def test_get_data_bytes_reassembles_fragmented_waveform():
