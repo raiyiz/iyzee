@@ -14,8 +14,8 @@ src/iyzee/
 ├── mxa.py                 # Keysight MXA SCPI/VISA driver
 ├── power.py                # power supply + optical shutter control
 ├── scope.py                # LeCroy oscilloscope: waveform download + channel/trigger/math control
-├── scope_workflows.py     # scope operations (apply channel/trigger settings, acquire waveforms) —
-│                           # plain functions/dataclasses on top of scope.py, no Textual; see
+├── scope_workflows.py     # scope operations + durable waveform recordings — plain
+│                           # functions/dataclasses on top of scope.py, no Textual; see
 │                           # "Design direction" below
 ├── wavemeter_readout.py  # wavemeter / laser setpoint control
 ├── experiment/            # composable measurement procedures
@@ -69,11 +69,12 @@ instruments are disconnected on the way out):
   banner says which instrument still needs connecting, a bad field is marked
   and focused, and every point is saved to disk as it is measured, so an
   interrupted run keeps what it had.
-- **Scope** (`o`) — configure the LeCroy's channels and trigger, and plot
-  live waveforms. The form/buttons are here; the actual operations live in
-  `scope_workflows.py` (see "Design direction" below) so the same channel
-  and trigger configuration, and the same acquisition, are usable from a
-  script or `lab.scope` without this screen.
+- **Scope** (`o`) — configure the LeCroy's channels and trigger, and use
+  **Acquire & save** to record enabled-channel waveforms. Each acquisition is
+  persisted under `data/YYYY-MM/` as a numeric `.npz` plus JSON manifest, then
+  plotted live. The reusable operations live in `scope_workflows.py` (see
+  "Design direction" below), so acquisition and configuration logic are not
+  tied to the Textual screen.
 - **Traces** (`t`) — browse previously recorded `.npz` runs on disk; the
   preview follows the highlighted run.
 - **Console** (`i`) — IPython's own terminal UI, in the app process, with live
@@ -276,11 +277,12 @@ Two technical guides, both Typst source compiled to PDF in CI:
 - GitLab CI publishes the same documentation set as pipeline artifacts; the
   repository does not currently declare its GitLab mirror URL.
 
-For a reproducible measurement, the relevant analyzer settings should travel
-with the data: frequency range and points, RBW/VBW, detector, averaging,
-sweep time, attenuation/reference level, trigger state, and calibration
-context. `StepResult.meta` and `save_step_results()`'s per-point metadata are
-how that happens in practice.
+For a reproducible measurement, the relevant instrument state should travel
+with the data. Sweep records carry frequency/range and analyzer settings in
+`StepResult.meta` and the JSON sidecar; Scope records carry requested and
+known-applied channel/trigger configuration, scope-reported calibration and
+timebase metadata, raw waveform codes when available, and derived statistics
+beside the numeric arrays.
 
 ## Design direction
 
@@ -334,15 +336,3 @@ uv run mypy src tests      # advisory in CI (the job is allowed to fail)
 
 CI (`.github/workflows/ci.yml`) runs the tests, ruff and mypy, and compiles the
 Typst guides; `.gitlab-ci.yml` compiles the guides too.
-
-## Known gaps
-
-- `scope.py`'s `LeCroy` driver is not integrated with `BaseDevice`'s
-  connection lifecycle (no context-manager support, no injectable transport
-  beyond the low-level socket helpers already covered by tests). The TUI's
-  Connect screen and `lab.scope` both expose it regardless, but no `Step`
-  type drives it yet — adding one is the natural next slice once it's
-  `BaseDevice`-integrated.
-- Aborting a running sweep (Sweep screen) stops after the current step
-  finishes, not mid-step — fine for the MXA's quick per-point calls today,
-  but worth revisiting if a future `Step` type has a long blocking call.

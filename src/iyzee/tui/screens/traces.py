@@ -1,8 +1,10 @@
-"""Traces screen: browse previously recorded sweep runs.
+"""Traces screen: browse persisted Sweep and Scope recordings.
 
-Reads exactly what ``experiment.io.save_step_results`` already writes —
-each run's numeric ``.npz`` plus its ``.json`` metadata sidecar — so
-there's no new persistence format to maintain just for browsing.
+Reads the shared numeric ``.npz`` plus JSON-manifest storage produced by
+``experiment.io``: sweep checkpoints keep their existing schema, while
+Scope acquisitions use channel-specific time/value arrays and optional raw
+waveform codes. There is one persistence format to browse, not a second
+Traces-only representation.
 """
 
 from __future__ import annotations
@@ -109,8 +111,8 @@ class TracesScreen(Page):
 
     def _show_empty(self) -> None:
         self.query_one("#traces-summary", Static).update(
-            "No runs recorded yet.\n\nRun a sweep on the Sweep page (F2); "
-            "it is saved as it goes and will appear here."
+            "No recordings yet.\n\nSweep and Scope acquisitions are saved automatically "
+            "and will appear here."
         )
         plot = self.query_one("#traces-plot", PlotextPlot)
         plot.plt.clear_data()
@@ -129,6 +131,57 @@ class TracesScreen(Page):
         if index is not None and 0 <= index < len(self._paths):
             self._show(self._paths[index])
 
+    def _show_scope_recording(
+        self, path: Path, arrays: dict[str, np.ndarray], metadata: dict
+    ) -> None:
+        """Preview a durable scope acquisition using the same plot helper."""
+        summary = self.query_one("#traces-summary", Static)
+        lines = [f"[b]{escape(path.name)}[/b]", "Scope acquisition"]
+        if metadata.get("measurement_id"):
+            lines.append(f"Measurement: {escape(str(metadata['measurement_id']))}")
+        if metadata.get("started_at_utc"):
+            lines.append(f"Started: {escape(str(metadata['started_at_utc']))}")
+        instrument = metadata.get("instrument")
+        if isinstance(instrument, dict):
+            lines.append(
+                "Instrument: " + escape(str(instrument.get("address") or "address unknown"))
+            )
+        series = []
+        for waveform in metadata.get("waveforms", []):
+            if not isinstance(waveform, dict):
+                continue
+            channel = str(waveform.get("channel", "?"))
+            time_array = arrays.get(f"time_{channel}")
+            value_array = arrays.get(f"value_{channel}")
+            if time_array is None or value_array is None:
+                continue
+            unit = str(waveform.get("value_unit", ""))
+            series.append((time_array.tolist(), value_array.tolist(), channel))
+            stats = waveform.get("stats")
+            if isinstance(stats, dict):
+                lines.append(
+                    f"{escape(channel)}: n={stats.get('sample_count', '?')}, "
+                    f"min={stats.get('min', '?')} {escape(unit)}, max={stats.get('max', '?')} {escape(unit)}, "
+                    f"p-p={stats.get('peak_to_peak', '?')} {escape(unit)}, rms={stats.get('rms', '?')} {escape(unit)}"
+                )
+        errors = metadata.get("errors")
+        if errors:
+            lines.append(f"Errors: {escape(str(errors))}")
+        summary.update("\n".join(lines))
+        plot = self.query_one("#traces-plot", PlotextPlot)
+        if series:
+            first = next((w for w in metadata.get("waveforms", []) if isinstance(w, dict)), {})
+            draw_series(
+                plot,
+                series,
+                title=path.name,
+                xlabel=f"Time ({first.get('time_unit', '')})",
+                ylabel=f"Signal ({first.get('value_unit', '')})",
+            )
+        else:
+            plot.plt.clear_data()
+            plot.refresh()
+
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.list_view.id != "traces-list":
             return
@@ -141,10 +194,11 @@ class TracesScreen(Page):
 
         try:
             with np.load(path, allow_pickle=False) as archive:
-                x_values = archive["x_values"]
+                arrays = {key: archive[key] for key in archive.files}
+                x_values = arrays.get("x_values")
                 traces = {
-                    key[len("trace_") :]: archive[key]
-                    for key in archive.files
+                    key[len("trace_") :]: value
+                    for key, value in arrays.items()
                     if key.startswith("trace_")
                 }
         except Exception as exc:  # noqa: BLE001
@@ -160,6 +214,7 @@ class TracesScreen(Page):
         # numeric data above — that's already loaded and shown regardless.
         points: list[dict] = []
         run_metadata = None
+        sidecar: dict = {}
         try:
             sidecar = json.loads(path.with_suffix(".json").read_text())
             points = sidecar.get("points", [])
@@ -167,6 +222,16 @@ class TracesScreen(Page):
         except OSError, ValueError:
             pass
 
+        if sidecar.get("kind") == "scope-acquisition":
+            self._show_scope_recording(path, arrays, sidecar)
+            return
+        if x_values is None:
+            summary.update(
+                f"[b]{escape(path.name)}[/b]\n\n[red]Missing x_values in recording.[/red]"
+            )
+            plot.plt.clear_data()
+            plot.refresh()
+            return
         lines = [f"[b]{escape(path.name)}[/b]", f"{len(x_values)} point(s)"]
         if isinstance(run_metadata, dict):
             lines.append("")

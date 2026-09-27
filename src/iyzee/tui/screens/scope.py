@@ -1,28 +1,31 @@
 """Scope screen: configure the LeCroy's channels and trigger, and plot
 live waveforms.
 
-The actual operations ("push these channel settings", "acquire every
-enabled channel") live in ``iyzee.scope_workflows``, not here — this
-screen's job is the form (reading/validating ``Input``/``Select`` widgets
-into a ``ChannelSettings``/``TriggerSettings``), the buttons, the plot,
-and reporting the result. See ``scope_workflows``'s module docstring for
-why: the same operations this screen's buttons trigger are meant to be
-identically usable from a script or the IPython console, which they
-cannot be if the logic lives on a Textual widget.
+The actual operations ("push these channel settings", "read back what's
+on the scope now", "acquire every enabled channel") live in
+``iyzee.scope_workflows``, not here — this screen's job is the form
+(reading/validating ``Input``/``Select`` widgets into a
+``ChannelSettings``/``TriggerSettings``, or writing one back into those
+same widgets), the buttons, the plot, and reporting the result. See
+``scope_workflows``'s module docstring for why: the same operations this
+screen's buttons trigger are meant to be identically usable from a script
+or the IPython console, which they cannot be if the logic lives on a
+Textual widget.
 
-Unlike the MXA/shutter/wavemeter, the scope driver (:class:`iyzee.scope.LeCroy`)
-is write-only for most vertical/trigger settings — it has no ``*IDN?``-style
-readback for volts/div, offset, or trigger level (see ``ScopeHandle``'s
-docstring in ``instruments.py``). So this form doesn't try to read the
-scope's current state on open; the fields start at sensible defaults
-(matching ``SweepScreen``'s form, which does the same for its own
-device-side parameters) and "Apply" only ever pushes settings outward.
+The fields start at sensible defaults on open (matching ``SweepScreen``'s
+form, which does the same for its own device-side parameters) — this
+screen has no way to know the scope is even connected yet at that point.
+"Retrieve current settings" is what syncs the form to the scope's actual
+state on demand: press it before making a small change, so "Apply" only
+overwrites the one field you meant to touch instead of pushing out
+whatever the other fields happened to default to.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 
 from rich.markup import escape
 from textual import work
@@ -31,14 +34,19 @@ from textual.containers import Grid, Vertical
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 from textual_plotext import PlotextPlot
 
+from ...experiment import create_dirs
 from ...scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from ...scope_workflows import (
     ChannelError,
     ChannelSettings,
+    ScopeAcquisition,
     TriggerSettings,
-    acquire_waveforms,
+    acquire_scope_recording,
     apply_channel_settings,
     apply_trigger_settings,
+    read_channel_settings,
+    read_trigger_settings,
+    save_scope_acquisition,
 )
 from ..plotting import draw_series
 from ..text import one_line
@@ -109,20 +117,19 @@ def _channel_panel(channel: Channel) -> Vertical:
 
 
 class ScopeScreen(Page):
-    """Configure the scope's channels and trigger, then plot what it sees.
+    """Configure the scope, record enabled channels, then plot the result.
 
     Mirrors ``SweepScreen``'s overall shape (form -> controls -> plot ->
     log) but for the scope specifically: one panel per analog channel,
-    one trigger section, an Apply button for each (they're independent
-    commands on the instrument, so a mistake in one doesn't block the
-    other), and an "Acquire" that downloads and plots a waveform per
-    enabled channel.
+    one trigger section, independent Apply buttons, and an "Acquire & save"
+    action that records the selected waveforms before plotting them.
     """
 
     def compose(self) -> ComposeResult:
         yield Static("Scope", classes="panel-title")
         # Shown only while the scope isn't connected; see refresh_readiness().
         yield Static("", id="scope-status")
+        yield Button("Retrieve current settings", id="retrieve-settings", variant="primary")
         with Grid(id="scope-channels"):
             for channel in CHANNELS:
                 yield _channel_panel(channel)
@@ -169,7 +176,7 @@ class ScopeScreen(Page):
                 yield _field("Level (V)", Input(value="0.0", id="trig-level"))
             yield Button("Apply trigger", id="apply-trigger")
         with Grid(id="scope-controls"):
-            yield Button("Acquire", id="acquire-waveforms", variant="success")
+            yield Button("Acquire & save", id="acquire-waveforms", variant="success")
         yield PlotextPlot(id="scope-plot")
         yield RichLog(id="scope-log", highlight=False, markup=True)
 
@@ -178,6 +185,8 @@ class ScopeScreen(Page):
         plot.plt.title("Scope waveforms")
         plot.plt.xlabel("Time (s)")
         plot.plt.ylabel("Voltage (V)")
+        self._last_applied_channel_settings: tuple[ChannelSettings, ...] | None = None
+        self._last_applied_trigger_settings: TriggerSettings | None = None
         self.refresh_readiness()
 
     def on_show(self) -> None:
@@ -195,6 +204,8 @@ class ScopeScreen(Page):
         status = self.query_one("#scope-status", Static)
         connected = "scope" in self.iyzee_app.handles
         if not connected:
+            self._last_applied_channel_settings = None
+            self._last_applied_trigger_settings = None
             status.update("Not ready: connect the Scope first — press F1 for the Connect page.")
         status.display = not connected
 
@@ -209,12 +220,99 @@ class ScopeScreen(Page):
         return handle.device
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "apply-channels":
+        if event.button.id == "retrieve-settings":
+            self._start_retrieve()
+        elif event.button.id == "apply-channels":
             self._start_apply_channels()
         elif event.button.id == "apply-trigger":
             self._start_apply_trigger()
         elif event.button.id == "acquire-waveforms":
             self._start_acquire()
+
+    # -- retrieve current settings ------------------------------------------
+
+    def _start_retrieve(self) -> None:
+        scope = self._scope()
+        if scope is None:
+            return
+        self.query_one("#retrieve-settings", Button).disabled = True
+        log_widget = self.query_one("#scope-log", RichLog)
+        log_widget.write("Retrieving current settings…")
+        self._retrieve(scope)
+
+    @work(thread=True, exclusive=True, group="scope-retrieve", exit_on_error=False)
+    def _retrieve(self, scope: LeCroy) -> None:
+        lock = self.iyzee_app.handles["scope"].lock
+        channel_settings, channel_errors = read_channel_settings(scope, CHANNELS, lock=lock)
+        trigger_settings: TriggerSettings | None = None
+        trigger_error: Exception | None = None
+        try:
+            trigger_settings = read_trigger_settings(scope, lock=lock)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("scope: failed to read trigger settings")
+            trigger_error = exc
+        self._ui(
+            self._finish_retrieve,
+            channel_settings,
+            channel_errors,
+            trigger_settings,
+            trigger_error,
+        )
+
+    def _apply_retrieved_channel_settings(self, settings: ChannelSettings) -> None:
+        """Write one channel's retrieved values into its form fields.
+
+        Only touches the fields for ``settings.channel`` — a channel that
+        failed to read (see ``read_channel_settings``) keeps whatever was
+        already in its form, rather than being blanked out.
+        """
+        channel = settings.channel
+        self.query_one(f"#{channel}-enable", Checkbox).value = settings.enabled
+        self.query_one(f"#{channel}-vdiv", Input).value = str(settings.volts_per_div)
+        self.query_one(f"#{channel}-offset", Input).value = str(settings.offset)
+        self.query_one(f"#{channel}-coupling", Select).value = settings.coupling.value
+        for field_id in (f"{channel}-vdiv", f"{channel}-offset"):
+            self.query_one(f"#{field_id}", Input).remove_class("-invalid")
+
+    def _apply_retrieved_trigger_settings(self, settings: TriggerSettings) -> None:
+        self.query_one("#trig-source", Select).value = settings.source.value
+        self.query_one("#trig-mode", Select).value = settings.mode.value
+        self.query_one("#trig-slope", Select).value = settings.slope.value
+        self.query_one("#trig-coupling", Select).value = settings.coupling.value
+        self.query_one("#trig-level", Input).value = str(settings.level_volts)
+        self.query_one("#trig-level", Input).remove_class("-invalid")
+
+    def _finish_retrieve(
+        self,
+        channel_settings: Sequence[ChannelSettings],
+        channel_errors: Sequence[ChannelError],
+        trigger_settings: TriggerSettings | None,
+        trigger_error: Exception | None,
+    ) -> None:
+        self.query_one("#retrieve-settings", Button).disabled = False
+        log_widget = self.query_one("#scope-log", RichLog)
+        for settings in channel_settings:
+            self._apply_retrieved_channel_settings(settings)
+        for err in channel_errors:
+            log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
+        # A clean read of every channel is exactly as trustworthy a record
+        # of "what's actually on the scope" as a successful Apply — so it's
+        # fine to treat it the same way for the acquisition manifest.
+        if not channel_errors:
+            self._last_applied_channel_settings = tuple(channel_settings)
+        if trigger_settings is not None:
+            self._apply_retrieved_trigger_settings(trigger_settings)
+            self._last_applied_trigger_settings = trigger_settings
+        elif trigger_error is not None:
+            log_widget.write(f"[red]Trigger: {escape(one_line(trigger_error))}[/red]")
+        if not channel_errors and trigger_error is None:
+            log_widget.write("Retrieved current settings from the scope.")
+        else:
+            self.notify(
+                "Some settings couldn't be retrieved — see the log; anything that did read "
+                "back is filled in, the rest is left as it was.",
+                severity="warning",
+            )
 
     # -- channel settings ------------------------------------------------
 
@@ -244,16 +342,20 @@ class ScopeScreen(Page):
     @work(thread=True, exclusive=True, group="scope-apply-channels", exit_on_error=False)
     def _apply_channels(self, scope: LeCroy, settings: Sequence[ChannelSettings]) -> None:
         errors = apply_channel_settings(scope, settings, lock=self.iyzee_app.handles["scope"].lock)
-        self._ui(self._finish_apply_channels, errors)
+        self._ui(self._finish_apply_channels, settings, errors)
 
-    def _finish_apply_channels(self, errors: Sequence[ChannelError]) -> None:
+    def _finish_apply_channels(
+        self, settings: Sequence[ChannelSettings], errors: Sequence[ChannelError]
+    ) -> None:
         self.query_one("#apply-channels", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         if not errors:
+            self._last_applied_channel_settings = tuple(settings)
             log_widget.write("Channel settings applied.")
             return
         for err in errors:
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
+        self._last_applied_channel_settings = None
         self.notify("Some channel settings failed to apply — see the log.", severity="error")
 
     # -- trigger settings --------------------------------------------------
@@ -287,18 +389,19 @@ class ScopeScreen(Page):
         except Exception as exc:  # noqa: BLE001
             log.exception("scope: failed to apply trigger settings")
             error = exc
-        self._ui(self._finish_apply_trigger, error)
+        self._ui(self._finish_apply_trigger, settings, error)
 
-    def _finish_apply_trigger(self, error: Exception | None) -> None:
+    def _finish_apply_trigger(self, settings: TriggerSettings, error: Exception | None) -> None:
         self.query_one("#apply-trigger", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         if error is None:
+            self._last_applied_trigger_settings = settings
             log_widget.write("Trigger settings applied.")
             return
         log_widget.write(f"[red]Trigger: {escape(one_line(error))}[/red]")
         self.notify(f"Trigger settings failed: {one_line(error)}", severity="error", markup=False)
 
-    # -- acquire: download and plot a waveform per enabled channel ---------
+    # -- acquire: record enabled channels, persist the result, then plot ---
 
     def _start_acquire(self) -> None:
         scope = self._scope()
@@ -310,36 +413,92 @@ class ScopeScreen(Page):
         if not channels:
             self.notify("Enable at least one channel first.", severity="warning")
             return
+        try:
+            channel_settings = tuple(self._read_channel_settings())
+            trigger_settings = self._read_trigger_settings()
+        except FieldError as exc:
+            self._flag_invalid(exc.field_id)
+            self.notify(f"Invalid scope configuration: {exc}", severity="error", markup=False)
+            return
         self.query_one("#acquire-waveforms", Button).disabled = True
         log_widget = self.query_one("#scope-log", RichLog)
-        log_widget.write(f"Acquiring {', '.join(str(c) for c in channels)}…")
-        self._acquire(scope, channels)
+        log_widget.write("Acquiring " + ", ".join(str(c) for c in channels) + "…")
+        # Snapshot the requested and known-applied configuration before the
+        # worker starts. The form may change while acquisition runs; the
+        # manifest must describe the configuration associated with this capture.
+        applied_channel_settings = self._last_applied_channel_settings
+        applied_trigger_settings = self._last_applied_trigger_settings
+        self._acquire(
+            scope,
+            channels,
+            channel_settings,
+            trigger_settings,
+            applied_channel_settings,
+            applied_trigger_settings,
+        )
 
     @work(thread=True, exclusive=True, group="scope-acquire", exit_on_error=False)
-    def _acquire(self, scope: LeCroy, channels: Sequence[Channel]) -> None:
-        series, errors = acquire_waveforms(
-            scope, channels, lock=self.iyzee_app.handles["scope"].lock
+    def _acquire(
+        self,
+        scope: LeCroy,
+        channels: Sequence[Channel],
+        channel_settings: Sequence[ChannelSettings],
+        trigger_settings: TriggerSettings,
+        applied_channel_settings: Sequence[ChannelSettings] | None,
+        applied_trigger_settings: TriggerSettings | None,
+    ) -> None:
+        recording = acquire_scope_recording(
+            scope,
+            channels,
+            channel_settings=channel_settings,
+            trigger_settings=trigger_settings,
+            applied_channel_settings=applied_channel_settings,
+            applied_trigger_settings=applied_trigger_settings,
+            lock=self.iyzee_app.handles["scope"].lock,
         )
-        self._ui(self._finish_acquire, series, errors)
+        # acquire_scope_recording releases the instrument lock before this
+        # point, so persistence cannot block another caller from using the scope.
+        path = None
+        save_error: Exception | None = None
+        try:
+            path = save_scope_acquisition(recording, create_dirs())
+        except Exception as exc:  # noqa: BLE001 - acquisition stays available in memory
+            log.exception("scope: failed to save acquisition")
+            save_error = exc
+        self._ui(self._finish_acquire, recording, path, save_error)
 
     def _finish_acquire(
         self,
-        series: Sequence[tuple[list[float], list[float], str]],
-        errors: Sequence[ChannelError],
+        recording: ScopeAcquisition,
+        path: Path | None,
+        save_error: Exception | None,
     ) -> None:
         self.query_one("#acquire-waveforms", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
-        for err in errors:
+        for err in recording.errors:
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
-        if series:
+        if recording.waveforms:
             plot = self.query_one("#scope-plot", PlotextPlot)
+            series = [
+                (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
+                for waveform in recording.waveforms
+            ]
+            first = recording.waveforms[0]
             draw_series(
                 plot,
                 series,
                 title="Scope waveforms",
-                xlabel="Time (s)",
-                ylabel="Voltage (V)",
+                xlabel=f"Time ({first.time_unit})",
+                ylabel=f"Signal ({first.value_unit})",
             )
-            log_widget.write(f"Acquired {len(series)} channel(s).")
-        elif errors:
+            log_widget.write(f"Acquired {len(recording.waveforms)} channel(s).")
+        if path is not None:
+            log_widget.write(f"Saved acquisition: {escape(str(path))}")
+        if save_error is not None:
+            self.notify(
+                f"Acquired traces but could not save them: {one_line(save_error)}",
+                severity="error",
+                markup=False,
+            )
+        elif recording.errors and not recording.waveforms:
             self.notify("Acquisition failed — see the log.", severity="error")
