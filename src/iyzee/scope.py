@@ -99,6 +99,7 @@ __all__ = [
     "TriggerMode",
     "TriggerSlope",
     "VICPFrame",
+    "VICPFrame",
     "VICPProtocolError",
     "VICPTransport",
 ]
