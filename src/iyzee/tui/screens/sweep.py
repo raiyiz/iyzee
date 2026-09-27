@@ -154,7 +154,7 @@ class SweepScreen(Page):
             missing.append("MXA")
         if kind == "frequency":
             shutter = handles.get("shutter")
-            if shutter is None or shutter.shutter is None:
+            if shutter is None or shutter.device is None:
                 missing.append("shutter")
         return missing
 
@@ -221,14 +221,14 @@ class SweepScreen(Page):
                 shutter = None
             else:
                 shutter_handle = self.iyzee_app.handles.get("shutter")
-                if shutter_handle is None or shutter_handle.shutter is None:
+                if shutter_handle is None or shutter_handle.device is None:
                     self.notify(
                         "Connect the shutter first — press F1 for the Connect page.",
                         severity="error",
                     )
                     return
                 steps, config = self._build_frequency_run()
-                shutter = shutter_handle.shutter
+                shutter = shutter_handle.device
         except FieldError as exc:
             self._flag_invalid(exc.field_id)
             self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
