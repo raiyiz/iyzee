@@ -1,18 +1,14 @@
-"""Where experiment results go: measurement persistence (run directories,
-compressed archives) and plotting helpers.
+"""Measurement persistence and plotting helpers.
 
-A run is saved as a matched pair of files sharing one file stem: a
-``.npz`` holding purely numeric arrays (x-values, and one 2-D array per
-named trace), and a ``.json`` sidecar holding per-point and run-level
-metadata as plain JSON. Splitting them this way means the ``.npz`` never
-needs ``allow_pickle=True`` to load — every array in it is a plain numeric
-dtype — so reading back a saved run, including a run someone else wrote,
-never risks NumPy's pickle-based object-array deserialization executing
-code embedded in the file. (An earlier version of this module packed
-everything, including per-point dicts, into a single ``dtype=object``
-``.npz``; that required ``allow_pickle=True`` to read anything back at
-all. Files written that way are not supported by this version.)
-"""
+Every numeric recording is a matched pair of files sharing one stem: a
+compressed ``.npz`` containing numeric arrays only, plus a plain-JSON
+``.json`` manifest carrying the interpretation and provenance metadata.
+Sweep checkpoints use the long-standing ``x_values``/``trace_*`` schema;
+scope acquisitions use channel-specific ``time_*``/``value_*`` arrays and
+may also retain raw ``raw_*`` waveform codes. Keeping the arrays numeric means
+readers never need ``allow_pickle=True`` — loading a recording cannot invoke
+NumPy's pickle-based object-array deserialization. Older object-array archives
+written by a pre-split version of this module are intentionally unsupported."""
 
 from __future__ import annotations
 
@@ -116,15 +112,16 @@ def save_numeric_recording(
 ) -> Path:
     """Persist numeric arrays plus a JSON manifest as one recording.
 
-    The NPZ contains only numeric arrays and is always loaded with
-    ``allow_pickle=False``. The sidecar is plain JSON and includes a SHA-256
-    digest of the finished NPZ so copied data can be checked for accidental
-    modification. Both files are replaced atomically, using the same
-    ``.part`` convention as the experiment checkpoints.
+    The NPZ contains only numeric arrays and is written/read without pickle.
+    The sidecar is plain JSON and includes a SHA-256 digest of the completed
+    NPZ so copied or archived data can be checked for accidental modification.
+    Both files use the ``.part``-then-replace pattern used by experiment
+    checkpoints, keeping partially-written final files out of normal listings.
 
-    This is the storage primitive for both experiment sweeps and scope
-    acquisitions; higher layers own their own metadata schemas, but the
-    failure-safe file handling stays in one place.
+    This is the shared persistence primitive for sweep checkpoints and scope
+    waveform recordings; higher layers define their own metadata schemas while
+    file naming, numeric validation, atomic replacement, and checksum handling
+    stay in one implementation.
     """
     if path is None:
         path = savedir / f"{_new_stem(name)}.npz"
