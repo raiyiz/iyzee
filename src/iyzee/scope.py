@@ -155,6 +155,7 @@ class LeCroy:
 
     def __init__(self):
         self.CONNECTED = False
+        self.address = None
 
     @staticmethod
     def _recv_exact(sock: socket.socket, num_bytes: int) -> bytes:
@@ -224,6 +225,7 @@ class LeCroy:
 
         self.SOCK_TIMEOUT = delayval
         self.s.settimeout(self.SOCK_TIMEOUT)
+        self.address = IP
         self.CONNECTED = True
 
     def disconnect(self):
@@ -549,31 +551,42 @@ class LeCroy:
             raise AssertionError(f"Expected {exp_bytes} bytes, got {len(dta)}")
         return struct.unpack(f"<{len(dta) // 2}h", dta)
 
-    def getDataFloats(self, channel="C1", block="DAT1"):
+    def getDataFloatsDetailed(self, channel="C1", block="DAT1"):
+        """Return calibrated waveform data together with its raw ADC codes.
+
+        The returned mapping contains the exact 16-bit samples received from
+        the scope plus the vertical calibration coefficients and engineering
+        unit used to produce ``values``. ``getDataFloats`` remains the
+        compatibility API for callers that only need ``(unit, values)``.
         """
-        return the data in measured units in np.float64
-        channel : "C1" or "C2"
-        block : "DAT1" (mostly), or "DAT2"
-        DAT1 is basic integer data block for storing measurements
-        DAT2 is used to hold the results of processing functions (extrema, FFT, etc.)
-        returns (VERTUNIT, array) : properly scaled numpy array of vertical value data
-        """
-        word_values = np.array(self.getDataWords(channel=channel, block=block))
-        # get vertical offset
+        word_values = np.array(self.getDataWords(channel=channel, block=block), dtype=np.int16)
         self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
         _r1, r2 = self.readAll()
-        VOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        # get vertical gain
+        vertical_offset = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
         self.send(f'{channel}:INSPECT? "VERTICAL_GAIN"')
         _r1, r2 = self.readAll()
-        VG = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        # get vertical unit
+        vertical_gain = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
         self.send(f'{channel}:INSPECT? "VERTUNIT"')
         _r1, r2 = self.readAll()
-        VERTUNIT = r2.split("Unit Name = ")[-1].split('"\n')[0]
-        # value = VERT_GAIN * data - VERT_OFFSET
-        return (VERTUNIT, VG * np.array(word_values, dtype=np.float64) - VOS)
+        unit = r2.split("Unit Name = ")[-1].split('"\n')[0]
+        values = vertical_gain * word_values.astype(np.float64) - vertical_offset
+        return {
+            "unit": unit,
+            "values": values,
+            "raw_codes": word_values,
+            "vertical_gain": vertical_gain,
+            "vertical_offset": vertical_offset,
+        }
 
+    def getDataFloats(self, channel="C1", block="DAT1"):
+        """Return one waveform in engineering units as ``(unit, values)``.
+
+        The detailed acquisition path is shared with scientific recording so
+        callers never need to download the same waveform twice just to retain
+        calibration metadata.
+        """
+        data = self.getDataFloatsDetailed(channel=channel, block=block)
+        return data["unit"], data["values"]
     def getHorProperties(self, channel="C1"):
         """
         return the time vector data for the measurement for channel "channel"
