@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
 from ..wavemeter_readout import set_pid_setpoint
-from .core import ExperimentContext, StepResult, run_sequence
+from .core import ExperimentContext, Step, StepResult, run_sequence
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
