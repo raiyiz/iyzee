@@ -134,7 +134,7 @@ class ScopeScreen(Page):
         with Grid(id="scope-channels"):
             for channel in CHANNELS:
                 yield _channel_panel(channel)
-        yield Button("Apply channel settings", id="apply-channels")
+        yield Button("Apply channel changes", id="apply-channels")
         with Vertical(id="scope-trigger"):
             yield Static("Trigger", classes="panel-title")
             with Grid(id="trigger-fields", classes="field-grid"):
@@ -175,7 +175,7 @@ class ScopeScreen(Page):
                     ),
                 )
                 yield _field("Level (V)", Input(value="0.0", id="trig-level"))
-            yield Button("Apply trigger", id="apply-trigger")
+            yield Button("Apply trigger changes", id="apply-trigger")
         with Grid(id="scope-controls"):
             yield Button("Acquire & save", id="acquire-waveforms", variant="success")
         yield PlotextPlot(id="scope-plot")
@@ -191,7 +191,10 @@ class ScopeScreen(Page):
         self._settings_synced = False
         self._settings_busy = False
         self._retrieve_in_flight = False
+        self._suppress_dirty_events = False
+        self._dirty_fields: set[str] = set()
         self.refresh_readiness()
+        self._refresh_scope_ui()
         self._update_sync_status()
         self._update_apply_buttons()
 
@@ -200,97 +203,142 @@ class ScopeScreen(Page):
 
     # -- form state ---------------------------------------------------------
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        super().on_input_changed(event)
-        if event.input.id and event.input.id.startswith(("C", "trig-")):
-            self._mark_scope_dirty()
+    def _field_label(self, field_id: str) -> str:
+        """Human-readable label for the small field-level dirty indicator."""
+        if field_id.startswith("C"):
+            channel, field = field_id.split("-", 1)
+            return {
+                "enable": f"{channel} visibility",
+                "vdiv": f"{channel} V/div",
+                "offset": f"{channel} offset",
+                "coupling": f"{channel} coupling",
+            }[field]
+        return {
+            "trig-source": "trigger source",
+            "trig-mode": "trigger mode",
+            "trig-slope": "trigger slope",
+            "trig-coupling": "trigger coupling",
+            "trig-level": "trigger level",
+        }.get(field_id, field_id)
 
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id and event.select.id.startswith(("C", "trig-")):
-            self._mark_scope_dirty()
+    def _channel_baseline(self, channel: Channel) -> ChannelSettings | None:
+        return next(
+            (setting for setting in self._last_applied_channel_settings or () if setting.channel == channel),
+            None,
+        )
 
-    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        if event.checkbox.id and event.checkbox.id.startswith("C"):
-            self._mark_scope_dirty()
+    def _field_changed_from_baseline(self, field_id: str) -> bool:
+        """Compare one form field with the known instrument-state baseline."""
+        if field_id.startswith("C"):
+            channel_name, field = field_id.split("-", 1)
+            baseline = self._channel_baseline(Channel(channel_name))
+            if baseline is None:
+                return False
+            if field == "enable":
+                return self.query_one(f"#{field_id}", Checkbox).value != baseline.enabled
+            if field == "vdiv":
+                try:
+                    value = self._read(field_id, _positive_float, f"{channel_name} V/div")
+                except FieldError:
+                    return True
+                return value != baseline.volts_per_div
+            if field == "offset":
+                try:
+                    value = self._read(field_id, _finite_float, f"{channel_name} offset")
+                except FieldError:
+                    return True
+                return value != baseline.offset
+            if field == "coupling":
+                return self.query_one(f"#{field_id}", Select).value != baseline.coupling.value
+        baseline = self._last_applied_trigger_settings
+        if baseline is None:
+            return False
+        if field_id == "trig-source":
+            return self.query_one("#trig-source", Select).value != baseline.source.value
+        if field_id == "trig-mode":
+            return self.query_one("#trig-mode", Select).value != baseline.mode.value
+        if field_id == "trig-slope":
+            return self.query_one("#trig-slope", Select).value != baseline.slope.value
+        if field_id == "trig-coupling":
+            return self.query_one("#trig-coupling", Select).value != baseline.coupling.value
+        if field_id == "trig-level":
+            try:
+                value = self._read("trig-level", _finite_float, "Trigger level")
+            except FieldError:
+                return True
+            return value != baseline.level_volts
+        return False
 
+    def _refresh_field_dirty(self, field_id: str) -> None:
+        if self._field_changed_from_baseline(field_id):
+            self._dirty_fields.add(field_id)
+            widget = self.query_one(f"#{field_id}")
+            widget.add_class("scope-dirty")
+        else:
+            self._dirty_fields.discard(field_id)
+            widget = self.query_one(f"#{field_id}")
+            widget.remove_class("scope-dirty")
+        self._refresh_scope_ui()
 
-    def _mark_scope_dirty(self) -> None:
-        """Refresh the visible sync/dirty state from the known instrument baseline."""
-        if not getattr(self, "_settings_synced", False):
-            self._update_sync_status()
+    def _set_channel_dirty_style(self, channel: Channel) -> None:
+        dirty = any(field_id.startswith(f"{channel}-") for field_id in self._dirty_fields)
+        self.query_one(f"#{channel}-panel", Vertical).set_class(dirty, "scope-dirty")
+
+    def _refresh_scope_ui(self) -> None:
+        """Update dirty styling, status text, and which actions can run."""
+        if not hasattr(self, "_dirty_fields"):
             return
-        try:
-            current_channels = self._read_channel_settings()
-        except FieldError:
-            current_channels = []
-        baseline_channels = self._last_applied_channel_settings or ()
-        known = {setting.channel: setting for setting in baseline_channels}
-        for setting in current_channels:
-            panel = self.query_one(f"#{setting.channel}-panel", Vertical)
-            panel.set_class(setting != known.get(setting.channel), "scope-dirty")
-            for field_id in (
-                f"{setting.channel}-enable",
-                f"{setting.channel}-vdiv",
-                f"{setting.channel}-offset",
-                f"{setting.channel}-coupling",
-            ):
-                widget = self.query_one(f"#{field_id}")
-                widget.set_class(setting != known.get(setting.channel), "scope-dirty")
-        try:
-            trigger = self._read_trigger_settings()
-        except FieldError:
-            trigger = None
-        trigger_dirty = trigger is not None and trigger != self._last_applied_trigger_settings
+        for channel in CHANNELS:
+            self._set_channel_dirty_style(channel)
+        trigger_dirty = any(field_id.startswith("trig-") for field_id in self._dirty_fields)
         self.query_one("#scope-trigger", Vertical).set_class(trigger_dirty, "scope-dirty")
-        self._update_sync_status()
-        self._update_apply_buttons()
-
-    def _update_apply_buttons(self) -> None:
-        busy = self._settings_busy or not self._settings_synced
-        channel_dirty = False
-        if not busy and self._last_applied_channel_settings is not None:
-            try:
-                current = self._read_channel_settings()
-            except FieldError:
-                current = []
-            baseline = {setting.channel: setting for setting in self._last_applied_channel_settings}
-            channel_dirty = any(setting != baseline.get(setting.channel) for setting in current if setting.channel in baseline)
-        trigger_dirty = False
-        if not busy and self._last_applied_trigger_settings is not None:
-            try:
-                trigger_dirty = self._read_trigger_settings() != self._last_applied_trigger_settings
-            except FieldError:
-                pass
-        self.query_one("#apply-channels", Button).disabled = not channel_dirty or busy
-        self.query_one("#apply-trigger", Button).disabled = not trigger_dirty or busy
-
-    def _update_sync_status(self) -> None:
         status = self.query_one("#scope-sync-status", Static)
         if self._settings_busy:
             status.update("Synchronizing scope settings…")
+            status.add_class("scope-dirty")
         elif not self._settings_synced:
-            status.update("Scope state not synchronized — retrieve current settings before acquiring.")
+            missing_channels = [
+                str(channel) for channel in CHANNELS if self._channel_baseline(channel) is None
+            ]
+            missing = missing_channels + ([] if self._last_applied_trigger_settings is not None else ["trigger"])
+            detail = f" — missing: {', '.join(missing)}" if missing else ""
+            status.update("Scope state is not fully synchronized" + detail + ".")
+            status.remove_class("scope-dirty")
+        elif self._dirty_fields:
+            labels = [self._field_label(field_id) for field_id in sorted(self._dirty_fields)]
+            status.update("Local edits pending: " + ", ".join(labels) + ".")
+            status.add_class("scope-dirty")
         else:
-            dirty_channels = []
-            baseline = {setting.channel: setting for setting in self._last_applied_channel_settings or ()}
-            try:
-                current = self._read_channel_settings()
-            except FieldError:
-                current = []
-            for setting in current:
-                if setting != baseline.get(setting.channel):
-                    dirty_channels.append(str(setting.channel))
-            try:
-                trigger_dirty = (
-                    self._read_trigger_settings() != self._last_applied_trigger_settings
-                )
-            except FieldError:
-                trigger_dirty = False
-            if dirty_channels or trigger_dirty:
-                parts = dirty_channels + ([ "trigger"] if trigger_dirty else [])
-                status.update("Edited locally — " + ", ".join(parts) + " will be applied.")
-            else:
-                status.update("Scope state synchronized.")
+            status.update("Scope state synchronized — no pending changes.")
+            status.remove_class("scope-dirty")
+
+        busy = self._settings_busy
+        channel_dirty = any(field_id.startswith("C") for field_id in self._dirty_fields)
+        trigger_dirty = any(field_id.startswith("trig-") for field_id in self._dirty_fields)
+        self.query_one("#apply-channels", Button).disabled = busy or not channel_dirty
+        self.query_one("#apply-trigger", Button).disabled = busy or not trigger_dirty
+        self.query_one("#acquire-waveforms", Button).disabled = (
+            busy or not self._settings_synced or bool(self._dirty_fields)
+        )
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        super().on_input_changed(event)
+        if self._suppress_dirty_events or event.input.id is None:
+            return
+        if event.input.id.startswith(("C", "trig-")):
+            self._refresh_field_dirty(event.input.id)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if self._suppress_dirty_events or event.select.id is None:
+            return
+        if event.select.id.startswith(("C", "trig-")):
+            self._refresh_field_dirty(event.select.id)
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if self._suppress_dirty_events or event.checkbox.id is None:
+            return
+        if event.checkbox.id.startswith("C"):
+            self._refresh_field_dirty(event.checkbox.id)
 
     # -- readiness -----------------------------------------------------------
 
@@ -408,13 +456,34 @@ class ScopeScreen(Page):
         self._retrieve_in_flight = False
         self.query_one("#retrieve-settings", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
+        self._suppress_dirty_events = True
+        try:
+            for settings in channel_settings:
+                self._apply_retrieved_channel_settings(settings)
+            if trigger_settings is not None:
+                self._apply_retrieved_trigger_settings(trigger_settings)
+        finally:
+            self._suppress_dirty_events = False
         for settings in channel_settings:
-            self._apply_retrieved_channel_settings(settings)
+            prefix = f"{settings.channel}-"
+            self._dirty_fields.difference_update(
+                field_id for field_id in self._dirty_fields if field_id.startswith(prefix)
+            )
+            for field in ("enable", "vdiv", "offset", "coupling"):
+                self.query_one(f"#{settings.channel}-{field}").remove_class("scope-dirty")
+        if trigger_settings is not None:
+            for field_id in (
+                "trig-source",
+                "trig-mode",
+                "trig-slope",
+                "trig-coupling",
+                "trig-level",
+            ):
+                self._dirty_fields.discard(field_id)
+                self.query_one(f"#{field_id}").remove_class("scope-dirty")
         for err in channel_errors:
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
         self._last_applied_channel_settings = tuple(channel_settings) or None
-        if trigger_settings is not None:
-            self._apply_retrieved_trigger_settings(trigger_settings)
         self._last_applied_trigger_settings = trigger_settings
         self._settings_synced = not channel_errors and trigger_error is None
         if self._settings_synced:
@@ -473,7 +542,7 @@ class ScopeScreen(Page):
         changed = [setting for setting in apply_settings if setting != known[setting.channel]]
         if not changed:
             self.query_one("#scope-log", RichLog).write("No channel changes to apply.")
-            self._mark_scope_dirty()
+            self._refresh_scope_ui()
             return
         self._settings_busy = True
         self.query_one("#apply-channels", Button).disabled = True
@@ -564,7 +633,7 @@ class ScopeScreen(Page):
             return
         if settings == baseline:
             self.query_one("#scope-log", RichLog).write("No trigger changes to apply.")
-            self._mark_scope_dirty()
+            self._refresh_scope_ui()
             return
         self._settings_busy = True
         self.query_one("#apply-trigger", Button).disabled = True
@@ -625,13 +694,25 @@ class ScopeScreen(Page):
                 "Trigger settings were applied but could not be verified.",
                 severity="warning",
             )
-            self._update_sync_status()
-            self._update_apply_buttons()
+            self._refresh_scope_ui()
             return
+        self._suppress_dirty_events = True
+        try:
+            self._apply_retrieved_trigger_settings(verified)
+        finally:
+            self._suppress_dirty_events = False
         self._last_applied_trigger_settings = verified
-        self._apply_retrieved_trigger_settings(verified)
         self._settings_synced = True
-        self._mark_scope_dirty()
+        for field_id in (
+            "trig-source",
+            "trig-mode",
+            "trig-slope",
+            "trig-coupling",
+            "trig-level",
+        ):
+            self._dirty_fields.discard(field_id)
+            self.query_one(f"#{field_id}").remove_class("scope-dirty")
+        self._refresh_scope_ui()
         log_widget.write("Trigger settings applied and verified.")
 
     # -- acquire: record enabled channels, persist the result, then plot ---
