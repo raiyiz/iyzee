@@ -77,7 +77,6 @@ class ChannelError:
     error: Exception
 
 
-
 @dataclass(frozen=True)
 class ScopeWaveform:
     """One channel's calibrated waveform and the scope's conversion data."""
@@ -221,7 +220,6 @@ def apply_trigger_settings(
         scope.set_trigger_level(settings.source, settings.level_volts)
 
 
-
 def acquire_scope_recording(
     scope: LeCroy,
     channels: Sequence[Channel],
@@ -356,7 +354,6 @@ def save_scope_acquisition(
             }
         )
 
-
     def channel_config(s: ChannelSettings) -> dict[str, object]:
         return {
             "channel": s.channel.value,
@@ -365,6 +362,7 @@ def save_scope_acquisition(
             "offset": s.offset,
             "coupling": s.coupling.value,
         }
+
     def trigger_config(s: TriggerSettings | None) -> dict[str, object] | None:
         if s is None:
             return None
@@ -375,6 +373,7 @@ def save_scope_acquisition(
             "coupling": s.coupling.value,
             "level_volts": s.level_volts,
         }
+
     metadata = {
         "kind": "scope-acquisition",
         "schema_version": 1,
