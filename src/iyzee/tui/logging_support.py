@@ -98,7 +98,7 @@ class TuiLogHandler(logging.Handler):
     ``on_record`` (supplied by the app) is responsible for getting back
     onto the app's own thread before touching any widget — the same
     ``call_from_thread`` pattern each screen's own worker->UI callbacks
-    already use (see e.g. ``ScopeScreen._ui``).
+    already use (see ``screens.page.Page._ui``).
     """
 
     def __init__(self, on_record: Callable[[LogEntry], None], maxlen: int = 2000) -> None:
