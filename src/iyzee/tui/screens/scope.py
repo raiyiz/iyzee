@@ -188,6 +188,7 @@ class ScopeScreen(Page):
         self._last_applied_channel_settings: tuple[ChannelSettings, ...] | None = None
         self._last_applied_trigger_settings: TriggerSettings | None = None
         self._settings_synced = False
+        self._settings_busy = False
         self._retrieve_in_flight = False
         self.refresh_readiness()
 
@@ -211,6 +212,7 @@ class ScopeScreen(Page):
             self._last_applied_channel_settings = None
             self._last_applied_trigger_settings = None
             self._settings_synced = False
+            self._settings_busy = False
             self._retrieve_in_flight = False
             status.update("Not ready: connect the Scope first — press F1 for the Connect page.")
         elif not self._settings_synced and not self._retrieve_in_flight:
@@ -241,14 +243,16 @@ class ScopeScreen(Page):
 
     def _start_retrieve(self, *, silent: bool = False) -> None:
         scope = self._scope()
-        if scope is None or self._retrieve_in_flight:
+        if scope is None or self._settings_busy:
             return
+        self._settings_busy = True
         self._retrieve_in_flight = True
         self.query_one("#retrieve-settings", Button).disabled = True
         if not silent:
             self.query_one("#scope-log", RichLog).write("Retrieving current settings…")
         handle = self.iyzee_app.handles.get("scope")
         if handle is None:
+            self._settings_busy = False
             self._retrieve_in_flight = False
             self.query_one("#retrieve-settings", Button).disabled = False
             return
@@ -303,6 +307,7 @@ class ScopeScreen(Page):
         trigger_error: Exception | None,
         silent: bool,
     ) -> None:
+        self._settings_busy = False
         self._retrieve_in_flight = False
         self.query_one("#retrieve-settings", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
@@ -339,6 +344,9 @@ class ScopeScreen(Page):
         scope = self._scope()
         if scope is None:
             return
+        if self._settings_busy:
+            self.notify("Another scope settings operation is already running.", severity="warning")
+            return
         baseline = self._last_applied_channel_settings
         if baseline is None:
             self.notify(
@@ -365,6 +373,7 @@ class ScopeScreen(Page):
         if not changed:
             self.query_one("#scope-log", RichLog).write("No channel changes to apply.")
             return
+        self._settings_busy = True
         self.query_one("#apply-channels", Button).disabled = True
         self._apply_channels(scope, changed, baseline)
 
@@ -395,6 +404,7 @@ class ScopeScreen(Page):
         errors: Sequence[ChannelError],
         baseline: Sequence[ChannelSettings],
     ) -> None:
+        self._settings_busy = False
         self.query_one("#apply-channels", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         error_channels = {err.channel for err in errors}
@@ -406,6 +416,7 @@ class ScopeScreen(Page):
             tuple(known[channel] for channel in CHANNELS if channel in known) or None
         )
         if errors:
+            self._settings_synced = False
             for err in errors:
                 log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
             self.notify("Some channel changes failed — see the log.", severity="error")
@@ -430,6 +441,9 @@ class ScopeScreen(Page):
         scope = self._scope()
         if scope is None:
             return
+        if self._settings_busy:
+            self.notify("Another scope settings operation is already running.", severity="warning")
+            return
         baseline = self._last_applied_trigger_settings
         if baseline is None:
             self.notify(
@@ -445,9 +459,11 @@ class ScopeScreen(Page):
         if settings == baseline:
             self.query_one("#scope-log", RichLog).write("No trigger changes to apply.")
             return
+        self._settings_busy = True
         self.query_one("#apply-trigger", Button).disabled = True
         handle = self.iyzee_app.handles.get("scope")
         if handle is None:
+            self._settings_busy = False
             self.query_one("#apply-trigger", Button).disabled = False
             return
         self._apply_trigger(scope, settings, baseline, handle.lock)
@@ -480,15 +496,18 @@ class ScopeScreen(Page):
         verified: TriggerSettings | None,
         verification_error: Exception | None,
     ) -> None:
+        self._settings_busy = False
         self.query_one("#apply-trigger", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         if error is not None:
+            self._settings_synced = False
             log_widget.write(f"[red]Trigger: {escape(one_line(error))}[/red]")
             self.notify(
                 f"Trigger settings failed: {one_line(error)}", severity="error", markup=False
             )
             return
         if verification_error is not None or verified is None:
+            self._settings_synced = False
             log_widget.write(
                 "[yellow]Trigger settings were written, but readback failed; "
                 "retrieve current settings to resync.[/yellow]"
@@ -508,7 +527,7 @@ class ScopeScreen(Page):
         scope = self._scope()
         if scope is None:
             return
-        if self._retrieve_in_flight or not self._settings_synced:
+        if self._settings_busy or self._retrieve_in_flight or not self._settings_synced:
             self.notify(
                 "Scope settings are not synchronized yet; retrieve the current settings first.",
                 severity="warning",
