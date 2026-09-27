@@ -341,7 +341,9 @@ class ScopeScreen(Page):
             return
         baseline = self._last_applied_channel_settings
         if baseline is None:
-            self.notify("Retrieve current settings before changing channel settings.", severity="warning")
+            self.notify(
+                "Retrieve current settings before changing channel settings.", severity="warning"
+            )
             return
         try:
             settings = self._read_channel_settings()
@@ -354,7 +356,8 @@ class ScopeScreen(Page):
         skipped = [setting.channel for setting in settings if setting.channel not in known]
         if skipped:
             self.notify(
-                "Skipped unsynchronized channels: " + ", ".join(map(str, skipped))
+                "Skipped unsynchronized channels: "
+                + ", ".join(map(str, skipped))
                 + ". Retrieve current settings for them first.",
                 severity="warning",
             )
@@ -374,7 +377,12 @@ class ScopeScreen(Page):
     ) -> None:
         handle = self.iyzee_app.handles.get("scope")
         if handle is None:
-            self._ui(self._finish_apply_channels, settings, [ChannelError(settings[0].channel, RuntimeError("scope disconnected"))], baseline)
+            self._ui(
+                self._finish_apply_channels,
+                settings,
+                [ChannelError(settings[0].channel, RuntimeError("scope disconnected"))],
+                baseline,
+            )
             return
         errors = apply_channel_settings(
             scope, settings, current_settings=baseline, lock=handle.lock
@@ -394,9 +402,9 @@ class ScopeScreen(Page):
         for setting in settings:
             if setting.channel not in error_channels:
                 known[setting.channel] = setting
-        self._last_applied_channel_settings = tuple(
-            known[channel] for channel in CHANNELS if channel in known
-        ) or None
+        self._last_applied_channel_settings = (
+            tuple(known[channel] for channel in CHANNELS if channel in known) or None
+        )
         if errors:
             for err in errors:
                 log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
@@ -424,7 +432,9 @@ class ScopeScreen(Page):
             return
         baseline = self._last_applied_trigger_settings
         if baseline is None:
-            self.notify("Retrieve current settings before changing trigger settings.", severity="warning")
+            self.notify(
+                "Retrieve current settings before changing trigger settings.", severity="warning"
+            )
             return
         try:
             settings = self._read_trigger_settings()
@@ -454,9 +464,7 @@ class ScopeScreen(Page):
         verified: TriggerSettings | None = None
         verification_error: Exception | None = None
         try:
-            apply_trigger_settings(
-                scope, settings, current_settings=baseline, lock=lock
-            )
+            apply_trigger_settings(scope, settings, current_settings=baseline, lock=lock)
             verified = read_trigger_settings(scope, lock=lock)
         except Exception as exc:  # noqa: BLE001
             log.exception("scope: failed to apply trigger settings")
@@ -476,7 +484,9 @@ class ScopeScreen(Page):
         log_widget = self.query_one("#scope-log", RichLog)
         if error is not None:
             log_widget.write(f"[red]Trigger: {escape(one_line(error))}[/red]")
-            self.notify(f"Trigger settings failed: {one_line(error)}", severity="error", markup=False)
+            self.notify(
+                f"Trigger settings failed: {one_line(error)}", severity="error", markup=False
+            )
             return
         if verification_error is not None or verified is None:
             log_widget.write(
