@@ -22,7 +22,6 @@ device-side parameters) and "Apply" only ever pushes settings outward.
 from __future__ import annotations
 
 import logging
-import math
 from collections.abc import Sequence
 
 from rich.markup import escape
@@ -43,7 +42,7 @@ from ...scope_workflows import (
 )
 from ..plotting import draw_series
 from ..text import one_line
-from .page import FieldError, Page, _field
+from .page import FieldError, Page, _field, _finite_float, _positive_float
 
 log = logging.getLogger("iyzee.tui")
 
@@ -86,29 +85,6 @@ TRIGGER_COUPLING_CHOICES = [
     ("HF reject", TriggerCoupling.HF_REJECT.value),
     ("LF reject", TriggerCoupling.LF_REJECT.value),
 ]
-
-
-def _finite_float(raw: str, field: str) -> float:
-    """Parse ``raw`` as a finite float.
-
-    Unlike ``SweepScreen``'s ``_positive_float``, this allows zero and
-    negative values — offsets and trigger levels are routinely negative.
-    """
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise ValueError(f"{field} must be a number") from exc
-    # float() happily parses "nan"/"inf"; neither is a usable setting.
-    if not math.isfinite(value):
-        raise ValueError(f"{field} must be a finite number")
-    return value
-
-
-def _positive_float(raw: str, field: str) -> float:
-    value = _finite_float(raw, field)
-    if value <= 0:
-        raise ValueError(f"{field} must be positive")
-    return value
 
 
 def _channel_panel(channel: Channel) -> Vertical:
