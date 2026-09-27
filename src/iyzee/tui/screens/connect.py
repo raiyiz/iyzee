@@ -12,8 +12,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from typing import TYPE_CHECKING
-
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
@@ -24,9 +22,6 @@ from ..text import one_line
 from ..workers import ConnectOutcome
 from .page import Page
 
-if TYPE_CHECKING:
-    from ..app import IyzeeApp
-
 log = logging.getLogger("iyzee.tui")
 
 STATUS_COL = "status"
@@ -35,7 +30,6 @@ DETAIL_COL = "detail"
 
 class ConnectScreen(Page):
     """Table of instruments with live connect/disconnect status."""
-
 
     def compose(self) -> ComposeResult:
         yield Static("Instruments", classes="panel-title")
