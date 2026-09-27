@@ -97,6 +97,7 @@ class DetailedFakeScope(FakeScope):
             "vertical_offset": 0.5,
         }
 
+
 def test_acquire_scope_recording_retains_calibration_and_statistics():
     scope = DetailedFakeScope()
     settings = (_settings(Channel.C1), _settings(Channel.C2))
