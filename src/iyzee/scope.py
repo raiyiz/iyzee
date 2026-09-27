@@ -432,9 +432,7 @@ class LeCroy:
     def getDataFloatsDetailed(self, channel="C1", block="DAT1"):
         """Return calibrated waveform data together with raw ADC codes."""
         with self.transaction():
-            word_values = np.array(
-                self.getDataWords(channel=channel, block=block), dtype=np.int16
-            )
+            word_values = np.array(self.getDataWords(channel=channel, block=block), dtype=np.int16)
             self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
             _r1, r2 = self.readAll()
             vertical_offset = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
