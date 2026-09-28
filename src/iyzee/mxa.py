@@ -171,8 +171,8 @@ class KeysightMXA(BaseDevice):
     # ------------------------------------------------------------------
     # Sweep / Acquisition Control
     # ------------------------------------------------------------------
-    def set_sweep_duration(self, time: int):
-        self.write(f"SWE:TIME {time}ms")
+    def set_sweep_duration(self, duration_ms: float):
+        self.write(f"SWE:TIME {duration_ms}ms")
 
     def set_sweep_points(self, points: int):
         self.write(f"SWE:POIN {points}")
@@ -343,8 +343,8 @@ class KeysightMXA(BaseDevice):
         """
         self.write("STAT:OPER:ENAB 32")
         self.query("STAT:OPER:EVEN?")  # clear
-        t0 = time.time()
-        while (time.time() - t0) < timeout_sec:
+        t0 = time.monotonic()
+        while (time.monotonic() - t0) < timeout_sec:
             try:
                 status = int(self.query("STAT:OPER:EVEN?"))
                 if status & 32:
