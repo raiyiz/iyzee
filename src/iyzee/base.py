@@ -51,12 +51,20 @@ class BaseDevice:
         """Open the device once; repeated calls reuse the existing resource."""
         if self.instrument is not None:
             return
-        self.instrument = self.open()
-        self.instrument.timeout = self.timeout_ms
-        if self.read_termination is not None:
-            self.instrument.read_termination = self.read_termination
-        if self.write_termination is not None:
-            self.instrument.write_termination = self.write_termination
+        instrument = self.open()
+        try:
+            instrument.timeout = self.timeout_ms
+            if self.read_termination is not None:
+                instrument.read_termination = self.read_termination
+            if self.write_termination is not None:
+                instrument.write_termination = self.write_termination
+        except Exception:
+            try:
+                instrument.close()
+            except Exception:
+                pass
+            raise
+        self.instrument = instrument
 
     def close(self) -> None:
         """Close the VISA resource, if it is open."""
