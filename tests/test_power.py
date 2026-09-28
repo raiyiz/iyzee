@@ -1,5 +1,5 @@
 from iyzee import CH, IP
-from iyzee.power import PSU
+from iyzee.power import PSU, ShutterControl
 
 
 class FakeInstrument:
@@ -67,3 +67,47 @@ def test_psu_context_manager_closes_injected_transport():
 
     assert psu.instrument is None
     assert instrument.close_calls == 1
+
+
+def test_shutter_control_has_explicit_connection_lifecycle():
+    resource_manager = FakeResourceManager()
+    shutter = ShutterControl(resource_manager=resource_manager)
+
+    assert resource_manager.opened == []
+    assert shutter.psu.instrument is None
+
+    shutter.connect()
+    instrument = shutter.psu.instrument
+    assert instrument is not None
+    assert instrument.commands == [
+        "INST:NSEL 3",
+        "VOLT 1.7",
+        "INST:NSEL 3",
+        "CURR 0.01",
+    ]
+
+    shutter.open()
+    shutter.disconnect()
+    shutter.disconnect()
+
+    assert instrument.commands[-4:] == [
+        "INST OUT3",
+        "OUTP:SEL 1",
+        "INST OUT3",
+        "OUTP:SEL 0",
+    ]
+    assert instrument.close_calls == 1
+    assert shutter.psu.instrument is None
+
+
+def test_shutter_control_context_manager_disconnects_the_psu():
+    resource_manager = FakeResourceManager()
+
+    with ShutterControl(resource_manager=resource_manager) as shutter:
+        instrument = shutter.psu.instrument
+        assert instrument is not None
+        shutter.open()
+
+    assert shutter.psu.instrument is None
+    assert instrument.close_calls == 1
+    assert instrument.commands[-2:] == ["INST OUT3", "OUTP:SEL 0"]
