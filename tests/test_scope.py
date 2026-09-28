@@ -19,6 +19,7 @@ from iyzee.scope import (
     VICPTimeoutError,
     VICPTransport,
 )
+from iyzee.vicp import VICP_DATA_FLAG, VICP_EOI_FLAG, recv_exact
 
 
 class FragmentingFakeSocket:
@@ -48,7 +49,7 @@ def test_recv_exact_reassembles_fragmented_reads():
     payload = b"0123456789ABCDEF"
     sock = FragmentingFakeSocket(payload, chunk_size=3)
 
-    result = LeCroy._recv_exact(sock, len(payload))
+    result = recv_exact(sock, len(payload))
 
     assert result == payload
 
@@ -57,10 +58,10 @@ def test_recv_exact_raises_on_closed_connection():
     sock = FragmentingFakeSocket(b"short", chunk_size=3)
 
     with pytest.raises(ConnectionError):
-        LeCroy._recv_exact(sock, 100)
+        recv_exact(sock, 100)
 
 
-# -- timeouts: connect(), _recv_exact(), send() must not block forever --------------------
+# -- timeouts: connect(), recv_exact(), send() must not block forever --------------------
 
 
 class _TimingOutSocket:
@@ -103,14 +104,14 @@ def test_recv_exact_raises_lecroy_timeout_not_a_bare_timeout():
     sock = _TimingOutSocket(timeout=3.0)
 
     with pytest.raises(LeCroyTimeoutError, match=r"3\.0s \(0/10 bytes received\)"):
-        LeCroy._recv_exact(sock, 10)
+        recv_exact(sock, 10, timeout_error=LeCroyTimeoutError)
 
 
 def test_recv_exact_reports_how_far_it_got_before_timing_out():
     sock = _PartialThenTimeoutSocket(b"abcd", timeout=1.5)
 
     with pytest.raises(LeCroyTimeoutError, match=r"1\.5s \(4/10 bytes received\)"):
-        LeCroy._recv_exact(sock, 10)
+        recv_exact(sock, 10, timeout_error=LeCroyTimeoutError)
 
 
 def test_vicp_transport_transaction_is_reentrant():
@@ -207,12 +208,15 @@ def test_connect_raises_lecroy_timeout_instead_of_hanging(monkeypatch):
     assert fake_socket.timeout == LeCroy.MAX_TCP_CONNECT
     # ...and the half-open socket wasn't leaked.
     assert fake_socket.closed
-    assert scope.CONNECTED is False
+    assert scope.connected is False
 
 
 class _ConnectableSocket:
     """A fake socket that connects successfully, recording every
     ``settimeout()`` call so the test can check both timeouts get applied."""
+
+    def setsockopt(self, *args):
+        pass
 
     def __init__(self, *args, **kwargs):
         self.timeouts: list[float] = []
@@ -236,7 +240,7 @@ def test_connect_bounds_the_handshake_then_the_ongoing_socket_timeout(monkeypatc
     scope = LeCroy()
     scope.connect("10.0.0.1")
 
-    assert scope.CONNECTED is True
+    assert scope.connected is True
     assert fake_socket.connected_to == ("10.0.0.1", LeCroy.LECROY_SERVER_PORT)
     # settimeout() is called twice: once (MAX_TCP_CONNECT) before connect()
     # so the handshake itself can't hang, and again (MAC_TCP_READ) once
@@ -266,7 +270,7 @@ def test_disconnect_clears_connection_state(monkeypatch):
     scope.disconnect()
 
     assert fake_socket.closed
-    assert scope.CONNECTED is False
+    assert scope.connected is False
     assert scope.connected is False
     assert scope.address is None
     assert scope.s is None
@@ -343,7 +347,7 @@ def test_send_serializes_vicp_header_and_message():
     sock = scope.s
     assert isinstance(sock, FragmentingFakeSocket)
     flag, reserved_1, reserved_2, reserved_3, length = struct.unpack("B3BI", sock.sent[:8])
-    assert flag == LeCroy.LECROY_DATA_FLAG | LeCroy.LECROY_EOI_FLAG
+    assert flag == VICP_DATA_FLAG | VICP_EOI_FLAG
     assert (reserved_1, reserved_2, reserved_3) == (1, 0, 0)
     assert socket.ntohl(length) == len("C1:VDIV 1.0")
     assert sock.sent[8:] == b"C1:VDIV 1.0"

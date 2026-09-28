@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from contextlib import contextmanager
+from typing import Any
 
 import numpy as np
 import pytest
@@ -10,9 +11,11 @@ import pytest
 from iyzee.scope import Channel, Coupling, TriggerCoupling, TriggerMode, TriggerSlope
 from iyzee.scope_workflows import (
     ChannelSettings,
+    SettingAdjustment,
     TriggerSettings,
     acquire_scope_recording,
     acquire_waveforms,
+    apply_and_verify_channel_settings,
     apply_channel_settings,
     apply_trigger_settings,
     read_channel_settings,
@@ -146,7 +149,7 @@ class FakeScope:
 
 
 def _settings(channel: Channel, **overrides) -> ChannelSettings:
-    defaults = dict(
+    defaults: dict[str, Any] = dict(
         channel=channel, enabled=True, volts_per_div=0.5, offset=0.0, coupling=Coupling.DC_1M
     )
     defaults.update(overrides)
@@ -216,7 +219,7 @@ def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path
         np.testing.assert_allclose(archive["time_C1"], [0.0, 1e-6, 2e-6])
     manifest = json.loads(path.with_suffix(".json").read_text())
     assert manifest["kind"] == "scope-acquisition"
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["measurement_id"] == recording.measurement_id
     assert manifest["waveforms"][0]["stats"]["max"] == 3.0
     assert manifest["configuration"]["applied_channel_settings"] is None
@@ -365,11 +368,11 @@ def test_apply_trigger_settings_pushes_every_field_in_order():
     apply_trigger_settings(scope, settings)
 
     assert scope.calls == [
-        ("set_trigger_mode", TriggerMode.AUTO),
         ("set_trigger_source", Channel.C2),
         ("set_trigger_slope", Channel.C2, TriggerSlope.POSITIVE),
         ("set_trigger_coupling", Channel.C2, TriggerCoupling.DC),
         ("set_trigger_level", Channel.C2, 0.1),
+        ("set_trigger_mode", TriggerMode.AUTO),  # mode last
     ]
 
 
@@ -444,11 +447,11 @@ def test_apply_trigger_settings_without_baseline_keeps_full_write_behavior():
     apply_trigger_settings(scope, desired)
 
     assert scope.calls == [
-        ("set_trigger_mode", TriggerMode.SINGLE),
         ("set_trigger_source", Channel.C2),
         ("set_trigger_slope", Channel.C2, TriggerSlope.NEGATIVE),
         ("set_trigger_coupling", Channel.C2, TriggerCoupling.AC),
         ("set_trigger_level", Channel.C2, 0.1),
+        ("set_trigger_mode", TriggerMode.SINGLE),  # mode last
     ]
 
 
@@ -487,19 +490,20 @@ def test_read_trigger_settings_raises_rather_than_collecting_errors():
 # -- acquire_waveforms ----------------------------------------------------------------------
 
 
-def test_acquire_waveforms_reads_the_timebase_once_not_per_channel():
+def test_acquire_waveforms_reads_each_channels_own_timebase():
     scope = FakeScope()
 
     series, errors = acquire_waveforms(scope, [Channel.C1, Channel.C2])
 
     assert errors == []
     assert [c for c in scope.calls if c[0] == "getHorProperties"] == [
-        ("getHorProperties", Channel.C1)
+        ("getHorProperties", Channel.C1),
+        ("getHorProperties", Channel.C2),
     ]
     assert [label for _x, _y, label in series] == ["C1", "C2"]
 
 
-def test_acquire_waveforms_builds_the_time_axis_from_the_shared_timebase():
+def test_acquire_waveforms_builds_the_time_axis_from_the_timebase():
     scope = FakeScope()
 
     series, _errors = acquire_waveforms(scope, [Channel.C1])
@@ -685,3 +689,334 @@ def test_batch_holds_the_drivers_transaction_even_without_an_explicit_lock():
 
     assert events[0] == "enter" and events[-1] == "exit"
     assert "set_offset" in events[1:-1]
+
+
+# -- trigger: mode is written last on the selective path too --------------------------------
+
+
+def test_apply_trigger_settings_writes_mode_after_source_and_level_when_all_change():
+    scope = FakeScope()
+    baseline = TriggerSettings(
+        Channel.C1, TriggerMode.STOP, TriggerSlope.POSITIVE, TriggerCoupling.DC, 0.0
+    )
+    desired = TriggerSettings(
+        Channel.C2, TriggerMode.NORMAL, TriggerSlope.NEGATIVE, TriggerCoupling.AC, 0.5
+    )
+
+    apply_trigger_settings(scope, desired, current_settings=baseline)
+
+    names = [c[0] for c in scope.calls]
+    assert names[-1] == "set_trigger_mode"
+    assert names[:-1] == [
+        "set_trigger_source",
+        "set_trigger_slope",
+        "set_trigger_coupling",
+        "set_trigger_level",
+    ]
+
+
+# -- apply + read-back verification ---------------------------------------------------------
+
+
+class StatefulScope(FakeScope):
+    """A scope that remembers what it was told, like a real one: values are
+    quantized to ``vdiv_step`` and (optionally) some writes are ignored."""
+
+    def __init__(self, *, vdiv_step: float = 0.0, ignore_coupling=frozenset(), **kwargs):
+        super().__init__(**kwargs)
+        self.vdiv_step = vdiv_step
+        self.ignore_coupling = ignore_coupling
+
+    def _update(self, channel, **changes):
+        from dataclasses import replace
+
+        self.channel_state[channel] = replace(self.channel_state[channel], **changes)
+
+    def set_volts_per_div(self, channel, value):
+        super().set_volts_per_div(channel, value)
+        if self.vdiv_step:
+            value = round(value / self.vdiv_step) * self.vdiv_step
+        self._update(channel, volts_per_div=value)
+
+    def set_offset(self, channel, value):
+        super().set_offset(channel, value)
+        self._update(channel, offset=value)
+
+    def set_coupling(self, channel, value):
+        super().set_coupling(channel, value)
+        if channel not in self.ignore_coupling:
+            self._update(channel, coupling=value)
+
+    def set_trace_display(self, channel, value):
+        super().set_trace_display(channel, value)
+        self._update(channel, enabled=value)
+
+
+def test_apply_and_verify_returns_what_the_scope_reports_not_what_was_requested():
+    scope = StatefulScope(vdiv_step=0.1)
+
+    result = apply_and_verify_channel_settings(
+        scope, [_settings(Channel.C1, volts_per_div=0.123, offset=0.25)]
+    )
+
+    assert result.errors == ()
+    (verified,) = result.verified
+    assert verified.volts_per_div == pytest.approx(0.1)
+    assert verified.offset == pytest.approx(0.25)
+    assert result.adjustments == (
+        SettingAdjustment(
+            Channel.C1, "volts_per_div", requested=0.123, actual=verified.volts_per_div
+        ),
+    )
+
+
+def test_apply_and_verify_exact_match_has_no_adjustments():
+    scope = StatefulScope()
+
+    result = apply_and_verify_channel_settings(scope, [_settings(Channel.C2, volts_per_div=0.2)])
+
+    assert result.errors == () and result.adjustments == ()
+    assert result.verified[0].volts_per_div == pytest.approx(0.2)
+
+
+def test_apply_and_verify_reports_an_ignored_discrete_setting_as_an_error():
+    scope = StatefulScope(ignore_coupling=frozenset({Channel.C1}))
+
+    result = apply_and_verify_channel_settings(
+        scope, [_settings(Channel.C1, coupling=Coupling.DC_50)]
+    )
+
+    assert [e.channel for e in result.errors] == [Channel.C1]
+    assert "coupling is D1M but D50 was requested" in str(result.errors[0].error)
+    assert result.verified[0].coupling == Coupling.DC_1M, "baseline must be the truth"
+
+
+def test_apply_and_verify_reports_a_channel_that_cannot_be_read_back():
+    scope = StatefulScope(fail_reads=frozenset({Channel.C2}))
+
+    result = apply_and_verify_channel_settings(
+        scope, [_settings(Channel.C1), _settings(Channel.C2, volts_per_div=1.0)]
+    )
+
+    assert [s.channel for s in result.verified] == [Channel.C1]
+    assert [e.channel for e in result.errors] == [Channel.C2]
+    assert "could not verify C2" in str(result.errors[0].error)
+
+
+def test_apply_and_verify_still_reads_back_a_channel_whose_write_failed():
+    """After a failed write the scope's real state is unknown, so it is read,
+    and the baseline becomes the truth (the old value), not the request."""
+    scope = StatefulScope(fail_channels=frozenset({Channel.C1}))
+    before = scope.channel_state[Channel.C1].volts_per_div
+
+    result = apply_and_verify_channel_settings(scope, [_settings(Channel.C1, volts_per_div=2.0)])
+
+    assert Channel.C1 in [e.channel for e in result.errors]
+    assert result.verified[0].volts_per_div == pytest.approx(before)
+    assert before != 2.0
+
+
+def test_apply_and_verify_skips_the_read_back_when_the_link_is_lost():
+    scope = DroppingScope(Channel.C1)
+
+    result = apply_and_verify_channel_settings(
+        scope, [_settings(Channel.C1, volts_per_div=1.0), _settings(Channel.C2, volts_per_div=1.0)]
+    )
+
+    assert result.verified == ()
+    assert [e.channel for e in result.errors] == [Channel.C1, Channel.C2]
+    assert not any(c[0].startswith("get_") for c in scope.calls)
+
+
+def test_apply_and_verify_holds_the_lock_across_write_and_read_back():
+    scope = StatefulScope()
+    lock = threading.Lock()
+    held: list[bool] = []
+    original = scope.get_volts_per_div
+    scope.get_volts_per_div = lambda ch: (held.append(lock.locked()), original(ch))[1]
+
+    apply_and_verify_channel_settings(scope, [_settings(Channel.C1)], lock=lock)
+
+    assert held == [True] and not lock.locked()
+
+
+# -- acquisition: consistency and provenance -----------------------------------------------
+
+
+class TimebaseScope(DetailedFakeScope):
+    INTERVALS = {Channel.C1: 1e-6, Channel.C2: 5e-6}
+
+    def getHorProperties(self, channel):
+        self.calls.append(("getHorProperties", channel))
+        return ("S", 0.0, self.INTERVALS[channel])
+
+
+def test_each_channel_gets_a_time_axis_from_its_own_timebase():
+    scope = TimebaseScope()
+
+    recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
+
+    c1, c2 = recording.waveforms
+    assert c1.time_interval == 1e-6 and c2.time_interval == 5e-6
+    np.testing.assert_allclose(c2.time, [0.0, 5e-6, 10e-6])
+
+
+def test_one_channels_timebase_failure_no_longer_discards_the_others():
+    class FlakyTimebase(DetailedFakeScope):
+        def getHorProperties(self, channel):
+            if channel == Channel.C2:
+                raise RuntimeError("no timebase for C2")
+            return super().getHorProperties(channel)
+
+    recording = acquire_scope_recording(FlakyTimebase(), [Channel.C1, Channel.C2, Channel.C3])
+
+    assert [w.channel for w in recording.waveforms] == [Channel.C1, Channel.C3]
+    assert [e.channel for e in recording.errors] == [Channel.C2]
+
+
+def test_empty_waveform_is_an_error_not_a_silent_success():
+    class Empty(DetailedFakeScope):
+        def getDataFloats(self, channel, block="DAT1"):
+            self.calls.append(("getDataFloats", channel))
+            return ("V", [])
+
+    recording = acquire_scope_recording(Empty(), [Channel.C1])
+
+    assert recording.waveforms == ()
+    assert "empty waveform" in str(recording.errors[0].error)
+
+
+def _mode_calls(scope):
+    return [c for c in scope.calls if c[0] == "set_trigger_mode"]
+
+
+@pytest.mark.parametrize("mode", [TriggerMode.AUTO, TriggerMode.NORMAL])
+def test_a_running_acquisition_is_stopped_for_the_download_and_restored(mode):
+    scope = DetailedFakeScope()
+    scope.trigger_state = TriggerSettings(
+        Channel.C1, mode, TriggerSlope.POSITIVE, TriggerCoupling.DC, 0.0
+    )
+
+    recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
+
+    assert _mode_calls(scope) == [
+        ("set_trigger_mode", TriggerMode.STOP),
+        ("set_trigger_mode", mode),
+    ]
+    names = [c[0] for c in scope.calls]
+    assert names.index("set_trigger_mode") < names.index("getDataFloats")
+    assert names[::-1].index("set_trigger_mode") < names[::-1].index(
+        "getDataFloats"
+    )  # restore is last
+    assert recording.frozen is True and recording.prior_trigger_mode == mode
+    assert recording.warnings == ()
+
+
+@pytest.mark.parametrize("mode", [TriggerMode.SINGLE, TriggerMode.STOP])
+def test_a_held_acquisition_is_left_alone(mode):
+    scope = DetailedFakeScope()
+    scope.trigger_state = TriggerSettings(
+        Channel.C1, mode, TriggerSlope.POSITIVE, TriggerCoupling.DC, 0.0
+    )
+
+    recording = acquire_scope_recording(scope, [Channel.C1])
+
+    assert _mode_calls(scope) == []
+    assert recording.frozen is False and recording.prior_trigger_mode == mode
+
+
+def test_freeze_can_be_disabled():
+    scope = DetailedFakeScope()
+
+    recording = acquire_scope_recording(scope, [Channel.C1], freeze=False)
+
+    assert _mode_calls(scope) == [] and not any(c[0] == "get_trigger_mode" for c in scope.calls)
+    assert recording.frozen is False
+
+
+def test_trigger_mode_is_restored_even_if_a_channel_fails():
+    scope = DetailedFakeScope(fail_channels=frozenset({Channel.C1}))
+
+    recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
+
+    assert _mode_calls(scope)[-1] == ("set_trigger_mode", TriggerMode.AUTO)
+    assert [e.channel for e in recording.errors] == [Channel.C1]
+    assert [w.channel for w in recording.waveforms] == [Channel.C2]
+
+
+def test_failure_to_freeze_is_a_warning_and_the_download_still_happens():
+    scope = DetailedFakeScope()
+
+    def boom(mode):
+        raise RuntimeError("refused")
+
+    scope.set_trigger_mode = boom
+
+    recording = acquire_scope_recording(scope, [Channel.C1])
+
+    assert recording.frozen is False
+    assert [w.channel for w in recording.waveforms] == [Channel.C1]
+    assert any("could not freeze" in w and "refused" in w for w in recording.warnings)
+
+
+def test_failure_to_restore_is_reported_as_a_warning():
+    scope = DetailedFakeScope()
+    calls = []
+
+    def flaky(mode):
+        calls.append(mode)
+        if len(calls) == 2:
+            raise RuntimeError("restore refused")
+
+    scope.set_trigger_mode = flaky
+
+    recording = acquire_scope_recording(scope, [Channel.C1])
+
+    assert recording.frozen is True
+    assert any("could not restore trigger mode AUTO" in w for w in recording.warnings)
+
+
+def test_a_lost_link_while_frozen_is_reported_not_papered_over():
+    scope = DroppingScope(Channel.C1)
+
+    recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
+
+    assert recording.frozen is True
+    assert _mode_calls(scope) == [("set_trigger_mode", TriggerMode.STOP)], (
+        "no restore on a dead link"
+    )
+    assert any("connection lost while frozen" in w for w in recording.warnings)
+    assert [e.channel for e in recording.errors] == [Channel.C1, Channel.C2]
+
+
+def test_identity_is_recorded_and_failure_to_read_it_is_a_warning():
+    scope = DetailedFakeScope()
+    scope.query = lambda command: "LECROY,WS452,LCRY1234,9.0.0"
+
+    recording = acquire_scope_recording(scope, [Channel.C1])
+
+    assert recording.instrument_id == "LECROY,WS452,LCRY1234,9.0.0"
+
+    def dead(command):
+        raise TimeoutError("no IDN")
+
+    scope.query = dead
+    recording = acquire_scope_recording(scope, [Channel.C1])
+    assert recording.instrument_id is None
+    assert any("identity unavailable" in w for w in recording.warnings)
+
+
+def test_manifest_records_provenance_and_the_error_type(tmp_path):
+    scope = DetailedFakeScope(fail_channels=frozenset({Channel.C2}))
+    scope.query = lambda command: "LECROY,WS452,LCRY1234,9.0.0"
+
+    recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
+    manifest = json.loads(
+        save_scope_acquisition(recording, tmp_path).with_suffix(".json").read_text()
+    )
+
+    assert manifest["instrument"]["identity"] == "LECROY,WS452,LCRY1234,9.0.0"
+    assert manifest["acquisition"] == {"frozen": True, "prior_trigger_mode": "AUTO", "warnings": []}
+    assert manifest["errors"] == [
+        {"channel": "C2", "type": "RuntimeError", "error": "C2 refused to send data"}
+    ]

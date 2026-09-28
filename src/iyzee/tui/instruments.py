@@ -62,7 +62,7 @@ class InstrumentHandle(Protocol):
         ...
 
     @property
-    def lock(self) -> threading.RLock:
+    def lock(self) -> threading.Lock | threading.RLock:
         """Serializes every call to this instrument's hardware, from
         whichever caller — a screen's background worker, the IPython
         console (via :class:`LockedProxy`), or a plain script holding this

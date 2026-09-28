@@ -19,7 +19,7 @@ import secrets
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -137,7 +137,7 @@ def save_numeric_recording(
 
     partial_npz = path.with_name(path.name + ".part")
     with partial_npz.open("wb") as handle:
-        np.savez_compressed(handle, **normalized)
+        np.savez_compressed(handle, **cast(Any, normalized))
     partial_npz.replace(path)
 
     digest = _sha256_file(path)
@@ -256,9 +256,9 @@ def _stack_trace(results: list[StepResult], trace_name: str) -> np.ndarray:
             )
         rows.append(row)
     stacked = np.full((len(results), width or 0), np.nan, dtype=np.float64)
-    for i, row in enumerate(rows):
-        if row is not None:
-            stacked[i] = row
+    for i, stored in enumerate(rows):
+        if stored is not None:
+            stacked[i] = stored
     return stacked
 
 

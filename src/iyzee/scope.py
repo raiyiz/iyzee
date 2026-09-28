@@ -1,4 +1,5 @@
-import socket
+import math
+import re
 import struct
 import threading
 from contextlib import contextmanager
@@ -7,7 +8,7 @@ from typing import Iterator
 
 import numpy as np
 
-from .vicp import VICPFrame, VICPProtocolError, VICPTimeoutError, VICPTransport, recv_exact
+from .vicp import VICPFrame, VICPProtocolError, VICPTimeoutError, VICPTransport
 
 
 class LeCroyTimeoutError(VICPTimeoutError):
@@ -105,6 +106,28 @@ __all__ = [
 ]
 
 
+_IDENT = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,15}")
+
+
+def _ident(value: object, what: str = "identifier") -> str:
+    """A header-path token (``C1``, ``F2``, ``DAT1``) that is safe to interpolate.
+
+    Channels are normally the enums above, but several methods also accept a
+    plain ``str``; without this a value such as ``"C1:VOLT_DIV 1;C2"`` would be
+    sent to the instrument verbatim.
+    """
+    text = str(value)
+    if _IDENT.fullmatch(text) is None:
+        raise ValueError(f"invalid {what} {text!r}")
+    return text
+
+
+def _finite(value: float, what: str) -> float:
+    if not math.isfinite(float(value)):
+        raise ValueError(f"{what} must be finite, got {value!r}")
+    return value  # unchanged: ``10`` stays ``10``, not ``10.0``
+
+
 class LeCroy:
     """
     Class for remote control and download of LeCroy oscilloscope data
@@ -139,8 +162,6 @@ class LeCroy:
     MAC_TCP_READ = 3  # time in s. to wait for the DSO to respond
     LECROY_SERVER_PORT = 1861  # as defined by LeCroy
     CMD_BUF_LEN = 8192
-    LECROY_EOI_FLAG = 0x01
-    LECROY_DATA_FLAG = 0x80
 
     def __init__(self):
         self._transport = VICPTransport(
@@ -154,11 +175,6 @@ class LeCroy:
     @property
     def connected(self) -> bool:
         return self._transport.connected
-
-    @property
-    def CONNECTED(self) -> bool:
-        """Compatibility alias for the historical all-caps state attribute."""
-        return self.connected
 
     @property
     def address(self) -> str | None:
@@ -178,17 +194,13 @@ class LeCroy:
         return self._transport.io_timeout
 
     @property
-    def s(self) -> socket.socket | object | None:
+    def s(self) -> object | None:
         """Compatibility access to the underlying socket for existing fakes."""
         return self._transport.socket
 
     @s.setter
     def s(self, sock: object) -> None:
         self._transport.attach_socket(sock)
-
-    @staticmethod
-    def _recv_exact(sock: object, num_bytes: int) -> bytes:
-        return recv_exact(sock, num_bytes, timeout_error=LeCroyTimeoutError)
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -197,11 +209,11 @@ class LeCroy:
             yield
 
     def connect(self, IP, delayval=None, connect_timeout=None):
-        """Connect to the IP with bounded handshake and I/O timeouts."""
-        if self.connected:
-            print("Already connected!")
-            return -2
+        """Connect to the IP with bounded handshake and I/O timeouts.
 
+        Raises ``RuntimeError`` if already connected, and
+        :class:`LeCroyTimeoutError` / ``OSError`` if the scope can't be reached.
+        """
         delayval = self.MAC_TCP_READ if delayval is None else delayval
         connect_timeout = self.MAX_TCP_CONNECT if connect_timeout is None else connect_timeout
         self._transport.connect(
@@ -211,9 +223,7 @@ class LeCroy:
         )
 
     def disconnect(self):
-        """Disconnect from the Scope and clear connection state."""
-        if not self.connected:
-            return -2
+        """Disconnect from the Scope and clear connection state (idempotent)."""
         self._transport.close()
 
     def send(self, message):
@@ -237,11 +247,11 @@ class LeCroy:
     # ------------------------------------------------------------------
     def set_volts_per_div(self, channel: Channel, volts_per_div: float) -> None:
         """Set the vertical scale for ``channel``, in volts/division."""
-        self.send(f"{channel}:VOLT_DIV {volts_per_div}")
+        self.send(f"{channel}:VOLT_DIV {_finite(volts_per_div, 'volts_per_div')}")
 
     def set_offset(self, channel: Channel, offset_volts: float) -> None:
         """Set the vertical offset for ``channel``, in volts."""
-        self.send(f"{channel}:OFFSET {offset_volts}")
+        self.send(f"{channel}:OFFSET {_finite(offset_volts, 'offset_volts')}")
 
     def set_coupling(self, channel: Channel, coupling: Coupling) -> None:
         """Set the input coupling and termination impedance for ``channel``.
@@ -256,7 +266,7 @@ class LeCroy:
     def set_attenuation(self, channel: Channel, factor: float) -> None:
         """Tell the scope the probe attenuation factor on ``channel`` (e.g.
         1, 10, or 100), so its vertical readings are scaled correctly."""
-        self.send(f"{channel}:ATTENUATION {factor}")
+        self.send(f"{channel}:ATTENUATION {_finite(factor, 'factor')}")
 
     def set_bandwidth_limit(self, channel: Channel, limit: str) -> None:
         """Set the bandwidth limit for ``channel``.
@@ -276,11 +286,11 @@ class LeCroy:
         header-path prefix), which is why this accepts ``Channel |
         MathChannel`` rather than only ``Channel``.
         """
-        self.send(f"{channel}:TRACE {'ON' if state else 'OFF'}")
+        self.send(f"{_ident(channel, 'channel')}:TRACE {'ON' if state else 'OFF'}")
 
     def set_invert(self, channel: Channel | MathChannel | str, state: bool) -> None:
         """Invert (or un-invert) ``channel``'s waveform."""
-        self.send(f"{channel}:INVERT_SET {'ON' if state else 'OFF'}")
+        self.send(f"{_ident(channel, 'channel')}:INVERT_SET {'ON' if state else 'OFF'}")
 
     def get_coupling(self, channel: Channel) -> str:
         """Return the device's raw response to a coupling query (see
@@ -298,7 +308,7 @@ class LeCroy:
         return self.query(f"{channel}:OFFSET?")
 
     def get_trace_display(self, channel: Channel | MathChannel | str) -> str:
-        return self.query(f"{channel}:TRACE?")
+        return self.query(f"{_ident(channel, 'channel')}:TRACE?")
 
     # ------------------------------------------------------------------
     # Trigger control
@@ -322,7 +332,7 @@ class LeCroy:
 
     def set_trigger_level(self, source: Channel, level_volts: float) -> None:
         """Set the trigger level for ``source``, in volts."""
-        self.send(f"{source}:TRIG_LEVEL {level_volts}")
+        self.send(f"{source}:TRIG_LEVEL {_finite(level_volts, 'level_volts')}")
 
     def set_trigger_slope(self, source: Channel, slope: TriggerSlope) -> None:
         self.send(f"{source}:TRIG_SLOPE {slope}")
@@ -341,7 +351,7 @@ class LeCroy:
         A negative value delays the trigger point (showing more pre-trigger
         data); a positive value shows less pre-trigger data, or none.
         """
-        self.send(f"TRIG_DELAY {delay_seconds}")
+        self.send(f"TRIG_DELAY {_finite(delay_seconds, 'delay_seconds')}")
 
     def get_trigger_mode(self) -> str:
         return self.query("TRIG_MODE?")
@@ -388,7 +398,9 @@ class LeCroy:
         :meth:`set_math_average`, and :meth:`set_math_fft` are thin
         convenience wrappers around the three operations mentioned above.
         """
-        self.send(f"{math_channel}:DEFINE EQN,'{equation}'")
+        if not equation or any(c in equation for c in "';\"\\") or not equation.isprintable():
+            raise ValueError(f"invalid math equation {equation!r}")
+        self.send(f"{_ident(math_channel, 'math channel')}:DEFINE EQN,'{equation}'")
 
     def set_math_difference(
         self, math_channel: MathChannel, minuend: Channel, subtrahend: Channel
@@ -410,13 +422,15 @@ class LeCroy:
     def getDataBytes(self, channel="C1", block="DAT1"):
         """Return waveform samples as signed 8-bit values."""
         with self.transaction():
+            channel, block = _ident(channel, "channel"), _ident(block, "block")
             self.send("CFMT DEF9,BYTE,BIN")
             self.send(f"{channel}:WF? {block}")
             data = self._transport.read_definite_block()
             return list(struct.iter_unpack("b", data))
 
-    def getDataWords(self, channel="C1", block="DAT1"):
-        """Return waveform samples as signed 16-bit values."""
+    def _read_words(self, channel: str, block: str) -> np.ndarray:
+        """Download one waveform as signed 16-bit codes (little-endian on the wire)."""
+        channel, block = _ident(channel, "channel"), _ident(block, "block")
         with self.transaction():
             # Format and byte order must be in force *before* the waveform is
             # requested: the scope encodes the WF? reply when it executes it.
@@ -424,14 +438,18 @@ class LeCroy:
             self.send("CORD LO")
             self.send(f"{channel}:WF? {block}")
             data = self._transport.read_definite_block()
-            if len(data) % 2:
-                raise VICPProtocolError(f"odd number of waveform bytes received: {len(data)}")
-            return struct.unpack(f"<{len(data) // 2}h", data)
+        if len(data) % 2:
+            raise VICPProtocolError(f"odd number of waveform bytes received: {len(data)}")
+        return np.frombuffer(data, dtype="<i2").astype(np.int16)
+
+    def getDataWords(self, channel="C1", block="DAT1"):
+        """Return waveform samples as a tuple of signed 16-bit values."""
+        return tuple(self._read_words(channel, block).tolist())
 
     def getDataFloatsDetailed(self, channel="C1", block="DAT1"):
         """Return calibrated waveform data together with raw ADC codes."""
         with self.transaction():
-            word_values = np.array(self.getDataWords(channel=channel, block=block), dtype=np.int16)
+            word_values = self._read_words(channel, block)
             self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
             _r1, r2 = self.readAll()
             vertical_offset = float(r2.split(":")[-1].split('"\n')[0].strip(" "))

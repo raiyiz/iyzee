@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import platform
 import re
 import uuid
@@ -129,6 +130,39 @@ class ScopeAcquisition:
     applied_trigger_settings: TriggerSettings | None
     waveforms: tuple[ScopeWaveform, ...]
     errors: tuple[ChannelError, ...]
+    # Provenance. All optional so existing constructors keep working.
+    instrument_id: str | None = None
+    """``*IDN?`` reply (make, model, serial, firmware), if the scope answered."""
+    frozen: bool = False
+    """True if a running acquisition was stopped for the download, so every
+    channel below comes from the same capture."""
+    prior_trigger_mode: TriggerMode | None = None
+    warnings: tuple[str, ...] = ()
+    """Non-fatal problems (could not freeze / restore, identity unavailable)."""
+
+
+@dataclass(frozen=True)
+class SettingAdjustment:
+    """A numeric setting the scope accepted but rounded to something else."""
+
+    channel: Channel
+    field: str
+    requested: float
+    actual: float
+
+
+@dataclass(frozen=True)
+class ChannelApplyResult:
+    """Outcome of :func:`apply_and_verify_channel_settings`.
+
+    ``verified`` is what the scope itself reported *after* the writes, not what
+    was requested, so it is the right value to store as the new baseline and to
+    record as the applied configuration.
+    """
+
+    verified: tuple[ChannelSettings, ...]
+    errors: tuple[ChannelError, ...]
+    adjustments: tuple[SettingAdjustment, ...]
 
 
 def _utc_now() -> str:
@@ -347,6 +381,72 @@ def apply_channel_settings(
     return errors
 
 
+def apply_and_verify_channel_settings(
+    scope: LeCroy,
+    settings: Sequence[ChannelSettings],
+    *,
+    current_settings: Mapping[Channel, ChannelSettings] | Sequence[ChannelSettings] | None = None,
+    lock: LockLike | None = None,
+    rel_tol: float = 1e-3,
+    abs_tol: float = 1e-6,
+) -> ChannelApplyResult:
+    """Apply channel settings, then read them back and report what the scope holds.
+
+    The scope quantizes vertical scale and offset (0.123 V/div may become
+    0.1 V/div), and a command can be silently ignored, so "written" is not
+    "applied". After the writes every channel in ``settings`` is read back:
+
+    * ``enabled`` / ``coupling`` are discrete, so a difference is an error.
+    * ``volts_per_div`` / ``offset`` differing beyond tolerance are reported as
+      :class:`SettingAdjustment` (informational, not a failure).
+    * A channel that cannot be read back is an error ("could not verify") and
+      is absent from ``verified``.
+
+    The whole write + read-back is one locked batch. If the link is lost the
+    read-back is skipped, since a dead stream cannot be trusted.
+    """
+    with _guarded(scope, lock):
+        errors = list(apply_channel_settings(scope, settings, current_settings=current_settings))
+        if _link_lost(scope):
+            return ChannelApplyResult((), tuple(errors), ())
+        attempted = [s.channel for s in settings]
+        verified, read_errors = read_channel_settings(scope, attempted)
+
+    errors.extend(
+        ChannelError(e.channel, RuntimeError(f"could not verify {e.channel}: {e.error}"))
+        for e in read_errors
+    )
+    desired = {s.channel: s for s in settings}
+    adjustments: list[SettingAdjustment] = []
+    for actual in verified:
+        want = desired[actual.channel]
+        if actual.enabled != want.enabled:
+            errors.append(
+                ChannelError(
+                    actual.channel,
+                    RuntimeError(
+                        f"{actual.channel} trace is {'ON' if actual.enabled else 'OFF'} "
+                        f"but {'ON' if want.enabled else 'OFF'} was requested"
+                    ),
+                )
+            )
+        if actual.coupling != want.coupling:
+            errors.append(
+                ChannelError(
+                    actual.channel,
+                    RuntimeError(
+                        f"{actual.channel} coupling is {actual.coupling.value} "
+                        f"but {want.coupling.value} was requested"
+                    ),
+                )
+            )
+        for name in ("volts_per_div", "offset"):
+            requested, got = getattr(want, name), getattr(actual, name)
+            if not math.isclose(requested, got, rel_tol=rel_tol, abs_tol=abs_tol):
+                adjustments.append(SettingAdjustment(actual.channel, name, requested, got))
+    return ChannelApplyResult(tuple(verified), tuple(errors), tuple(adjustments))
+
+
 def read_channel_settings(
     scope: LeCroy, channels: Sequence[Channel], *, lock: LockLike | None = None
 ) -> tuple[list[ChannelSettings], list[ChannelError]]:
@@ -400,20 +500,19 @@ def apply_trigger_settings(
     source by accident.
 
     Omitting ``current_settings`` keeps the original behavior: write the full
-    trigger configuration supplied by the caller. Failures still raise because
+    trigger configuration supplied by the caller. The mode is always written
+    last, so an arming mode never fires against a half-updated configuration. Failures still raise because
     there is only one trigger configuration to report.
     """
     with _guarded(scope, lock):
         if current_settings is None:
-            scope.set_trigger_mode(settings.mode)
             scope.set_trigger_source(settings.source)
             scope.set_trigger_slope(settings.source, settings.slope)
             scope.set_trigger_coupling(settings.source, settings.coupling)
             scope.set_trigger_level(settings.source, settings.level_volts)
+            scope.set_trigger_mode(settings.mode)
             return
 
-        if settings.mode != current_settings.mode:
-            scope.set_trigger_mode(settings.mode)
         if settings.source != current_settings.source:
             scope.set_trigger_source(settings.source)
         if settings.slope != current_settings.slope:
@@ -422,6 +521,10 @@ def apply_trigger_settings(
             scope.set_trigger_coupling(settings.source, settings.coupling)
         if settings.level_volts != current_settings.level_volts:
             scope.set_trigger_level(settings.source, settings.level_volts)
+        # Mode last: switching to NORMAL/SINGLE/AUTO arms an acquisition, and it
+        # should arm against the new source/level, not a half-written config.
+        if settings.mode != current_settings.mode:
+            scope.set_trigger_mode(settings.mode)
 
 
 def read_trigger_settings(scope: LeCroy, *, lock: LockLike | None = None) -> TriggerSettings:
@@ -450,8 +553,9 @@ def acquire_scope_recording(
     applied_channel_settings: Sequence[ChannelSettings] | None = None,
     applied_trigger_settings: TriggerSettings | None = None,
     lock: LockLike | None = None,
+    freeze: bool = True,
 ) -> ScopeAcquisition:
-    """Acquire enabled ``DAT1`` waveforms and capture their interpretation metadata.
+    """Acquire ``DAT1`` waveforms and capture their interpretation metadata.
 
     The returned object contains per-channel time axes, calibrated values,
     optional raw signed 16-bit samples, scope-reported calibration data, and
@@ -459,76 +563,109 @@ def acquire_scope_recording(
     the last configuration known to have been applied. This function does
     not write to disk; :func:`save_scope_acquisition` owns persistence.
 
+    Consistency: each channel's own timebase is read alongside its data (a
+    math trace or a different record length need not share channel 1's).
+    Channels are downloaded one after another, so with ``freeze=True`` (the
+    default) a *running* acquisition (trigger mode AUTO or NORMAL) is stopped
+    for the download and the previous mode restored afterwards; otherwise
+    each channel could come from a different capture. SINGLE and STOP hold
+    still already and are left alone. If freezing or restoring fails, the
+    recording still succeeds and says so in ``warnings``.
+
     Acquisition is deliberately tolerant of per-channel failures: a channel
     that cannot be downloaded is recorded as an error while other channels
-    are retained."""
+    are retained, unless the connection itself was lost, in which case the
+    remaining channels are reported as not attempted.
+    """
     if not channels:
         raise ValueError("at least one channel is required")
     started = _utc_now()
     measurement_id = uuid.uuid4().hex
     errors: list[ChannelError] = []
     waveforms: list[ScopeWaveform] = []
+    warnings: list[str] = []
+    instrument_id: str | None = None
+    prior_mode: TriggerMode | None = None
+    frozen = False
+
     with _guarded(scope, lock):
-        try:
-            time_unit, time_offset, time_interval = scope.getHorProperties(channel=channels[0])
-        except Exception as exc:  # noqa: BLE001
-            log.exception("scope: failed to read the timebase from %s", channels[0])
-            errors.extend(ChannelError(channel, exc) for channel in channels)
-            return ScopeAcquisition(
-                measurement_id=measurement_id,
-                started_at_utc=started,
-                completed_at_utc=_utc_now(),
-                instrument_address=getattr(scope, "address", None),
-                socket_timeout_s=getattr(scope, "SOCK_TIMEOUT", None),
-                requested_channel_settings=tuple(channel_settings),
-                requested_trigger_settings=trigger_settings,
-                applied_channel_settings=(
-                    tuple(applied_channel_settings)
-                    if applied_channel_settings is not None
-                    else None
-                ),
-                applied_trigger_settings=applied_trigger_settings,
-                waveforms=(),
-                errors=tuple(errors),
-            )
-        for index, channel in enumerate(channels):
+        query = getattr(scope, "query", None)
+        if callable(query):
             try:
-                detailed = getattr(scope, "getDataFloatsDetailed", None)
-                if callable(detailed):
-                    data = detailed(channel=channel, block="DAT1")
-                    value_unit = str(data["unit"])
-                    values = np.asarray(data["values"], dtype=np.float64)
-                    raw_codes = np.asarray(data["raw_codes"], dtype=np.int16)
-                    vertical_gain = float(data["vertical_gain"])
-                    vertical_offset = float(data["vertical_offset"])
-                else:
-                    value_unit, values_raw = scope.getDataFloats(channel=channel, block="DAT1")
-                    values = np.asarray(values_raw, dtype=np.float64)
-                    raw_codes = None
-                    vertical_gain = None
-                    vertical_offset = None
-                time_values = time_offset + np.arange(values.size, dtype=np.float64) * time_interval
-                waveforms.append(
-                    ScopeWaveform(
-                        channel=channel,
-                        time=time_values,
-                        values=values,
-                        raw_codes=raw_codes,
-                        value_unit=value_unit,
-                        time_unit=str(time_unit),
-                        time_offset=float(time_offset),
-                        time_interval=float(time_interval),
-                        vertical_gain=vertical_gain,
-                        vertical_offset=vertical_offset,
-                        stats=_stats(time_values, values),
-                    )
-                )
+                instrument_id = str(query("*IDN?"))
+            except Exception as exc:  # noqa: BLE001 - provenance is best-effort
+                log.warning("scope: could not read *IDN?: %s", exc)
+                warnings.append(f"instrument identity unavailable: {exc}")
+
+        if freeze and not _link_lost(scope):
+            try:
+                prior_mode = TriggerMode(_value(scope.get_trigger_mode()))
+                if prior_mode in (TriggerMode.AUTO, TriggerMode.NORMAL):
+                    scope.set_trigger_mode(TriggerMode.STOP)
+                    frozen = True
             except Exception as exc:  # noqa: BLE001
-                log.exception("scope: failed to acquire %s", channel)
-                errors.append(ChannelError(channel, exc))
-                if _link_lost(scope):
-                    errors.extend(_not_attempted(channels[index + 1 :]))
-                    break
+                log.warning("scope: could not freeze acquisition: %s", exc)
+                warnings.append(f"could not freeze acquisition; channels may differ: {exc}")
+
+        try:
+            for index, channel in enumerate(channels):
+                try:
+                    time_unit, time_offset, time_interval = scope.getHorProperties(channel=channel)
+                    detailed = getattr(scope, "getDataFloatsDetailed", None)
+                    if callable(detailed):
+                        data = detailed(channel=channel, block="DAT1")
+                        value_unit = str(data["unit"])
+                        values = np.asarray(data["values"], dtype=np.float64)
+                        raw_codes = np.asarray(data["raw_codes"], dtype=np.int16)
+                        vertical_gain = float(data["vertical_gain"])
+                        vertical_offset = float(data["vertical_offset"])
+                    else:
+                        value_unit, values_raw = scope.getDataFloats(channel=channel, block="DAT1")
+                        values = np.asarray(values_raw, dtype=np.float64)
+                        raw_codes = None
+                        vertical_gain = None
+                        vertical_offset = None
+                    if values.size == 0:
+                        raise ValueError(f"{channel} returned an empty waveform")
+                    time_values = (
+                        time_offset + np.arange(values.size, dtype=np.float64) * time_interval
+                    )
+                    waveforms.append(
+                        ScopeWaveform(
+                            channel=channel,
+                            time=time_values,
+                            values=values,
+                            raw_codes=raw_codes,
+                            value_unit=value_unit,
+                            time_unit=str(time_unit),
+                            time_offset=float(time_offset),
+                            time_interval=float(time_interval),
+                            vertical_gain=vertical_gain,
+                            vertical_offset=vertical_offset,
+                            stats=_stats(time_values, values),
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.exception("scope: failed to acquire %s", channel)
+                    errors.append(ChannelError(channel, exc))
+                    if _link_lost(scope):
+                        errors.extend(_not_attempted(channels[index + 1 :]))
+                        break
+        finally:
+            if frozen and prior_mode is not None and not _link_lost(scope):
+                try:
+                    scope.set_trigger_mode(prior_mode)
+                except Exception as exc:  # noqa: BLE001
+                    log.exception("scope: could not restore trigger mode %s", prior_mode)
+                    warnings.append(
+                        f"could not restore trigger mode {prior_mode.value}; scope is left "
+                        f"in {TriggerMode.STOP.value}: {exc}"
+                    )
+            elif frozen:
+                warnings.append(
+                    f"connection lost while frozen; trigger mode {prior_mode} not restored"
+                )
+
     return ScopeAcquisition(
         measurement_id=measurement_id,
         started_at_utc=started,
@@ -543,11 +680,19 @@ def acquire_scope_recording(
         applied_trigger_settings=applied_trigger_settings,
         waveforms=tuple(waveforms),
         errors=tuple(errors),
+        instrument_id=instrument_id,
+        frozen=frozen,
+        prior_trigger_mode=prior_mode,
+        warnings=tuple(warnings),
     )
 
 
 def acquire_waveforms(
-    scope: LeCroy, channels: Sequence[Channel], *, lock: LockLike | None = None
+    scope: LeCroy,
+    channels: Sequence[Channel],
+    *,
+    lock: LockLike | None = None,
+    freeze: bool = True,
 ) -> tuple[list[tuple[list[float], list[float], str]], list[ChannelError]]:
     """Return the legacy plot-series shape without adding persistence.
 
@@ -555,7 +700,7 @@ def acquire_waveforms(
     :func:`acquire_scope_recording` followed by :func:`save_scope_acquisition`.
     This wrapper remains for existing presentation/script callers that only
     need ``(x, y, label)`` series."""
-    recording = acquire_scope_recording(scope, channels, lock=lock)
+    recording = acquire_scope_recording(scope, channels, lock=lock, freeze=freeze)
     series = [
         (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
         for waveform in recording.waveforms
@@ -624,7 +769,7 @@ def save_scope_acquisition(
 
     metadata = {
         "kind": "scope-acquisition",
-        "schema_version": 1,
+        "schema_version": 2,
         "measurement_id": recording.measurement_id,
         "started_at_utc": recording.started_at_utc,
         "completed_at_utc": recording.completed_at_utc,
@@ -637,6 +782,7 @@ def save_scope_acquisition(
             "driver": "iyzee.scope.LeCroy",
             "protocol": "LeCroy VICP",
             "address": recording.instrument_address,
+            "identity": recording.instrument_id,
             "port": LeCroy.LECROY_SERVER_PORT,
             "socket_timeout_s": recording.socket_timeout_s,
         },
@@ -652,8 +798,18 @@ def save_scope_acquisition(
             ),
             "applied_trigger_settings": trigger_config(recording.applied_trigger_settings),
         },
+        "acquisition": {
+            "frozen": recording.frozen,
+            "prior_trigger_mode": (
+                recording.prior_trigger_mode.value if recording.prior_trigger_mode else None
+            ),
+            "warnings": list(recording.warnings),
+        },
         "waveforms": channel_metadata,
-        "errors": [{"channel": e.channel.value, "error": str(e.error)} for e in recording.errors],
+        "errors": [
+            {"channel": e.channel.value, "type": type(e.error).__name__, "error": str(e.error)}
+            for e in recording.errors
+        ],
         "data_semantics": {
             "value_arrays": "engineering units using the scope-reported VERTICAL_GAIN and VERTICAL_OFFSET",
             "raw_arrays": "signed 16-bit waveform codes returned by the scope when available",

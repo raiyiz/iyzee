@@ -160,6 +160,9 @@ class _Connectable:
     def settimeout(self, value) -> None:
         pass
 
+    def setsockopt(self, *args) -> None:
+        pass
+
     def connect(self, address) -> None:
         pass
 
@@ -366,3 +369,142 @@ def test_get_data_bytes_sets_format_before_requesting_the_waveform():
     scope.getDataBytes(channel="C1", block="DAT1")
 
     assert sent_commands(bytes(sock.sent)) == [b"CFMT DEF9,BYTE,BIN", b"C1:WF? DAT1"]
+
+
+# -- connect(): real loopback server -------------------------------------------------------
+
+
+def _listener() -> socket.socket:
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    return server
+
+
+def test_connect_sets_tcp_nodelay_so_back_to_back_commands_are_not_delayed():
+    server = _listener()
+    try:
+        transport = VICPTransport(port=server.getsockname()[1])
+        transport.connect("127.0.0.1")
+        try:
+            sock = transport.socket
+            assert isinstance(sock, socket.socket)
+            assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY) != 0
+        finally:
+            transport.close()
+    finally:
+        server.close()
+
+
+def test_loopback_round_trip_and_reconnect_after_peer_disconnect():
+    server = _listener()
+    try:
+        transport = VICPTransport(port=server.getsockname()[1], io_timeout=1.0)
+        transport.connect("127.0.0.1")
+        peer, _ = server.accept()
+        peer.sendall(frame(DATA_EOI, b"LECROY,WS452\n"))
+        assert transport.query("*IDN?") == "LECROY,WS452"
+
+        peer.close()  # scope goes away
+        with pytest.raises(ConnectionError):
+            transport.query("*IDN?")
+        assert transport.connected is False
+
+        transport.connect("127.0.0.1")  # and we can come back
+        peer2, _ = server.accept()
+        peer2.sendall(frame(DATA_EOI, b"AGAIN\n"))
+        assert transport.query("*IDN?") == "AGAIN"
+        peer2.close()
+        transport.close()
+    finally:
+        server.close()
+
+
+# -- connect()/disconnect() semantics -----------------------------------------------------
+
+
+def test_connect_while_connected_raises_instead_of_printing_and_returning_minus_two():
+    scope, _ = attached()
+
+    with pytest.raises(RuntimeError, match="Already connected"):
+        scope.connect("10.0.0.1")
+
+
+def test_disconnect_is_idempotent():
+    scope, sock = attached()
+
+    scope.disconnect()
+    scope.disconnect()
+
+    assert sock.closed and scope.connected is False
+
+
+# -- command strings are validated before they reach the instrument -----------------------
+
+
+@pytest.mark.parametrize("bad", ["C1:VOLT_DIV 1;C2", "C1\n", "", "1C", "C1 C2", "C" * 40])
+def test_free_form_channel_names_must_be_plain_identifiers(bad):
+    scope, sock = attached()
+
+    with pytest.raises(ValueError, match="invalid channel"):
+        scope.set_trace_display(bad, True)
+    with pytest.raises(ValueError, match="invalid channel"):
+        scope.getDataWords(channel=bad)
+
+    assert not sock.sent, "nothing may be written for an invalid name"
+
+
+@pytest.mark.parametrize("bad", ["", "C1'", "C1;C2", "a\nb", 'x"y', "back\\slash"])
+def test_math_equation_rejects_quote_and_control_characters(bad):
+    from iyzee.scope import MathChannel
+
+    scope, sock = attached()
+
+    with pytest.raises(ValueError, match="invalid math equation"):
+        scope.set_math_equation(MathChannel.F1, bad)
+
+    assert not sock.sent
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_numeric_setters_reject_non_finite_values(value):
+    from iyzee.scope import Channel
+
+    scope, sock = attached()
+
+    for call in (
+        lambda: scope.set_volts_per_div(Channel.C1, value),
+        lambda: scope.set_offset(Channel.C1, value),
+        lambda: scope.set_trigger_level(Channel.C1, value),
+        lambda: scope.set_trigger_delay(value),
+    ):
+        with pytest.raises(ValueError, match="must be finite"):
+            call()
+
+    assert not sock.sent
+
+
+def test_valid_math_equation_is_still_sent_verbatim():
+    from iyzee.scope import MathChannel
+
+    scope, sock = attached()
+
+    scope.set_math_equation(MathChannel.F2, "C1-C2")
+
+    assert sent_commands(bytes(sock.sent)) == [b"F2:DEFINE EQN,'C1-C2'"]
+
+
+# -- word download decodes straight to an int16 array ------------------------------------
+
+
+def test_internal_word_read_returns_native_int16_array_without_python_tuples():
+    import numpy as np
+
+    body = struct.pack("<3h", -32768, 0, 32767)
+    scope, _ = attached(frame(DATA, block_header(6)) + frame(DATA, body) + frame(EOI, b"\n"))
+
+    codes = scope._read_words("C1", "DAT1")
+
+    assert codes.dtype == np.int16
+    assert codes.tolist() == [-32768, 0, 32767]
+    assert codes.flags.writeable

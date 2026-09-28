@@ -112,7 +112,7 @@ The MXA is by far the most-used instrument and has its own dedicated guide — s
 
 == LeCroy oscilloscope <sec-scope>
 
-`scope.py`'s `LeCroy` driver talks LeCroy's VICP protocol directly over a raw TCP socket (port 1861) — it predates PyVISA in this codebase and has never been migrated onto `BaseDevice`. Every exchange follows the same shape: an 8-byte header (a flag byte, 3 reserved bytes, and a big-endian-on-the-wire 4-byte length) followed by that many bytes of payload; `LeCroy._recv_exact()` loops until the full payload has actually arrived, since a single `socket.recv()` is not guaranteed to return everything at once.
+`scope.py`'s `LeCroy` driver talks LeCroy's VICP protocol directly over a raw TCP socket (port 1861) — it predates PyVISA in this codebase and has never been migrated onto `BaseDevice`. Every exchange follows the same shape: an 8-byte header (a flag byte, 3 reserved bytes, and a big-endian-on-the-wire 4-byte length) followed by that many bytes of payload; `vicp.recv_exact()` loops until the full payload has actually arrived, since a single `socket.recv()` is not guaranteed to return everything at once.
 
 Typical commands sent via `LeCroy.send()`:
 

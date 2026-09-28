@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from textual.containers import Vertical, VerticalScroll
 from textual.widget import Widget
-from textual.widgets import Input, Label
+from textual.widgets import Input, Label, Select
 
 if TYPE_CHECKING:
     from ..app import IyzeeApp
@@ -144,11 +144,22 @@ class Page(VerticalScroll, can_focus=False):
 
     def _flag_invalid(self, field_id: str) -> None:
         """Mark field_id invalid and focus it so it can be corrected."""
-        for widget in self.query("Input.-invalid"):
+        for widget in self.query(".-invalid"):
             widget.remove_class("-invalid")
-        widget = self.query_one(f"#{field_id}", Input)
+        widget = self.query_one(f"#{field_id}")
         widget.add_class("-invalid")
         widget.focus()
+
+    def _selected(self, field_id: str, label: str) -> str:
+        """The chosen value of a ``Select``; a blank selection is a ``FieldError``.
+
+        ``Select.value`` is ``NoSelection`` until something is chosen, which is
+        not a ``str`` and would otherwise blow up later inside an enum lookup.
+        """
+        value = self.query_one(f"#{field_id}", Select).value
+        if not isinstance(value, str):
+            raise FieldError(field_id, f"{label}: choose a value")
+        return value
 
     def _read(self, field_id: str, parse: Callable[..., T], label: str, **kwargs: object) -> T:
         """Parse an Input and attach its field id to ValueError."""
