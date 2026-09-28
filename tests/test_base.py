@@ -73,3 +73,31 @@ def test_base_device_can_reconnect_after_close(monkeypatch):
 
     device.connect()
     assert resource_manager.open_calls == 2
+
+
+class _FailingConfigurationInstrument(FakeInstrument):
+    @property
+    def timeout(self):
+        return None
+
+    @timeout.setter
+    def timeout(self, _value):
+        raise RuntimeError("configuration failed")
+
+
+def test_base_device_closes_resource_if_configuration_fails():
+    class ResourceManager:
+        def __init__(self):
+            self.instrument = _FailingConfigurationInstrument()
+
+        def open_resource(self, address):
+            return self.instrument
+
+    rm = ResourceManager()
+    device = BaseDevice(ip=IP.POWER_SUPPLY, resource_manager=rm)
+
+    with pytest.raises(RuntimeError, match="configuration failed"):
+        device.connect()
+
+    assert device.instrument is None
+    assert rm.instrument.close_calls == 1
