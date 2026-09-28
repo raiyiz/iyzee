@@ -51,7 +51,9 @@ def draw_series(
     plot.refresh()
 
 
-def figure_series(fig: Any) -> tuple[list[tuple[list[float], list[float], str | None]], dict[str, str]]:
+def figure_series(
+    fig: Any,
+) -> tuple[list[tuple[list[float], list[float], str | None]], dict[str, str]]:
     """Extract line data and axis labels from a matplotlib figure."""
     lines = [
         (list(line.get_xdata()), list(line.get_ydata()), line.get_label())
