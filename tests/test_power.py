@@ -77,8 +77,10 @@ def test_shutter_control_has_explicit_connection_lifecycle():
     assert shutter.psu.instrument is None
 
     shutter.connect()
+    shutter.connect()
     instrument = shutter.psu.instrument
     assert instrument is not None
+    assert resource_manager.opened == [(resource_manager.opened[0][0], instrument)]
     assert instrument.commands == [
         "INST:NSEL 3",
         "VOLT 1.7",
