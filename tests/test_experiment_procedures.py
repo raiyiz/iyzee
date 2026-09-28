@@ -58,7 +58,7 @@ class FakeShutterControl:
 def test_bandwidth_step_sets_vbw_to_twice_rbw(monkeypatch):
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
     mx = FakeMXA()
-    ctx = ExperimentContext(mx=mx, run_id="t")
+    ctx = ExperimentContext(mx=mx, run_id="t", config={"sweep_duration_ms": 10})
 
     result = BandwidthStep(rbw_hz=1000).run(ctx)
 
@@ -68,7 +68,11 @@ def test_bandwidth_step_sets_vbw_to_twice_rbw(monkeypatch):
     assert result.x_unit == "Hz"
     assert result.traces["squeezing"] == [1]
     assert result.traces["shot_noise"] == [2]
-    assert result.meta == {"rbw_hz": 1000, "vbw_hz": 2000}
+    assert result.meta == {
+        "rbw_hz": 1000,
+        "vbw_hz": 2000,
+        "sweep_duration_ms": 10,
+    }
 
 
 def test_bandwidth_sweep_steps_defaults_match_20khz_scan():
@@ -172,4 +176,16 @@ def test_acquire_trace_disables_trace_after_failure():
     with pytest.raises(RuntimeError, match="sweep failed"):
         acquire_trace(mx, 1)
 
+    assert mx.update_states == [(1, True), (1, False)]
+
+
+class _FalseCompletionMXA(FakeMXAForTraceAcquisition):
+    def single_sweep_wait(self):
+        return False
+
+
+def test_acquire_trace_rejects_uncompleted_sweep():
+    mx = _FalseCompletionMXA()
+    with pytest.raises(TimeoutError, match="did not complete"):
+        acquire_trace(mx, 1)
     assert mx.update_states == [(1, True), (1, False)]
