@@ -269,7 +269,9 @@ class SweepScreen(Page):
         stop = self._read("rbw-stop", _positive_float, "RBW stop")
         count = self._read("rbw-steps", _positive_int, "Steps", maximum=MAX_POINTS)
         rbw_values = list(np.linspace(start, stop, count))
-        return build_bandwidth_sweep(rbw_values, sweep_duration_ms=10)
+        return build_bandwidth_sweep(
+            rbw_values, sweep_duration_ms=10, res_bw_hz=rbw_values[0]
+        )
 
     def _build_frequency_run(self):
         center = self._read("freq-center", _positive_float, "Laser center")
