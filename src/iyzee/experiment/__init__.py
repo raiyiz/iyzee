@@ -13,6 +13,7 @@ from .io import (
     build_figure,
     create_dirs,
     difference_series,
+    difference_series_many,
     multiplot,
     save_step_results,
 )

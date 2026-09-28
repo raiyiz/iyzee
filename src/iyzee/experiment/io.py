@@ -296,9 +296,7 @@ def difference_series_many(
 ) -> list[tuple[list[float], list[float], str]]:
     """Build all usable squeezing-minus-shot-noise series for a recording."""
     series = []
-    for squeezing, shot_noise, label in zip(
-        squeezing_rows, shot_noise_rows, labels, strict=True
-    ):
+    for squeezing, shot_noise, label in zip(squeezing_rows, shot_noise_rows, labels, strict=True):
         result = difference_series(squeezing, shot_noise, label)
         if result is not None:
             series.append(result)
