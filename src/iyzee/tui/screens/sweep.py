@@ -126,11 +126,12 @@ class SweepScreen(Page):
     def on_mount(self) -> None:
         self._abort_event = Event()
         self._collected: list[StepResult] = []
+        self._run_metadata: dict[str, object] | None = None
         self._reset_checkpoint()
         self.query_one("#freq-fields").display = False
         plot = self.query_one("#sweep-plot", PlotextPlot)
         plot.plt.title("Squeezing - shot noise")
-        plot.plt.xlabel("Trace point")
+        plot.plt.xlabel("Sweep time (ms)")
         plot.plt.ylabel("Squeezing - shot noise")
         self.refresh_readiness()
 
@@ -240,6 +241,7 @@ class SweepScreen(Page):
         self._abort_event = Event()
         self._collected = []
         self._reset_checkpoint()
+        self._run_metadata = {"sweep_type": kind, **asdict(config)}
         log = self.query_one("#sweep-log", RichLog)
         log.clear()
         plot = self.query_one("#sweep-plot", PlotextPlot)
@@ -252,7 +254,7 @@ class SweepScreen(Page):
             plot,
             [],
             title="Squeezing - shot noise",
-            xlabel="Trace point",
+            xlabel="Sweep time (ms)",
             ylabel="Squeezing - shot noise",
         )
         progress = self.query_one("#sweep-progress", ProgressBar)
@@ -361,8 +363,12 @@ class SweepScreen(Page):
             self._plot_result(result)
 
     def _plot_result(self, result: StepResult) -> None:
+        duration = result.meta.get("sweep_duration_ms")
         series = difference_series(
-            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
+            result.traces.get("squeezing"),
+            result.traces.get("shot_noise"),
+            result.label,
+            sweep_duration_ms=float(duration) if duration is not None else None,
         )
         if series is None:
             return
@@ -433,6 +439,7 @@ class SweepScreen(Page):
         self._savedir: Path | None = None
         self._save_path: Path | None = None
         self._save_warned = False
+        self._run_metadata = None
 
     def _checkpoint(self, kind: str, *, on_ui_thread: bool = False) -> None:
         """Write everything collected so far to disk.
@@ -453,7 +460,11 @@ class SweepScreen(Page):
             if self._savedir is None:
                 self._savedir = create_dirs()
             self._save_path = save_step_results(
-                list(self._collected), self._savedir, name=kind, path=self._save_path
+                list(self._collected),
+                self._savedir,
+                run_metadata=self._run_metadata,
+                name=kind,
+                path=self._save_path
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("sweep: could not save results")
