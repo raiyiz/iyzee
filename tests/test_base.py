@@ -1,3 +1,4 @@
+import pytest
 import pyvisa
 
 from iyzee import IP, BaseDevice
