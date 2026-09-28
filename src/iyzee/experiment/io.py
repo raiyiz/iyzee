@@ -16,7 +16,7 @@ import hashlib
 import json
 import re
 import secrets
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -263,20 +263,13 @@ def _stack_trace(results: list[StepResult], trace_name: str) -> np.ndarray:
 
 
 def difference_series(
-    squeezing: object, shot_noise: object, label: str | None
-) -> tuple[list[float], list[float], str | None] | None:
+    squeezing: object, shot_noise: object, label: str
+) -> tuple[list[float], list[float], str] | None:
     """Compute one squeezing-minus-shot-noise line, ready to plot.
 
-    The single source of truth for this computation — before this, the
-    same three lines (subtract, build an x-index, attach a label) were
-    written out independently in four places: this module's own
-    ``build_figure`` (matplotlib), ``SweepScreen._plot_result`` (live,
-    per point, plotext), ``TracesScreen._show`` (re-derived from a saved
-    ``.npz``, plotext), and indirectly duplicated again in spirit by
-    ``IyzeeConsole``'s figure rendering. Callers only differ in *where*
-    the squeezing/shot_noise arrays came from (a live ``StepResult`` vs.
-    an archived point) and *how* they draw the result (matplotlib vs.
-    plotext) — this covers the part in between.
+    This is the shared measurement transformation used by live results and
+    archived recordings. Renderers only decide how the resulting (x, y,
+    label) series are displayed.
 
     Returns ``None`` if either trace is missing, matching the skip
     behavior ``SweepScreen``/``TracesScreen`` already had (``build_figure``
@@ -296,6 +289,22 @@ def difference_series(
     return list(range(len(difference))), list(difference), label
 
 
+def difference_series_many(
+    squeezing_rows: Sequence[object],
+    shot_noise_rows: Sequence[object],
+    labels: Sequence[str],
+) -> list[tuple[list[float], list[float], str]]:
+    """Build all usable squeezing-minus-shot-noise series for a recording."""
+    series = []
+    for squeezing, shot_noise, label in zip(
+        squeezing_rows, shot_noise_rows, labels, strict=True
+    ):
+        result = difference_series(squeezing, shot_noise, label)
+        if result is not None:
+            series.append(result)
+    return series
+
+
 def build_figure(results: list[StepResult]):
     """Build (but do not display) the squeezing-minus-shot-noise figure.
 
@@ -305,22 +314,15 @@ def build_figure(results: list[StepResult]):
     to pop up a blocking GUI window.
     """
     fig, ax = plt.subplots()
-    labels: list[str] = []
+    series = difference_series_many(
+        [result.traces.get("squeezing") for result in results],
+        [result.traces.get("shot_noise") for result in results],
+        [result.label for result in results],
+    )
 
-    for result in results:
-        series = difference_series(
-            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
-        )
-        if series is None:
-            continue
-        _x, difference, label = series
-        ax.plot(difference)
-        # difference_series() types its returned label as `str | None` because
-        # it also accepts `None` in (for a caller with no label at all); here
-        # `result.label` is a plain `str` (StepResult.label is not Optional),
-        # so it comes back unchanged — this is just narrowing that for `legend()`.
-        if label is not None:
-            labels.append(label)
+    for x_values, difference, _label in series:
+        ax.plot(x_values, difference)
+    labels = [label for _, _, label in series]
 
     if labels:
         ax.legend(labels, ncol=4, loc="upper center", bbox_to_anchor=(0.5, 1.1))

@@ -20,7 +20,7 @@ from textual.markup import escape
 from textual.widgets import Label, ListItem, ListView, Static
 from textual_plotext import PlotextPlot
 
-from ...experiment import difference_series
+from ...experiment import difference_series_many
 from ...experiment.io import DATA_ROOT, STEM_PATTERN
 from ..plotting import draw_series
 from .page import Page
@@ -240,16 +240,16 @@ class TracesScreen(Page):
 
         squeezing = traces.get("squeezing")
         shot_noise = traces.get("shot_noise")
-        series = []
-        for index in range(len(x_values)):
-            label = None
-            if index < len(points):
-                label = points[index].get("label")
-            sq = squeezing[index] if squeezing is not None else None
-            sn = shot_noise[index] if shot_noise is not None else None
-            result = difference_series(sq, sn, label or f"pt {index}")
-            if result is not None:
-                series.append(result)
+        labels = [
+            (points[index].get("label") or f"pt {index}") if index < len(points) else f"pt {index}"
+            for index in range(len(x_values))
+        ]
+        rows = len(x_values)
+        series = difference_series_many(
+            squeezing if squeezing is not None else [None] * rows,
+            shot_noise if shot_noise is not None else [None] * rows,
+            labels,
+        )
         draw_series(
             plot,
             series,

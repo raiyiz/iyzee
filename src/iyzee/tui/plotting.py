@@ -17,6 +17,7 @@ and belongs with the rest of the TUI instead.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from textual_plotext import PlotextPlot
 
@@ -48,3 +49,17 @@ def draw_series(
     if ylabel:
         plot.plt.ylabel(ylabel)
     plot.refresh()
+
+
+def figure_series(fig: Any) -> tuple[list[tuple[list[float], list[float], str | None]], dict[str, str]]:
+    """Extract line data and axis labels from a matplotlib figure."""
+    lines = [
+        (list(line.get_xdata()), list(line.get_ydata()), line.get_label())
+        for ax in fig.axes
+        for line in ax.lines
+    ]
+    labels = {
+        "xlabel": fig.axes[0].get_xlabel() if fig.axes else "",
+        "ylabel": fig.axes[0].get_ylabel() if fig.axes else "",
+    }
+    return lines, labels
