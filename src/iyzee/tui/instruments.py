@@ -121,12 +121,7 @@ class _VisaHandle(_LockedHandle):
 
 
 class ShutterHandle(_LockedHandle):
-    """Adapter for :class:`~iyzee.power.ShutterControl`.
-
-    ``ShutterControl.__init__`` opens the PSU connection eagerly (it has
-    to, to set the shutter's trigger voltage/current), so ``connect()``
-    here is really "construct it" and ``disconnect()`` releases the PSU.
-    """
+    """Adapter for :class:`~iyzee.power.ShutterControl`."""
 
     def __init__(self, chan: CH = CH.THREE, ip: IP = IP.POWER_SUPPLY) -> None:
         super().__init__()
@@ -135,11 +130,19 @@ class ShutterHandle(_LockedHandle):
         self._shutter: ShutterControl | None = None
 
     def connect(self) -> None:
-        self._shutter = ShutterControl(chan=self._chan, ip=self._ip)
+        if self._shutter is not None:
+            return
+        shutter = ShutterControl(chan=self._chan, ip=self._ip)
+        try:
+            shutter.connect()
+        except Exception:
+            shutter.disconnect()
+            raise
+        self._shutter = shutter
 
     def disconnect(self) -> None:
         if self._shutter is not None:
-            self._shutter.psu.close()
+            self._shutter.disconnect()
             self._shutter = None
 
     def probe(self) -> str:
