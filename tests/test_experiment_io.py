@@ -219,3 +219,18 @@ def test_difference_series_returns_none_without_usable_traces():
     assert difference_series(None, [1.0], "pt0") is None
     assert difference_series([1.0], None, "pt0") is None
     assert difference_series([np.nan, np.nan], [1.0, 1.0], "pt0") is None
+
+
+def test_difference_series_uses_sweep_time_when_duration_is_given():
+    result = difference_series(
+        [3.0, 4.0, 5.0], [1.0, 1.0, 1.0], "pt0", sweep_duration_ms=10
+    )
+    assert result == ([0.0, 5.0, 10.0], [2.0, 3.0, 4.0], "pt0")
+
+
+def test_save_numeric_recording_creates_missing_directory(tmp_path):
+    target = tmp_path / "nested"
+    from iyzee.experiment.io import save_numeric_recording
+
+    path = save_numeric_recording({"x": np.array([1.0])}, target, {})
+    assert path.exists()
