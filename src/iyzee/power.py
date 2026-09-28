@@ -51,8 +51,13 @@ class ShutterControl:
             raise
 
     def disconnect(self) -> None:
-        """Release the underlying PSU connection without changing the shutter state."""
-        self.psu.close()
+        """Turn the shutter off, then release the underlying PSU connection."""
+        if self.psu.instrument is None:
+            return
+        try:
+            self.close()
+        finally:
+            self.psu.close()
 
     def __enter__(self):
         """Connect and return the shutter controller for use in a managed context."""
