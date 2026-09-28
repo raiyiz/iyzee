@@ -53,5 +53,7 @@ ignore_missing_imports = true
 
 [dependency-groups]
 dev = [
+    "mypy>=1.18.2",
     "pytest>=9.1.1",
+    "ruff>=0.13.0",
 ]

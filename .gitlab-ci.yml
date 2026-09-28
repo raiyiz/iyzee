@@ -1,4 +1,4 @@
-image: python:3.14
+image: ghcr.io/astral-sh/uv:0.12.19-python3.14-trixie
 
 workflow:
   rules:
@@ -15,46 +15,25 @@ stages:
 test:
   stage: test
   script:
-    - python -m pip install -e '.[test]'
-    - python -m pytest
+    - ./ci.sh test
 
 lint:
   stage: lint
   script:
-    - python -m pip install ruff
-    - ruff check .
-    - ruff format --check .
+    - ./ci.sh lint
 
 typecheck:
   stage: typecheck
   script:
-    - python -m pip install -e . mypy
-    - mypy src tests
+    - ./ci.sh typecheck
 
 docs:
   stage: docs
   image:
-    name: ghcr.io/typst/typst:latest
-    # The typst image's ENTRYPOINT is the typst binary itself
-    # (["/bin/typst"]), not a shell. GitLab's Docker executor runs jobs
-    # by handing a shell-detection script to the image's entrypoint —
-    # it doesn't replace a non-shell entrypoint on its own — so without
-    # this override, `script:` below is passed as arguments to `typst`
-    # instead of being executed, and the job fails before compiling
-    # anything. Clearing the entrypoint lets the runner fall back to a
-    # real shell (Alpine's /bin/sh, present in this image's base).
+    name: ghcr.io/typst/typst:0.15.1
     entrypoint: [""]
   script:
-    - set -eu
-    - mkdir -p build/docs
-    - |
-      for source in docs/*.typ; do
-        case "$source" in
-          docs/requirements.typ) continue ;;
-        esac
-        output="build/docs/$(basename "${source%.typ}").pdf"
-        typst compile "$source" "$output"
-      done
+    - ./ci.sh docs
   artifacts:
     name: iyzee-documentation
     paths:
