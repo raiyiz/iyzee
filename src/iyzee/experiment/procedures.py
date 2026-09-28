@@ -60,7 +60,9 @@ def acquire_trace(mx, trace_num):
     """Acquire one trace and return its data."""
     mx.set_trace_update(trace_num, True)
     try:
-        mx.single_sweep_wait()
+        completed = mx.single_sweep_wait()
+        if completed is False:
+            raise TimeoutError("MXA sweep did not complete before the configured timeout")
         return mx.get_trace_data(trace_num=trace_num, binary=False)
     finally:
         mx.set_trace_update(trace_num, False)
@@ -90,7 +92,11 @@ class BandwidthStep:
                 "squeezing": acquire_trace(ctx.mx, TRACE_SQZ),
                 "shot_noise": acquire_trace(ctx.mx, TRACE_SHOT),
             },
-            meta={"rbw_hz": self.rbw_hz, "vbw_hz": self.rbw_hz * 2},
+            meta={
+                "rbw_hz": self.rbw_hz,
+                "vbw_hz": self.rbw_hz * 2,
+                "sweep_duration_ms": ctx.config.get("sweep_duration_ms"),
+            },
         )
 
 
@@ -135,6 +141,7 @@ class FrequencyStep:
             meta={
                 "wavemeter_channel": self.wavemeter_channel,
                 "relax_time_s": self.relax_time_s,
+                "sweep_duration_ms": ctx.config.get("sweep_duration_ms"),
             },
         )
 
