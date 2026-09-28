@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -61,7 +62,7 @@ class InstrumentHandle(Protocol):
         ...
 
     @property
-    def lock(self) -> threading.Lock:
+    def lock(self) -> threading.RLock:
         """Serializes every call to this instrument's hardware, from
         whichever caller — a screen's background worker, the IPython
         console (via :class:`LockedProxy`), or a plain script holding this
@@ -85,10 +86,12 @@ class _LockedHandle:
     """
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        # Re-entrant: a caller holding the handle lock (a workflow batch) may go
+        # through a LockedProxy that takes the same lock again without deadlocking.
+        self._lock = threading.RLock()
 
     @property
-    def lock(self) -> threading.Lock:
+    def lock(self) -> threading.RLock:
         return self._lock
 
 
@@ -207,6 +210,16 @@ class ScopeHandle(_LockedHandle):
         return f"socket connected @ {self._ip}"
 
     @property
+    def lock(self) -> threading.RLock:
+        """The driver's own transaction lock.
+
+        One lock guards the scope: the handle, the console's ``LockedProxy``,
+        workflow batches and the driver's compound transfers all share it, so
+        there is no second lock to order against or to deadlock on.
+        """
+        return self._scope.transaction_lock
+
+    @property
     def device(self) -> LeCroy:
         """The underlying live LeCroy driver."""
         return self._scope
@@ -249,7 +262,7 @@ class LockedProxy:
 
     Wraps a device so attribute access passes straight through, but
     calling any method acquires ``lock`` for the call's duration — the
-    same :class:`threading.Lock` a screen holds around its own hardware
+    same lock a screen holds around its own hardware
     calls to this instrument (the owning handle's own ``.lock``; see
     :class:`InstrumentHandle`).
 
@@ -261,7 +274,7 @@ class LockedProxy:
     was actually closed).
     """
 
-    def __init__(self, target: Any, lock: threading.Lock) -> None:
+    def __init__(self, target: Any, lock: AbstractContextManager[Any]) -> None:
         object.__setattr__(self, "_target", target)
         object.__setattr__(self, "_lock", lock)
 

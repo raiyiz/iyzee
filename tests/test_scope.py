@@ -368,7 +368,7 @@ def test_get_data_words_reads_definite_block_data_and_validates_word_size():
     scope = LeCroy()
     data = struct.pack("<2h", -123, 456)
     response = (
-        vicp_frame(0x80, b"C1:WF DAT1,#900000004")
+        vicp_frame(0x80, b"C1:WF DAT1,#9000000004")
         + vicp_frame(0x80, data[:1])
         + vicp_frame(0x80, data[1:])
         + vicp_frame(0x81, b"\n")

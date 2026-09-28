@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import socket
 import struct
 import threading
@@ -7,8 +8,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterator
 
+log = logging.getLogger("iyzee.vicp")
+
 VICP_EOI_FLAG = 0x01
 VICP_DATA_FLAG = 0x80
+
+# A DEF9 block is followed by a line terminator that is never sample data.
+_TERMINATORS = (b"\n", b"\r\n")
 
 
 class VICPTimeoutError(TimeoutError):
@@ -86,12 +92,27 @@ def send_all(sock: object, data: bytes, *, timeout_error: type[TimeoutError]) ->
         sent += count
 
 
+class _MessageState:
+    """Tracks whether the current response has been consumed through EOI."""
+
+    complete = False
+
+
 class VICPTransport:
     """Thread-safe VICP/TCP transport.
 
     The transport owns connection state and serializes complete logical
     request/response transactions. The lock is re-entrant so high-level
     operations can safely compose send, read, and query primitives.
+
+    Failure contract: VICP has no request IDs, so once a read or write fails
+    part-way (timeout, peer close, bad header, an interrupted transfer) the
+    byte stream can no longer be trusted, and a late reply would be handed to
+    the *next* caller as if it answered *its* question. The transport therefore
+    invalidates itself: the socket is closed, ``connected`` becomes ``False``
+    and the caller must reconnect. Errors raised after a response was read
+    completely through EOI (e.g. a bad block length) leave the stream aligned,
+    so the connection stays usable.
     """
 
     HEADER_SIZE = 8
@@ -141,10 +162,37 @@ class VICPTransport:
         with self._lock:
             yield
 
+    def _invalidate(self, reason: BaseException | str | None = None) -> None:
+        """Drop the connection because the byte stream is no longer trustworthy."""
+        with self._lock:
+            sock = self._socket
+            self._socket = None
+            self._address = None
+        if sock is None:
+            return
+        log.warning("VICP connection dropped after failure: %s", reason or "unknown")
+        close = getattr(sock, "close", None)
+        if close is not None:
+            try:
+                close()
+            except OSError:
+                pass
+
+    @contextmanager
+    def _message(self) -> Iterator[_MessageState]:
+        """Guard one response: invalidate if it fails before EOI was consumed."""
+        state = _MessageState()
+        try:
+            yield state
+        except BaseException as exc:
+            if not state.complete:
+                self._invalidate(exc)
+            raise
+
     def _require_socket(self) -> socket.socket | object:
         sock = self._socket
         if sock is None:
-            raise ConnectionError("Scope is not connected")
+            raise ConnectionError("VICP transport is not connected")
         return sock
 
     def connect(
@@ -211,7 +259,11 @@ class VICPTransport:
             0,
             len(payload),
         )
-        send_all(sock, header + payload, timeout_error=self._timeout_error)
+        try:
+            send_all(sock, header + payload, timeout_error=self._timeout_error)
+        except BaseException as exc:
+            self._invalidate(exc)
+            raise
 
     def send_command(self, message: str) -> None:
         """Send one ASCII VICP command as one EOI-terminated frame."""
@@ -229,23 +281,29 @@ class VICPTransport:
 
     def _read_frame(self) -> VICPFrame:
         sock = self._require_socket()
-        header = recv_exact(sock, self.HEADER_SIZE, timeout_error=self._timeout_error)
-        flags, version, _reserved_1, _reserved_2, length = struct.unpack("!4BI", header)
-        if version != self.HEADER_VERSION:
-            raise VICPProtocolError(
-                f"unsupported VICP header version {version}; expected {self.HEADER_VERSION}"
-            )
-        payload = recv_exact(sock, length, timeout_error=self._timeout_error)
+        try:
+            header = recv_exact(sock, self.HEADER_SIZE, timeout_error=self._timeout_error)
+            flags, version, _reserved_1, _reserved_2, length = struct.unpack("!4BI", header)
+            if version != self.HEADER_VERSION:
+                raise VICPProtocolError(
+                    f"unsupported VICP header version {version}; expected {self.HEADER_VERSION}"
+                )
+            payload = recv_exact(sock, length, timeout_error=self._timeout_error)
+        except BaseException as exc:
+            # Mid-frame failure: the stream position is unknown.
+            self._invalidate(exc)
+            raise
         return VICPFrame(flags=flags, payload=payload)
 
     def read_message(self) -> tuple[int, bytes]:
         """Read frames through EOI and return the final flags plus complete payload."""
-        with self._lock:
+        with self._lock, self._message() as state:
             chunks = bytearray()
             for _ in range(self.MAX_MESSAGE_FRAMES):
                 frame = self._read_frame()
                 chunks.extend(frame.payload)
                 if frame.is_eoi:
+                    state.complete = True
                     return frame.flags, bytes(chunks)
             raise VICPProtocolError(
                 f"message exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
@@ -257,8 +315,14 @@ class VICPTransport:
         LeCroy DEF9 waveform responses place an ASCII #9 marker and a
         nine-digit byte count before the binary payload. The marker and count
         may span VICP frames, so parsing must not depend on a fixed prefix.
+
+        The count is authoritative. A final EOI frame that holds only a line
+        terminator is never treated as sample data, so a truncated block cannot
+        be "completed" by its own terminator. Errors raised once EOI has been
+        consumed (wrong length, bad trailer) leave the connection usable; errors
+        before EOI invalidate it (see the class docstring).
         """
-        with self._lock:
+        with self._lock, self._message() as state:
             header = bytearray()
             data = bytearray()
             expected: int | None = None
@@ -266,10 +330,12 @@ class VICPTransport:
 
             for _ in range(self.MAX_MESSAGE_FRAMES):
                 frame = self._read_frame()
+                state.complete = frame.is_eoi
                 payload = frame.payload if frame.is_data else b""
 
                 if expected is None:
                     header.extend(payload)
+                    payload = b""
                     marker_index = header.find(b"#9")
                     if marker_index >= 0:
                         count_start = marker_index + 2
@@ -285,11 +351,16 @@ class VICPTransport:
                         if not count_field.isdigit():
                             raise VICPProtocolError(f"invalid DEF9 byte count {count_field!r}")
                         expected = int(count_field)
-                        data.extend(header[count_end:])
+                        # Whatever followed the count in this frame is body, and
+                        # goes through the same length/terminator rules below.
+                        payload = bytes(header[count_end:])
                         header.clear()
-                elif payload:
+
+                if expected is not None and payload:
                     remaining = expected - len(data)
-                    if remaining > 0:
+                    if frame.is_eoi and remaining > 0 and payload in _TERMINATORS:
+                        trailing.extend(payload)
+                    elif remaining > 0:
                         take = min(remaining, len(payload))
                         data.extend(payload[:take])
                         trailing.extend(payload[take:])
@@ -303,7 +374,7 @@ class VICPTransport:
                         )
                     if len(data) != expected:
                         raise VICPProtocolError(f"Expected {expected} bytes, got {len(data)}")
-                    if trailing not in (b"", b"\n", b"\r\n"):
+                    if bytes(trailing) not in (b"", *_TERMINATORS):
                         raise VICPProtocolError(
                             f"unexpected bytes after DEF9 block: {bytes(trailing)!r}"
                         )
@@ -315,13 +386,14 @@ class VICPTransport:
 
     def read_data_until_eoi(self) -> bytes:
         """Read DATA frames through EOI, ignoring non-DATA terminator payloads."""
-        with self._lock:
+        with self._lock, self._message() as state:
             data = bytearray()
             for _ in range(self.MAX_MESSAGE_FRAMES):
                 frame = self._read_frame()
                 if frame.is_data:
                     data.extend(frame.payload)
                 if frame.is_eoi:
+                    state.complete = True
                     return bytes(data)
             raise VICPProtocolError(
                 f"data message exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
@@ -340,4 +412,5 @@ class VICPTransport:
             try:
                 return response.decode("ascii").strip()
             except UnicodeDecodeError as exc:
+                # The whole response was consumed, so the stream is still aligned.
                 raise VICPProtocolError("VICP text response was not valid ASCII") from exc
