@@ -1,6 +1,7 @@
 import pytest
+
 from iyzee import CH, IP
-from iyzee.power import PSU
+from iyzee.power import PSU, ShutterControl
 
 
 class FakeInstrument:
