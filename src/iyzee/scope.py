@@ -134,8 +134,8 @@ class LeCroy:
     tested for WaveSurfer 452
     Methods
     ------------
-    connect(IP) : after initializing to connect
-    disconnect() : to end communication
+    connect(IP) : after initializing to connect (raises if already connected)
+    disconnect() : to end communication (safe to call when not connected)
     send(message) : message to device (commands, etc.)
     readAll() : read a full framed response from the device, returns ascii string
     query(message) : send(message) + readAll(), returns the trimmed response text

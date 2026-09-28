@@ -30,6 +30,22 @@ the same scope might be touched concurrently by something else — the
 TUI's ``ScopeScreen`` does exactly this, and it's what makes calling these
 same functions safe from the IPython console at the same time a screen is
 mid-acquisition, or from two screens/scripts sharing one connected handle.
+The lock is re-entrant and, for a ``ScopeHandle``, is the driver's own
+transaction lock; every batch here also enters ``scope.transaction()`` itself.
+
+Two behaviours worth knowing before relying on a recording:
+
+* ``apply_and_verify_channel_settings()`` reads every channel back after
+  writing. The scope's reported values, not the request, are what should be
+  treated as applied (it rounds V/div and offset, and can ignore a command).
+* ``acquire_scope_recording(freeze=True)`` (the default) stops a *running*
+  acquisition (trigger mode AUTO/NORMAL) for the download and restores the
+  previous mode afterwards, so every channel comes from the same capture.
+  Pass ``freeze=False`` to leave the trigger mode alone.
+
+If the driver reports its connection lost (any timeout or framing error
+invalidates it), batch loops stop and mark the remaining channels as not
+attempted instead of continuing on a stream that can no longer be trusted.
 """
 
 from __future__ import annotations

@@ -13,6 +13,8 @@ src/iyzee/
 ├── base.py                # shared VISA lifecycle, instrument IPs, PSU channels
 ├── mxa.py                 # Keysight MXA SCPI/VISA driver
 ├── power.py                # power supply + optical shutter control
+├── vicp.py                 # VICP framing over TCP: thread-safe transport that drops the connection
+│                           # after any mid-message failure (no request IDs, so a late reply would desync)
 ├── scope.py                # LeCroy oscilloscope: waveform download + channel/trigger/math control
 ├── scope_workflows.py     # scope operations + durable waveform recordings — plain
 │                           # functions/dataclasses on top of scope.py, no Textual; see
@@ -154,7 +156,8 @@ already just picks a `Step` list and runs it.
   SCPI strings.
 - **`power.py`** — PSU control plus `ShutterControl`, a thin wrapper that
   drives the optical shutter through one PSU channel.
-- **`scope.py`** — LeCroy oscilloscope driver (VICP protocol over TCP). Not
+- **`scope.py`** — LeCroy oscilloscope driver (VICP protocol over TCP, framing in
+  `vicp.py`, which drops the connection after any mid-message failure). Not
   yet unified with `BaseDevice`'s connection lifecycle; treat as a standalone
   legacy driver. `scope_workflows.py` holds the operations built on top
   (channel/trigger settings, waveform acquisition) — see "Design direction".
@@ -281,8 +284,10 @@ Two technical guides, both Typst source compiled to PDF in CI:
 For a reproducible measurement, the relevant instrument state should travel
 with the data. Sweep records carry frequency/range and analyzer settings in
 `StepResult.meta` and the JSON sidecar; Scope records carry requested and
-known-applied channel/trigger configuration, scope-reported calibration and
-timebase metadata, raw waveform codes when available, and derived statistics
+channel/trigger configuration (the applied values are what the scope reported
+after a read-back, not what was requested), scope-reported calibration and
+per-channel timebase metadata, instrument identity (`*IDN?`), whether a running
+acquisition was paused for the capture, raw waveform codes when available, and derived statistics
 beside the numeric arrays.
 
 ## Design direction
@@ -321,7 +326,13 @@ happens to trigger it in the TUI. `InstrumentHandle.lock` (each handle owns
 one — see `instruments.py`) is what makes that safe without an `IyzeeApp`
 in the picture: pass it as the optional `lock=` argument when a script or
 screen needs to serialize against concurrent access; a script with a
-private, uncontended connection can leave it out entirely. A new screen
+private, uncontended connection can leave it out entirely. The lock is
+re-entrant, and for the scope it *is* the driver's own transaction lock, so
+passing it (even through the console's `lab.scope` proxy) cannot deadlock, and
+the operations take the driver's transaction themselves either way. Use
+`apply_and_verify_channel_settings` when you need to know what the scope
+actually holds afterwards: it reads every channel back and reports
+adjustments and ignored settings. A new screen
 with real device-orchestration logic (not just reading a form) should
 follow this shape from the start, in a module beside the driver it
 operates on — the way `ScopeScreen` originally didn't, and now does.
