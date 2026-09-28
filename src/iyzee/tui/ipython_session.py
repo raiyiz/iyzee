@@ -36,6 +36,7 @@ handled here:
 from __future__ import annotations
 
 import asyncio
+import atexit
 import builtins
 import contextlib
 import ctypes
@@ -321,12 +322,18 @@ class IPythonSession:
                     _raise_in_thread(self._thread_id, KeyboardInterrupt)
             self._exit_prompt()
             thread.join(timeout)
+        if thread is None or not thread.is_alive():
+            with contextlib.suppress(Exception):
+                atexit.unregister(self.shell.atexit_operations)
+            with contextlib.suppress(Exception):
+                self.shell.atexit_operations()
+            if InteractiveShell._instance is self.shell:
+                InteractiveShell._instance = None
+        else:
+            log.warning("IPython session thread did not stop within %.1fs", timeout)
         self._restore_streams()
         with contextlib.suppress(Exception):
             self._stack.close()
-        # Deliberately not calling shell.atexit_operations() here: IPython
-        # registers it with `atexit` itself (that is what closes the history
-        # session), and it is not safe to run twice.
 
     def _restore_streams(self) -> None:
         if self._previous_streams is None:
