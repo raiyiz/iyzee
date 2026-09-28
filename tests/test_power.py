@@ -82,7 +82,7 @@ def test_shutter_control_is_lazy_and_managed(monkeypatch):
         shutter.close()
 
     assert instrument.commands[:6] == [
-        "INST OUT3" if False else "INST:NSEL 3",
+        "INST:NSEL 3",
         "VOLT 1.7",
         "INST:NSEL 3",
         "CURR 0.01",
@@ -97,3 +97,17 @@ def test_shutter_control_rejects_output_commands_before_connecting():
     shutter = ShutterControl()
     with pytest.raises(RuntimeError, match="not connected"):
         shutter.open()
+
+
+def test_shutter_disconnect_disables_output(monkeypatch):
+    resource_manager = FakeResourceManager()
+    monkeypatch.setattr("iyzee.power.pyvisa.ResourceManager", lambda: resource_manager)
+    shutter = ShutterControl()
+    shutter.connect()
+    instrument = resource_manager.opened[0][1]
+
+    shutter.open()
+    shutter.disconnect()
+
+    assert instrument.commands[-2:] == ["OUTP:SEL 0", "<CLOSE>"]
+    assert shutter.psu.instrument is None
