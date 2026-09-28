@@ -63,6 +63,9 @@ Rb_transitions = [
 ]
 
 
+DEFAULT_WAVEMETER_TIMEOUT_S = 1.0
+
+
 class WavemeterReadoutError(RuntimeError):
     """Raised when a wavemeter measurement cannot be obtained or parsed."""
 
@@ -143,7 +146,9 @@ def fast_readout(ch: int) -> float:
     )
 
 
-def set_pid_setpoint(freq: float, channel: int):
+def set_pid_setpoint(
+    freq: float, channel: int, *, timeout_s: float = DEFAULT_WAVEMETER_TIMEOUT_S
+):
     """
     Set the PID-setpoint of the wavemeter lock.
     The regulation has to be turned on manually due to safety reasons.
@@ -153,10 +158,17 @@ def set_pid_setpoint(freq: float, channel: int):
         freq (float): Frequency in THz to be set.
     """
 
-    urllib.request.urlopen(
-        f"http://{IP.WAVEMETER}:8000/api/set_pid/",
-        data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
-    )
+    try:
+        response = urllib.request.urlopen(
+            f"http://{IP.WAVEMETER}:8000/api/set_pid/",
+            data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
+            timeout=timeout_s,
+        )
+        close = getattr(response, "close", None)
+        if close is not None:
+            close()
+    except OSError as exc:
+        raise WavemeterReadoutError(f"Failed to set wavemeter PID channel {channel}") from exc
     print(f"[WS-7] Set new PID-setpoint of channel {channel} to be {freq} THz.")
 
 
