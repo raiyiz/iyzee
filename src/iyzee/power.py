@@ -38,25 +38,34 @@ class ShutterControl:
         self.psu = PSU(ip=ip)
         self.chan = chan
 
-        # Shutter trigger voltage is 1.7 V.
+    def connect(self):
+        """Connect the PSU and configure the shutter channel."""
+        if self.psu.instrument is not None:
+            return
         try:
             self.psu.connect()
-            self.psu.set_voltage(1.7, chan)
-            self.psu.set_current(0.01, chan)
+            self.psu.set_voltage(1.7, self.chan)
+            self.psu.set_current(0.01, self.chan)
         except Exception:
             self.psu.close()
             raise
 
+    def disconnect(self):
+        """Close the shutter, then release the PSU connection."""
+        try:
+            if self.psu.instrument is not None:
+                self.close()
+        finally:
+            self.psu.close()
+
     def __enter__(self):
-        """Return the shutter controller for use in a managed context."""
+        """Connect and return the shutter controller for use in a managed context."""
+        self.connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Close the shutter and release the underlying PSU connection."""
-        try:
-            self.close()
-        finally:
-            self.psu.close()
+        self.disconnect()
         return False
 
     def open(self):
