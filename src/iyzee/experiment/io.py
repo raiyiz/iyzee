@@ -123,6 +123,7 @@ def save_numeric_recording(
     file naming, numeric validation, atomic replacement, and checksum handling
     stay in one implementation.
     """
+    savedir.mkdir(parents=True, exist_ok=True)
     if path is None:
         path = savedir / f"{_new_stem(name)}.npz"
 
@@ -263,8 +264,12 @@ def _stack_trace(results: list[StepResult], trace_name: str) -> np.ndarray:
 
 
 def difference_series(
-    squeezing: object, shot_noise: object, label: str | None
-) -> tuple[list[float], list[float], str | None] | None:
+    squeezing: object,
+    shot_noise: object,
+    label: str,
+    *,
+    sweep_duration_ms: float | None = None,
+) -> tuple[list[float], list[float], str] | None:
     """Compute one squeezing-minus-shot-noise line, ready to plot.
 
     The single source of truth for this computation — before this, the
@@ -293,7 +298,11 @@ def difference_series(
     if np.all(np.isnan(squeezing)) or np.all(np.isnan(shot_noise)):
         return None
     difference = squeezing - shot_noise
-    return list(range(len(difference))), list(difference), label
+    if sweep_duration_ms is None:
+        x_values = list(range(len(difference)))
+    else:
+        x_values = np.linspace(0.0, sweep_duration_ms, len(difference)).tolist()
+    return x_values, list(difference), label
 
 
 def build_figure(results: list[StepResult]):
@@ -306,15 +315,22 @@ def build_figure(results: list[StepResult]):
     """
     fig, ax = plt.subplots()
     labels: list[str] = []
+    has_sweep_time = False
 
     for result in results:
+        duration = result.meta.get("sweep_duration_ms")
+        sweep_duration_ms = float(duration) if duration is not None else None
+        has_sweep_time = has_sweep_time or sweep_duration_ms is not None
         series = difference_series(
-            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
+            result.traces.get("squeezing"),
+            result.traces.get("shot_noise"),
+            result.label,
+            sweep_duration_ms=sweep_duration_ms,
         )
         if series is None:
             continue
-        _x, difference, label = series
-        ax.plot(difference)
+        x_values, difference, label = series
+        ax.plot(x_values, difference)
         # difference_series() types its returned label as `str | None` because
         # it also accepts `None` in (for a caller with no label at all); here
         # `result.label` is a plain `str` (StepResult.label is not Optional),
@@ -324,7 +340,7 @@ def build_figure(results: list[StepResult]):
 
     if labels:
         ax.legend(labels, ncol=4, loc="upper center", bbox_to_anchor=(0.5, 1.1))
-    ax.set_xlabel("Trace point")
+    ax.set_xlabel("Sweep time (ms)" if has_sweep_time else "Trace point")
     ax.set_ylabel("Squeezing - shot noise")
     fig.tight_layout()
     return fig
@@ -336,5 +352,8 @@ def multiplot(results: list[StepResult]) -> None:
     Kept for the script/CLI entry point (``main.py``) and existing callers.
     Non-interactive callers should use :func:`build_figure` instead.
     """
-    build_figure(results)
-    plt.show()
+    fig = build_figure(results)
+    try:
+        plt.show()
+    finally:
+        plt.close(fig)
