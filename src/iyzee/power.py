@@ -65,11 +65,8 @@ class ShutterControl:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Close the shutter and release the underlying PSU connection."""
-        try:
-            self.close()
-        finally:
-            self.disconnect()
+        """Turn the shutter off and release the underlying PSU connection."""
+        self.disconnect()
         return False
 
     def open(self):
