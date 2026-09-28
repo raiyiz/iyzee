@@ -42,6 +42,7 @@ async def test_console_lab_reflects_running_app_state() -> None:
         # No refresh is required: LabProxy resolves results directly from the app.
         app.last_run = LastRun(kind="bandwidth", results=[result], path=None)
         assert lab.results == [result]
+        assert lab.last_run is not None
         assert lab.last_run.kind == "bandwidth"
 
         class FakeHandle:

@@ -37,12 +37,13 @@ from textual_plotext import PlotextPlot
 from ...experiment import create_dirs
 from ...scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from ...scope_workflows import (
+    ChannelApplyResult,
     ChannelError,
     ChannelSettings,
     ScopeAcquisition,
     TriggerSettings,
     acquire_scope_recording,
-    apply_channel_settings,
+    apply_and_verify_channel_settings,
     apply_trigger_settings,
     read_channel_settings,
     read_trigger_settings,
@@ -252,23 +253,23 @@ class ScopeScreen(Page):
                 return value != baseline.offset
             if field == "coupling":
                 return self.query_one(f"#{field_id}", Select).value != baseline.coupling.value
-        baseline = self._last_applied_trigger_settings
-        if baseline is None:
+        trigger_baseline = self._last_applied_trigger_settings
+        if trigger_baseline is None:
             return False
         if field_id == "trig-source":
-            return self.query_one("#trig-source", Select).value != baseline.source.value
+            return self.query_one("#trig-source", Select).value != trigger_baseline.source.value
         if field_id == "trig-mode":
-            return self.query_one("#trig-mode", Select).value != baseline.mode.value
+            return self.query_one("#trig-mode", Select).value != trigger_baseline.mode.value
         if field_id == "trig-slope":
-            return self.query_one("#trig-slope", Select).value != baseline.slope.value
+            return self.query_one("#trig-slope", Select).value != trigger_baseline.slope.value
         if field_id == "trig-coupling":
-            return self.query_one("#trig-coupling", Select).value != baseline.coupling.value
+            return self.query_one("#trig-coupling", Select).value != trigger_baseline.coupling.value
         if field_id == "trig-level":
             try:
                 value = self._read("trig-level", _finite_float, "Trigger level")
             except FieldError:
                 return True
-            return value != baseline.level_volts
+            return value != trigger_baseline.level_volts
         return False
 
     def _refresh_field_dirty(self, field_id: str) -> None:
@@ -487,8 +488,10 @@ class ScopeScreen(Page):
             self._suppress_dirty_events = False
         for settings in channel_settings:
             prefix = f"{settings.channel}-"
+            # Materialize first: difference_update() on a generator over the very
+            # same set raises "Set changed size during iteration".
             self._dirty_fields.difference_update(
-                field_id for field_id in self._dirty_fields if field_id.startswith(prefix)
+                [field_id for field_id in self._dirty_fields if field_id.startswith(prefix)]
             )
             for field in ("enable", "vdiv", "offset", "coupling"):
                 self.query_one(f"#{settings.channel}-{field}").remove_class("scope-dirty")
@@ -526,7 +529,7 @@ class ScopeScreen(Page):
         for channel in CHANNELS:
             vdiv = self._read(f"{channel}-vdiv", _positive_float, f"{channel} V/div")
             offset = self._read(f"{channel}-offset", _finite_float, f"{channel} offset")
-            coupling = Coupling(self.query_one(f"#{channel}-coupling", Select).value)
+            coupling = Coupling(self._selected(f"{channel}-coupling", f"{channel} coupling"))
             enabled = self.query_one(f"#{channel}-enable", Checkbox).value
             settings.append(ChannelSettings(channel, enabled, vdiv, offset, coupling))
         return settings
@@ -578,61 +581,81 @@ class ScopeScreen(Page):
     ) -> None:
         handle = self.iyzee_app.handles.get("scope")
         if handle is None:
-            self._ui(
-                self._finish_apply_channels,
-                scope,
-                settings,
-                [ChannelError(settings[0].channel, RuntimeError("scope disconnected"))],
-                baseline,
+            result = ChannelApplyResult(
+                (),
+                tuple(
+                    ChannelError(s.channel, RuntimeError("scope disconnected")) for s in settings
+                ),
+                (),
             )
+            self._ui(self._finish_apply_channels, scope, settings, result, baseline)
             return
-        errors = apply_channel_settings(
-            scope, settings, current_settings=baseline, lock=handle.lock
-        )
-        self._ui(self._finish_apply_channels, scope, settings, errors, baseline)
+        try:
+            result = apply_and_verify_channel_settings(
+                scope, settings, current_settings=baseline, lock=handle.lock
+            )
+        except Exception as exc:  # noqa: BLE001 - never leave the Apply button disabled
+            log.exception("scope: applying channel settings failed")
+            result = ChannelApplyResult(
+                (), tuple(ChannelError(s.channel, exc) for s in settings), ()
+            )
+        self._ui(self._finish_apply_channels, scope, settings, result, baseline)
 
     def _finish_apply_channels(
         self,
         scope: LeCroy,
         settings: Sequence[ChannelSettings],
-        errors: Sequence[ChannelError],
+        result: ChannelApplyResult,
         baseline: Sequence[ChannelSettings],
     ) -> None:
-        if not self._scope_is_current(scope):
-            self._settings_busy = False
-            self.query_one("#apply-channels", Button).disabled = False
-            self._refresh_scope_ui()
-            return
         self._settings_busy = False
         self.query_one("#apply-channels", Button).disabled = False
+        if not self._scope_is_current(scope):
+            self._refresh_scope_ui()
+            return
         log_widget = self.query_one("#scope-log", RichLog)
-        error_channels = {err.channel for err in errors}
+        error_channels = {err.channel for err in result.errors}
+        # The baseline is what the scope *reported* after the writes. Requested
+        # values are never assumed to have been applied: the scope rounds
+        # V/div and offset, and can ignore a command outright.
         known = {setting.channel: setting for setting in baseline}
-        for setting in settings:
-            if setting.channel not in error_channels:
-                known[setting.channel] = setting
+        for verified in result.verified:
+            known[verified.channel] = verified
         self._last_applied_channel_settings = (
             tuple(known[channel] for channel in CHANNELS if channel in known) or None
         )
-        for setting in settings:
-            if setting.channel not in error_channels:
+        for verified in result.verified:
+            channel = verified.channel
+            if channel in error_channels:
+                # Keep what the user typed so they can retry; just re-evaluate
+                # "changed" against the now-truthful baseline.
                 for field in ("enable", "vdiv", "offset", "coupling"):
-                    field_id = f"{setting.channel}-{field}"
-                    self._dirty_fields.discard(field_id)
-                    self.query_one(f"#{field_id}").remove_class("scope-dirty")
+                    self._refresh_field_dirty(f"{channel}-{field}")
+                continue
+            self._apply_retrieved_channel_settings(verified)  # shows any rounding
+            for field in ("enable", "vdiv", "offset", "coupling"):
+                field_id = f"{channel}-{field}"
+                self._dirty_fields.discard(field_id)
+                self.query_one(f"#{field_id}").remove_class("scope-dirty")
         self._settings_synced = (
             all(self._channel_baseline(channel) is not None for channel in CHANNELS)
             and self._last_applied_trigger_settings is not None
         )
-        if errors:
-            for err in errors:
+        for adjustment in result.adjustments:
+            label = "V/div" if adjustment.field == "volts_per_div" else "offset"
+            log_widget.write(
+                f"[yellow]{adjustment.channel} {label}: requested {adjustment.requested:g}, "
+                f"scope set {adjustment.actual:g}[/yellow]"
+            )
+        if result.errors:
+            for err in result.errors:
                 log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
             self.notify("Some channel changes failed — see the log.", severity="error")
             self._refresh_scope_ui()
             return
         self._refresh_scope_ui()
         log_widget.write(
-            "Applied changed channel fields: "
+            "Applied and verified channel fields: "
             + ", ".join(str(setting.channel) for setting in settings)
             + "."
         )
@@ -641,10 +664,10 @@ class ScopeScreen(Page):
 
     def _read_trigger_settings(self) -> TriggerSettings:
         level = self._read("trig-level", _finite_float, "Trigger level")
-        source = Channel(self.query_one("#trig-source", Select).value)
-        mode = TriggerMode(self.query_one("#trig-mode", Select).value)
-        slope = TriggerSlope(self.query_one("#trig-slope", Select).value)
-        coupling = TriggerCoupling(self.query_one("#trig-coupling", Select).value)
+        source = Channel(self._selected("trig-source", "Trigger source"))
+        mode = TriggerMode(self._selected("trig-mode", "Trigger mode"))
+        slope = TriggerSlope(self._selected("trig-slope", "Trigger slope"))
+        coupling = TriggerCoupling(self._selected("trig-coupling", "Trigger coupling"))
         return TriggerSettings(source, mode, slope, coupling, level)
 
     def _start_apply_trigger(self) -> None:
@@ -816,15 +839,24 @@ class ScopeScreen(Page):
         applied_channel_settings: Sequence[ChannelSettings] | None,
         applied_trigger_settings: TriggerSettings | None,
     ) -> None:
-        recording = acquire_scope_recording(
-            scope,
-            channels,
-            channel_settings=channel_settings,
-            trigger_settings=trigger_settings,
-            applied_channel_settings=applied_channel_settings,
-            applied_trigger_settings=applied_trigger_settings,
-            lock=self.iyzee_app.handles["scope"].lock,
-        )
+        handle = self.iyzee_app.handles.get("scope")
+        if handle is None or handle.device is not scope:
+            self._ui(self._acquire_failed, "the scope was disconnected before acquisition started")
+            return
+        try:
+            recording = acquire_scope_recording(
+                scope,
+                channels,
+                channel_settings=channel_settings,
+                trigger_settings=trigger_settings,
+                applied_channel_settings=applied_channel_settings,
+                applied_trigger_settings=applied_trigger_settings,
+                lock=handle.lock,
+            )
+        except Exception as exc:  # noqa: BLE001 - never leave the Acquire button disabled
+            log.exception("scope: acquisition failed")
+            self._ui(self._acquire_failed, one_line(exc))
+            return
         # acquire_scope_recording releases the instrument lock before this
         # point, so persistence cannot block another caller from using the scope.
         path = None
@@ -836,6 +868,13 @@ class ScopeScreen(Page):
             save_error = exc
         self._ui(self._finish_acquire, recording, path, save_error)
 
+    def _acquire_failed(self, reason: str) -> None:
+        self.query_one("#acquire-waveforms", Button).disabled = False
+        self.query_one("#scope-log", RichLog).write(
+            f"[red]Acquisition failed: {escape(reason)}[/red]"
+        )
+        self.notify(f"Acquisition failed: {reason}", severity="error", markup=False)
+
     def _finish_acquire(
         self,
         recording: ScopeAcquisition,
@@ -844,6 +883,12 @@ class ScopeScreen(Page):
     ) -> None:
         self.query_one("#acquire-waveforms", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
+        if recording.frozen:
+            log_widget.write(
+                "Acquisition was running: paused for a consistent capture, then resumed."
+            )
+        for warning in recording.warnings:
+            log_widget.write(f"[yellow]{escape(warning)}[/yellow]")
         for err in recording.errors:
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
         if recording.waveforms:

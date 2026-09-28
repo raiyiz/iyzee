@@ -41,6 +41,13 @@ class VICPFrame:
         return bool(self.flags & VICP_EOI_FLAG)
 
 
+def _close_socket(sock: object) -> None:
+    """Close a socket-like object; fakes without ``close()`` are tolerated."""
+    close = getattr(sock, "close", None)
+    if close is not None:
+        close()
+
+
 def recv_exact(
     sock: object,
     num_bytes: int,
@@ -136,7 +143,7 @@ class VICPTransport:
         self.io_timeout = io_timeout
         self.max_command_length = max_command_length
         self._timeout_error = timeout_error
-        self._socket: socket.socket | object | None = None
+        self._socket: object | None = None
         self._address: str | None = None
         self._lock = threading.RLock()
 
@@ -149,7 +156,7 @@ class VICPTransport:
         return self._address
 
     @property
-    def socket(self) -> socket.socket | object | None:
+    def socket(self) -> object | None:
         return self._socket
 
     @property
@@ -171,12 +178,10 @@ class VICPTransport:
         if sock is None:
             return
         log.warning("VICP connection dropped after failure: %s", reason or "unknown")
-        close = getattr(sock, "close", None)
-        if close is not None:
-            try:
-                close()
-            except OSError:
-                pass
+        try:
+            _close_socket(sock)
+        except OSError:
+            pass
 
     @contextmanager
     def _message(self) -> Iterator[_MessageState]:
@@ -189,7 +194,7 @@ class VICPTransport:
                 self._invalidate(exc)
             raise
 
-    def _require_socket(self) -> socket.socket | object:
+    def _require_socket(self) -> object:
         sock = self._socket
         if sock is None:
             raise ConnectionError("VICP transport is not connected")
@@ -217,6 +222,10 @@ class VICPTransport:
             try:
                 sock.connect((address, self.port))
                 sock.settimeout(io_timeout)
+                try:
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                except OSError:
+                    log.debug("could not set TCP_NODELAY on VICP socket", exc_info=True)
             except TimeoutError as exc:
                 sock.close()
                 raise self._timeout_error(
@@ -239,7 +248,7 @@ class VICPTransport:
             self._address = None
             if sock is None:
                 return
-            sock.close()
+            _close_socket(sock)
 
     def attach_socket(self, sock: object) -> None:
         """Attach a socket-like object for tests and legacy LeCroy.s use."""
@@ -382,21 +391,6 @@ class VICPTransport:
 
             raise VICPProtocolError(
                 f"binary response exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
-            )
-
-    def read_data_until_eoi(self) -> bytes:
-        """Read DATA frames through EOI, ignoring non-DATA terminator payloads."""
-        with self._lock, self._message() as state:
-            data = bytearray()
-            for _ in range(self.MAX_MESSAGE_FRAMES):
-                frame = self._read_frame()
-                if frame.is_data:
-                    data.extend(frame.payload)
-                if frame.is_eoi:
-                    state.complete = True
-                    return bytes(data)
-            raise VICPProtocolError(
-                f"data message exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
             )
 
     def query(self, message: str) -> str:

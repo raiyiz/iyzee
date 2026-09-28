@@ -119,6 +119,11 @@ class TuiLogHandler(logging.Handler):
             pass  # no app/event loop yet, or it's shutting down — buffer still has it
 
 
+def _mark_owned(handler: logging.Handler) -> None:
+    """Tag a handler as ours so a re-install can find and replace it."""
+    setattr(handler, "_iyzee_owned", True)  # noqa: B010 - attribute is dynamic by design
+
+
 def install(on_record: Callable[[LogEntry], None]) -> TuiLogHandler:
     """Attach the capturing handler (session buffer + live callback) and a
     rotating file handler (history across restarts) to the shared
@@ -149,7 +154,7 @@ def install(on_record: Callable[[LogEntry], None]) -> TuiLogHandler:
             existing.close()
 
     handler = TuiLogHandler(on_record)
-    handler._iyzee_owned = True
+    _mark_owned(handler)
     handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(handler)
 
@@ -157,7 +162,7 @@ def install(on_record: Callable[[LogEntry], None]) -> TuiLogHandler:
     file_handler = logging.handlers.RotatingFileHandler(
         LOG_ROOT / "iyzee.log", maxBytes=2 * 1024 * 1024, backupCount=5
     )
-    file_handler._iyzee_owned = True
+    _mark_owned(file_handler)
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)-8s %(name)s: %(message)s")
     )
