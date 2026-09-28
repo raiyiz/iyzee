@@ -2,6 +2,8 @@
 
 ## Status of the core principle
 
+Refab implementation status: the original scope extraction and lock-ownership phase is complete. This ADR now records the resulting architecture and the remaining maintenance work.
+
 > **Python first, TUI second: the TUI organizes, displays, and controls the
 > machinery; it does not contain machinery a script could reasonably need.**
 
@@ -12,12 +14,12 @@ from opening":
 
 | Layer | Status |
 |---|---|
-| Device I/O (`mxa.py`, `scope.py`, `shutter.py`, `wavemeter.py`, `power.py`) | Already pure — no Textual import anywhere. |
+| Device I/O (`mxa.py`, `scope.py`, `power.py`, `wavemeter_readout.py`) | Pure Python — no Textual import. `ShutterControl` uses explicit connect/disconnect lifecycle. |
 | Experiment workflow (`experiment/core.py`, `procedures.py`, `io.py`) | Already pure. `main.py` is a working, script-only path today: connect, run a sweep, plot, save — zero TUI. |
 | Progress seam | Already exists: `run_sequence(..., on_step=callback)` (`StepCallback` in `core.py`). The TUI turns this into progress/plots; a script can use the same seam for a print statement. No new work needed here. |
 | Console access to live instruments | Already the target pattern: `LabProxy`/`LockedProxy` (`ipython.py`, `instruments.py`) give `lab.scope`, `lab.mx`, etc., identically from console or (indirectly) TUI. |
-| Scope screen (`tui/screens/scope.py`) | **Violates the principle.** Channel/trigger apply logic and waveform acquisition live as private methods on the Textual widget itself. This is the concrete gap to close. |
-| Instrument locking (`instrument_locks`) | **Violates the principle, more fundamentally than the document states.** Owned by `IyzeeApp`, not by the device layer — see below. |
+| Scope screen (`tui/screens/scope.py`) | Implemented: scope read/apply/acquire/persist operations live in `scope_workflows.py`; the screen owns form state, workers, plotting, and reporting. |
+| Instrument locking | Implemented: handles own re-entrant locks, and `ScopeHandle` shares the LeCroy driver transaction lock. |
 
 ## Two disagreements with the original document, and why
 
@@ -60,25 +62,9 @@ observation (it's already a plain, Textual-free dataclass; only *who
 currently sets it* is TUI-flavored). Low priority — fold into a later pass
 rather than treating as a standalone task.
 
-## Where I'd go further: instrument locking is a live blocker, not a someday
+## Implemented refab changes
 
-Checked directly: `instrument_locks` is created and owned by `IyzeeApp`
-(`app.py`), and `ScopeScreen`'s workers reach up to
-`self.iyzee_app.instrument_locks["scope"]`. That means, **today**, a plain
-script cannot get the same safe-concurrent-access guarantee a TUI action
-gets — there is no app object to ask for a lock from. The document's own
-diagram (sweep code and console/script sharing one instrument, needing
-synchronization "below the TUI") already implies this must move; I'd treat
-it as part of the *same* piece of work as extracting Scope's operations,
-not a separate future step — extracting the operations without moving the
-lock would just relocate the same problem one file over.
-
-Concretely: each `InstrumentHandle` (`ScopeHandle`, etc., in
-`instruments.py`) should own its own lock, or `LockedProxy` should, so that
-constructing a handle — with or without a running `IyzeeApp` — gets correct
-synchronization for free. `IyzeeApp.instrument_locks` becomes unnecessary
-once this moves; `ConnectScreen`/`ScopeScreen`/`SweepScreen` stop reaching
-into the app for a lock and just use the handle they already have.
+The original Phase 1 concern is now resolved on `refab`. Scope operations are in `scope_workflows.py`, the TUI supplies the presentation seam, and instrument handles own the synchronization used by screens and the embedded console.
 
 ## Revised target layering
 
@@ -123,40 +109,18 @@ keeping as-is:
                     no app object required
 ```
 
-## Phased plan
+## Follow-up plan
 
-### Phase 1 — Scope: extract operations, relocate locking (concrete, ready to start)
+### Done in refab
 
-1. Pull `ChannelSettings`, `TriggerSettings`, `apply_channel_settings(scope, settings)`,
-   `apply_trigger_settings(scope, settings)`, `acquire_waveforms(scope, channels)` out
-   of `tui/screens/scope.py` into a new module sitting beside `scope.py`
-   (mirroring how `experiment/` sits beside `mxa.py`) — no Textual import.
-2. Move lock ownership from `IyzeeApp.instrument_locks` down to the handle
-   (`ScopeHandle`/`LockedProxy`) so the new functions above take a scope
-   handle (or driver + its own lock) and are safe to call from a script, the
-   console, or the TUI identically.
-3. `ScopeScreen`'s workers shrink to: read form → build a settings value →
-   call the plain function → format the result for display. No behavior
-   change from the user's perspective; this is a structural move.
-4. Result: `apply_channel_settings(lab.scope, [...])` works from the console
-   today, and the same call works from a bare script with its own `LeCroy`
-   instance, with the same safety guarantee, no `IyzeeApp` involved.
+The original Phase 1 extraction is implemented. The standing convention is plain Python operations and dataclasses below the TUI, with handle-owned locking where shared hardware access needs serialization.
 
-### Phase 2 — Make it the standing convention, not a one-off
+### Remaining maintenance
 
-Any new screen built after this point follows the same shape by default:
-plain functions/dataclasses for the operation, a thin screen that calls
-them. Worth a short note in the repo (README or a module docstring
-convention, matching how this document itself works) so it isn't
-rediscovered by hand each time.
+New screens should continue this shape by default. Future work can focus on coverage expansion, metadata schema evolution, and reduction of legacy compatibility APIs rather than another architectural rewrite.
 
-### Phase 3 — Deferred, not rejected, revisit only if a real need shows up
+### Deferred by design
 
-- Pluggable persistence backend, if a second format is ever actually needed.
-- `devices`/`experiments` namespace + richer `Result`/`Run` objects with
-  methods, if/when there's a concrete reason (a second instrument-family
-  workflow complex enough to want it, external users of the library, etc.)
-  — evaluated as its own proposal against the codebase's existing
-  free-function convention, not assumed.
-- `LastRun` rename, folded into whichever of the above actually happens
-  first, rather than done alone.
+- A pluggable persistence backend, unless a second storage format becomes a real requirement.
+- A `devices`/`experiments` namespace or richer result/run objects, if a concrete external use case justifies them.
+- Renaming `LastRun` when a broader run model is actually needed.
