@@ -48,6 +48,7 @@ __all__ = [
     "build_figure",
     "create_dirs",
     "difference_series",
+    "difference_series_many",
     "build_frequency_sweep",
     "frequency_sweep_steps",
     "multiplot",
