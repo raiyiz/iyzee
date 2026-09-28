@@ -139,9 +139,10 @@ what both the CLI script and the TUI's Sweep screen build on:
 
 Constructing a device does not connect it. `BaseDevice` opens the VISA resource
 when `connect()` is called, normally through the explicit `with device:`
-boundary in the application entry point. This keeps hardware access out of
-experiment construction and makes procedure tests independent of real
-instruments.
+boundary in the application entry point. `ShutterControl` follows the same
+rule: construction is inert, while `connect()` opens and configures its PSU
+channel. This keeps hardware access out of experiment construction and makes
+procedure tests independent of real instruments.
 
 Adding a new experiment means adding a new `Step` subclass and a factory
 function in `procedures.py`, not writing a new hand-rolled loop. That's also
