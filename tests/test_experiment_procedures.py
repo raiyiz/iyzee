@@ -6,6 +6,8 @@ from iyzee.experiment.procedures import (
     FrequencyStep,
     acquire_trace,
     bandwidth_sweep_steps,
+    build_bandwidth_sweep,
+    build_frequency_sweep,
     run_bandwidth_sweep,
     run_frequency_sweep,
 )
@@ -75,6 +77,32 @@ def test_bandwidth_sweep_steps_defaults_match_20khz_scan():
     steps = bandwidth_sweep_steps()
 
     assert [s.rbw_hz for s in steps] == [20e3 * i for i in range(1, 20)]
+
+
+def test_bandwidth_sweep_builder_uses_shared_config():
+    steps, config = build_bandwidth_sweep([20e3, 40e3], sweep_duration_ms=10)
+
+    assert [step.rbw_hz for step in steps] == [20e3, 40e3]
+    assert config.avg_count == 200
+    assert config.sweep_duration_ms == 10
+    assert config.res_bw_hz == 24e3
+    assert config.trig_source == "IMM"
+
+
+def test_frequency_sweep_builder_derives_relax_time_from_config():
+    steps, config = build_frequency_sweep(
+        laser_center_thz=377.1,
+        wavemeter_channel=4,
+        offsets_thz=[-1e-9, 0.0, 1e-9],
+        sweep_duration_ms=10,
+    )
+
+    assert [step.frequency_thz for step in steps] == pytest.approx(
+        [377.099999999, 377.1, 377.100000001]
+    )
+    assert [step.relax_time_s for step in steps] == [1.5, 1.5, 1.5]
+    assert config.avg_count == 150
+    assert config.sweep_duration_ms == 10
 
 
 def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
