@@ -175,8 +175,8 @@ def test_multiplot_plots_each_result(monkeypatch):
     plotted = []
 
     class FakeAx:
-        def plot(self, values):
-            plotted.append(list(values))
+        def plot(self, *values):
+            plotted.append([list(value) for value in values])
 
         def legend(self, *a, **k):
             pass
@@ -193,6 +193,7 @@ def test_multiplot_plots_each_result(monkeypatch):
 
     monkeypatch.setattr("iyzee.experiment.io.plt.subplots", lambda: (FakeFig(), FakeAx()))
     monkeypatch.setattr("iyzee.experiment.io.plt.show", lambda: None)
+    monkeypatch.setattr("iyzee.experiment.io.plt.close", lambda _fig: None)
 
     results = [
         StepResult(
@@ -205,7 +206,7 @@ def test_multiplot_plots_each_result(monkeypatch):
 
     multiplot(results)
 
-    assert plotted == [[2.0, 3.0]]
+    assert plotted == [[[0, 1], [2.0, 3.0]]]
 
 
 def test_difference_series_computes_x_y_and_label():
