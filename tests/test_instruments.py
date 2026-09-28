@@ -133,6 +133,14 @@ class _FakeShutterControl:
         self.chan = chan
         self.ip = ip
         self.psu = _FakePsu()
+        self.connected = False
+
+    def connect(self) -> None:
+        self.connected = True
+
+    def disconnect(self) -> None:
+        self.psu.close()
+        self.connected = False
 
 
 class _FakePsu:
