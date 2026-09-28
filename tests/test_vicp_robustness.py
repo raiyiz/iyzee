@@ -1,0 +1,368 @@
+"""Failure-contract tests for the VICP transport and the DEF9 block reader.
+
+The transport has no request IDs, so after any mid-message failure a late
+reply would be handed to the next caller as its own answer. These tests pin
+down that the transport invalidates itself in that case, stays usable when the
+stream is still aligned, and never lets a line terminator stand in for samples.
+"""
+
+from __future__ import annotations
+
+import socket
+import struct
+
+import pytest
+
+from iyzee.scope import LeCroy, LeCroyTimeoutError
+from iyzee.vicp import VICPProtocolError, VICPTransport
+
+DATA = 0x80
+EOI = 0x01
+DATA_EOI = DATA | EOI
+
+
+def frame(flags: int, payload: bytes, version: int = 1) -> bytes:
+    return struct.pack("!4BI", flags, version, 0, 0, len(payload)) + payload
+
+
+def block_header(count: int, prefix: bytes = b"C1:WF DAT1,") -> bytes:
+    return prefix + b"#9" + f"{count:09d}".encode()
+
+
+def sent_commands(sent: bytes) -> list[bytes]:
+    """Split everything a fake socket received back into command payloads."""
+    commands, pos = [], 0
+    while pos < len(sent):
+        length = struct.unpack("!I", sent[pos + 4 : pos + 8])[0]
+        commands.append(sent[pos + 8 : pos + 8 + length])
+        pos += 8 + length
+    return commands
+
+
+class ScriptedSocket:
+    """recv() serves ``data`` in ``chunk``-byte pieces, then times out."""
+
+    def __init__(self, data: bytes = b"", chunk: int = 4096, timeout: float = 3.0):
+        self.buf = bytearray(data)
+        self.chunk = chunk
+        self.sent = bytearray()
+        self.closed = False
+        self._timeout = timeout
+
+    def gettimeout(self) -> float:
+        return self._timeout
+
+    def recv(self, n: int) -> bytes:
+        if not self.buf:
+            raise TimeoutError("timed out")
+        take = min(n, self.chunk, len(self.buf))
+        chunk = bytes(self.buf[:take])
+        del self.buf[:take]
+        return chunk
+
+    def send(self, data: bytes) -> int:
+        self.sent.extend(data)
+        return len(data)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def attached(data: bytes = b"", **kwargs) -> tuple[LeCroy, ScriptedSocket]:
+    scope = LeCroy()
+    sock = ScriptedSocket(data, **kwargs)
+    scope.s = sock
+    return scope, sock
+
+
+# -- a failed read/write invalidates the connection -----------------------------------------
+
+
+def test_timeout_invalidates_the_connection_and_closes_the_socket():
+    scope, sock = attached()
+
+    with pytest.raises(LeCroyTimeoutError):
+        scope.query("C1:VOLT_DIV?")
+
+    assert scope.connected is False
+    assert scope.address is None
+    assert sock.closed
+
+
+def test_late_reply_is_never_returned_to_the_next_caller():
+    """The desync scenario: q1 times out, its reply shows up afterwards, and
+    q2 must not receive it as its own answer."""
+    scope, sock = attached()
+    with pytest.raises(LeCroyTimeoutError):
+        scope.query("C1:VOLT_DIV?")
+
+    sock.buf += frame(DATA_EOI, b"C1:VOLT_DIV 5.00E-01 V\n")  # the late reply
+
+    with pytest.raises(ConnectionError, match="not connected"):
+        scope.query("C2:OFFSET?")
+
+
+def test_peer_close_invalidates_the_connection():
+    class ClosedSocket(ScriptedSocket):
+        def recv(self, n: int) -> bytes:
+            return b""
+
+    scope = LeCroy()
+    scope.s = ClosedSocket()
+
+    with pytest.raises(ConnectionError):
+        scope.query("*IDN?")
+
+    assert scope.connected is False
+
+
+def test_unsupported_header_version_invalidates_the_connection():
+    scope, sock = attached(frame(DATA_EOI, b"x", version=2))
+
+    with pytest.raises(VICPProtocolError, match="header version"):
+        scope.query("*IDN?")
+
+    assert scope.connected is False
+
+
+def test_stalled_write_invalidates_the_connection():
+    class StalledSend(ScriptedSocket):
+        def send(self, data: bytes) -> int:
+            raise TimeoutError("timed out")
+
+    scope = LeCroy()
+    scope.s = StalledSend()
+
+    with pytest.raises(LeCroyTimeoutError):
+        scope.send("C1:VDIV 1.0")
+
+    assert scope.connected is False
+
+
+def test_a_dropped_connection_can_be_re_established(monkeypatch):
+    """Invalidation must leave the transport in a state where connect() works."""
+    scope, _sock = attached()
+    with pytest.raises(LeCroyTimeoutError):
+        scope.query("*IDN?")
+
+    fresh = ScriptedSocket()
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: _Connectable(fresh))
+    scope.connect("10.0.0.9")
+
+    assert scope.connected is True
+    assert scope.address == "10.0.0.9"
+
+
+class _Connectable:
+    def __init__(self, target: ScriptedSocket) -> None:
+        self._target = target
+
+    def settimeout(self, value) -> None:
+        pass
+
+    def connect(self, address) -> None:
+        pass
+
+    def __getattr__(self, name):
+        return getattr(self._target, name)
+
+
+# -- same contract with real sockets (real socket.timeout, real EOF) -----------------------
+
+
+def test_real_socket_timeout_invalidates_the_transport():
+    near, far = socket.socketpair()
+    try:
+        near.settimeout(0.05)
+        transport = VICPTransport(timeout_error=LeCroyTimeoutError)
+        transport.attach_socket(near)
+
+        with pytest.raises(LeCroyTimeoutError):
+            transport.query("*IDN?")
+
+        assert transport.connected is False
+    finally:
+        near.close()
+        far.close()
+
+
+def test_real_socket_peer_close_invalidates_the_transport():
+    near, far = socket.socketpair()
+    try:
+        near.settimeout(1.0)
+        transport = VICPTransport()
+        transport.attach_socket(near)
+        far.close()
+
+        with pytest.raises(ConnectionError):
+            transport.read_message()
+
+        assert transport.connected is False
+    finally:
+        near.close()
+
+
+def test_real_socket_round_trip_still_works():
+    near, far = socket.socketpair()
+    try:
+        near.settimeout(1.0)
+        transport = VICPTransport()
+        transport.attach_socket(near)
+        far.sendall(frame(DATA_EOI, b"LECROY,WS452\n"))
+
+        assert transport.query("*IDN?") == "LECROY,WS452"
+        assert transport.connected is True
+    finally:
+        near.close()
+        far.close()
+
+
+# -- errors after a complete message keep the stream aligned --------------------------------
+
+
+def test_wrong_block_length_after_eoi_keeps_the_connection_usable():
+    data = (
+        frame(DATA, block_header(4))
+        + frame(DATA, b"\x01\x02")
+        + frame(EOI, b"\n")
+        + frame(DATA_EOI, b"NEXT\n")
+    )
+    scope, _ = attached(data)
+
+    with pytest.raises(VICPProtocolError, match="Expected 4 bytes, got 2"):
+        scope.getDataBytes()
+
+    assert scope.connected is True
+    assert scope.readAll() == (DATA_EOI, "NEXT\n")
+
+
+def test_non_ascii_reply_keeps_the_connection_usable():
+    scope, _ = attached(frame(DATA_EOI, b"\xff\xfe") + frame(DATA_EOI, b"OK\n"))
+
+    with pytest.raises(VICPProtocolError, match="not valid ASCII"):
+        scope.query("*IDN?")
+
+    assert scope.connected is True
+    assert scope.query("*OPC?") == "OK"
+
+
+def test_bad_count_before_eoi_invalidates_because_frames_are_still_unread():
+    scope, _ = attached(frame(DATA, b"C1:WF DAT1,#9notanumber") + frame(DATA_EOI, b"more"))
+
+    with pytest.raises(VICPProtocolError, match="invalid DEF9 byte count"):
+        scope.getDataBytes()
+
+    assert scope.connected is False
+
+
+def test_bad_count_in_the_final_frame_keeps_the_connection_usable():
+    scope, _ = attached(frame(DATA_EOI, b"C1:WF DAT1,#9notanumber"))
+
+    with pytest.raises(VICPProtocolError, match="invalid DEF9 byte count"):
+        scope.getDataBytes()
+
+    assert scope.connected is True
+
+
+def test_frame_cap_without_eoi_invalidates(monkeypatch):
+    monkeypatch.setattr(VICPTransport, "MAX_MESSAGE_FRAMES", 3)
+    scope, _ = attached(frame(DATA, b"a") * 5)
+
+    with pytest.raises(VICPProtocolError, match="without EOI"):
+        scope.readAll()
+
+    assert scope.connected is False
+
+
+# -- the terminator is never sample data ----------------------------------------------------
+
+
+def test_terminator_frame_cannot_complete_a_short_block():
+    """3 of 4 bytes + a "\\n" frame used to come back as 4 'samples'."""
+    scope, _ = attached(
+        frame(DATA, block_header(4)) + frame(DATA, b"\x01\x02\x03") + frame(DATA_EOI, b"\n")
+    )
+
+    with pytest.raises(VICPProtocolError, match="Expected 4 bytes, got 3"):
+        scope.getDataBytes()
+
+
+@pytest.mark.parametrize("terminator", [frame(EOI, b"\n"), frame(DATA_EOI, b"\n")])
+def test_block_ends_with_a_separate_terminator_frame(terminator):
+    body = bytes([0, 1, 255])
+    scope, _ = attached(frame(DATA, block_header(3)) + frame(DATA, body) + terminator)
+
+    assert scope._transport.read_definite_block() == body
+
+
+def test_sample_value_0x0a_is_kept_when_the_terminator_follows_separately():
+    body = b"\x01\x0a"
+    scope, _ = attached(frame(DATA, block_header(2)) + frame(DATA, body) + frame(EOI, b"\n"))
+
+    assert scope._transport.read_definite_block() == body
+
+
+def test_binary_body_containing_the_block_marker_is_not_reparsed():
+    body = b"#9\n#9123456789"
+    scope, _ = attached(
+        frame(DATA, block_header(len(body))) + frame(DATA, body) + frame(EOI, b"\n")
+    )
+
+    assert scope._transport.read_definite_block() == body
+
+
+def test_whole_response_in_one_frame():
+    body = b"\x01\x02\x03"
+    scope, _ = attached(frame(DATA_EOI, block_header(3) + body + b"\n"))
+
+    assert scope._transport.read_definite_block() == body
+
+
+def test_bytes_beyond_the_declared_length_are_rejected():
+    scope, _ = attached(frame(DATA_EOI, block_header(2) + b"\x01\x02EXTRA"))
+
+    with pytest.raises(VICPProtocolError, match="unexpected bytes"):
+        scope._transport.read_definite_block()
+
+
+def test_zero_length_block():
+    scope, _ = attached(frame(DATA, block_header(0)) + frame(EOI, b"\n"))
+
+    assert scope._transport.read_definite_block() == b""
+
+
+@pytest.mark.parametrize("chunk", [1, 3, 64])
+def test_every_frame_split_point_yields_the_same_block(chunk):
+    """Split header + body at every byte (including between '#' and '9', and
+    inside the nine-digit count) and read it back through tiny recv()s."""
+    body = bytes(range(10, 20))
+    stream = block_header(len(body)) + body
+    for cut in range(1, len(stream)):
+        data = frame(DATA, stream[:cut]) + frame(DATA, stream[cut:]) + frame(EOI, b"\n")
+        scope, _ = attached(data, chunk=chunk)
+
+        assert scope._transport.read_definite_block() == body, f"cut at {cut}"
+
+
+# -- byte order / format are set before the waveform is requested ---------------------------
+
+
+def test_get_data_words_sets_format_and_byte_order_before_requesting_the_waveform():
+    body = struct.pack("<2h", -123, 456)
+    scope, sock = attached(frame(DATA, block_header(4)) + frame(DATA, body) + frame(EOI, b"\n"))
+
+    assert scope.getDataWords(channel="C2", block="DAT1") == (-123, 456)
+
+    assert sent_commands(bytes(sock.sent)) == [
+        b"CFMT DEF9,WORD,BIN",
+        b"CORD LO",
+        b"C2:WF? DAT1",
+    ]
+
+
+def test_get_data_bytes_sets_format_before_requesting_the_waveform():
+    scope, sock = attached(frame(DATA, block_header(1)) + frame(DATA, b"\x05") + frame(EOI, b"\n"))
+
+    scope.getDataBytes(channel="C1", block="DAT1")
+
+    assert sent_commands(bytes(sock.sent)) == [b"CFMT DEF9,BYTE,BIN", b"C1:WF? DAT1"]

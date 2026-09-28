@@ -1,5 +1,6 @@
 import socket
 import struct
+import threading
 from contextlib import contextmanager
 from enum import StrEnum
 from typing import Iterator
@@ -99,7 +100,6 @@ __all__ = [
     "TriggerMode",
     "TriggerSlope",
     "VICPFrame",
-    "VICPFrame",
     "VICPProtocolError",
     "VICPTransport",
 ]
@@ -163,6 +163,15 @@ class LeCroy:
     @property
     def address(self) -> str | None:
         return self._transport.address
+
+    @property
+    def transaction_lock(self) -> threading.RLock:
+        """The one re-entrant lock guarding this connection.
+
+        Anything that must serialize with the driver (e.g. an instrument
+        handle) should share this lock rather than keep a second one.
+        """
+        return self._transport.transaction_lock
 
     @property
     def SOCK_TIMEOUT(self) -> float:
@@ -409,9 +418,11 @@ class LeCroy:
     def getDataWords(self, channel="C1", block="DAT1"):
         """Return waveform samples as signed 16-bit values."""
         with self.transaction():
+            # Format and byte order must be in force *before* the waveform is
+            # requested: the scope encodes the WF? reply when it executes it.
             self.send("CFMT DEF9,WORD,BIN")
-            self.send(f"{channel}:WF? {block}")
             self.send("CORD LO")
+            self.send(f"{channel}:WF? {block}")
             data = self._transport.read_definite_block()
             if len(data) % 2:
                 raise VICPProtocolError(f"odd number of waveform bytes received: {len(data)}")

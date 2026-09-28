@@ -38,9 +38,8 @@ import contextlib
 import logging
 import platform
 import re
-import threading
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -190,11 +189,45 @@ def _software_version() -> str:
         return "unknown"
 
 
-def _locked(lock: threading.Lock | None) -> AbstractContextManager[object]:
-    """``lock`` if given, else a no-op context — so a script with its own
-    private ``LeCroy`` never needs to construct a throwaway lock just to
-    call these functions."""
-    return lock if lock is not None else contextlib.nullcontext()
+LockLike = AbstractContextManager[object]
+
+
+@contextlib.contextmanager
+def _guarded(scope: object, lock: LockLike | None) -> Iterator[None]:
+    """Hold ``lock`` (if given) and the driver's own transaction for a batch.
+
+    Entering ``scope.transaction()`` means a batch is atomic against any other
+    thread using the driver, even one that never heard of ``lock``. For a
+    ``ScopeHandle`` both are the same re-entrant lock, so passing the handle's
+    lock is redundant but harmless (and cannot deadlock through a
+    ``LockedProxy``). Scopes without ``transaction()`` (test fakes) just use
+    ``lock``.
+    """
+    with contextlib.ExitStack() as stack:
+        if lock is not None:
+            stack.enter_context(lock)
+        transaction = getattr(scope, "transaction", None)
+        if callable(transaction):
+            stack.enter_context(transaction())
+        yield
+
+
+def _link_lost(scope: object) -> bool:
+    """True once the driver has dropped its connection after a failure.
+
+    The transport invalidates itself when a timeout, disconnect or framing
+    error leaves the byte stream untrustworthy. Continuing with the next
+    channel would read a late reply as that channel's answer, so batch loops
+    stop instead. Scopes without a ``connected`` flag are assumed healthy.
+    """
+    return getattr(scope, "connected", True) is False
+
+
+def _not_attempted(channels: Sequence[Channel]) -> list[ChannelError]:
+    return [
+        ChannelError(channel, ConnectionError("scope connection lost; channel not attempted"))
+        for channel in channels
+    ]
 
 
 def _value(raw: str) -> str:
@@ -259,7 +292,7 @@ def apply_channel_settings(
     settings: Sequence[ChannelSettings],
     *,
     current_settings: Mapping[Channel, ChannelSettings] | Sequence[ChannelSettings] | None = None,
-    lock: threading.Lock | None = None,
+    lock: LockLike | None = None,
 ) -> list[ChannelError]:
     """Apply channel settings, optionally writing only fields that changed.
 
@@ -286,8 +319,8 @@ def apply_channel_settings(
         else {s.channel: s for s in current_settings}
     )
     errors: list[ChannelError] = []
-    with _locked(lock):
-        for desired in settings:
+    with _guarded(scope, lock):
+        for index, desired in enumerate(settings):
             current = baseline.get(desired.channel) if baseline is not None else None
             if baseline is not None and current is None:
                 error = RuntimeError(
@@ -308,11 +341,14 @@ def apply_channel_settings(
             except Exception as exc:  # noqa: BLE001 - collected, not swallowed
                 log.exception("scope: failed to apply %s settings", desired.channel)
                 errors.append(ChannelError(desired.channel, exc))
+                if _link_lost(scope):
+                    errors.extend(_not_attempted([s.channel for s in settings[index + 1 :]]))
+                    break
     return errors
 
 
 def read_channel_settings(
-    scope: LeCroy, channels: Sequence[Channel], *, lock: threading.Lock | None = None
+    scope: LeCroy, channels: Sequence[Channel], *, lock: LockLike | None = None
 ) -> tuple[list[ChannelSettings], list[ChannelError]]:
     """Read every channel's current vertical settings back from the scope.
 
@@ -330,8 +366,8 @@ def read_channel_settings(
     """
     settings: list[ChannelSettings] = []
     errors: list[ChannelError] = []
-    with _locked(lock):
-        for channel in channels:
+    with _guarded(scope, lock):
+        for index, channel in enumerate(channels):
             try:
                 volts_per_div = _parse_volts(scope.get_volts_per_div(channel))
                 offset = _parse_volts(scope.get_offset(channel))
@@ -341,6 +377,9 @@ def read_channel_settings(
             except Exception as exc:  # noqa: BLE001 - collected, not swallowed
                 log.exception("scope: failed to read %s settings", channel)
                 errors.append(ChannelError(channel, exc))
+                if _link_lost(scope):
+                    errors.extend(_not_attempted(channels[index + 1 :]))
+                    break
     return settings, errors
 
 
@@ -349,7 +388,7 @@ def apply_trigger_settings(
     settings: TriggerSettings,
     *,
     current_settings: TriggerSettings | None = None,
-    lock: threading.Lock | None = None,
+    lock: LockLike | None = None,
 ) -> None:
     """Apply trigger settings, optionally writing only fields that changed.
 
@@ -364,7 +403,7 @@ def apply_trigger_settings(
     trigger configuration supplied by the caller. Failures still raise because
     there is only one trigger configuration to report.
     """
-    with _locked(lock):
+    with _guarded(scope, lock):
         if current_settings is None:
             scope.set_trigger_mode(settings.mode)
             scope.set_trigger_source(settings.source)
@@ -385,7 +424,7 @@ def apply_trigger_settings(
             scope.set_trigger_level(settings.source, settings.level_volts)
 
 
-def read_trigger_settings(scope: LeCroy, *, lock: threading.Lock | None = None) -> TriggerSettings:
+def read_trigger_settings(scope: LeCroy, *, lock: LockLike | None = None) -> TriggerSettings:
     """Read the scope's current trigger configuration back.
 
     The read counterpart of :func:`apply_trigger_settings`, including its
@@ -393,7 +432,7 @@ def read_trigger_settings(scope: LeCroy, *, lock: threading.Lock | None = None) 
     there's one trigger, not a batch, so there's nothing to partially
     read.
     """
-    with _locked(lock):
+    with _guarded(scope, lock):
         source = Channel(_trigger_source(scope.get_trigger_source()))
         mode = TriggerMode(_value(scope.get_trigger_mode()))
         slope = TriggerSlope(_value(scope.get_trigger_slope(source)))
@@ -410,7 +449,7 @@ def acquire_scope_recording(
     trigger_settings: TriggerSettings | None = None,
     applied_channel_settings: Sequence[ChannelSettings] | None = None,
     applied_trigger_settings: TriggerSettings | None = None,
-    lock: threading.Lock | None = None,
+    lock: LockLike | None = None,
 ) -> ScopeAcquisition:
     """Acquire enabled ``DAT1`` waveforms and capture their interpretation metadata.
 
@@ -429,7 +468,7 @@ def acquire_scope_recording(
     measurement_id = uuid.uuid4().hex
     errors: list[ChannelError] = []
     waveforms: list[ScopeWaveform] = []
-    with _locked(lock):
+    with _guarded(scope, lock):
         try:
             time_unit, time_offset, time_interval = scope.getHorProperties(channel=channels[0])
         except Exception as exc:  # noqa: BLE001
@@ -452,7 +491,7 @@ def acquire_scope_recording(
                 waveforms=(),
                 errors=tuple(errors),
             )
-        for channel in channels:
+        for index, channel in enumerate(channels):
             try:
                 detailed = getattr(scope, "getDataFloatsDetailed", None)
                 if callable(detailed):
@@ -487,6 +526,9 @@ def acquire_scope_recording(
             except Exception as exc:  # noqa: BLE001
                 log.exception("scope: failed to acquire %s", channel)
                 errors.append(ChannelError(channel, exc))
+                if _link_lost(scope):
+                    errors.extend(_not_attempted(channels[index + 1 :]))
+                    break
     return ScopeAcquisition(
         measurement_id=measurement_id,
         started_at_utc=started,
@@ -505,7 +547,7 @@ def acquire_scope_recording(
 
 
 def acquire_waveforms(
-    scope: LeCroy, channels: Sequence[Channel], *, lock: threading.Lock | None = None
+    scope: LeCroy, channels: Sequence[Channel], *, lock: LockLike | None = None
 ) -> tuple[list[tuple[list[float], list[float], str]], list[ChannelError]]:
     """Return the legacy plot-series shape without adding persistence.
 

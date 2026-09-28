@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from contextlib import contextmanager
 
 import numpy as np
 import pytest
@@ -525,3 +526,162 @@ def test_acquire_waveforms_continues_past_one_channels_failure():
 
     assert [label for _x, _y, label in series] == ["C1", "C4"]
     assert [e.channel for e in errors] == [Channel.C3]
+
+
+# -- link loss: stop instead of reading a late reply as the next channel's answer ---------
+
+
+class DroppingScope(DetailedFakeScope):
+    """Behaves like the real driver: a failure on ``fail_on`` invalidates the
+    connection, after which ``connected`` is False."""
+
+    def __init__(self, fail_on: Channel, **kwargs):
+        super().__init__(
+            fail_channels=frozenset({fail_on}), fail_reads=frozenset({fail_on}), **kwargs
+        )
+        self.connected = True
+
+    def _drop(self, message: str):
+        self.connected = False
+        raise TimeoutError(message)
+
+    def _check_readable(self, channel):
+        if channel in self._fail_reads:
+            self._drop(f"{channel} timed out")
+
+    def set_volts_per_div(self, channel, value):
+        self.calls.append(("set_volts_per_div", channel, value))
+        if channel in self._fail_channels:
+            self._drop(f"{channel} timed out")
+
+    def getDataFloatsDetailed(self, channel, block):
+        if channel in self._fail_channels:
+            self.calls.append(("getDataFloatsDetailed", channel))
+            self._drop(f"{channel} timed out")
+        return super().getDataFloatsDetailed(channel, block)
+
+
+def test_read_channel_settings_stops_once_the_connection_is_lost():
+    scope = DroppingScope(Channel.C2)
+
+    settings, errors = read_channel_settings(
+        scope, [Channel.C1, Channel.C2, Channel.C3, Channel.C4]
+    )
+
+    assert [s.channel for s in settings] == [Channel.C1]
+    assert [e.channel for e in errors] == [Channel.C2, Channel.C3, Channel.C4]
+    assert isinstance(errors[0].error, TimeoutError)
+    assert all(isinstance(e.error, ConnectionError) for e in errors[1:])
+    queried = {call[1] for call in scope.calls if len(call) > 1}
+    assert queried == {Channel.C1, Channel.C2}, "C3/C4 must never be queried on a dead link"
+
+
+def test_apply_channel_settings_stops_once_the_connection_is_lost():
+    scope = DroppingScope(Channel.C1)
+    desired = [_settings(c, volts_per_div=1.0) for c in (Channel.C1, Channel.C2, Channel.C3)]
+
+    errors = apply_channel_settings(scope, desired)
+
+    assert [e.channel for e in errors] == [Channel.C1, Channel.C2, Channel.C3]
+    assert [c for c in scope.calls if c[0].startswith("set_")] == [
+        ("set_volts_per_div", Channel.C1, 1.0)
+    ]
+
+
+def test_acquire_scope_recording_stops_once_the_connection_is_lost():
+    scope = DroppingScope(Channel.C2)
+
+    recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2, Channel.C3])
+
+    assert [w.channel for w in recording.waveforms] == [Channel.C1]
+    assert [e.channel for e in recording.errors] == [Channel.C2, Channel.C3]
+    assert not any(c == ("getDataFloats", Channel.C3) for c in scope.calls)
+
+
+def test_a_parse_error_on_a_healthy_link_does_not_stop_the_batch():
+    """Only a lost connection aborts; a bad reply from one channel doesn't."""
+    scope = FakeScope(fail_reads=frozenset({Channel.C1}))
+
+    settings, errors = read_channel_settings(scope, [Channel.C1, Channel.C2])
+
+    assert [s.channel for s in settings] == [Channel.C2]
+    assert [e.channel for e in errors] == [Channel.C1]
+
+
+# -- locking: one lock, no deadlock through the console proxy ------------------------------
+
+
+class RecordingSocket:
+    def __init__(self):
+        self.sent = bytearray()
+
+    def send(self, data):
+        self.sent.extend(data)
+        return len(data)
+
+    def recv(self, n):
+        raise TimeoutError
+
+    def gettimeout(self):
+        return 1.0
+
+    def close(self):
+        pass
+
+
+def test_scope_handle_lock_is_the_drivers_own_transaction_lock():
+    from iyzee.tui.instruments import ScopeHandle
+
+    handle = ScopeHandle()
+
+    assert handle.lock is handle.scope.transaction_lock
+    with handle.lock, handle.lock:  # re-entrant
+        pass
+
+
+def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock():
+    """The console's ``lab.scope`` is a LockedProxy over the handle's lock;
+    passing that same lock to a workflow used to hang forever."""
+    from iyzee.tui.instruments import LockedProxy, ScopeHandle
+
+    handle = ScopeHandle()
+    sock = RecordingSocket()
+    handle.scope.s = sock
+    proxy = LockedProxy(handle.scope, handle.lock)
+    outcome: list[object] = []
+
+    def run() -> None:
+        outcome.append(
+            apply_channel_settings(
+                proxy, [_settings(Channel.C1, volts_per_div=1.0)], lock=handle.lock
+            )
+        )
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(timeout=3.0)
+
+    assert not worker.is_alive(), "deadlocked: handle lock re-entered through the proxy"
+    assert outcome == [[]]
+    assert b"C1:VOLT_DIV 1.0" in bytes(sock.sent)
+
+
+def test_batch_holds_the_drivers_transaction_even_without_an_explicit_lock():
+    events: list[str] = []
+
+    class TransactionalScope(FakeScope):
+        @contextmanager
+        def transaction(self):
+            events.append("enter")
+            try:
+                yield
+            finally:
+                events.append("exit")
+
+        def set_offset(self, channel, value):
+            events.append("set_offset")
+
+    apply_channel_settings(TransactionalScope(), [_settings(Channel.C1)])
+
+    assert events[0] == "enter" and events[-1] == "exit"
+    assert "set_offset" in events[1:-1]
