@@ -1,3 +1,4 @@
+import pytest
 from iyzee import CH, IP
 from iyzee.power import PSU
 
@@ -67,3 +68,32 @@ def test_psu_context_manager_closes_injected_transport():
 
     assert psu.instrument is None
     assert instrument.close_calls == 1
+
+
+def test_shutter_control_is_lazy_and_managed(monkeypatch):
+    resource_manager = FakeResourceManager()
+    monkeypatch.setattr("iyzee.power.pyvisa.ResourceManager", lambda: resource_manager)
+    shutter = ShutterControl()
+
+    assert resource_manager.opened == []
+    with shutter:
+        instrument = resource_manager.opened[0][1]
+        shutter.open()
+        shutter.close()
+
+    assert instrument.commands[:6] == [
+        "INST OUT3" if False else "INST:NSEL 3",
+        "VOLT 1.7",
+        "INST:NSEL 3",
+        "CURR 0.01",
+        "INST OUT3",
+        "OUTP:SEL 1",
+    ]
+    assert instrument.close_calls == 1
+    assert shutter.psu.instrument is None
+
+
+def test_shutter_control_rejects_output_commands_before_connecting():
+    shutter = ShutterControl()
+    with pytest.raises(RuntimeError, match="not connected"):
+        shutter.open()
