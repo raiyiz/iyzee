@@ -34,8 +34,13 @@ class PSU(BaseDevice):
 class ShutterControl:
     """Control the optical shutter connected to a PSU channel."""
 
-    def __init__(self, chan: CH = CH.THREE, ip: IP = IP.POWER_SUPPLY):
-        self.psu = PSU(ip=ip)
+    def __init__(
+        self,
+        chan: CH = CH.THREE,
+        ip: IP = IP.POWER_SUPPLY,
+        resource_manager=None,
+    ):
+        self.psu = PSU(ip=ip, resource_manager=resource_manager)
         self.chan = chan
 
     def connect(self):
