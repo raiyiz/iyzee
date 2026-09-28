@@ -6,9 +6,13 @@ import iyzee.wavemeter_readout as wavemeter_readout
 class FakeResponse:
     def __init__(self, value: str):
         self.value = value
+        self.closed = False
 
     def read(self):
         return self.value.encode("ascii")
+
+    def close(self):
+        self.closed = True
 
 
 def test_single_readout_returns_measured_frequency(monkeypatch):
@@ -59,3 +63,32 @@ def test_monitoring_frequencies_matches_channels_by_position(monkeypatch, capsys
     printed = capsys.readouterr().out
     assert "ch2" in printed
     assert "ch5" in printed
+
+
+def test_set_pid_setpoint_uses_a_bounded_request(monkeypatch):
+    calls = []
+    response = FakeResponse("ok")
+
+    def fake_urlopen(url, data=None, timeout=None):
+        calls.append((url, data, timeout))
+        return response
+
+    monkeypatch.setattr(wavemeter_readout.urllib.request, "urlopen", fake_urlopen)
+    wavemeter_readout.set_pid_setpoint(377.1, 4, timeout_s=2.5)
+
+    assert calls == [(
+        f"http://{wavemeter_readout.IP.WAVEMETER}:8000/api/set_pid/",
+        b"freq_thz=377.1&channel=4",
+        2.5,
+    )]
+    assert response.closed
+
+
+def test_set_pid_setpoint_wraps_network_failures(monkeypatch):
+    monkeypatch.setattr(
+        wavemeter_readout.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("timed out")),
+    )
+    with pytest.raises(wavemeter_readout.WavemeterReadoutError, match="PID channel 4"):
+        wavemeter_readout.set_pid_setpoint(377.1, 4)
