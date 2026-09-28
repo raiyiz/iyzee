@@ -165,14 +165,16 @@ def frequency_sweep_steps(
     ]
 
 
-def bandwidth_sweep_config(*, sweep_duration_ms: int = 5) -> AnalyzerConfig:
+def bandwidth_sweep_config(
+    *, sweep_duration_ms: int = 5, res_bw_hz: float = 24e3
+) -> AnalyzerConfig:
     """Return the standard analyzer configuration for an RBW sweep."""
     return AnalyzerConfig(
         center_hz=1e6,
         span_hz=0,
         avg_count=200,
         sweep_duration_ms=sweep_duration_ms,
-        res_bw_hz=24e3,
+        res_bw_hz=res_bw_hz,
         trig_source="IMM",
     )
 
@@ -189,11 +191,11 @@ def frequency_sweep_config(*, sweep_duration_ms: int = 10) -> AnalyzerConfig:
 
 
 def build_bandwidth_sweep(
-    rbw_values_hz=None, *, sweep_duration_ms: int = 5
+    rbw_values_hz=None, *, sweep_duration_ms: int = 5, res_bw_hz: float = 24e3
 ) -> tuple[list[BandwidthStep], AnalyzerConfig]:
     """Build an RBW sweep and the analyzer configuration it needs."""
     return bandwidth_sweep_steps(rbw_values_hz), bandwidth_sweep_config(
-        sweep_duration_ms=sweep_duration_ms
+        sweep_duration_ms=sweep_duration_ms, res_bw_hz=res_bw_hz
     )
 
 
