@@ -86,6 +86,7 @@ async def test_a_run_shows_its_summary_verbatim(
     )
     async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
         screen._show(path)
+        await _pilot.pause(0.3)
         text = _summary(screen)
         assert "2 point(s)" in text and "analyzer" in text
         assert "see [/docs] and [nan, nan]" in text
@@ -108,6 +109,7 @@ async def test_a_damaged_run_degrades_to_a_message_instead_of_crashing(
     path = make_run(tmp_path)
     async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
         screen._show(path)  # must not raise
+        await _pilot.pause(0.3)
         assert expected in _summary(screen)
 
 
