@@ -11,6 +11,7 @@ stages:
   - lint
   - typecheck
   - docs
+  - maintenance
 
 test:
   stage: test
@@ -39,3 +40,18 @@ docs:
     paths:
       - build/docs/*.pdf
     expire_in: 30 days
+
+update:
+  stage: maintenance
+  needs: []
+  when: manual
+  script:
+    - ./ci.sh update
+    - ./ci.sh test
+    - ./ci.sh lint
+    - ./ci.sh typecheck
+  artifacts:
+    name: iyzee-update
+    paths:
+      - uv.lock
+    expire_in: 7 days
