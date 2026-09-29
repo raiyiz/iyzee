@@ -23,6 +23,7 @@ import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
@@ -49,7 +50,7 @@ from ...waveform_math import (
     subtract_traces,
     traces_from_scope_recording,
 )
-from ..plotting import draw_series, figure_series
+from ..plotting import PlotSnapshot, draw_snapshot, make_plot_snapshot, figure_series
 from .page import FieldError, Page, _field, _finite_float
 from .traces import _run_label
 
@@ -89,7 +90,7 @@ def _peek_kind(path: Path) -> str | None:
     """
     try:
         return json.loads(path.with_suffix(".json").read_text()).get("kind")
-    except OSError, ValueError, AttributeError:
+    except (OSError, ValueError, AttributeError):
         return None
 
 
@@ -153,31 +154,19 @@ class DataScreen(Page):
         self._measured: dict[str, Trace] = {}
         self._derived: dict[str, Trace] = {}
         self._checkboxes: dict[str, Checkbox] = {}
+        self._selection_generation = 0
+        self._render_generation = 0
         self.refresh_runs()
 
     def on_show(self) -> None:
         self.refresh_runs()
 
     def _all_traces(self) -> dict[str, Trace]:
-        """Measured channels plus derived traces, by label.
-
-        A derived trace reusing an existing label (re-running the same
-        operation, most often) intentionally replaces the earlier entry
-        rather than being kept alongside it under a second name.
-        """
         return {**self._measured, **self._derived}
 
     # -- run list --------------------------------------------------------------------------
 
     def refresh_runs(self) -> None:
-        """Re-scan the data directory for scope acquisitions.
-
-        Filtered to scope acquisitions (see ``_peek_kind``): a sweep
-        checkpoint has no per-channel waveforms for the math operations here
-        to act on, so listing it would only be a dead end for this screen —
-        Traces already lists every recording, sweep and scope alike, for
-        browsing.
-        """
         list_view = self.query_one("#data-list", ListView)
         index = list_view.index
         previous = (
@@ -201,6 +190,8 @@ class DataScreen(Page):
         list_view.index = self._paths.index(previous) if previous in self._paths else 0
 
     def _show_empty(self) -> None:
+        self._selection_generation += 1
+        self._render_generation += 1
         self._path = None
         self._measured = {}
         self._derived = {}
@@ -210,7 +201,7 @@ class DataScreen(Page):
         )
         self._rebuild_channel_checkboxes()
         self._refresh_operand_choices()
-        self._redraw()
+        self._clear_plot()
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         if event.list_view.id != "data-list":
@@ -222,40 +213,94 @@ class DataScreen(Page):
     # -- selecting a run ---------------------------------------------------------------------
 
     def _select(self, path: Path) -> None:
-        summary = self.query_one("#data-summary", Static)
+        self._selection_generation += 1
+        self._render_generation += 1
+        generation = self._selection_generation
+
+        self._path = path
+        self._measured = {}
+        self._derived = {}
+        self._rebuild_channel_checkboxes()
+        self._refresh_operand_choices()
+        self.query_one("#data-summary", Static).update(
+            f"[b]{escape(path.name)}[/b]\n\nLoading preview…"
+        )
+        self._clear_plot()
+        self._load_selection(path, generation)
+
+    @work(thread=True, exclusive=True, group="data-selection", exit_on_error=False)
+    def _load_selection(self, path: Path, generation: int) -> None:
         try:
             recording = load_recording(path)
-            measured = traces_from_scope_recording(recording)
-        except Exception as exc:  # noqa: BLE001 - shown to the user, not raised
-            summary.update(
-                f"[b]{escape(path.name)}[/b]\n\n[red]Could not read file: {escape(str(exc))}[/red]"
-            )
-            self._path = None
+            measured = tuple(traces_from_scope_recording(recording))
+            lines = [f"[b]{escape(path.name)}[/b]"]
+            instrument = recording.metadata.get("instrument")
+            if isinstance(instrument, dict) and instrument.get("identity"):
+                lines.append(escape(str(instrument["identity"])))
+            acquisition = recording.metadata.get("acquisition")
+            if isinstance(acquisition, dict) and acquisition.get("warnings"):
+                lines.append(f"[yellow]{escape('; '.join(acquisition['warnings']))}[/yellow]")
+            if not measured:
+                lines.append("\n[yellow]No channel data in this recording.[/yellow]")
+            summary = "\n".join(lines)
+            snapshot = self._build_snapshot(measured, path)
+        except Exception as exc:
+            self._ui(self._finish_selection, path, generation, None, None, exc)
+            return
+
+        self._ui(
+            self._finish_selection,
+            path,
+            generation,
+            measured,
+            summary,
+            None,
+            snapshot,
+        )
+
+    def _build_snapshot(self, traces: tuple[Trace, ...], path: Path) -> PlotSnapshot:
+        fig = build_waveform_figure(traces, title=path.name)
+        try:
+            lines, labels = figure_series(fig)
+        finally:
+            plt.close(fig)
+        return make_plot_snapshot(
+            lines,
+            title=path.name,
+            xlabel=labels["xlabel"] or None,
+            ylabel=labels["ylabel"] or None,
+        )
+
+    def _finish_selection(
+        self,
+        path: Path,
+        generation: int,
+        measured: tuple[Trace, ...] | None,
+        summary: str | None,
+        error: Exception | None,
+        snapshot: PlotSnapshot | None = None,
+    ) -> None:
+        if generation != self._selection_generation or self._path != path:
+            return
+        if error is not None:
             self._measured = {}
             self._derived = {}
             self._rebuild_channel_checkboxes()
             self._refresh_operand_choices()
-            self._redraw()
+            self.query_one("#data-summary", Static).update(
+                f"[b]{escape(path.name)}[/b]\n\n"
+                f"[red]Could not read file: {escape(str(error))}[/red]"
+            )
+            self._clear_plot()
             return
 
-        self._path = path
+        assert measured is not None and summary is not None and snapshot is not None
         self._measured = {trace.label: trace for trace in measured}
         self._derived = {}
-
-        lines = [f"[b]{escape(path.name)}[/b]"]
-        instrument = recording.metadata.get("instrument")
-        if isinstance(instrument, dict) and instrument.get("identity"):
-            lines.append(escape(str(instrument["identity"])))
-        acquisition = recording.metadata.get("acquisition")
-        if isinstance(acquisition, dict) and acquisition.get("warnings"):
-            lines.append(f"[yellow]{escape('; '.join(acquisition['warnings']))}[/yellow]")
-        if not measured:
-            lines.append("\n[yellow]No channel data in this recording.[/yellow]")
-        summary.update("\n".join(lines))
-
+        self.query_one("#data-summary", Static).update(summary)
         self._rebuild_channel_checkboxes()
         self._refresh_operand_choices()
-        self._redraw()
+        draw_snapshot(self.query_one("#data-plot", PlotextPlot), snapshot)
 
     # -- channel checkboxes and operand choices -----------------------------------------------
 
@@ -289,21 +334,48 @@ class DataScreen(Page):
         ]
 
     def _redraw(self) -> None:
-        plot = self.query_one("#data-plot", PlotextPlot)
-        traces = self._selected_traces()
-        title = self._path.name if self._path else None
-        fig = build_waveform_figure(traces, title=title)
+        path = self._path
+        traces = tuple(self._selected_traces())
+        self._render_generation += 1
+        generation = self._render_generation
+        if path is None:
+            self._clear_plot()
+            return
+        self._render_selected(path, traces, generation)
+
+    @work(thread=True, exclusive=True, group="data-render", exit_on_error=False)
+    def _render_selected(
+        self, path: Path, traces: tuple[Trace, ...], generation: int
+    ) -> None:
         try:
-            lines, labels = figure_series(fig)
-        finally:
-            plt.close(fig)
-        draw_series(
-            plot,
-            lines,
-            title=title,
-            xlabel=labels["xlabel"] or None,
-            ylabel=labels["ylabel"] or None,
-        )
+            snapshot = self._build_snapshot(traces, path)
+        except Exception as exc:
+            self._ui(self._finish_redraw, path, generation, None, exc)
+            return
+        self._ui(self._finish_redraw, path, generation, snapshot, None)
+
+    def _finish_redraw(
+        self,
+        path: Path,
+        generation: int,
+        snapshot: PlotSnapshot | None,
+        error: Exception | None,
+    ) -> None:
+        if generation != self._render_generation or self._path != path:
+            return
+        if error is not None:
+            self.query_one("#data-log", RichLog).write(
+                f"[red]Preview failed: {escape(str(error))}[/red]"
+            )
+            self._clear_plot()
+            return
+        assert snapshot is not None
+        draw_snapshot(self.query_one("#data-plot", PlotextPlot), snapshot)
+
+    def _clear_plot(self) -> None:
+        plot = self.query_one("#data-plot", PlotextPlot)
+        plot.plt.clear_data()
+        plot.refresh()
 
     # -- math operations -----------------------------------------------------------------------
 
