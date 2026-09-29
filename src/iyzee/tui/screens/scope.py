@@ -49,13 +49,27 @@ from ...scope_workflows import (
     read_trigger_settings,
     save_scope_acquisition,
 )
-from ..plotting import draw_series
+from ..plotting import PlotSnapshot, draw_snapshot, make_plot_snapshot
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
 
 log = logging.getLogger("iyzee.tui")
 
 CHANNELS: tuple[Channel, ...] = (Channel.C1, Channel.C2, Channel.C3, Channel.C4)
+
+def _scope_plot_snapshot(recording: ScopeAcquisition) -> PlotSnapshot:
+    """Prepare scope waveform data away from Textual's UI thread."""
+    series = [
+        (waveform.time, waveform.values, str(waveform.channel))
+        for waveform in recording.waveforms
+    ]
+    first = recording.waveforms[0] if recording.waveforms else None
+    return make_plot_snapshot(
+        series,
+        title="Scope waveforms",
+        xlabel=f"Time ({first.time_unit})" if first is not None else "Time (s)",
+        ylabel=f"Signal ({first.value_unit})" if first is not None else "Voltage (V)",
+    )
 
 # Matches the trace colours the instrument itself uses for C1-C4, so the
 # channel panel you're editing and the line it produces on "Acquire" read
@@ -866,7 +880,9 @@ class ScopeScreen(Page):
         except Exception as exc:  # noqa: BLE001 - acquisition stays available in memory
             log.exception("scope: failed to save acquisition")
             save_error = exc
-        self._ui(self._finish_acquire, recording, path, save_error)
+
+        snapshot = _scope_plot_snapshot(recording)
+        self._ui(self._finish_acquire, recording, path, save_error, snapshot)
 
     def _acquire_failed(self, reason: str) -> None:
         self.query_one("#acquire-waveforms", Button).disabled = False
@@ -880,6 +896,7 @@ class ScopeScreen(Page):
         recording: ScopeAcquisition,
         path: Path | None,
         save_error: Exception | None,
+        snapshot: PlotSnapshot,
     ) -> None:
         self.query_one("#acquire-waveforms", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
@@ -892,19 +909,7 @@ class ScopeScreen(Page):
         for err in recording.errors:
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
         if recording.waveforms:
-            plot = self.query_one("#scope-plot", PlotextPlot)
-            series = [
-                (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
-                for waveform in recording.waveforms
-            ]
-            first = recording.waveforms[0]
-            draw_series(
-                plot,
-                series,
-                title="Scope waveforms",
-                xlabel=f"Time ({first.time_unit})",
-                ylabel=f"Signal ({first.value_unit})",
-            )
+            draw_snapshot(self.query_one("#scope-plot", PlotextPlot), snapshot)
             log_widget.write(f"Acquired {len(recording.waveforms)} channel(s).")
         if path is not None:
             log_widget.write(f"Saved acquisition: {escape(str(path))}")
