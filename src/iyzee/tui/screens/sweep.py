@@ -354,7 +354,7 @@ class SweepScreen(Page):
         step: Step,
         result: StepResult | None,
         error,
-        series: tuple[list[float], list[float], str] | None,
+        series: tuple[list[float], list[float], str] | None = None,
     ) -> None:
         self.query_one("#sweep-progress", ProgressBar).update(progress=index + 1)
         log = self.query_one("#sweep-log", RichLog)
