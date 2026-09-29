@@ -17,9 +17,62 @@ and belongs with the rest of the TUI instead.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from textual_plotext import PlotextPlot
+
+
+@dataclass(frozen=True)
+class PlotSeries:
+    """Thread-safe line data prepared for a Textual plot."""
+
+    x: tuple[float, ...]
+    y: tuple[float, ...]
+    label: str | None
+
+
+@dataclass(frozen=True)
+class PlotSnapshot:
+    """All data needed to update a plot, without touching Textual widgets."""
+
+    series: tuple[PlotSeries, ...]
+    title: str | None = None
+    xlabel: str | None = None
+    ylabel: str | None = None
+
+
+def make_plot_snapshot(
+    series: Sequence[tuple[Sequence[float], Sequence[float], str | None]],
+    *,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+) -> PlotSnapshot:
+    """Materialize plot data while still off the UI thread."""
+
+    return PlotSnapshot(
+        series=tuple(
+            PlotSeries(tuple(float(value) for value in x), tuple(float(value) for value in y), label)
+            for x, y, label in series
+        ),
+        title=title,
+        xlabel=xlabel,
+        ylabel=ylabel,
+    )
+
+
+def draw_snapshot(plot: PlotextPlot, snapshot: PlotSnapshot, *, clear: bool = True) -> None:
+    """Apply a prepared snapshot to a Textual plot on the UI thread."""
+
+    draw_series(
+        plot,
+        [(item.x, item.y, item.label) for item in snapshot.series],
+        title=snapshot.title,
+        xlabel=snapshot.xlabel,
+        ylabel=snapshot.ylabel,
+        clear=clear,
+    )
 
 
 def draw_series(
