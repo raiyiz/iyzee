@@ -10,10 +10,12 @@ machinery rather than hand-written loops.
 
 from .core import ExperimentContext, Step, StepCallback, StepResult, run_sequence
 from .io import (
+    Recording,
     build_figure,
     create_dirs,
     difference_series,
     difference_series_many,
+    load_recording,
     multiplot,
     save_step_results,
 )
@@ -38,6 +40,7 @@ __all__ = [
     "BandwidthStep",
     "ExperimentContext",
     "FrequencyStep",
+    "Recording",
     "Step",
     "StepCallback",
     "StepResult",
@@ -52,6 +55,7 @@ __all__ = [
     "difference_series_many",
     "build_frequency_sweep",
     "frequency_sweep_steps",
+    "load_recording",
     "multiplot",
     "prepare_analyzer",
     "run_bandwidth_sweep",

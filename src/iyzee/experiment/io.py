@@ -17,6 +17,7 @@ import json
 import re
 import secrets
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -91,6 +92,52 @@ def _new_stem(name: str = "") -> str:
     token = secrets.token_hex(3)
     slug = _UNSAFE_STEM_CHARS.sub("-", name).strip("-")
     return "_".join(part for part in (timestamp, slug, token) if part)
+
+
+@dataclass(frozen=True)
+class Recording:
+    """One saved measurement, loaded back from its ``.npz``/``.json`` pair.
+
+    ``arrays`` and ``metadata`` are exactly what ``save_numeric_recording``
+    (and, through it, ``save_step_results``/``scope_workflows.
+    save_scope_acquisition``) wrote. This layer doesn't interpret them: a
+    caller reads ``metadata["kind"]`` to pick the right accessor —
+    ``difference_series_many`` for a sweep checkpoint,
+    ``waveform_math.traces_from_scope_recording`` for a scope acquisition —
+    rather than this function guessing the schema.
+    """
+
+    path: Path
+    arrays: dict[str, np.ndarray]
+    metadata: dict[str, Any]
+
+
+def load_recording(path: Path) -> Recording:
+    """Load one saved recording's numeric arrays and JSON sidecar.
+
+    The single reader for the pair :func:`save_numeric_recording` writes;
+    ``TracesScreen`` and the Data screen both go through this rather than
+    each re-implementing "np.load a dict, then try to parse the matching
+    .json" — see the ``experiment.io`` design note in ``adr_0001`` on
+    consolidating a transformation applied more than once before it reaches
+    a renderer.
+
+    A missing or corrupt sidecar (partial write, hand edit) is tolerated —
+    ``metadata`` comes back ``{}`` rather than raising — because the numeric
+    arrays are still fully usable without it. An unreadable ``.npz`` *does*
+    raise ``Exception``: unlike the sidecar, there is no usable partial
+    result in that case, and every existing caller already handles this by
+    catching broadly and showing the error rather than expecting a
+    particular exception type.
+    """
+    with np.load(path, allow_pickle=False) as archive:
+        arrays = {key: archive[key] for key in archive.files}
+    metadata: dict[str, Any] = {}
+    try:
+        metadata = json.loads(path.with_suffix(".json").read_text())
+    except OSError, ValueError:
+        pass
+    return Recording(path=path, arrays=arrays, metadata=metadata)
 
 
 def _sha256_file(path: Path) -> str:

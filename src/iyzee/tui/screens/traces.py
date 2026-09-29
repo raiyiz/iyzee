@@ -9,9 +9,9 @@ Traces-only representation.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 from textual.app import ComposeResult
@@ -21,7 +21,7 @@ from textual.widgets import Label, ListItem, ListView, Static
 from textual_plotext import PlotextPlot
 
 from ...experiment import difference_series_many
-from ...experiment.io import DATA_ROOT, STEM_PATTERN
+from ...experiment.io import DATA_ROOT, STEM_PATTERN, load_recording
 from ..plotting import draw_series
 from .page import Page
 
@@ -193,14 +193,7 @@ class TracesScreen(Page):
         plot = self.query_one("#traces-plot", PlotextPlot)
 
         try:
-            with np.load(path, allow_pickle=False) as archive:
-                arrays = {key: archive[key] for key in archive.files}
-                x_values = arrays.get("x_values")
-                traces = {
-                    key[len("trace_") :]: value
-                    for key, value in arrays.items()
-                    if key.startswith("trace_")
-                }
+            recording = load_recording(path)
         except Exception as exc:  # noqa: BLE001
             summary.update(
                 f"[b]{escape(path.name)}[/b]\n\n[red]Could not read file: {escape(str(exc))}[/red]"
@@ -209,18 +202,17 @@ class TracesScreen(Page):
             plot.refresh()
             return
 
-        # A missing or corrupt sidecar (partial write, hand edit) only costs
-        # the per-point labels and the run-metadata summary lines, not the
-        # numeric data above — that's already loaded and shown regardless.
-        points: list[dict] = []
-        run_metadata = None
-        sidecar: dict = {}
-        try:
-            sidecar = json.loads(path.with_suffix(".json").read_text())
-            points = sidecar.get("points", [])
-            run_metadata = sidecar.get("run_metadata")
-        except OSError, ValueError:
-            pass
+        arrays = recording.arrays
+        x_values = arrays.get("x_values")
+        traces = {
+            key[len("trace_") :]: value for key, value in arrays.items() if key.startswith("trace_")
+        }
+        # A missing or corrupt sidecar (partial write, hand edit) — already
+        # tolerated by load_recording() — only costs the per-point labels and
+        # the run-metadata summary lines below, not the numeric data above.
+        sidecar = recording.metadata
+        points: list[dict] = sidecar.get("points", [])
+        run_metadata = sidecar.get("run_metadata")
 
         if sidecar.get("kind") == "scope-acquisition":
             self._show_scope_recording(path, arrays, sidecar)
@@ -246,8 +238,8 @@ class TracesScreen(Page):
         ]
         rows = len(x_values)
         series = difference_series_many(
-            squeezing if squeezing is not None else [None] * rows,
-            shot_noise if shot_noise is not None else [None] * rows,
+            cast(Any, squeezing) if squeezing is not None else [None] * rows,
+            cast(Any, shot_noise) if shot_noise is not None else [None] * rows,
             labels,
         )
         draw_series(
