@@ -5,13 +5,16 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 
 usage() {
-    echo "usage: $0 {test|lint|typecheck|docs}" >&2
+    echo "usage: $0 {test|lint|typecheck|docs|update}" >&2
     exit 2
 }
 
 case "${1:-}" in
     test|lint|typecheck)
         uv sync --locked --group dev
+        ;;
+    update)
+        uv lock --upgrade
         ;;
     docs)
         ;;
@@ -30,6 +33,8 @@ case "${1:-}" in
         ;;
     typecheck)
         exec uv run --locked mypy src tests
+        ;;
+    update)
         ;;
     docs)
         rm -rf build/docs
