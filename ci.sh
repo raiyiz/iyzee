@@ -5,12 +5,12 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 
 usage() {
-    echo "usage: $0 {test|lint|typecheck|docs}" >&2
+    echo "usage: $0 {test|lint|typecheck|docs|all}" >&2
     exit 2
 }
 
-case "${1:-}" in
-    test|lint|typecheck)
+case "\${1:-}" in
+    test|lint|typecheck|all)
         uv sync --locked --group dev
         ;;
     docs)
@@ -20,7 +20,7 @@ case "${1:-}" in
         ;;
 esac
 
-case "${1:-}" in
+case "\${1:-}" in
     test)
         exec uv run --locked python -m pytest
         ;;
@@ -42,10 +42,17 @@ case "${1:-}" in
                     ;;
             esac
 
-            filename=${source##*/}
-            name=${filename%.typ}
-            typst compile "$source" "build/docs/${name}.pdf"
+            filename=\${source##*/}
+            name=\${filename%.typ}
+            typst compile "$source" "build/docs/\${name}.pdf"
         done
+        ;;
+    all)
+        uv run --locked python -m pytest
+        uv run --locked ruff check .
+        uv run --locked ruff format --check .
+        uv run --locked mypy src tests
+        "$0" docs
         ;;
     *)
         usage
