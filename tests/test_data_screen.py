@@ -334,6 +334,7 @@ async def test_export_writes_a_real_png_next_to_the_recording(
         out = npz_path.with_name(f"{npz_path.stem}-plot.png")
         assert out.exists()
         assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        await pilot.pause(0.3)
         assert f"Saved plot: {out}" in _log(screen)
 
 
