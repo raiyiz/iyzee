@@ -58,5 +58,4 @@ jobs:
             --title "chore: update dependencies and CI images" \
             --body "Automated dependency and CI toolchain update.
 
-Validation passed with:
-./ci.sh all"
+Validation passed with: ./ci.sh all"
