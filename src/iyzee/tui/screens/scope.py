@@ -57,11 +57,11 @@ log = logging.getLogger("iyzee.tui")
 
 CHANNELS: tuple[Channel, ...] = (Channel.C1, Channel.C2, Channel.C3, Channel.C4)
 
+
 def _scope_plot_snapshot(recording: ScopeAcquisition) -> PlotSnapshot:
     """Prepare scope waveform data away from Textual's UI thread."""
     series = [
-        (waveform.time, waveform.values, str(waveform.channel))
-        for waveform in recording.waveforms
+        (waveform.time, waveform.values, str(waveform.channel)) for waveform in recording.waveforms
     ]
     first = recording.waveforms[0] if recording.waveforms else None
     return make_plot_snapshot(
@@ -70,6 +70,7 @@ def _scope_plot_snapshot(recording: ScopeAcquisition) -> PlotSnapshot:
         xlabel=f"Time ({first.time_unit})" if first is not None else "Time (s)",
         ylabel=f"Signal ({first.value_unit})" if first is not None else "Voltage (V)",
     )
+
 
 # Matches the trace colours the instrument itself uses for C1-C4, so the
 # channel panel you're editing and the line it produces on "Acquire" read

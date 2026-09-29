@@ -408,9 +408,7 @@ class SweepScreen(Page):
         )
         self._ui(self._finish_capture, error=None, snapshot=snapshot)
 
-    def _finish_capture(
-        self, *, error: Exception | None, snapshot: PlotSnapshot | None
-    ) -> None:
+    def _finish_capture(self, *, error: Exception | None, snapshot: PlotSnapshot | None) -> None:
         self.iyzee_app.sweep_running = False
         self.query_one("#run-sweep", Button).disabled = False
         self.query_one("#capture-trace", Button).disabled = False

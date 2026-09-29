@@ -50,7 +50,7 @@ from ...waveform_math import (
     subtract_traces,
     traces_from_scope_recording,
 )
-from ..plotting import PlotSnapshot, draw_snapshot, make_plot_snapshot, figure_series
+from ..plotting import PlotSnapshot, draw_snapshot, figure_series, make_plot_snapshot
 from .page import FieldError, Page, _field, _finite_float
 from .traces import _run_label
 
@@ -90,7 +90,7 @@ def _peek_kind(path: Path) -> str | None:
     """
     try:
         return json.loads(path.with_suffix(".json").read_text()).get("kind")
-    except (OSError, ValueError, AttributeError):
+    except OSError, ValueError, AttributeError:
         return None
 
 
@@ -344,9 +344,7 @@ class DataScreen(Page):
         self._render_selected(path, traces, generation)
 
     @work(thread=True, exclusive=True, group="data-render", exit_on_error=False)
-    def _render_selected(
-        self, path: Path, traces: tuple[Trace, ...], generation: int
-    ) -> None:
+    def _render_selected(self, path: Path, traces: tuple[Trace, ...], generation: int) -> None:
         try:
             snapshot = self._build_snapshot(traces, path)
         except Exception as exc:

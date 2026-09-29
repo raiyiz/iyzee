@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
@@ -138,9 +139,7 @@ class TracesScreen(Page):
             if recording.metadata.get("kind") == "scope-acquisition":
                 metadata = recording.metadata
                 summary = self._scope_summary(path, metadata)
-                first = next(
-                    (w for w in metadata.get("waveforms", []) if isinstance(w, dict)), {}
-                )
+                first = next((w for w in metadata.get("waveforms", []) if isinstance(w, dict)), {})
                 series = []
                 for waveform in metadata.get("waveforms", []):
                     if not isinstance(waveform, dict):
@@ -266,4 +265,3 @@ class TracesScreen(Page):
         assert snapshot is not None
         self.query_one("#traces-summary", Static).update(summary or "")
         draw_snapshot(self.query_one("#traces-plot", PlotextPlot), snapshot)
-
