@@ -451,21 +451,44 @@ class DataScreen(Page):
     # -- export --------------------------------------------------------------------------------
 
     def _export(self) -> None:
-        log_widget = self.query_one("#data-log", RichLog)
         if self._path is None:
             self.notify("Select a scope acquisition first.", severity="error")
             return
-        traces = self._selected_traces()
+        traces = tuple(self._selected_traces())
         if not traces:
             self.notify("Select at least one channel/trace to export.", severity="error")
             return
-        out_path = self._path.with_name(f"{self._path.stem}-plot.png")
+        path = self._path
+        out_path = path.with_name(f"{path.stem}-plot.png")
+        selection_generation = self._selection_generation
+        self._export_figure(traces, path.name, out_path, selection_generation)
+
+    @work(thread=True, exclusive=True, group="data-export", exit_on_error=False)
+    def _export_figure(
+        self,
+        traces: tuple[Trace, ...],
+        title: str,
+        out_path: Path,
+        selection_generation: int,
+    ) -> None:
         try:
-            save_waveform_figure(traces, out_path, title=self._path.name)
+            save_waveform_figure(traces, out_path, title=title)
         except Exception as exc:  # noqa: BLE001 - reported, not raised, from a UI action
             log.exception("data: failed to export waveform figure")
-            log_widget.write(f"[red]Export failed: {escape(str(exc))}[/red]")
-            self.notify(f"Export failed: {exc}", severity="error", markup=False)
+            self._ui(self._finish_export, out_path, selection_generation, exc)
             return
-        log_widget.write(f"Saved plot: {escape(str(out_path))}")
+        self._ui(self._finish_export, out_path, selection_generation, None)
+
+    def _finish_export(
+        self, out_path: Path, selection_generation: int, error: Exception | None
+    ) -> None:
+        if selection_generation != self._selection_generation:
+            return
+        if error is not None:
+            self.query_one("#data-log", RichLog).write(
+                f"[red]Export failed: {escape(str(error))}[/red]"
+            )
+            self.notify(f"Export failed: {error}", severity="error", markup=False)
+            return
+        self.query_one("#data-log", RichLog).write(f"Saved plot: {escape(str(out_path))}")
         self.notify(f"Saved {out_path.name}")
