@@ -52,7 +52,7 @@ from ...experiment import (
     run_sequence,
     save_step_results,
 )
-from ..plotting import draw_series
+from ..plotting import PlotSnapshot, draw_series, draw_snapshot, make_plot_snapshot
 from ..text import one_line
 from ..workers import LastRun
 from .page import FieldError, Page, _field, _positive_float, _positive_int
@@ -322,7 +322,16 @@ class SweepScreen(Page):
                     # power cut or a quit part-way through a long run then
                     # costs at most the step in flight, not the whole run.
                     self._checkpoint(kind)
-                self._ui(self._on_step, index, total, step, result, error)
+                series = (
+                    difference_series(
+                        result.traces.get("squeezing"),
+                        result.traces.get("shot_noise"),
+                        result.label,
+                    )
+                    if result is not None
+                    else None
+                )
+                self._ui(self._on_step, index, total, step, result, error, series)
                 if self._abort_event.is_set() or self.iyzee_app.shutdown_requested.is_set():
                     raise SweepAborted()
 
@@ -338,7 +347,15 @@ class SweepScreen(Page):
 
         self._ui(self._finish, kind, aborted=aborted, setup_error=None)
 
-    def _on_step(self, index, total, step: Step, result: StepResult | None, error) -> None:
+    def _on_step(
+        self,
+        index,
+        total,
+        step: Step,
+        result: StepResult | None,
+        error,
+        series: tuple[list[float], list[float], str] | None,
+    ) -> None:
         self.query_one("#sweep-progress", ProgressBar).update(progress=index + 1)
         log = self.query_one("#sweep-log", RichLog)
         label = getattr(step, "label", None) or f"step[{index}]"
@@ -348,17 +365,8 @@ class SweepScreen(Page):
             )
             return
         log.write(f"[{index + 1}/{total}] {escape(label)}: ok")
-        if result is not None:
-            self._plot_result(result)
-
-    def _plot_result(self, result: StepResult) -> None:
-        series = difference_series(
-            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
-        )
-        if series is None:
-            return
-        plot = self.query_one("#sweep-plot", PlotextPlot)
-        draw_series(plot, [series], clear=False)
+        if series is not None:
+            draw_series(self.query_one("#sweep-plot", PlotextPlot), [series], clear=False)
 
     # -- "Capture trace": one raw spectrum off the analyzer, right now ------
 
@@ -390,12 +398,18 @@ class SweepScreen(Page):
                 freq = mx.get_frequency_axis()
             except Exception as exc:  # noqa: BLE001
                 log.exception("capture: failed to read a trace from the MXA")
-                self._ui(self._finish_capture, error=exc, freq=None, power=None)
+                self._ui(self._finish_capture, error=exc, snapshot=None)
                 return
-        self._ui(self._finish_capture, error=None, freq=freq, power=power)
+        snapshot = make_plot_snapshot(
+            [(freq, power, "Trace 1")],
+            title="Live trace capture",
+            xlabel="Frequency (Hz)",
+            ylabel="Power (dBm)",
+        )
+        self._ui(self._finish_capture, error=None, snapshot=snapshot)
 
     def _finish_capture(
-        self, *, error: Exception | None, freq: list[float] | None, power: list[float] | None
+        self, *, error: Exception | None, snapshot: PlotSnapshot | None
     ) -> None:
         self.iyzee_app.sweep_running = False
         self.query_one("#run-sweep", Button).disabled = False
@@ -407,16 +421,9 @@ class SweepScreen(Page):
             self.notify(f"Capture failed: {one_line(error)}", severity="error", markup=False)
             return
 
-        assert freq is not None and power is not None  # error is None guarantees both are set
-        plot = self.query_one("#sweep-plot", PlotextPlot)
-        draw_series(
-            plot,
-            [(freq, power, "Trace 1")],
-            title="Live trace capture",
-            xlabel="Frequency (Hz)",
-            ylabel="Power (dBm)",
-        )
-        log.write(f"Captured {len(power)} point(s).")
+        assert snapshot is not None
+        draw_snapshot(self.query_one("#sweep-plot", PlotextPlot), snapshot)
+        log.write(f"Captured {len(snapshot.series[0].y) if snapshot.series else 0} point(s).")
 
     # -- checkpointing ----------------------------------------------------
 
