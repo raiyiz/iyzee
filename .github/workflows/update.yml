@@ -1,9 +1,6 @@
 name: Update dependencies
 
 on:
-  push:
-    branches:
-      - cleanup/refabulation
   workflow_dispatch:
 
 permissions:
