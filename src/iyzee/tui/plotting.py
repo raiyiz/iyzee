@@ -53,7 +53,11 @@ def make_plot_snapshot(
 
     return PlotSnapshot(
         series=tuple(
-            PlotSeries(tuple(float(value) for value in x), tuple(float(value) for value in y), label)
+            PlotSeries(
+                tuple(float(value) for value in x),
+                tuple(float(value) for value in y),
+                label,
+            )
             for x, y, label in series
         ),
         title=title,
