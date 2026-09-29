@@ -11,9 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
-
-import numpy as np
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.markup import escape
@@ -22,7 +20,7 @@ from textual_plotext import PlotextPlot
 
 from ...experiment import difference_series_many
 from ...experiment.io import DATA_ROOT, STEM_PATTERN, load_recording
-from ..plotting import draw_series
+from ..plotting import PlotSnapshot, draw_snapshot, make_plot_snapshot
 from .page import Page
 
 # The single source of truth for this path is experiment.io.DATA_ROOT — kept
@@ -73,18 +71,14 @@ class TracesScreen(Page):
 
     def on_mount(self) -> None:
         self._paths: list[Path] = []
+        self._render_generation = 0
         self.refresh_runs()
 
     def on_show(self) -> None:
         self.refresh_runs()
 
     def refresh_runs(self) -> None:
-        """Re-scan the data directory. Cheap enough to call on every visit.
-
-        Keeps the highlighted run highlighted across the rescan (falling
-        back to the newest), so coming back to this page doesn't silently
-        move the highlight away from the run the preview is showing.
-        """
+        """Re-scan the data directory and preserve the current selection."""
         list_view = self.query_one("#traces-list", ListView)
         index = list_view.index
         previous = (
@@ -103,39 +97,114 @@ class TracesScreen(Page):
         if not self._paths:
             self._show_empty()
             return
-        # append() does not set a highlighted index the way passing
-        # children to ListView's constructor does, so without this nothing
-        # is "current". Setting it also fires Highlighted, which is what
-        # draws the preview (see on_list_view_highlighted).
         list_view.index = self._paths.index(previous) if previous in self._paths else 0
 
     def _show_empty(self) -> None:
+        self._render_generation += 1
         self.query_one("#traces-summary", Static).update(
             "No recordings yet.\n\nSweep and Scope acquisitions are saved automatically "
             "and will appear here."
         )
-        plot = self.query_one("#traces-plot", PlotextPlot)
-        plot.plt.clear_data()
-        plot.refresh()
+        self.query_one("#traces-plot", PlotextPlot).plt.clear_data()
+        self.query_one("#traces-plot", PlotextPlot).refresh()
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
-        """Preview follows the highlight, so Up/Down browses runs directly.
-
-        Previously only Enter/click selected, so the preview and the
-        highlighted row could disagree — and on arrival the newest run was
-        highlighted while the preview still said "Select a run".
-        """
         if event.list_view.id != "traces-list":
             return
         index = event.list_view.index
         if index is not None and 0 <= index < len(self._paths):
             self._show(self._paths[index])
 
-    def _show_scope_recording(
-        self, path: Path, arrays: dict[str, np.ndarray], metadata: dict
-    ) -> None:
-        """Preview a durable scope acquisition using the same plot helper."""
-        summary = self.query_one("#traces-summary", Static)
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.list_view.id != "traces-list":
+            return
+        if 0 <= event.index < len(self._paths):
+            self._show(self._paths[event.index])
+
+    def _show(self, path: Path) -> None:
+        """Start preview preparation without doing file/numpy work on the UI thread."""
+        self._render_generation += 1
+        generation = self._render_generation
+        self.query_one("#traces-summary", Static).update(
+            f"[b]{escape(path.name)}[/b]\n\nLoading preview…"
+        )
+        self._render(path, generation)
+
+    @work(thread=True, exclusive=True, group="traces-render", exit_on_error=False)
+    def _render(self, path: Path, generation: int) -> None:
+        try:
+            recording = load_recording(path)
+
+            if recording.metadata.get("kind") == "scope-acquisition":
+                metadata = recording.metadata
+                summary = self._scope_summary(path, metadata)
+                first = next(
+                    (w for w in metadata.get("waveforms", []) if isinstance(w, dict)), {}
+                )
+                series = []
+                for waveform in metadata.get("waveforms", []):
+                    if not isinstance(waveform, dict):
+                        continue
+                    channel = str(waveform.get("channel", "?"))
+                    time_array = recording.arrays.get(f"time_{channel}")
+                    value_array = recording.arrays.get(f"value_{channel}")
+                    if time_array is None or value_array is None:
+                        continue
+                    series.append((time_array, value_array, channel))
+                snapshot = make_plot_snapshot(
+                    series,
+                    title=path.name,
+                    xlabel=f"Time ({first.get('time_unit', '')})",
+                    ylabel=f"Signal ({first.get('value_unit', '')})",
+                )
+            else:
+                arrays = recording.arrays
+                x_values = arrays.get("x_values")
+                if x_values is None:
+                    raise ValueError("Missing x_values in recording.")
+                traces = {
+                    key[len("trace_") :]: value
+                    for key, value in arrays.items()
+                    if key.startswith("trace_")
+                }
+                points = recording.metadata.get("points", [])
+                run_metadata = recording.metadata.get("run_metadata")
+                lines = [f"[b]{escape(path.name)}[/b]", f"{len(x_values)} point(s)"]
+                if isinstance(run_metadata, dict):
+                    lines.append("")
+                    lines.extend(
+                        f"{escape(str(k))}: {escape(str(v))}" for k, v in run_metadata.items()
+                    )
+                summary = "\n".join(lines)
+
+                labels = [
+                    (points[index].get("label") or f"pt {index}")
+                    if index < len(points) and isinstance(points[index], dict)
+                    else f"pt {index}"
+                    for index in range(len(x_values))
+                ]
+                series = difference_series_many(
+                    traces.get("squeezing")
+                    if traces.get("squeezing") is not None
+                    else [None] * len(x_values),
+                    traces.get("shot_noise")
+                    if traces.get("shot_noise") is not None
+                    else [None] * len(x_values),
+                    labels,
+                )
+                snapshot = make_plot_snapshot(
+                    series,
+                    title=path.name,
+                    xlabel="Trace point",
+                    ylabel="Squeezing - shot noise",
+                )
+        except Exception as exc:  # noqa: BLE001 - preview errors are shown in the page
+            self._ui(self._finish_render, path, generation, None, exc)
+            return
+
+        self._ui(self._finish_render, path, generation, snapshot, None, summary)
+
+    def _scope_summary(self, path: Path, metadata: dict) -> str:
         lines = [f"[b]{escape(path.name)}[/b]", "Scope acquisition"]
         if metadata.get("measurement_id"):
             lines.append(f"Measurement: {escape(str(metadata['measurement_id']))}")
@@ -146,106 +215,55 @@ class TracesScreen(Page):
             lines.append(
                 "Instrument: " + escape(str(instrument.get("address") or "address unknown"))
             )
-        series = []
         for waveform in metadata.get("waveforms", []):
             if not isinstance(waveform, dict):
                 continue
             channel = str(waveform.get("channel", "?"))
-            time_array = arrays.get(f"time_{channel}")
-            value_array = arrays.get(f"value_{channel}")
-            if time_array is None or value_array is None:
-                continue
-            unit = str(waveform.get("value_unit", ""))
-            series.append((time_array.tolist(), value_array.tolist(), channel))
             stats = waveform.get("stats")
             if isinstance(stats, dict):
+                unit = str(waveform.get("value_unit", ""))
                 lines.append(
                     f"{escape(channel)}: n={stats.get('sample_count', '?')}, "
-                    f"min={stats.get('min', '?')} {escape(unit)}, max={stats.get('max', '?')} {escape(unit)}, "
-                    f"p-p={stats.get('peak_to_peak', '?')} {escape(unit)}, rms={stats.get('rms', '?')} {escape(unit)}"
+                    f"min={stats.get('min', '?')} {escape(unit)}, "
+                    f"max={stats.get('max', '?')} {escape(unit)}, "
+                    f"p-p={stats.get('peak_to_peak', '?')} {escape(unit)}, "
+                    f"rms={stats.get('rms', '?')} {escape(unit)}"
                 )
         errors = metadata.get("errors")
         if errors:
             lines.append(f"Errors: {escape(str(errors))}")
-        summary.update("\n".join(lines))
-        plot = self.query_one("#traces-plot", PlotextPlot)
-        if series:
-            first = next((w for w in metadata.get("waveforms", []) if isinstance(w, dict)), {})
-            draw_series(
-                plot,
-                series,
-                title=path.name,
-                xlabel=f"Time ({first.get('time_unit', '')})",
-                ylabel=f"Signal ({first.get('value_unit', '')})",
-            )
-        else:
-            plot.plt.clear_data()
-            plot.refresh()
+        return "\n".join(lines)
 
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        if event.list_view.id != "traces-list":
+    def _finish_render(
+        self,
+        path: Path,
+        generation: int,
+        snapshot: PlotSnapshot | None,
+        error: Exception | None,
+        summary: str | None = None,
+    ) -> None:
+        if generation != self._render_generation:
             return
-        if 0 <= event.index < len(self._paths):
-            self._show(self._paths[event.index])
-
-    def _show(self, path: Path) -> None:
-        summary = self.query_one("#traces-summary", Static)
-        plot = self.query_one("#traces-plot", PlotextPlot)
-
-        try:
-            recording = load_recording(path)
-        except Exception as exc:  # noqa: BLE001
-            summary.update(
-                f"[b]{escape(path.name)}[/b]\n\n[red]Could not read file: {escape(str(exc))}[/red]"
-            )
-            plot.plt.clear_data()
-            plot.refresh()
-            return
-
-        arrays = recording.arrays
-        x_values = arrays.get("x_values")
-        traces = {
-            key[len("trace_") :]: value for key, value in arrays.items() if key.startswith("trace_")
-        }
-        # A missing or corrupt sidecar (partial write, hand edit) — already
-        # tolerated by load_recording() — only costs the per-point labels and
-        # the run-metadata summary lines below, not the numeric data above.
-        sidecar = recording.metadata
-        points: list[dict] = sidecar.get("points", [])
-        run_metadata = sidecar.get("run_metadata")
-
-        if sidecar.get("kind") == "scope-acquisition":
-            self._show_scope_recording(path, arrays, sidecar)
-            return
-        if x_values is None:
-            summary.update(
-                f"[b]{escape(path.name)}[/b]\n\n[red]Missing x_values in recording.[/red]"
-            )
-            plot.plt.clear_data()
-            plot.refresh()
-            return
-        lines = [f"[b]{escape(path.name)}[/b]", f"{len(x_values)} point(s)"]
-        if isinstance(run_metadata, dict):
-            lines.append("")
-            lines.extend(f"{escape(str(k))}: {escape(str(v))}" for k, v in run_metadata.items())
-        summary.update("\n".join(lines))
-
-        squeezing = traces.get("squeezing")
-        shot_noise = traces.get("shot_noise")
-        labels = [
-            (points[index].get("label") or f"pt {index}") if index < len(points) else f"pt {index}"
-            for index in range(len(x_values))
-        ]
-        rows = len(x_values)
-        series = difference_series_many(
-            cast(Any, squeezing) if squeezing is not None else [None] * rows,
-            cast(Any, shot_noise) if shot_noise is not None else [None] * rows,
-            labels,
+        current_index = self.query_one("#traces-list", ListView).index
+        current_path = (
+            self._paths[current_index]
+            if current_index is not None and 0 <= current_index < len(self._paths)
+            else None
         )
-        draw_series(
-            plot,
-            series,
-            title=path.name,
-            xlabel="Trace point",
-            ylabel="Squeezing - shot noise",
-        )
+        if current_path != path:
+            return
+
+        if error is not None:
+            self.query_one("#traces-summary", Static).update(
+                f"[b]{escape(path.name)}[/b]\n\n"
+                f"[red]Could not read file: {escape(str(error))}[/red]"
+            )
+            plot = self.query_one("#traces-plot", PlotextPlot)
+            plot.plt.clear_data()
+            plot.refresh()
+            return
+
+        assert snapshot is not None
+        self.query_one("#traces-summary", Static).update(summary or "")
+        draw_snapshot(self.query_one("#traces-plot", PlotextPlot), snapshot)
+
