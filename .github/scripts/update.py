@@ -150,13 +150,12 @@ def update_tool_versions() -> bool:
     for path in sorted(WORKFLOW_DIR.glob("*.y*ml")):
         original = path.read_text(encoding="utf-8")
         updated = re.sub(
-            r"(uses:\s*astral-sh/setup-uv@[^\n]+\n\s+with:\n\s+version:\s*)"
-            r"(['"])[^'"]+\2",
+            r"""(uses:\s*astral-sh/setup-uv@[^\n]+\n\s+with:\n\s+version:\s*)(['"])[^'"]+\2""",
             lambda match: f'{match.group(1)}"{uv_version}"',
             original,
         )
         updated = re.sub(
-            r"(typst-version:\s*)(['"])[^'"]+\2",
+            r"""(typst-version:\s*)(['"])[^'"]+\2""",
             lambda match: f'{match.group(1)}"{typst_version}"',
             updated,
         )
