@@ -7,7 +7,7 @@ from textual.app import App
 from textual.widgets import Label
 from textual_plotext import PlotextPlot
 
-from iyzee.tui.plotting import draw_series, figure_series
+from iyzee.tui.plotting import draw_series, figure_series, make_plot_snapshot
 
 
 class _PlotApp(App):
@@ -67,3 +67,22 @@ def test_figure_series_extracts_lines_and_axis_labels() -> None:
 
     assert lines == [([0, 1], [2, 3], "a")]
     assert labels == {"xlabel": "x", "ylabel": "y"}
+
+
+def test_make_plot_snapshot_materializes_plot_data() -> None:
+    x_values = (value for value in [0, 1])
+    y_values = (value for value in [2.0, 3.0])
+
+    snapshot = make_plot_snapshot(
+        [(x_values, y_values, "a")],
+        title="t",
+        xlabel="x",
+        ylabel="y",
+    )
+
+    assert snapshot.title == "t"
+    assert snapshot.xlabel == "x"
+    assert snapshot.ylabel == "y"
+    assert snapshot.series[0].x == (0.0, 1.0)
+    assert snapshot.series[0].y == (2.0, 3.0)
+    assert snapshot.series[0].label == "a"
