@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   update:
@@ -31,16 +32,31 @@ jobs:
       - name: Validate update
         run: ./ci.sh all
 
-      - name: Commit validated update
+      - name: Create update pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ github.ref_name }}
+          UPDATE_BRANCH: automation/dependency-update-${{ github.ref_name }}-${{ github.run_id }}
         run: |
           if git diff --quiet; then
             echo "No updates available."
             exit 0
           fi
 
+          git switch -c "$UPDATE_BRANCH"
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add pyproject.toml uv.lock .github/workflows .gitlab-ci.yml
           git commit -m "chore: update dependencies and CI images"
-          git push
+          git push --set-upstream origin "$UPDATE_BRANCH"
+
+          gh pr create \
+            --base "$BASE_BRANCH" \
+            --head "$UPDATE_BRANCH" \
+            --title "chore: update dependencies and CI images" \
+            --body "Automated dependency and CI toolchain update.
+
+Validation passed with:
+./ci.sh all"
