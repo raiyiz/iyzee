@@ -1,0 +1,49 @@
+name: Update dependencies
+
+on:
+  push:
+    branches:
+      - cleanup/refabulation
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+
+      - name: Set up Typst
+        uses: typst-community/setup-typst@v5
+        with:
+          typst-version: "0.15.1"
+
+      - name: Update dependencies and CI versions
+        run: python3 .github/scripts/update.py
+
+      - name: Validate update
+        run: ./ci.sh all
+
+      - name: Commit validated update
+        run: |
+          if git diff --quiet; then
+            echo "No updates available."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add pyproject.toml uv.lock .github/workflows .gitlab-ci.yml
+          git commit -m "chore: update dependencies and CI images"
+          git push
