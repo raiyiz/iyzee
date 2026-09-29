@@ -8,8 +8,10 @@ to the workflow that calls it.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -19,42 +21,61 @@ WORKFLOW_DIR = ROOT / ".github" / "workflows"
 GITHUB_API = "https://api.github.com"
 USER_AGENT = "iyzee-dependency-updater"
 
+_RELEASE_CACHE: dict[str, str] = {}
+_COMMIT_CACHE: dict[tuple[str, str], str] = {}
 
-def get_json(url: str) -> object | None:
-    request = Request(
-        url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": USER_AGENT,
-        },
-    )
+
+def get_json(url: str) -> object:
+    headers = {"User-Agent": USER_AGENT}
+    if url.startswith(GITHUB_API):
+        headers["Accept"] = "application/vnd.github+json"
+        token = os.environ.get("GITHUB_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+    request = Request(url, headers=headers)
     try:
         with urlopen(request, timeout=30) as response:
             return json.load(response)
-    except (HTTPError, URLError, TimeoutError):
-        return None
+    except (HTTPError, URLError, TimeoutError) as exc:
+        raise RuntimeError(f"failed to fetch {url}: {exc}") from exc
 
 
-def latest_release_tag(repository: str) -> str | None:
+def latest_release_tag(repository: str) -> str:
+    if repository in _RELEASE_CACHE:
+        return _RELEASE_CACHE[repository]
+
     data = get_json(f"{GITHUB_API}/repos/{repository}/releases/latest")
-    if not isinstance(data, dict):
-        return None
-    tag = data.get("tag_name")
-    return tag if isinstance(tag, str) else None
+    if not isinstance(data, dict) or not isinstance(data.get("tag_name"), str):
+        raise RuntimeError(f"{repository} has no usable latest release")
+
+    tag = data["tag_name"]
+    _RELEASE_CACHE[repository] = tag
+    return tag
 
 
-def latest_action_commit(repository: str, tag: str) -> str | None:
+def latest_action_commit(repository: str, tag: str) -> str:
+    key = (repository, tag)
+    if key in _COMMIT_CACHE:
+        return _COMMIT_CACHE[key]
+
     data = get_json(f"{GITHUB_API}/repos/{repository}/commits/{tag}")
-    if not isinstance(data, dict):
-        return None
-    sha = data.get("sha")
-    return sha if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) else None
+    if not isinstance(data, dict) or not isinstance(data.get("sha"), str):
+        raise RuntimeError(f"could not resolve {repository}@{tag} to a commit")
+
+    sha = data["sha"]
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError(f"invalid commit SHA for {repository}@{tag}: {sha}")
+
+    _COMMIT_CACHE[key] = sha
+    return sha
 
 
-def normalize_action_tag(tag: str) -> str | None:
-    if re.fullmatch(r"v?\d+(?:\.\d+){1,2}", tag):
-        return tag if tag.startswith("v") else f"v{tag}"
-    return None
+def normalize_action_tag(tag: str) -> str:
+    match = re.fullmatch(r"v?(\d+(?:\.\d+){1,2})", tag)
+    if match is None:
+        raise RuntimeError(f"latest release is not a version tag: {tag}")
+    return f"v{match.group(1)}"
 
 
 def update_github_actions() -> bool:
@@ -79,18 +100,13 @@ def update_github_actions() -> bool:
             if ref.startswith("./"):
                 return match.group(0)
 
-            latest_tag = normalize_action_tag(latest_release_tag(repository) or "")
-            if latest_tag is None:
-                return match.group(0)
+            latest_tag = normalize_action_tag(latest_release_tag(repository))
 
             if re.fullmatch(r"[0-9a-f]{40}", ref):
                 if not match.group("comment_version"):
                     return match.group(0)
 
                 latest_sha = latest_action_commit(repository, latest_tag)
-                if latest_sha is None:
-                    return match.group(0)
-
                 latest_comment = f" # {latest_tag}"
                 if ref == latest_sha and comment == latest_comment:
                     return match.group(0)
@@ -126,82 +142,44 @@ def update_github_actions() -> bool:
     return changed
 
 
-def registry_tags(image: str) -> list[str]:
-    url = f"https://ghcr.io/v2/{image.removeprefix('ghcr.io/')}/tags/list?n=1000"
-    data = get_json(url)
-    if isinstance(data, dict):
-        tags = data.get("tags")
-        if isinstance(tags, list):
-            return [tag for tag in tags if isinstance(tag, str)]
-    return []
-
-
-def version_tuple(tag: str) -> tuple[int, int, int] | None:
-    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", tag)
-    if match is None:
-        return None
-    return tuple(int(part) for part in match.groups())
-
-
-def latest_matching_docker_tag(current_tag: str, tags: list[str]) -> str | None:
-    if version_tuple(current_tag) is not None:
-        candidates = [
-            (version_tuple(tag), tag)
-            for tag in tags
-            if version_tuple(tag) is not None
-        ]
-        return max(candidates, key=lambda item: item[0] or (0, 0, 0))[1] if candidates else None
-
-    suffix_match = re.fullmatch(
-        r"(\d+\.\d+\.\d+)(-python3\.14-trixie)",
-        current_tag,
-    )
-    if suffix_match is None:
-        return None
-
-    suffix = suffix_match.group(2)
-    candidates: list[tuple[tuple[int, int, int], str]] = []
-    for tag in tags:
-        match = re.fullmatch(r"(\d+\.\d+\.\d+)" + re.escape(suffix), tag)
-        if match is None:
-            continue
-        version = version_tuple(match.group(1))
-        if version is not None:
-            candidates.append((version, tag))
-
-    return max(candidates, key=lambda item: item[0])[1] if candidates else None
-
-
-def update_ghcr_images() -> bool:
+def update_tool_versions() -> bool:
+    uv_version = latest_release_tag("astral-sh/uv").lstrip("v")
+    typst_version = latest_release_tag("typst/typst").lstrip("v")
     changed = False
-    pattern = re.compile(
-        r"(?P<prefix>ghcr\.io/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+:)"
-        r"(?P<tag>[^\s#]+)"
-    )
 
-    paths = [ROOT / ".gitlab-ci.yml", *sorted(WORKFLOW_DIR.glob("*.y*ml"))]
-    cache: dict[str, list[str]] = {}
-
-    for path in paths:
+    for path in sorted(WORKFLOW_DIR.glob("*.y*ml")):
         original = path.read_text(encoding="utf-8")
+        updated = re.sub(
+            r"(uses:\s*astral-sh/setup-uv@[^\n]+\n\s+with:\n\s+version:\s*)"
+            r"(['"])[^'"]+\2",
+            lambda match: f'{match.group(1)}"{uv_version}"',
+            original,
+        )
+        updated = re.sub(
+            r"(typst-version:\s*)(['"])[^'"]+\2",
+            lambda match: f'{match.group(1)}"{typst_version}"',
+            updated,
+        )
 
-        def replace(match: re.Match[str]) -> str:
-            nonlocal changed
-
-            image = match.group("prefix")[:-1]
-            current_tag = match.group("tag")
-            tags = cache.setdefault(image, registry_tags(image))
-            latest_tag = latest_matching_docker_tag(current_tag, tags)
-
-            if latest_tag is None or latest_tag == current_tag:
-                return match.group(0)
-
-            changed = True
-            return f"{match.group('prefix')}{latest_tag}"
-
-        updated = pattern.sub(replace, original)
         if updated != original:
             path.write_text(updated, encoding="utf-8")
+            changed = True
+
+    gitlab = ROOT / ".gitlab-ci.yml"
+    original = gitlab.read_text(encoding="utf-8")
+    updated = re.sub(
+        r"(ghcr\.io/astral-sh/uv:)(\d+\.\d+\.\d+)(-python3\.14-trixie)",
+        r"\g<1>" + uv_version + r"\g<3>",
+        original,
+    )
+    updated = re.sub(
+        r"(ghcr\.io/typst/typst:)\d+\.\d+\.\d+",
+        r"\g<1>" + typst_version,
+        updated,
+    )
+    if updated != original:
+        gitlab.write_text(updated, encoding="utf-8")
+        changed = True
 
     return changed
 
@@ -213,8 +191,12 @@ def update_python_lock() -> None:
 def main() -> None:
     update_python_lock()
     update_github_actions()
-    update_ghcr_images()
+    update_tool_versions()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (RuntimeError, subprocess.CalledProcessError) as exc:
+        print(f"update failed: {exc}", file=sys.stderr)
+        raise SystemExit(1)

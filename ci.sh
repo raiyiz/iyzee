@@ -9,7 +9,7 @@ usage() {
     exit 2
 }
 
-case "\${1:-}" in
+case "${1:-}" in
     test|lint|typecheck|all)
         uv sync --locked --group dev
         ;;
@@ -20,7 +20,7 @@ case "\${1:-}" in
         ;;
 esac
 
-case "\${1:-}" in
+case "${1:-}" in
     test)
         exec uv run --locked python -m pytest
         ;;
@@ -42,9 +42,9 @@ case "\${1:-}" in
                     ;;
             esac
 
-            filename=\${source##*/}
-            name=\${filename%.typ}
-            typst compile "$source" "build/docs/\${name}.pdf"
+            filename=${source##*/}
+            name=${filename%.typ}
+            typst compile "$source" "build/docs/${name}.pdf"
         done
         ;;
     all)
