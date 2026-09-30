@@ -193,8 +193,6 @@ async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
         assert banner.display and "MXA" in plain(banner)
 
 
-
-
 # -- running a (fake) sweep: abort, and saving as it goes ----------------------------------
 
 
