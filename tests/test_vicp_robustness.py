@@ -253,7 +253,6 @@ def test_terminator_frame_cannot_complete_a_short_block():
         scope.getDataBytes()
 
 
-@pytest.mark.parametrize("terminator", [frame(EOI, b"\n"), frame(DATA_EOI, b"\n")])
 def test_binary_body_containing_the_block_marker_is_not_reparsed():
     body = b"#9\n#9123456789"
     scope, _ = attached(
@@ -270,6 +269,7 @@ def test_bytes_beyond_the_declared_length_are_rejected():
         scope._transport.read_definite_block()
 
 
+@pytest.mark.parametrize("terminator", [frame(EOI, b"\n"), frame(DATA_EOI, b"\n")])
 def test_block_ends_with_a_separate_terminator_frame(terminator):
     body = bytes([0, 1, 255])
     scope, _ = attached(frame(DATA, block_header(3)) + frame(DATA, body) + terminator)
