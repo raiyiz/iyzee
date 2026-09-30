@@ -9,7 +9,6 @@ from iyzee.experiment.procedures import (
     build_bandwidth_sweep,
     build_frequency_sweep,
     run_bandwidth_sweep,
-    run_frequency_sweep,
 )
 
 
