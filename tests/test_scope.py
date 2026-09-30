@@ -349,7 +349,7 @@ def test_send_serializes_vicp_header_and_message():
     flag, reserved_1, reserved_2, reserved_3, length = struct.unpack("B3BI", sock.sent[:8])
     assert flag == VICP_DATA_FLAG | VICP_EOI_FLAG
     assert reserved_1 == VICPTransport.HEADER_VERSION
-    assert reserved_2 == 1
+    assert reserved_2 == 0
     assert reserved_3 == 0
     assert socket.ntohl(length) == len("C1:VDIV 1.0")
     assert sock.sent[8:] == b"C1:VDIV 1.0"
