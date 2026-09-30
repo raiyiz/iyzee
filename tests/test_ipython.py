@@ -106,6 +106,22 @@ def test_lab_scope_uses_the_handle_device() -> None:
     assert repr(lab.scope) == repr("scope-device")
 
 
+class _DisconnectedDevice:
+    connected = False
+
+
+def test_lab_does_not_expose_a_scope_with_a_dead_transport() -> None:
+    app = FakeApp(handles={"scope": FakeHandle(device=_DisconnectedDevice())})
+    lab = LabProxy(app)
+
+    try:
+        lab.scope
+    except AttributeError as exc:
+        assert "disconnected" in str(exc)
+    else:
+        raise AssertionError("expected AttributeError")
+
+
 def test_lab_results_and_last_run_reflect_the_latest_sweep() -> None:
     app = FakeApp()
     lab = LabProxy(app)
@@ -129,8 +145,10 @@ def test_lab_is_read_only() -> None:
         raise AssertionError("expected AttributeError")
 
 
-def test_lab_connected_and_dir_reflect_current_state() -> None:
-    app = FakeApp(handles={"mxa": FakeHandle(device=object())})
+def test_lab_connected_reflects_live_device_state() -> None:
+    live = type("LiveDevice", (), {"connected": True})()
+    dead = _DisconnectedDevice()
+    app = FakeApp(handles={"mxa": FakeHandle(device=live), "scope": FakeHandle(device=dead)})
     lab = LabProxy(app)
     assert lab.connected == ("mx",)
     # dir() always lists the full possible set, connected or not
