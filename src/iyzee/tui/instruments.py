@@ -187,9 +187,10 @@ class WavemeterHandle(_LockedHandle):
 class ScopeHandle(_LockedHandle):
     """Adapter for the legacy :class:`~iyzee.scope.LeCroy` raw-socket driver.
 
-    This driver predates :class:`~iyzee.base.BaseDevice` and has no
-    ``*IDN?``-style query, so ``probe()`` can only report that the TCP
-    handshake succeeded, not identify the instrument.
+    The WaveSurfer 400-series remote-command service can silently ignore a
+    malformed or unsupported program message, so probe deliberately does not
+    send a command. A successful TCP connection is the only non-invasive
+    readiness check available from this legacy transport.
     """
 
     def __init__(self, ip: IP = IP.SCOPE) -> None:
@@ -204,11 +205,7 @@ class ScopeHandle(_LockedHandle):
         self._scope.disconnect()
 
     def probe(self) -> str:
-        # A successful TCP handshake does not prove the VICP request/response
-        # path is usable. Issue one cheap ASCII query so Connect rejects a
-        # half-working scope before the TUI or console starts using it.
-        mode = self._scope.get_trigger_mode()
-        return f"VICP connected @ {self._ip} (trigger mode {mode.strip()})"
+        return f"TCP connected @ {self._ip}"
 
     @property
     def lock(self) -> threading.RLock:
