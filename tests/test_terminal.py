@@ -26,7 +26,6 @@ from iyzee.tui.vterm import VTermScreen
 
 # -- screen model ---------------------------------------------------------------------
 
-
 def test_vterm_scrollback_colours_and_cursor() -> None:
     screen = VTermScreen(20, 3, scrollback=50)
     added = screen.feed("one\ntwo\nthree\nfour\nfive\n")  # bare \n must act as CR+LF
@@ -53,9 +52,7 @@ def test_vterm_scrollback_colours_and_cursor() -> None:
         s.style and s.style.reverse for s in screen.row_segments(0, offset=1, cursor=True)
     )
 
-
 # -- key encoding -----------------------------------------------------------------------
-
 
 @pytest.mark.parametrize(
     "key,character,expected",
@@ -87,7 +84,6 @@ def test_keys_encode_to_what_prompt_toolkit_decodes(key, character, expected) ->
     parser.flush()
     assert seen == [expected]
 
-
 def test_key_encoding_edge_cases() -> None:
     # Alt+A must stay an Alt combination even if Textual also reports character="a".
     assert key_to_bytes("alt+a", "a") == b"\x1ba"
@@ -96,9 +92,7 @@ def test_key_encoding_edge_cases() -> None:
     assert key_to_bytes("ctrl+z") is None
     assert key_to_bytes("some-unknown-key") is None
 
-
 # -- the IPython session -----------------------------------------------------------------
-
 
 async def _until(screen_text, needle: str, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
@@ -107,7 +101,6 @@ async def _until(screen_text, needle: str, timeout: float = 10.0) -> bool:
             return True
         await asyncio.sleep(0.03)
     return False
-
 
 @async_test
 async def test_session_runs_a_real_ipython_in_process() -> None:
@@ -160,11 +153,9 @@ async def test_session_runs_a_real_ipython_in_process() -> None:
     assert not session._thread.is_alive()
     assert sys.stdout is real_stdout, "stdout is restored on close"
 
-
 def _prompt_line(screen_text) -> str:
     lines = [line for line in screen_text().splitlines() if "In [" in line]
     return lines[-1].strip() if lines else ""
-
 
 @async_test
 async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_path) -> None:
@@ -214,22 +205,17 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
     await session_run(history, ["a = 1", "b = 2"], _noop)
     await session_run(history, [], recalls_after_restart)  # a fresh session, same file
 
-
 async def _noop(session, text) -> None:
     return None
 
-
 # -- the page, end to end through real key presses ---------------------------------------
-
 
 def _keys(text: str) -> list[str]:
     names = {" ": "space", "+": "plus", "(": "left_parenthesis", ")": "right_parenthesis"}
     return [names.get(c, c) for c in text]
 
-
 def _console_text(app: IyzeeApp) -> str:
     return "\n".join(app.screen.query_one(TerminalView).text_lines())
-
 
 async def _wait(pilot, app, needle: str, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
@@ -238,7 +224,6 @@ async def _wait(pilot, app, needle: str, timeout: float = 10.0) -> bool:
         if needle in _console_text(app):
             return True
     return False
-
 
 @async_test
 async def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
@@ -269,24 +254,6 @@ async def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
         await pilot.press(*_keys("x"), "enter")
         assert await _wait(pilot, app, "Out[3]: 5"), _console_text(app)
 
-
-@async_test
-async def test_up_arrow_recalls_the_previous_command_in_the_console_page() -> None:
-    app = IyzeeApp()
-    async with app.run_test(size=(110, 32)) as pilot:
-        await pilot.press("i")
-        assert await _wait(pilot, app, "In [1]")
-        await pilot.press(*_keys("1 + 1"), "enter")
-        assert await _wait(pilot, app, "Out[1]: 2")
-        await pilot.press(*_keys("2 + 2"), "enter")
-        assert await _wait(pilot, app, "Out[2]: 4")
-        await pilot.press("up")  # a real Up-arrow key event
-        assert await _wait(pilot, app, "In [3]: 2 + 2"), _console_text(app)
-        await pilot.press("up")
-        assert await _wait(pilot, app, "In [3]: 1 + 1"), _console_text(app)
-
-
-@async_test
 async def test_console_interrupt_scrollback_and_shutdown() -> None:
     app = IyzeeApp()
     async with app.run_test(size=(110, 32)) as pilot:

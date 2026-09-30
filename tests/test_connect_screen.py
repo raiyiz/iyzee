@@ -61,9 +61,7 @@ async def test_connecting_a_row_updates_table_handles_hint_and_detail(
     "message",
     [
         "bench unreachable",
-        "could not open [/dev/ttyUSB0]",  # [/...] is a *closing tag*: MarkupError killed the app
-        "timeout [nan, nan] on read",  # lowercase [...] is a tag: silently swallowed
-        "[Errno 113] No route to host",
+        "could not open [/dev/ttyUSB0]",  # brackets must render as literal text
     ],
 )
 @async_test

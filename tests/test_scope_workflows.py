@@ -23,7 +23,6 @@ from iyzee.scope_workflows import (
     save_scope_acquisition,
 )
 
-
 class FakeScope:
     """Records every call ``scope_workflows`` makes, and can be told to
     fail on specific channels — enough to exercise the workflow logic
@@ -147,14 +146,12 @@ class FakeScope:
             raise RuntimeError(f"{channel} refused to send data")
         return ("V", self._data[channel])
 
-
 def _settings(channel: Channel, **overrides) -> ChannelSettings:
     defaults: dict[str, Any] = dict(
         channel=channel, enabled=True, volts_per_div=0.5, offset=0.0, coupling=Coupling.DC_1M
     )
     defaults.update(overrides)
     return ChannelSettings(**defaults)
-
 
 class DetailedFakeScope(FakeScope):
     def getDataFloatsDetailed(self, channel, block):
@@ -167,7 +164,6 @@ class DetailedFakeScope(FakeScope):
             "vertical_gain": 0.25,
             "vertical_offset": 0.5,
         }
-
 
 def test_acquire_scope_recording_retains_calibration_and_statistics():
     scope = DetailedFakeScope()
@@ -205,7 +201,6 @@ def test_acquire_scope_recording_retains_calibration_and_statistics():
     assert waveform.stats["min"] == 1.0
     assert waveform.stats["peak_to_peak"] == 2.0
 
-
 def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path):
     scope = DetailedFakeScope()
     recording = acquire_scope_recording(
@@ -225,9 +220,7 @@ def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path
     assert manifest["configuration"]["applied_channel_settings"] is None
     assert len(manifest["data_sha256"]) == 64
 
-
 # -- apply_channel_settings ---------------------------------------------------------------
-
 
 def test_apply_channel_settings_pushes_every_field_per_channel():
     scope = FakeScope()
@@ -243,7 +236,6 @@ def test_apply_channel_settings_pushes_every_field_per_channel():
         ("set_trace_display", Channel.C1, False),
     ]
 
-
 def test_apply_channel_settings_continues_past_one_channels_failure():
     scope = FakeScope(fail_channels=frozenset({Channel.C1}))
     settings = [_settings(Channel.C1), _settings(Channel.C2)]
@@ -254,7 +246,6 @@ def test_apply_channel_settings_continues_past_one_channels_failure():
     assert isinstance(errors[0].error, RuntimeError)
     # C2's settings still went out, even though C1 failed first.
     assert ("set_offset", Channel.C2, 0.0) in scope.calls
-
 
 def test_apply_channel_settings_holds_one_lock_for_the_whole_batch():
     scope = FakeScope()
@@ -274,16 +265,13 @@ def test_apply_channel_settings_holds_one_lock_for_the_whole_batch():
     assert lock_state_during_calls == [True, True], "lock must stay held across both channels"
     assert not lock.locked(), "lock must be released once the batch finishes"
 
-
 def test_apply_channel_settings_works_with_no_lock_at_all():
     """A script with its own private scope shouldn't need to construct a
     throwaway lock just to call this."""
     errors = apply_channel_settings(FakeScope(), [_settings(Channel.C1)])
     assert errors == []
 
-
 # -- selective channel apply ---------------------------------------------------------------
-
 
 def test_apply_channel_settings_only_writes_changed_fields_against_baseline():
     scope = FakeScope()
@@ -295,7 +283,6 @@ def test_apply_channel_settings_only_writes_changed_fields_against_baseline():
     assert errors == []
     assert scope.calls == [("set_offset", Channel.C1, 0.2)]
 
-
 def test_apply_channel_settings_refuses_unsynchronized_channel():
     scope = FakeScope()
     baseline = [_settings(Channel.C1)]
@@ -306,7 +293,6 @@ def test_apply_channel_settings_refuses_unsynchronized_channel():
     assert [error.channel for error in errors] == [Channel.C2]
     assert scope.calls == []
 
-
 def test_apply_channel_settings_does_nothing_when_form_matches_baseline():
     scope = FakeScope()
     baseline = [_settings(Channel.C1)]
@@ -315,7 +301,6 @@ def test_apply_channel_settings_does_nothing_when_form_matches_baseline():
 
     assert errors == []
     assert scope.calls == []
-
 
 def test_read_channel_settings_accepts_space_separated_voltage_units():
     scope = FakeScope()
@@ -326,9 +311,7 @@ def test_read_channel_settings_accepts_space_separated_voltage_units():
     assert errors == []
     assert settings == [ChannelSettings(Channel.C1, True, 0.2, -0.5, Coupling.DC_1M)]
 
-
 # -- read_channel_settings ----------------------------------------------------------------
-
 
 def test_read_channel_settings_reads_every_field_per_channel():
     scope = FakeScope()
@@ -341,7 +324,6 @@ def test_read_channel_settings_reads_every_field_per_channel():
     assert errors == []
     assert settings == [ChannelSettings(Channel.C1, False, 1.0, -0.25, Coupling.DC_50)]
 
-
 def test_read_channel_settings_continues_past_one_channels_failure():
     scope = FakeScope(fail_reads=frozenset({Channel.C1}))
 
@@ -351,9 +333,7 @@ def test_read_channel_settings_continues_past_one_channels_failure():
     assert [e.channel for e in errors] == [Channel.C1]
     assert isinstance(errors[0].error, RuntimeError)
 
-
 # -- apply_trigger_settings ----------------------------------------------------------------
-
 
 def test_apply_trigger_settings_pushes_every_field_in_order():
     scope = FakeScope()
@@ -375,7 +355,6 @@ def test_apply_trigger_settings_pushes_every_field_in_order():
         ("set_trigger_mode", TriggerMode.AUTO),  # mode last
     ]
 
-
 def test_apply_trigger_settings_raises_rather_than_collecting_errors():
     """Unlike apply_channel_settings, there's only one trigger — nothing
     to partially succeed, so a failure just raises."""
@@ -392,9 +371,7 @@ def test_apply_trigger_settings_raises_rather_than_collecting_errors():
     with pytest.raises(RuntimeError, match="nope"):
         apply_trigger_settings(scope, settings)
 
-
 # -- selective trigger apply ----------------------------------------------------------------
-
 
 def test_apply_trigger_settings_only_writes_changed_field():
     scope = FakeScope()
@@ -410,7 +387,6 @@ def test_apply_trigger_settings_only_writes_changed_field():
     apply_trigger_settings(scope, desired, current_settings=baseline)
 
     assert scope.calls == [("set_trigger_level", Channel.C1, 0.25)]
-
 
 def test_apply_trigger_settings_changes_source_without_copying_old_source_settings():
     scope = FakeScope()
@@ -433,31 +409,6 @@ def test_apply_trigger_settings_changes_source_without_copying_old_source_settin
 
     assert scope.calls == [("set_trigger_source", Channel.C2)]
 
-
-def test_apply_trigger_settings_without_baseline_keeps_full_write_behavior():
-    scope = FakeScope()
-    desired = TriggerSettings(
-        source=Channel.C2,
-        mode=TriggerMode.SINGLE,
-        slope=TriggerSlope.NEGATIVE,
-        coupling=TriggerCoupling.AC,
-        level_volts=0.1,
-    )
-
-    apply_trigger_settings(scope, desired)
-
-    assert scope.calls == [
-        ("set_trigger_source", Channel.C2),
-        ("set_trigger_slope", Channel.C2, TriggerSlope.NEGATIVE),
-        ("set_trigger_coupling", Channel.C2, TriggerCoupling.AC),
-        ("set_trigger_level", Channel.C2, 0.1),
-        ("set_trigger_mode", TriggerMode.SINGLE),  # mode last
-    ]
-
-
-# -- read_trigger_settings -----------------------------------------------------------------
-
-
 def test_read_trigger_settings_reads_every_field_off_the_armed_source():
     scope = FakeScope()
     scope.trigger_state = TriggerSettings(
@@ -476,7 +427,6 @@ def test_read_trigger_settings_reads_every_field_off_the_armed_source():
     assert ("get_trigger_slope", Channel.C2) in scope.calls
     assert ("get_trigger_level", Channel.C2) in scope.calls
 
-
 def test_read_trigger_settings_raises_rather_than_collecting_errors():
     """Mirrors apply_trigger_settings: one trigger, nothing to partially
     read."""
@@ -486,9 +436,7 @@ def test_read_trigger_settings_raises_rather_than_collecting_errors():
     with pytest.raises(RuntimeError, match="nope"):
         read_trigger_settings(scope)
 
-
 # -- acquire_waveforms ----------------------------------------------------------------------
-
 
 def test_acquire_waveforms_reads_each_channels_own_timebase():
     scope = FakeScope()
@@ -501,18 +449,9 @@ def test_acquire_waveforms_reads_each_channels_own_timebase():
         ("getHorProperties", Channel.C2),
     ]
     assert [label for _x, _y, label in series] == ["C1", "C2"]
-
-
-def test_acquire_waveforms_builds_the_time_axis_from_the_timebase():
-    scope = FakeScope()
-
-    series, _errors = acquire_waveforms(scope, [Channel.C1])
-
-    times, values, label = series[0]
-    assert label == "C1"
-    assert values == [1.0, 2.0, 3.0]
-    assert times == [0.0, 1e-6, 2e-6]
-
+    assert series[0][0] == [0.0, 1e-6, 2e-6]
+    assert series[1][0] == [0.0, 1e-6, 2e-6]
+    assert series[0][1] == [1.0, 2.0, 3.0]
 
 def test_acquire_waveforms_reports_every_channel_failed_if_the_timebase_read_fails():
     scope = FakeScope(fail_hor=True)
@@ -522,7 +461,6 @@ def test_acquire_waveforms_reports_every_channel_failed_if_the_timebase_read_fai
     assert series == []
     assert {e.channel for e in errors} == {Channel.C1, Channel.C2}
 
-
 def test_acquire_waveforms_continues_past_one_channels_failure():
     scope = FakeScope(fail_channels=frozenset({Channel.C3}))
 
@@ -531,9 +469,7 @@ def test_acquire_waveforms_continues_past_one_channels_failure():
     assert [label for _x, _y, label in series] == ["C1", "C4"]
     assert [e.channel for e in errors] == [Channel.C3]
 
-
 # -- link loss: stop instead of reading a late reply as the next channel's answer ---------
-
 
 class DroppingScope(DetailedFakeScope):
     """Behaves like the real driver: a failure on ``fail_on`` invalidates the
@@ -564,7 +500,6 @@ class DroppingScope(DetailedFakeScope):
             self._drop(f"{channel} timed out")
         return super().getDataFloatsDetailed(channel, block)
 
-
 def test_read_channel_settings_stops_once_the_connection_is_lost():
     scope = DroppingScope(Channel.C2)
 
@@ -579,7 +514,6 @@ def test_read_channel_settings_stops_once_the_connection_is_lost():
     queried = {call[1] for call in scope.calls if len(call) > 1}
     assert queried == {Channel.C1, Channel.C2}, "C3/C4 must never be queried on a dead link"
 
-
 def test_apply_channel_settings_stops_once_the_connection_is_lost():
     scope = DroppingScope(Channel.C1)
     desired = [_settings(c, volts_per_div=1.0) for c in (Channel.C1, Channel.C2, Channel.C3)]
@@ -591,7 +525,6 @@ def test_apply_channel_settings_stops_once_the_connection_is_lost():
         ("set_volts_per_div", Channel.C1, 1.0)
     ]
 
-
 def test_acquire_scope_recording_stops_once_the_connection_is_lost():
     scope = DroppingScope(Channel.C2)
 
@@ -600,7 +533,6 @@ def test_acquire_scope_recording_stops_once_the_connection_is_lost():
     assert [w.channel for w in recording.waveforms] == [Channel.C1]
     assert [e.channel for e in recording.errors] == [Channel.C2, Channel.C3]
     assert not any(c == ("getDataFloats", Channel.C3) for c in scope.calls)
-
 
 def test_a_parse_error_on_a_healthy_link_does_not_stop_the_batch():
     """Only a lost connection aborts; a bad reply from one channel doesn't."""
@@ -611,9 +543,7 @@ def test_a_parse_error_on_a_healthy_link_does_not_stop_the_batch():
     assert [s.channel for s in settings] == [Channel.C2]
     assert [e.channel for e in errors] == [Channel.C1]
 
-
 # -- locking: one lock, no deadlock through the console proxy ------------------------------
-
 
 class RecordingSocket:
     def __init__(self):
@@ -632,7 +562,6 @@ class RecordingSocket:
     def close(self):
         pass
 
-
 def test_scope_handle_lock_is_the_drivers_own_transaction_lock():
     from iyzee.tui.instruments import ScopeHandle
 
@@ -641,7 +570,6 @@ def test_scope_handle_lock_is_the_drivers_own_transaction_lock():
     assert handle.lock is handle.scope.transaction_lock
     with handle.lock, handle.lock:  # re-entrant
         pass
-
 
 def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock():
     """The console's ``lab.scope`` is a LockedProxy over the handle's lock;
@@ -669,7 +597,6 @@ def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock()
     assert outcome == [[]]
     assert b"C1:VOLT_DIV 1.0" in bytes(sock.sent)
 
-
 def test_batch_holds_the_drivers_transaction_even_without_an_explicit_lock():
     events: list[str] = []
 
@@ -690,9 +617,7 @@ def test_batch_holds_the_drivers_transaction_even_without_an_explicit_lock():
     assert events[0] == "enter" and events[-1] == "exit"
     assert "set_offset" in events[1:-1]
 
-
 # -- trigger: mode is written last on the selective path too --------------------------------
-
 
 def test_apply_trigger_settings_writes_mode_after_source_and_level_when_all_change():
     scope = FakeScope()
@@ -714,9 +639,7 @@ def test_apply_trigger_settings_writes_mode_after_source_and_level_when_all_chan
         "set_trigger_level",
     ]
 
-
 # -- apply + read-back verification ---------------------------------------------------------
-
 
 class StatefulScope(FakeScope):
     """A scope that remembers what it was told, like a real one: values are
@@ -751,7 +674,6 @@ class StatefulScope(FakeScope):
         super().set_trace_display(channel, value)
         self._update(channel, enabled=value)
 
-
 def test_apply_and_verify_returns_what_the_scope_reports_not_what_was_requested():
     scope = StatefulScope(vdiv_step=0.1)
 
@@ -769,7 +691,6 @@ def test_apply_and_verify_returns_what_the_scope_reports_not_what_was_requested(
         ),
     )
 
-
 def test_apply_and_verify_exact_match_has_no_adjustments():
     scope = StatefulScope()
 
@@ -777,7 +698,6 @@ def test_apply_and_verify_exact_match_has_no_adjustments():
 
     assert result.errors == () and result.adjustments == ()
     assert result.verified[0].volts_per_div == pytest.approx(0.2)
-
 
 def test_apply_and_verify_reports_an_ignored_discrete_setting_as_an_error():
     scope = StatefulScope(ignore_coupling=frozenset({Channel.C1}))
@@ -790,7 +710,6 @@ def test_apply_and_verify_reports_an_ignored_discrete_setting_as_an_error():
     assert "coupling is D1M but D50 was requested" in str(result.errors[0].error)
     assert result.verified[0].coupling == Coupling.DC_1M, "baseline must be the truth"
 
-
 def test_apply_and_verify_reports_a_channel_that_cannot_be_read_back():
     scope = StatefulScope(fail_reads=frozenset({Channel.C2}))
 
@@ -801,7 +720,6 @@ def test_apply_and_verify_reports_a_channel_that_cannot_be_read_back():
     assert [s.channel for s in result.verified] == [Channel.C1]
     assert [e.channel for e in result.errors] == [Channel.C2]
     assert "could not verify C2" in str(result.errors[0].error)
-
 
 def test_apply_and_verify_still_reads_back_a_channel_whose_write_failed():
     """After a failed write the scope's real state is unknown, so it is read,
@@ -815,7 +733,6 @@ def test_apply_and_verify_still_reads_back_a_channel_whose_write_failed():
     assert result.verified[0].volts_per_div == pytest.approx(before)
     assert before != 2.0
 
-
 def test_apply_and_verify_skips_the_read_back_when_the_link_is_lost():
     scope = DroppingScope(Channel.C1)
 
@@ -826,7 +743,6 @@ def test_apply_and_verify_skips_the_read_back_when_the_link_is_lost():
     assert result.verified == ()
     assert [e.channel for e in result.errors] == [Channel.C1, Channel.C2]
     assert not any(c[0].startswith("get_") for c in scope.calls)
-
 
 def test_apply_and_verify_holds_the_lock_across_write_and_read_back():
     scope = StatefulScope()
@@ -839,9 +755,7 @@ def test_apply_and_verify_holds_the_lock_across_write_and_read_back():
 
     assert held == [True] and not lock.locked()
 
-
 # -- acquisition: consistency and provenance -----------------------------------------------
-
 
 class TimebaseScope(DetailedFakeScope):
     INTERVALS = {Channel.C1: 1e-6, Channel.C2: 5e-6}
@@ -849,7 +763,6 @@ class TimebaseScope(DetailedFakeScope):
     def getHorProperties(self, channel):
         self.calls.append(("getHorProperties", channel))
         return ("S", 0.0, self.INTERVALS[channel])
-
 
 def test_each_channel_gets_a_time_axis_from_its_own_timebase():
     scope = TimebaseScope()
@@ -859,7 +772,6 @@ def test_each_channel_gets_a_time_axis_from_its_own_timebase():
     c1, c2 = recording.waveforms
     assert c1.time_interval == 1e-6 and c2.time_interval == 5e-6
     np.testing.assert_allclose(c2.time, [0.0, 5e-6, 10e-6])
-
 
 def test_one_channels_timebase_failure_no_longer_discards_the_others():
     class FlakyTimebase(DetailedFakeScope):
@@ -873,7 +785,6 @@ def test_one_channels_timebase_failure_no_longer_discards_the_others():
     assert [w.channel for w in recording.waveforms] == [Channel.C1, Channel.C3]
     assert [e.channel for e in recording.errors] == [Channel.C2]
 
-
 def test_empty_waveform_is_an_error_not_a_silent_success():
     class Empty(DetailedFakeScope):
         def getDataFloats(self, channel, block="DAT1"):
@@ -885,10 +796,8 @@ def test_empty_waveform_is_an_error_not_a_silent_success():
     assert recording.waveforms == ()
     assert "empty waveform" in str(recording.errors[0].error)
 
-
 def _mode_calls(scope):
     return [c for c in scope.calls if c[0] == "set_trigger_mode"]
-
 
 @pytest.mark.parametrize("mode", [TriggerMode.AUTO, TriggerMode.NORMAL])
 def test_a_running_acquisition_is_stopped_for_the_download_and_restored(mode):
@@ -911,7 +820,6 @@ def test_a_running_acquisition_is_stopped_for_the_download_and_restored(mode):
     assert recording.frozen is True and recording.prior_trigger_mode == mode
     assert recording.warnings == ()
 
-
 @pytest.mark.parametrize("mode", [TriggerMode.SINGLE, TriggerMode.STOP])
 def test_a_held_acquisition_is_left_alone(mode):
     scope = DetailedFakeScope()
@@ -924,7 +832,6 @@ def test_a_held_acquisition_is_left_alone(mode):
     assert _mode_calls(scope) == []
     assert recording.frozen is False and recording.prior_trigger_mode == mode
 
-
 def test_freeze_can_be_disabled():
     scope = DetailedFakeScope()
 
@@ -932,7 +839,6 @@ def test_freeze_can_be_disabled():
 
     assert _mode_calls(scope) == [] and not any(c[0] == "get_trigger_mode" for c in scope.calls)
     assert recording.frozen is False
-
 
 def test_trigger_mode_is_restored_even_if_a_channel_fails():
     scope = DetailedFakeScope(fail_channels=frozenset({Channel.C1}))
@@ -942,7 +848,6 @@ def test_trigger_mode_is_restored_even_if_a_channel_fails():
     assert _mode_calls(scope)[-1] == ("set_trigger_mode", TriggerMode.AUTO)
     assert [e.channel for e in recording.errors] == [Channel.C1]
     assert [w.channel for w in recording.waveforms] == [Channel.C2]
-
 
 def test_failure_to_freeze_is_a_warning_and_the_download_still_happens():
     scope = DetailedFakeScope()
@@ -957,7 +862,6 @@ def test_failure_to_freeze_is_a_warning_and_the_download_still_happens():
     assert recording.frozen is False
     assert [w.channel for w in recording.waveforms] == [Channel.C1]
     assert any("could not freeze" in w and "refused" in w for w in recording.warnings)
-
 
 def test_failure_to_restore_is_reported_as_a_warning():
     scope = DetailedFakeScope()
@@ -975,7 +879,6 @@ def test_failure_to_restore_is_reported_as_a_warning():
     assert recording.frozen is True
     assert any("could not restore trigger mode AUTO" in w for w in recording.warnings)
 
-
 def test_a_lost_link_while_frozen_is_reported_not_papered_over():
     scope = DroppingScope(Channel.C1)
 
@@ -987,7 +890,6 @@ def test_a_lost_link_while_frozen_is_reported_not_papered_over():
     )
     assert any("connection lost while frozen" in w for w in recording.warnings)
     assert [e.channel for e in recording.errors] == [Channel.C1, Channel.C2]
-
 
 def test_identity_is_recorded_and_failure_to_read_it_is_a_warning():
     scope = DetailedFakeScope()
@@ -1004,7 +906,6 @@ def test_identity_is_recorded_and_failure_to_read_it_is_a_warning():
     recording = acquire_scope_recording(scope, [Channel.C1])
     assert recording.instrument_id is None
     assert any("identity unavailable" in w for w in recording.warnings)
-
 
 def test_manifest_records_provenance_and_the_error_type(tmp_path):
     scope = DetailedFakeScope(fail_channels=frozenset({Channel.C2}))

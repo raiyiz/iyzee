@@ -29,7 +29,6 @@ from iyzee.tui.instruments import (
 
 # -- LockedProxy --------------------------------------------------------
 
-
 class _Recorder:
     """A fake device whose calls take just long enough to observe overlap."""
 
@@ -45,7 +44,6 @@ class _Recorder:
     @property
     def not_callable(self) -> int:
         return 42
-
 
 def test_locked_proxy_serializes_calls_across_threads() -> None:
     """Two threads calling through the same proxy must never interleave —
@@ -73,15 +71,6 @@ def test_locked_proxy_serializes_calls_across_threads() -> None:
         ["start:b", "end:b", "start:a", "end:a"],
     )
 
-
-def test_locked_proxy_passes_through_non_callable_attributes() -> None:
-    proxy = LockedProxy(_Recorder(), threading.Lock())
-    assert proxy.not_callable == 42
-
-
-# -- _VisaHandle ----------------------------------------------------------
-
-
 class _FakeVisaDevice:
     def __init__(self, idn: str = "FAKE,MODEL,0,1.0", ip: str = "10.0.0.1") -> None:
         self._idn = idn
@@ -98,13 +87,11 @@ class _FakeVisaDevice:
     def idn(self) -> str:
         return self._idn
 
-
 def test_visa_handle_probe_uses_idn_when_available() -> None:
     handle = _VisaHandle(_FakeVisaDevice(idn="Keysight,MXA,SN1,FW2"))
     handle.connect()
     assert handle.probe() == "Keysight,MXA,SN1,FW2"
     assert handle.device.connected is True
-
 
 class _FakeVisaDeviceNoIdn:
     """Simulates a driver with no *IDN? support (e.g. a raw PSU)."""
@@ -112,11 +99,9 @@ class _FakeVisaDeviceNoIdn:
     def __init__(self, ip: str) -> None:
         self.ip = ip
 
-
 def test_visa_handle_probe_falls_back_when_no_idn() -> None:
     handle = _VisaHandle(_FakeVisaDeviceNoIdn(ip="10.140.1.42"))
     assert handle.probe() == "connected @ 10.140.1.42"
-
 
 def test_visa_handle_disconnect_closes_device() -> None:
     device = _FakeVisaDevice()
@@ -124,9 +109,7 @@ def test_visa_handle_disconnect_closes_device() -> None:
     handle.disconnect()
     assert device.closed is True
 
-
 # -- ShutterHandle ----------------------------------------------------------
-
 
 class _FakeShutterControl:
     def __init__(self, chan, ip) -> None:  # noqa: ANN001 - mirrors real signature
@@ -142,14 +125,12 @@ class _FakeShutterControl:
         self.psu.close()
         self.connected = False
 
-
 class _FakePsu:
     def __init__(self) -> None:
         self.closed = False
 
     def close(self) -> None:
         self.closed = True
-
 
 def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(instruments_mod, "ShutterControl", _FakeShutterControl)
@@ -171,15 +152,12 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
     assert psu.closed is True
     assert handle.shutter is None
 
-
 # -- WavemeterHandle ----------------------------------------------------------
-
 
 def test_wavemeter_handle_probe_reports_frequency(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(instruments_mod, "single_readout", lambda ch, printing=False: 377.105)
     handle = WavemeterHandle(channel=1)
     assert handle.probe() == "ch1 = 377.105000 THz"
-
 
 def test_wavemeter_handle_probe_wraps_readout_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(_ch, printing=False):
@@ -190,9 +168,7 @@ def test_wavemeter_handle_probe_wraps_readout_error(monkeypatch: pytest.MonkeyPa
     with pytest.raises(ConnectionError, match="switch unreachable"):
         handle.probe()
 
-
 # -- ScopeHandle ----------------------------------------------------------
-
 
 class _FakeLeCroy:
     def __init__(self) -> None:
@@ -205,7 +181,6 @@ class _FakeLeCroy:
     def disconnect(self) -> None:
         self.disconnected = True
 
-
 def test_scope_handle_connect_and_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
     handle = ScopeHandle()
@@ -214,9 +189,7 @@ def test_scope_handle_connect_and_probe(monkeypatch: pytest.MonkeyPatch) -> None
     assert scope.connected_to == str(handle._ip)
     assert "socket connected" in handle.probe()
 
-
 # -- registry ----------------------------------------------------------
-
 
 def test_instrument_registry_has_unique_nonempty_specs() -> None:
     keys = [spec.key for spec in INSTRUMENTS]

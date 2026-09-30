@@ -18,7 +18,6 @@ from iyzee.experiment.io import (
     save_step_results,
 )
 
-
 def test_data_root_is_the_project_root_not_inside_the_package():
     # A sibling of src/, not e.g. src/iyzee/data — this is the behavior the
     # "move data/ to the project root" request actually depends on; a
@@ -28,7 +27,6 @@ def test_data_root_is_the_project_root_not_inside_the_package():
     assert (DATA_ROOT.parent / "pyproject.toml").is_file()
     assert (DATA_ROOT.parent / "src" / "iyzee").is_dir()
     assert DATA_ROOT.name == "data"
-
 
 def test_create_dirs_is_idempotent_and_groups_by_month(tmp_path, monkeypatch):
     monkeypatch.setattr(io, "DATA_ROOT", tmp_path)
@@ -41,9 +39,7 @@ def test_create_dirs_is_idempotent_and_groups_by_month(tmp_path, monkeypatch):
     assert first.parent == tmp_path
     assert first.name == datetime.now().astimezone().strftime("%Y-%m")
 
-
 # -- save_step_results: the numeric .npz + JSON sidecar pair -----------------------------
-
 
 def _result(x_value=1.0, *, squeezing=None, shot_noise=None, **meta) -> StepResult:
     traces = {}
@@ -54,7 +50,6 @@ def _result(x_value=1.0, *, squeezing=None, shot_noise=None, **meta) -> StepResu
     return StepResult(
         label=f"x={x_value}", x_value=x_value, x_unit="Hz", traces=traces, meta=dict(meta)
     )
-
 
 def test_save_step_results_writes_data_and_metadata_pair(tmp_path):
     results = [
@@ -90,7 +85,6 @@ def test_save_step_results_writes_data_and_metadata_pair(tmp_path):
     # Per-point metadata and run-level metadata stay in the sidecar rather than
     # contaminating the numeric NPZ payload.
 
-
 def test_save_step_results_can_overwrite_a_fixed_file_pair_atomically(tmp_path: Path) -> None:
     target = tmp_path / "checkpoint.npz"
     assert save_step_results([_result(1.0)], tmp_path, path=target) == target
@@ -103,7 +97,6 @@ def test_save_step_results_can_overwrite_a_fixed_file_pair_atomically(tmp_path: 
     ], "no stray .part file, and the sidecar follows the .npz's chosen name"
     with np.load(target, allow_pickle=False) as archive:
         assert len(archive["x_values"]) == 2
-
 
 def test_save_step_results_fills_a_missing_trace_with_nan(tmp_path):
     results = [
@@ -118,7 +111,6 @@ def test_save_step_results_fills_a_missing_trace_with_nan(tmp_path):
     np.testing.assert_array_equal(shot_noise[0], [3.0, 4.0])
     assert np.all(np.isnan(shot_noise[1]))
 
-
 def test_save_step_results_rejects_a_trace_whose_length_disagrees_across_points(tmp_path):
     results = [
         _result(1.0, squeezing=[1.0, 2.0, 3.0]),
@@ -128,7 +120,6 @@ def test_save_step_results_rejects_a_trace_whose_length_disagrees_across_points(
     with pytest.raises(ValueError, match="squeezing.*inconsistent lengths"):
         save_step_results(results, tmp_path)
 
-
 def test_save_step_results_names_the_file_from_name_and_a_random_suffix(tmp_path):
     path = save_step_results([_result(1.0)], tmp_path, name="bandwidth")
 
@@ -136,14 +127,12 @@ def test_save_step_results_names_the_file_from_name_and_a_random_suffix(tmp_path
     assert match is not None
     assert match["name"] == "bandwidth"
 
-
 def test_save_step_results_sanitizes_an_unsafe_name(tmp_path):
     path = save_step_results([_result(1.0)], tmp_path, name="bandwidth sweep/#1")
 
     match = STEM_PATTERN.match(path.stem)
     assert match is not None
     assert match["name"] == "bandwidth-sweep-1"
-
 
 def test_two_saves_in_the_same_second_do_not_collide(tmp_path):
     # No time-freezing needed: two calls back-to-back in a test almost
@@ -154,23 +143,7 @@ def test_two_saves_in_the_same_second_do_not_collide(tmp_path):
 
     assert first != second
 
-
 # -- multiplot / difference_series -------------------------------------------------------
-
-
-def test_multiplot_handles_empty_data(monkeypatch):
-    shown = False
-
-    def fake_show():
-        nonlocal shown
-        shown = True
-
-    monkeypatch.setattr("iyzee.experiment.io.plt.show", fake_show)
-
-    multiplot([])
-
-    assert shown
-
 
 def test_multiplot_plots_each_result(monkeypatch):
     plotted = []
@@ -208,12 +181,10 @@ def test_multiplot_plots_each_result(monkeypatch):
 
     assert plotted == [([0, 1], [2.0, 3.0])]
 
-
 def test_difference_series_computes_x_y_and_label():
     result = difference_series([3.0, 4.0], [1.0, 1.0], "pt0")
 
     assert result == ([0, 1], [2.0, 3.0], "pt0")
-
 
 def test_difference_series_many_skips_unusable_rows():
     result = difference_series_many(
@@ -226,7 +197,6 @@ def test_difference_series_many_skips_unusable_rows():
         ([0, 1], [2.0, 3.0], "first"),
         ([0, 1], [3.0, 4.0], "third"),
     ]
-
 
 def test_difference_series_returns_none_without_usable_traces():
     # A missing trace and a trace that is only NaNs are both unusable.

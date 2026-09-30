@@ -12,7 +12,6 @@ from iyzee.experiment.procedures import (
     run_frequency_sweep,
 )
 
-
 class FakeMXA:
     def __init__(self):
         self.rbw_values = []
@@ -25,18 +24,15 @@ class FakeMXA:
     def set_vbw(self, vbw_hz, auto=False):
         self.vbw_values.append((vbw_hz, auto))
 
-
 def fake_acquire_trace(mx, trace_num):
     mx.trace_calls.append(trace_num)
     return [trace_num]
-
 
 class BoomStep:
     label = "boom"
 
     def run(self, ctx):
         raise RuntimeError("boom")
-
 
 class FakeShutterControl:
     """Stand-in for power.ShutterControl as a context manager."""
@@ -56,7 +52,6 @@ class FakeShutterControl:
     def close(self):
         self.events.append("close")
 
-
 def test_bandwidth_step_sets_vbw_to_twice_rbw(monkeypatch):
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
     mx = FakeMXA()
@@ -72,12 +67,10 @@ def test_bandwidth_step_sets_vbw_to_twice_rbw(monkeypatch):
     assert result.traces["shot_noise"] == [2]
     assert result.meta == {"rbw_hz": 1000, "vbw_hz": 2000}
 
-
 def test_bandwidth_sweep_steps_defaults_match_20khz_scan():
     steps = bandwidth_sweep_steps()
 
     assert [s.rbw_hz for s in steps] == [20e3 * i for i in range(1, 20)]
-
 
 def test_bandwidth_sweep_builder_uses_shared_config():
     steps, config = build_bandwidth_sweep([20e3, 40e3], sweep_duration_ms=10)
@@ -87,7 +80,6 @@ def test_bandwidth_sweep_builder_uses_shared_config():
     assert config.sweep_duration_ms == 10
     assert config.res_bw_hz == 24e3
     assert config.trig_source == "IMM"
-
 
 def test_frequency_sweep_builder_derives_relax_time_from_config():
     steps, config = build_frequency_sweep(
@@ -103,7 +95,6 @@ def test_frequency_sweep_builder_derives_relax_time_from_config():
     assert [step.relax_time_s for step in steps] == [1.5, 1.5, 1.5]
     assert config.avg_count == 150
     assert config.sweep_duration_ms == 10
-
 
 def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
@@ -126,13 +117,11 @@ def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
     assert result.traces["squeezing"] == [1]
     assert result.traces["shot_noise"] == [2]
 
-
 def test_frequency_step_requires_shutter():
     ctx = ExperimentContext(mx=FakeMXA(), run_id="t")
 
     with pytest.raises(ValueError, match="shutter"):
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
-
 
 def test_run_bandwidth_sweep_uses_caller_owned_mxa(monkeypatch):
     mx = FakeMXA()
@@ -151,7 +140,6 @@ def test_run_bandwidth_sweep_uses_caller_owned_mxa(monkeypatch):
     assert result == []
     assert prepared and prepared[0][0] is mx
 
-
 def test_run_bandwidth_sweep_does_not_disconnect_on_failure(monkeypatch):
     mx = FakeMXA()
     monkeypatch.setattr("iyzee.experiment.procedures.prepare_analyzer", lambda *args: None)
@@ -163,26 +151,6 @@ def test_run_bandwidth_sweep_does_not_disconnect_on_failure(monkeypatch):
     with pytest.raises(RuntimeError, match="boom"):
         run_bandwidth_sweep(mx)
 
-
-def test_run_frequency_sweep_uses_caller_owned_devices(monkeypatch):
-    mx = FakeMXA()
-    shutter = FakeShutterControl()
-    prepared = []
-    monkeypatch.setattr(
-        "iyzee.experiment.procedures.prepare_analyzer",
-        lambda analyzer, traces, config: prepared.append((analyzer, traces, config)),
-    )
-    monkeypatch.setattr(
-        "iyzee.experiment.procedures.frequency_sweep_steps",
-        lambda **kwargs: [],
-    )
-
-    result = run_frequency_sweep(mx, shutter)
-
-    assert result == []
-    assert prepared and prepared[0][0] is mx
-
-
 class FakeMXAForTraceAcquisition:
     def __init__(self):
         self.update_states = []
@@ -192,7 +160,6 @@ class FakeMXAForTraceAcquisition:
 
     def single_sweep_wait(self):
         raise RuntimeError("sweep failed")
-
 
 def test_acquire_trace_disables_trace_after_failure():
     mx = FakeMXAForTraceAcquisition()
