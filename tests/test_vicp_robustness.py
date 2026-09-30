@@ -280,6 +280,19 @@ def test_block_ends_with_a_separate_terminator_frame(terminator):
     assert scope._transport.read_definite_block() == body
 
 
+def test_command_sequence_numbers_are_nonzero_and_advance() -> None:
+    scope, sock = attached()
+    scope.send("C1:TEST")
+    scope.send("C2:TEST")
+
+    first = struct.unpack("!4BI", bytes(sock.sent[:8]))
+    second_offset = 8 + len(b"C1:TEST")
+    second = struct.unpack("!4BI", bytes(sock.sent[second_offset : second_offset + 8]))
+
+    assert first[:4] == (DATA_EOI, VICPTransport.HEADER_VERSION, 1, 0)
+    assert second[:4] == (DATA_EOI, VICPTransport.HEADER_VERSION, 2, 0)
+
+
 def test_get_data_words_sets_format_and_byte_order_before_requesting_the_waveform():
     body = struct.pack("<2h", -123, 456)
     scope, sock = attached(frame(DATA, block_header(4)) + frame(DATA, body) + frame(EOI, b"\n"))
