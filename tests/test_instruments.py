@@ -197,6 +197,9 @@ class _FakeLeCroy:
     def disconnect(self) -> None:
         self.disconnected = True
 
+    def get_trigger_mode(self) -> str:
+        return "AUTO"
+
 
 def test_scope_handle_connect_and_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
@@ -204,7 +207,7 @@ def test_scope_handle_connect_and_probe(monkeypatch: pytest.MonkeyPatch) -> None
     handle.connect()
     scope = cast(_FakeLeCroy, handle.scope)
     assert scope.connected_to == str(handle._ip)
-    assert "socket connected" in handle.probe()
+    assert handle.probe() == f"VICP connected @ {handle._ip} (trigger mode AUTO)"
 
 
 # -- registry ----------------------------------------------------------
