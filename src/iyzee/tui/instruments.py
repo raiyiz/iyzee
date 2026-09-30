@@ -204,7 +204,11 @@ class ScopeHandle(_LockedHandle):
         self._scope.disconnect()
 
     def probe(self) -> str:
-        return f"socket connected @ {self._ip}"
+        # A successful TCP handshake does not prove the VICP request/response
+        # path is usable. Issue one cheap ASCII query so Connect rejects a
+        # half-working scope before the TUI or console starts using it.
+        mode = self._scope.get_trigger_mode()
+        return f"VICP connected @ {self._ip} (trigger mode {mode.strip()})"
 
     @property
     def lock(self) -> threading.RLock:
