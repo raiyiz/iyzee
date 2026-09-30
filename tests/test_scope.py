@@ -41,7 +41,9 @@ class FragmentingFakeSocket:
 
 
 def vicp_frame(flag: int, payload: bytes) -> bytes:
-    header = struct.pack("B3BI", flag, VICPTransport.HEADER_VERSION, 0, 0, socket.htonl(len(payload)))
+    header = struct.pack(
+        "B3BI", flag, VICPTransport.HEADER_VERSION, 0, 0, socket.htonl(len(payload))
+    )
     return header + payload
 
 
