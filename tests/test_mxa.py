@@ -1,6 +1,3 @@
-import pytest
-
-import iyzee.base as base_module
 from iyzee.mxa import KeysightMXA
 
 
