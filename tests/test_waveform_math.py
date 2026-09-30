@@ -61,6 +61,7 @@ def _recording(waveforms: list[dict], applied: list[dict] | None = None, **extra
     }
     return Recording(path=Path("fake.npz"), arrays=arrays, metadata=metadata)
 
+
 # -- traces_from_scope_recording ------------------------------------------------------------
 
 
@@ -121,6 +122,7 @@ def test_a_channel_with_no_applied_settings_entry_still_loads():
 
     assert trace.label == "C3" and "volts_per_div" not in trace.meta
 
+
 # -- subtract_traces --------------------------------------------------------------------------
 
 
@@ -162,6 +164,7 @@ def test_subtract_traces_does_not_mutate_its_inputs():
 
     np.testing.assert_array_equal(a.values, a_before)
     np.testing.assert_array_equal(b.values, b_before)
+
 
 # -- subtract_background ------------------------------------------------------------------
 
@@ -217,6 +220,7 @@ def test_background_correction_requires_exactly_one_mode(kwargs):
 
     with pytest.raises(ValueError, match="exactly one"):
         subtract_background(trace, **kwargs)
+
 
 # -- scale_trace ----------------------------------------------------------------------------
 

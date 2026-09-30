@@ -44,6 +44,7 @@ def _save_sweep_run(data_root: Path) -> Path:
     )
     return stem.with_suffix(".npz")
 
+
 @asynccontextmanager
 async def _open_data_screen(
     monkeypatch: pytest.MonkeyPatch, data_root: Path
@@ -63,6 +64,7 @@ def _summary(screen: DataScreen) -> str:
 def _log(screen: DataScreen) -> str:
     return "\n".join(strip.text for strip in screen.query_one("#data-log", RichLog).lines)
 
+
 # -- empty state / navigation to the page ----------------------------------------------------
 
 
@@ -73,6 +75,7 @@ async def test_empty_data_root_shows_a_placeholder_and_an_empty_preview(
     async with _open_data_screen(monkeypatch, tmp_path) as (screen, _pilot):
         assert "No scope acquisitions" in _summary(screen)
         assert screen._measured == {} and screen._checkboxes == {}
+
 
 # -- run list: filtered to scope acquisitions -------------------------------------------------
 
@@ -102,6 +105,7 @@ async def test_a_corrupt_npz_is_reported_rather_than_crashing_the_page(
         assert "Could not read file" in _summary(screen)
         assert screen._measured == {}
 
+
 # -- selecting a channel toggles the preview, not an error ------------------------------------
 
 
@@ -117,6 +121,7 @@ async def test_channel_toggles_control_the_preview(
         screen._checkboxes["C2"].value = False
         await pilot.pause()
         assert [t.label for t in screen._selected_traces()] == ["C1"]
+
 
 # -- subtract ---------------------------------------------------------------------------------
 
@@ -157,6 +162,7 @@ async def test_subtract_with_no_channel_b_flags_that_field(
         assert screen.query_one("#data-chan-b", Select).has_class("-invalid")
         assert any("Channel B" in n for n in notifications(app))
 
+
 # -- background correction ---------------------------------------------------------------------
 
 
@@ -181,6 +187,7 @@ async def test_background_region_subtracts_the_mean_of_the_window(
 
         (derived_label,) = [label for label in screen._derived if label != "C1"]
         assert "bg-corrected" in derived_label
+
 
 # -- scale --------------------------------------------------------------------------------------
 
@@ -224,6 +231,7 @@ async def test_a_non_numeric_scale_field_flags_that_field(
         assert screen._derived == {}
         assert screen.query_one("#data-yscale", Input).has_class("-invalid")
 
+
 # -- clear derived --------------------------------------------------------------------------
 
 
@@ -245,6 +253,7 @@ async def test_clear_derived_removes_every_derived_trace_and_its_checkbox(
         assert screen._derived == {}
         assert set(screen._checkboxes) == {"C1", "C2"}
         assert "Cleared derived traces." in _log(screen)
+
 
 # -- threaded rendering: a slow render must never land after a newer one -------------------
 
@@ -329,6 +338,7 @@ async def test_export_disables_the_button_while_running_and_reenables_after(
         await wait_until(pilot, lambda: not screen.query_one("#data-export", Button).disabled)
         assert "Saved plot" in _log(screen)
 
+
 @async_test
 async def test_visiting_console_then_data_leaves_the_backend_pinned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -354,6 +364,7 @@ async def test_visiting_console_then_data_leaves_the_backend_pinned(
         await pilot.pause()
 
         assert matplotlib.get_backend().lower() == "agg"
+
 
 # -- export ------------------------------------------------------------------------------------
 
@@ -390,6 +401,7 @@ async def test_export_with_no_channel_checked_refuses_with_a_notification(
 
         assert not npz_path.with_name(f"{npz_path.stem}-plot.png").exists()
         assert any("Select at least one" in n for n in notifications(app))
+
 
 # -- switching runs resets derived traces, not just the measured channels --------------------
 

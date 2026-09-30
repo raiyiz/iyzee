@@ -225,6 +225,7 @@ def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path
     assert manifest["configuration"]["applied_channel_settings"] is None
     assert len(manifest["data_sha256"]) == 64
 
+
 # -- apply_channel_settings ---------------------------------------------------------------
 
 
@@ -280,6 +281,7 @@ def test_apply_channel_settings_works_with_no_lock_at_all():
     errors = apply_channel_settings(FakeScope(), [_settings(Channel.C1)])
     assert errors == []
 
+
 # -- selective channel apply ---------------------------------------------------------------
 
 
@@ -324,6 +326,7 @@ def test_read_channel_settings_accepts_space_separated_voltage_units():
     assert errors == []
     assert settings == [ChannelSettings(Channel.C1, True, 0.2, -0.5, Coupling.DC_1M)]
 
+
 # -- read_channel_settings ----------------------------------------------------------------
 
 
@@ -347,6 +350,7 @@ def test_read_channel_settings_continues_past_one_channels_failure():
     assert [s.channel for s in settings] == [Channel.C2]
     assert [e.channel for e in errors] == [Channel.C1]
     assert isinstance(errors[0].error, RuntimeError)
+
 
 # -- apply_trigger_settings ----------------------------------------------------------------
 
@@ -387,6 +391,7 @@ def test_apply_trigger_settings_raises_rather_than_collecting_errors():
 
     with pytest.raises(RuntimeError, match="nope"):
         apply_trigger_settings(scope, settings)
+
 
 # -- selective trigger apply ----------------------------------------------------------------
 
@@ -457,6 +462,7 @@ def test_read_trigger_settings_raises_rather_than_collecting_errors():
     with pytest.raises(RuntimeError, match="nope"):
         read_trigger_settings(scope)
 
+
 # -- acquire_waveforms ----------------------------------------------------------------------
 
 
@@ -492,6 +498,7 @@ def test_acquire_waveforms_continues_past_one_channels_failure():
 
     assert [label for _x, _y, label in series] == ["C1", "C4"]
     assert [e.channel for e in errors] == [Channel.C3]
+
 
 # -- link loss: stop instead of reading a late reply as the next channel's answer ---------
 
@@ -572,6 +579,7 @@ def test_a_parse_error_on_a_healthy_link_does_not_stop_the_batch():
     assert [s.channel for s in settings] == [Channel.C2]
     assert [e.channel for e in errors] == [Channel.C1]
 
+
 # -- locking: one lock, no deadlock through the console proxy ------------------------------
 
 
@@ -650,6 +658,7 @@ def test_batch_holds_the_drivers_transaction_even_without_an_explicit_lock():
     assert events[0] == "enter" and events[-1] == "exit"
     assert "set_offset" in events[1:-1]
 
+
 # -- trigger: mode is written last on the selective path too --------------------------------
 
 
@@ -672,6 +681,7 @@ def test_apply_trigger_settings_writes_mode_after_source_and_level_when_all_chan
         "set_trigger_coupling",
         "set_trigger_level",
     ]
+
 
 # -- apply + read-back verification ---------------------------------------------------------
 
@@ -796,6 +806,7 @@ def test_apply_and_verify_holds_the_lock_across_write_and_read_back():
     apply_and_verify_channel_settings(scope, [_settings(Channel.C1)], lock=lock)
 
     assert held == [True] and not lock.locked()
+
 
 # -- acquisition: consistency and provenance -----------------------------------------------
 

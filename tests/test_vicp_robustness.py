@@ -74,6 +74,7 @@ def attached(data: bytes = b"", **kwargs) -> tuple[LeCroy, ScriptedSocket]:
     scope.s = sock
     return scope, sock
 
+
 # -- a failed read/write invalidates the connection -----------------------------------------
 
 
@@ -168,6 +169,7 @@ class _Connectable:
     def __getattr__(self, name):
         return getattr(self._target, name)
 
+
 # -- same contract with real sockets (real socket.timeout, real EOF) -----------------------
 
 
@@ -240,6 +242,7 @@ def test_frame_cap_without_eoi_invalidates(monkeypatch):
 
     assert scope.connected is False
 
+
 # -- the terminator is never sample data ----------------------------------------------------
 
 
@@ -297,6 +300,7 @@ def test_get_data_bytes_sets_format_before_requesting_the_waveform():
 
     assert sent_commands(bytes(sock.sent)) == [b"CFMT DEF9,BYTE,BIN", b"C1:WF? DAT1"]
 
+
 # -- connect(): real loopback server -------------------------------------------------------
 
 
@@ -330,6 +334,7 @@ def test_loopback_round_trip_and_reconnect_after_peer_disconnect():
     finally:
         server.close()
 
+
 # -- connect()/disconnect() semantics -----------------------------------------------------
 
 
@@ -347,6 +352,7 @@ def test_disconnect_is_idempotent():
     scope.disconnect()
 
     assert sock.closed and scope.connected is False
+
 
 # -- command strings are validated before they reach the instrument -----------------------
 
@@ -401,6 +407,7 @@ def test_valid_math_equation_is_still_sent_verbatim():
     scope.set_math_equation(MathChannel.F2, "C1-C2")
 
     assert sent_commands(bytes(sock.sent)) == [b"F2:DEFINE EQN,'C1-C2'"]
+
 
 # -- word download decodes straight to an int16 array ------------------------------------
 

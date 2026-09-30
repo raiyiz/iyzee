@@ -19,6 +19,7 @@ from iyzee.tui import app as app_mod
 from iyzee.tui.screens import traces as traces_mod
 from iyzee.tui.screens.traces import TracesScreen
 
+
 @asynccontextmanager
 async def _open_traces_screen(
     monkeypatch: pytest.MonkeyPatch, data_root: Path
@@ -222,4 +223,3 @@ async def test_an_empty_folder_explains_itself_and_names_the_folder(
     async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
         assert "No recordings yet" in _summary(screen)
         assert str(tmp_path) in plain(screen.query_one("#traces-hint", Static))
-

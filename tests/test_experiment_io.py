@@ -41,6 +41,7 @@ def test_create_dirs_is_idempotent_and_groups_by_month(tmp_path, monkeypatch):
     assert first.parent == tmp_path
     assert first.name == datetime.now().astimezone().strftime("%Y-%m")
 
+
 # -- save_step_results: the numeric .npz + JSON sidecar pair -----------------------------
 
 
@@ -152,6 +153,7 @@ def test_two_saves_in_the_same_second_do_not_collide(tmp_path):
     second = save_step_results([_result(1.0)], tmp_path, name="bandwidth")
 
     assert first != second
+
 
 # -- multiplot / difference_series -------------------------------------------------------
 

@@ -53,6 +53,7 @@ def test_vterm_scrollback_colours_and_cursor() -> None:
         s.style and s.style.reverse for s in screen.row_segments(0, offset=1, cursor=True)
     )
 
+
 # -- key encoding -----------------------------------------------------------------------
 
 
@@ -95,7 +96,9 @@ def test_key_encoding_edge_cases() -> None:
     assert key_to_bytes("ctrl+z") is None
     assert key_to_bytes("some-unknown-key") is None
 
+
 # -- the IPython session -----------------------------------------------------------------
+
 
 async def _until(screen_text, needle: str, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
@@ -211,8 +214,10 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
     await session_run(history, ["a = 1", "b = 2"], _noop)
     await session_run(history, [], recalls_after_restart)  # a fresh session, same file
 
+
 async def _noop(session, text) -> None:
     return None
+
 
 # -- the page, end to end through real key presses ---------------------------------------
 
@@ -224,6 +229,7 @@ def _keys(text: str) -> list[str]:
 
 def _console_text(app: IyzeeApp) -> str:
     return "\n".join(app.screen.query_one(TerminalView).text_lines())
+
 
 async def _wait(pilot, app, needle: str, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
@@ -264,6 +270,7 @@ async def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
         assert await _wait(pilot, app, "Out[3]: 5"), _console_text(app)
         await pilot.press("up")
         assert await _wait(pilot, app, "In [4]: x"), _console_text(app)
+
 
 @async_test
 async def test_console_interrupt_scrollback_and_shutdown() -> None:

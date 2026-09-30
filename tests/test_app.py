@@ -101,6 +101,7 @@ async def test_nav_rail_and_sweep_banner_update_the_moment_a_connect_finishes(
         assert "● Fk" in plain(nav), plain(nav)  # no page switch in between
         assert not app.query_one("#sweep-status", Static).display
 
+
 @async_test
 async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(
     tmp_path: Path,

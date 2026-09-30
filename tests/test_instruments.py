@@ -116,6 +116,7 @@ def test_visa_handle_disconnect_closes_device() -> None:
     handle.disconnect()
     assert device.closed is True
 
+
 # -- ShutterHandle ----------------------------------------------------------
 
 
@@ -162,6 +163,7 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
     assert psu.closed is True
     assert handle.shutter is None
 
+
 # -- WavemeterHandle ----------------------------------------------------------
 
 
@@ -179,6 +181,7 @@ def test_wavemeter_handle_probe_wraps_readout_error(monkeypatch: pytest.MonkeyPa
     handle = WavemeterHandle(channel=0)
     with pytest.raises(ConnectionError, match="switch unreachable"):
         handle.probe()
+
 
 # -- ScopeHandle ----------------------------------------------------------
 
@@ -202,6 +205,7 @@ def test_scope_handle_connect_and_probe(monkeypatch: pytest.MonkeyPatch) -> None
     scope = cast(_FakeLeCroy, handle.scope)
     assert scope.connected_to == str(handle._ip)
     assert "socket connected" in handle.probe()
+
 
 # -- registry ----------------------------------------------------------
 

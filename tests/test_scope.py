@@ -60,6 +60,7 @@ def test_recv_exact_raises_on_closed_connection():
     with pytest.raises(ConnectionError):
         recv_exact(sock, 100)
 
+
 # -- timeouts: connect(), recv_exact(), send() must not block forever --------------------
 
 
@@ -440,6 +441,7 @@ def test_get_data_floats_detailed_retains_raw_codes_and_calibration():
     np.testing.assert_allclose(detailed["values"], [199.75, -100.25])
     assert detailed["vertical_gain"] == 2.0
     assert detailed["vertical_offset"] == 0.25
+
 
 # -- channel / trigger / math control --------------------------------------------------------
 
