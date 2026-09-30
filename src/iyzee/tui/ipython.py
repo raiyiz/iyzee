@@ -118,6 +118,10 @@ class LabProxy:
             device = getattr(handle, "device", None)
             if device is None:
                 raise AttributeError(f"lab.{name} is connected but exposes no live device")
+            if getattr(device, "connected", True) is False:
+                raise AttributeError(
+                    f"lab.{name} is disconnected — reconnect it on the Connect screen"
+                )
             return LockedProxy(device, handle.lock)
         if name == "results":
             return app.last_run.results if app.last_run is not None else []
@@ -141,7 +145,13 @@ class LabProxy:
     def connected(self) -> tuple[str, ...]:
         """Names of the instruments currently connected, e.g. ``("mx",)``."""
         app = object.__getattribute__(self, "_app")
-        return tuple(name for name, key in self._INSTRUMENT_KEYS.items() if key in app.handles)
+        connected: list[str] = []
+        for name, key in self._INSTRUMENT_KEYS.items():
+            handle = app.handles.get(key)
+            device = getattr(handle, "device", None) if handle is not None else None
+            if key in app.handles and getattr(device, "connected", True) is not False:
+                connected.append(name)
+        return tuple(connected)
 
 
 def shell_config(history_file: str | Path | None = None) -> Config:
