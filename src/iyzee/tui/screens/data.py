@@ -10,10 +10,10 @@ screen's job is picking channels, reading the math-op form into one of those
 function calls, and drawing the result — not the math itself.
 
 Unlike Sweep and Scope, nothing here talks to a socket: loading a saved run
-and combining a handful of waveform arrays is local file I/O and numpy, not
-hardware I/O that can block for seconds. So, like Traces, this screen does
-its work directly in UI event handlers rather than a background ``@work``
-worker — there's no blocking call here to keep off the UI thread.
+and combining a handful of waveform arrays is local file I/O and numpy. Those
+operations can still be large enough to stall the TUI, so loading and plot-data
+preparation run in Textual workers; only the final widget update stays on the
+UI thread.
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def _peek_kind(path: Path) -> str | None:
     """
     try:
         return json.loads(path.with_suffix(".json").read_text()).get("kind")
-    except OSError, ValueError, AttributeError:
+    except (OSError, ValueError, AttributeError):
         return None
 
 
