@@ -9,11 +9,27 @@ buttons trigger are identically usable from a script or the console. This
 screen's job is picking channels, reading the math-op form into one of those
 function calls, and drawing the result — not the math itself.
 
-Unlike Sweep and Scope, nothing here talks to a socket: loading a saved run
-and combining a handful of waveform arrays is local file I/O and numpy, not
-hardware I/O that can block for seconds. So, like Traces, this screen does
-its work directly in UI event handlers rather than a background ``@work``
-worker — there's no blocking call here to keep off the UI thread.
+Unlike Sweep and Scope, nothing here talks to a socket, so there's no
+hardware I/O to keep off the UI thread — but building a matplotlib figure
+and extracting its line data is real, non-trivial CPU work (roughly half a
+second for a 1M-sample waveform, measured; a long-memory scope acquisition
+can be many times that), and that *does* block Textual's single-threaded UI
+loop just as effectively as a blocking socket call would. So
+:func:`~iyzee.waveform_math.build_waveform_figure`/``figure_series`` (in
+``_render_waveforms``) and the export's ``savefig`` (in ``_export``) run in
+``@work(thread=True)`` workers, same as Sweep/Scope's hardware calls; only
+the actual math-op application and the final ``draw_series`` widget update
+stay synchronous, since matplotlib figure objects are plain Python objects
+safe to build off the main thread (see ``tui.__init__`` for why the backend
+must be non-interactive for that to hold), but only the main thread may ever
+touch a Textual widget.
+
+A checkbox toggle can be superseded by another before its worker finishes
+(the user keeps clicking while a big waveform is still rendering); each
+redraw request carries a generation number, checked before the result is
+applied, so a slow, now-stale render can never land after a newer one —
+the same "is this still the current thing" guard ``ScopeScreen._scope_is_
+current`` uses for a different kind of staleness.
 """
 
 from __future__ import annotations
@@ -23,6 +39,7 @@ import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
@@ -153,6 +170,8 @@ class DataScreen(Page):
         self._measured: dict[str, Trace] = {}
         self._derived: dict[str, Trace] = {}
         self._checkboxes: dict[str, Checkbox] = {}
+        self._suppress_events = False
+        self._render_generation = 0
         self.refresh_runs()
 
     def on_show(self) -> None:
@@ -177,6 +196,19 @@ class DataScreen(Page):
         to act on, so listing it would only be a dead end for this screen —
         Traces already lists every recording, sweep and scope alike, for
         browsing.
+
+        ``ListView`` posts its own ``Highlighted`` message on every change to
+        ``.index`` — including the implicit ``None -> 0`` it makes itself the
+        moment the first item is mounted into a previously-empty list, not
+        just the explicit assignment below — so rebuilding the list here
+        would otherwise drive ``on_list_view_highlighted`` (and everything it
+        triggers: a file load, a worker-threaded render) two or three times
+        over for what is, to the person looking at the screen, one visit to
+        this page. ``_suppress_events`` turns those off for the rebuild, and
+        this function makes the one call that actually matters — to
+        ``_select``/``_show_empty`` — itself, once, explicitly, rather than
+        leaving it to however many of ``ListView``'s own events happen to
+        fire along the way.
         """
         list_view = self.query_one("#data-list", ListView)
         index = list_view.index
@@ -192,13 +224,20 @@ class DataScreen(Page):
         self.query_one("#data-hint", Static).update(
             f"Scope acquisitions are read from {escape(str(_DATA_ROOT))}"
         )
-        list_view.clear()
-        for path in self._paths:
-            list_view.append(ListItem(Label(_run_label(path, path.stat().st_mtime))))
-        if not self._paths:
+        self._suppress_events = True
+        try:
+            list_view.clear()
+            for path in self._paths:
+                list_view.append(ListItem(Label(_run_label(path, path.stat().st_mtime))))
+            if self._paths:
+                list_view.index = self._paths.index(previous) if previous in self._paths else 0
+        finally:
+            self._suppress_events = False
+
+        if self._paths:
+            self._select(self._paths[list_view.index or 0])
+        else:
             self._show_empty()
-            return
-        list_view.index = self._paths.index(previous) if previous in self._paths else 0
 
     def _show_empty(self) -> None:
         self._path = None
@@ -213,7 +252,7 @@ class DataScreen(Page):
         self._redraw()
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
-        if event.list_view.id != "data-list":
+        if self._suppress_events or event.list_view.id != "data-list":
             return
         index = event.list_view.index
         if index is not None and 0 <= index < len(self._paths):
@@ -222,6 +261,17 @@ class DataScreen(Page):
     # -- selecting a run ---------------------------------------------------------------------
 
     def _select(self, path: Path) -> None:
+        if path == self._path:
+            # Reached again for the run already showing — most often ListView
+            # re-posting Highlighted for an index that didn't actually change
+            # (it fires on the implicit None -> 0 a freshly-populated list
+            # makes for itself, not just on a real explicit change), or
+            # on_mount and on_show both scanning at once. Filenames are
+            # timestamped and never rewritten under the same name, so "same
+            # path" reliably means "nothing to redo" — skip re-reading the
+            # file and re-rendering rather than trusting how many times
+            # Textual happens to have called this for one visible selection.
+            return
         summary = self.query_one("#data-summary", Static)
         try:
             recording = load_recording(path)
@@ -260,13 +310,28 @@ class DataScreen(Page):
     # -- channel checkboxes and operand choices -----------------------------------------------
 
     def _rebuild_channel_checkboxes(self) -> None:
+        """Rebuild the channel/derived-trace checkboxes for the current selection.
+
+        Mounting a ``Checkbox`` fires its own ``Changed`` message once its
+        initial value settles — one per checkbox, not one for the whole
+        rebuild — so without ``_suppress_events`` this would dispatch
+        one redundant background render per channel on every run switch.
+        The staleness guard in ``_apply_preview`` keeps any of those from
+        landing *wrong*, but doing (and discarding) the work at all is still
+        wasted worker threads and, worse, can flicker a stale frame onto the
+        plot in between. Shares ``_suppress_events`` with ``refresh_runs()``'s own list-rebuild guard below, and the same idiom as ``ScopeScreen._suppress_dirty_events``.
+        """
         grid = self.query_one("#data-channels", Grid)
         grid.remove_children()
         self._checkboxes = {}
-        for label in self._all_traces():
-            checkbox = Checkbox(label, value=True, classes="data-chan-toggle")
-            self._checkboxes[label] = checkbox
-            grid.mount(checkbox)
+        self._suppress_events = True
+        try:
+            for label in self._all_traces():
+                checkbox = Checkbox(label, value=True, classes="data-chan-toggle")
+                self._checkboxes[label] = checkbox
+                grid.mount(checkbox)
+        finally:
+            self._suppress_events = False
 
     def _refresh_operand_choices(self) -> None:
         labels = sorted(self._all_traces())
@@ -275,7 +340,7 @@ class DataScreen(Page):
         self.query_one("#data-chan-b", Select).set_options(options)
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        if "data-chan-toggle" in event.checkbox.classes:
+        if not self._suppress_events and "data-chan-toggle" in event.checkbox.classes:
             self._redraw()
 
     # -- preview -----------------------------------------------------------------------------
@@ -289,14 +354,38 @@ class DataScreen(Page):
         ]
 
     def _redraw(self) -> None:
-        plot = self.query_one("#data-plot", PlotextPlot)
+        """Kick off a (possibly slow) preview render; never blocks the caller.
+
+        Reading ``self._selected_traces()``/``self._path`` here, before
+        handing off to the worker, is deliberate: both reflect live widget
+        state that must be read on the main thread, and by the time a big
+        render finishes several clicks could have changed either.
+        """
+        self._render_generation += 1
+        generation = self._render_generation
         traces = self._selected_traces()
         title = self._path.name if self._path else None
+        self._render_waveforms(generation, traces, title)
+
+    @work(thread=True, exclusive=True, group="data-render", exit_on_error=False)
+    def _render_waveforms(self, generation: int, traces: list[Trace], title: str | None) -> None:
         fig = build_waveform_figure(traces, title=title)
         try:
             lines, labels = figure_series(fig)
         finally:
             plt.close(fig)
+        self._ui(self._apply_preview, generation, lines, labels, title)
+
+    def _apply_preview(
+        self,
+        generation: int,
+        lines: list[tuple[list[float], list[float], str | None]],
+        labels: dict[str, str],
+        title: str | None,
+    ) -> None:
+        if generation != self._render_generation:
+            return  # superseded by a later _redraw() before this one finished
+        plot = self.query_one("#data-plot", PlotextPlot)
         draw_series(
             plot,
             lines,
@@ -379,7 +468,6 @@ class DataScreen(Page):
     # -- export --------------------------------------------------------------------------------
 
     def _export(self) -> None:
-        log_widget = self.query_one("#data-log", RichLog)
         if self._path is None:
             self.notify("Select a scope acquisition first.", severity="error")
             return
@@ -388,12 +476,26 @@ class DataScreen(Page):
             self.notify("Select at least one channel/trace to export.", severity="error")
             return
         out_path = self._path.with_name(f"{self._path.stem}-plot.png")
+        title = self._path.name
+        self.query_one("#data-export", Button).disabled = True
+        self._save_export(traces, out_path, title)
+
+    @work(thread=True, exclusive=True, group="data-export", exit_on_error=False)
+    def _save_export(self, traces: list[Trace], out_path: Path, title: str) -> None:
+        error: Exception | None = None
         try:
-            save_waveform_figure(traces, out_path, title=self._path.name)
+            save_waveform_figure(traces, out_path, title=title)
         except Exception as exc:  # noqa: BLE001 - reported, not raised, from a UI action
             log.exception("data: failed to export waveform figure")
-            log_widget.write(f"[red]Export failed: {escape(str(exc))}[/red]")
-            self.notify(f"Export failed: {exc}", severity="error", markup=False)
+            error = exc
+        self._ui(self._finish_export, out_path, error)
+
+    def _finish_export(self, out_path: Path, error: Exception | None) -> None:
+        self.query_one("#data-export", Button).disabled = False
+        log_widget = self.query_one("#data-log", RichLog)
+        if error is not None:
+            log_widget.write(f"[red]Export failed: {escape(str(error))}[/red]")
+            self.notify(f"Export failed: {error}", severity="error", markup=False)
             return
         log_widget.write(f"Saved plot: {escape(str(out_path))}")
         self.notify(f"Saved {out_path.name}")

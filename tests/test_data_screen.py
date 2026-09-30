@@ -6,15 +6,16 @@ test_traces_screen.py, so these never touch the real ``data/`` directory.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
-from helpers import async_test, notifications, plain
+from helpers import async_test, notifications, plain, wait_until
 from test_scope_workflows import DetailedFakeScope
 from textual.pilot import Pilot
-from textual.widgets import Button, Input, RichLog, Select, Static
+from textual.widgets import Button, Input, ListView, RichLog, Select, Static
 
 from iyzee.scope import Channel
 from iyzee.scope_workflows import acquire_scope_recording, save_scope_acquisition
@@ -319,6 +320,128 @@ async def test_clear_derived_removes_every_derived_trace_and_its_checkbox(
         assert "Cleared derived traces." in _log(screen)
 
 
+# -- threaded rendering: a slow render must never land after a newer one -------------------
+
+
+@async_test
+async def test_a_slow_redraw_does_not_clobber_a_newer_ones_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression guard for the generation check in _apply_preview: toggle a
+    checkbox while the previous (now-stale) render is still building its
+    figure, and confirm the *plot itself* ends up drawn from the second
+    toggle's data, not whichever render happened to finish last.
+
+    Checking ``_selected_traces()`` here would prove nothing — it just
+    re-reads the checkboxes' current state, which is unaffected by which
+    render actually reached ``draw_series()``. This spies on ``draw_series``
+    itself (the one call that actually touches ``#data-plot``) to see what
+    was drawn.
+    """
+    _save_scope_run(tmp_path)
+    real_build = data_mod.build_waveform_figure
+    calls: list[str | None] = []
+    release = threading.Event()
+    entered_first = threading.Event()
+
+    def gated_build(traces: list, *, title: str | None = None):  # type: ignore[no-untyped-def]
+        calls.append(title)
+        if len(calls) == 1:
+            entered_first.set()
+            release.wait(timeout=5)
+        return real_build(traces, title=title)
+
+    monkeypatch.setattr(data_mod, "build_waveform_figure", gated_build)
+
+    drawn: list[list[str | None]] = []
+    real_draw_series = data_mod.draw_series
+
+    def spying_draw_series(plot, lines, **kwargs):  # type: ignore[no-untyped-def]
+        drawn.append([label for _x, _y, label in lines])
+        return real_draw_series(plot, lines, **kwargs)
+
+    monkeypatch.setattr(data_mod, "draw_series", spying_draw_series)
+
+    async with _open_data_screen(monkeypatch, tmp_path) as (screen, pilot):
+        await wait_until(pilot, entered_first.is_set)  # the initial auto-select's redraw
+        generation_at_block = screen._render_generation
+
+        screen._checkboxes["C2"].value = False  # a second, newer redraw request
+        await wait_until(pilot, lambda: screen._render_generation != generation_at_block)
+        release.set()  # let the first (now stale) render proceed and finish
+
+        await wait_until(pilot, lambda: len(calls) >= 2)
+        await wait_until(pilot, lambda: len(drawn) >= 1)
+        await pilot.pause(0.2)  # give a stale, wrongly-applied second draw a chance to land
+
+        # Both channels were built (calls==2), but only the second (later)
+        # request's result may ever reach the plot.
+        assert drawn == [["C1"]]
+
+
+@async_test
+async def test_export_disables_the_button_while_running_and_reenables_after(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_save = data_mod.save_waveform_figure
+    entered = threading.Event()
+    release = threading.Event()
+
+    def gated_save(traces, path, *, title=None):  # type: ignore[no-untyped-def]
+        entered.set()
+        release.wait(timeout=5)
+        return real_save(traces, path, title=title)
+
+    monkeypatch.setattr(data_mod, "save_waveform_figure", gated_save)
+    async with _open_data_screen(monkeypatch, _save_scope_run(tmp_path).parent) as (screen, pilot):
+        screen.query_one("#data-export", Button).press()
+        await wait_until(pilot, entered.is_set)
+
+        assert screen.query_one("#data-export", Button).disabled
+
+        release.set()
+        await wait_until(pilot, lambda: not screen.query_one("#data-export", Button).disabled)
+        assert "Saved plot" in _log(screen)
+
+
+def test_importing_the_tui_package_pins_a_non_interactive_matplotlib_backend() -> None:
+    """The prerequisite for building figures in a worker thread at all: an
+    interactive backend generally requires the main thread. iyzee.tui must
+    already be imported by the time this test runs (test_data_screen.py
+    imports it at module level), so this only checks the backend it left
+    matplotlib in, not the import itself."""
+    import matplotlib
+
+    assert matplotlib.get_backend().lower() == "agg"
+
+
+@async_test
+async def test_visiting_console_then_data_leaves_the_backend_pinned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A GUI backend (Tk, most commonly) is not thread-safe: creating or
+    destroying its objects off the thread that first touched it crashes
+    outright rather than raising a catchable exception (this is the actual
+    failure observed switching between pages without an instrument
+    connected — nothing here talks to hardware). Console is the other page
+    that can put a matplotlib Figure in front of the user's own code
+    (``console.py``'s ``_render_figure``), so it's the one place that could
+    plausibly re-trigger backend resolution after ``iyzee.tui``'s own
+    import-time pin — confirm visiting it doesn't undo that pin before Data
+    goes on to build a figure in a worker thread."""
+    import matplotlib
+
+    monkeypatch.setattr(data_mod, "_DATA_ROOT", tmp_path)
+    app = app_mod.IyzeeApp()
+    async with app.run_test() as pilot:
+        await pilot.press("i")  # Console
+        await pilot.pause()
+        await pilot.press("d")  # Data
+        await pilot.pause()
+
+        assert matplotlib.get_backend().lower() == "agg"
+
+
 # -- export ------------------------------------------------------------------------------------
 
 
@@ -329,12 +452,13 @@ async def test_export_writes_a_real_png_next_to_the_recording(
     npz_path = _save_scope_run(tmp_path)
     async with _open_data_screen(monkeypatch, npz_path.parent) as (screen, pilot):
         screen.query_one("#data-export", Button).press()
-        await pilot.pause()
+        await wait_until(pilot, lambda: "Saved plot" in _log(screen))
 
         out = npz_path.with_name(f"{npz_path.stem}-plot.png")
         assert out.exists()
         assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
         assert f"Saved plot: {out}" in _log(screen)
+        assert not screen.query_one("#data-export", Button).disabled
 
 
 @async_test
@@ -390,7 +514,7 @@ async def test_switching_to_a_different_run_clears_derived_traces_from_the_previ
         await pilot.pause()
         assert screen._derived
 
-        list_view = screen.query_one("#data-list")
+        list_view = screen.query_one("#data-list", ListView)
         list_view.index = 1  # the other (C1/C2) run
         await pilot.pause()
 
