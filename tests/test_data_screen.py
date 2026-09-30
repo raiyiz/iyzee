@@ -68,8 +68,6 @@ def _log(screen: DataScreen) -> str:
 # -- empty state / navigation to the page ----------------------------------------------------
 
 
-
-
 @async_test
 async def test_empty_data_root_shows_a_placeholder_and_an_empty_preview(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -80,7 +78,6 @@ async def test_empty_data_root_shows_a_placeholder_and_an_empty_preview(
 
 
 # -- run list: filtered to scope acquisitions -------------------------------------------------
-
 
 
 @async_test
@@ -110,7 +107,6 @@ async def test_a_corrupt_npz_is_reported_rather_than_crashing_the_page(
 
 
 # -- selecting a channel toggles the preview, not an error ------------------------------------
-
 
 
 @async_test
@@ -167,8 +163,6 @@ async def test_subtract_with_no_channel_b_flags_that_field(
         assert any("Channel B" in n for n in notifications(app))
 
 
-
-
 # -- background correction ---------------------------------------------------------------------
 
 
@@ -193,8 +187,6 @@ async def test_background_region_subtracts_the_mean_of_the_window(
 
         (derived_label,) = [label for label in screen._derived if label != "C1"]
         assert "bg-corrected" in derived_label
-
-
 
 
 # -- scale --------------------------------------------------------------------------------------
@@ -420,8 +412,6 @@ async def test_export_with_no_channel_checked_refuses_with_a_notification(
 
         assert not npz_path.with_name(f"{npz_path.stem}-plot.png").exists()
         assert any("Select at least one" in n for n in notifications(app))
-
-
 
 
 # -- switching runs resets derived traces, not just the measured channels --------------------
