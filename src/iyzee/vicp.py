@@ -183,6 +183,7 @@ class VICPTransport:
             sock = self._socket
             self._socket = None
             self._address = None
+            self._sequence_supported = False
         if sock is None:
             return
         log.warning("VICP connection dropped after failure: %s", reason or "unknown")
@@ -256,6 +257,8 @@ class VICPTransport:
             sock = self._socket
             self._socket = None
             self._address = None
+            self._sequence_supported = False
+            self._next_sequence = 1
             if sock is None:
                 return
             _close_socket(sock)
