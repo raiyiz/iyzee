@@ -114,7 +114,6 @@ async def test_editing_a_field_while_a_retrieve_is_in_flight_does_not_break_the_
 # -- apply channel changes: the baseline is what the scope reports ------------------------
 
 
-
 @async_test
 async def test_applying_channel_changes_tracks_verified_state_and_failed_edits() -> None:
     scope = ScreenScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
@@ -152,8 +151,6 @@ async def test_applying_channel_changes_tracks_verified_state_and_failed_edits()
         assert not screen.query_one("#apply-channels", Button).disabled
 
 
-
-
 # -- acquire ---------------------------------------------------------------------------------
 
 
@@ -175,8 +172,6 @@ async def test_acquire_saves_and_reports_that_a_running_acquisition_was_paused(
         assert "paused for a consistent capture, then resumed" in _log(screen)
         assert list(tmp_path.rglob("*.npz")) and list(tmp_path.rglob("*.json"))
         assert not screen.query_one("#acquire-waveforms", Button).disabled
-
-
 
 
 @async_test
