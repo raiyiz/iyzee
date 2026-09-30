@@ -21,7 +21,7 @@ EOI = 0x01
 DATA_EOI = DATA | EOI
 
 
-def frame(flags: int, payload: bytes, version: int = 1) -> bytes:
+def frame(flags: int, payload: bytes, version: int = 2) -> bytes:
     return struct.pack("!4BI", flags, version, 0, 0, len(payload)) + payload
 
 
@@ -117,7 +117,7 @@ def test_peer_close_invalidates_the_connection():
 
 
 def test_unsupported_header_version_invalidates_the_connection():
-    scope, sock = attached(frame(DATA_EOI, b"x", version=2))
+    scope, sock = attached(frame(DATA_EOI, b"x", version=1))
 
     with pytest.raises(VICPProtocolError, match="header version"):
         scope.query("*IDN?")
