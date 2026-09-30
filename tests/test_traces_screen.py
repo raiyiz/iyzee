@@ -6,18 +6,15 @@ touch the real ``data/`` directory.
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 
 import pytest
 from helpers import async_test, make_result, plain, save_run, wait_until
 from textual.pilot import Pilot
-from textual.widgets import Label, ListView, Static
+from textual.widgets import ListView, Static
 
-from iyzee.experiment import save_step_results
 from iyzee.tui import app as app_mod
 from iyzee.tui.screens import traces as traces_mod
 from iyzee.tui.screens.traces import TracesScreen
