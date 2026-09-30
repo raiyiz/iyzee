@@ -18,7 +18,6 @@ from helpers import (
 )
 from textual.widgets import ContentSwitcher, Static
 
-from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.screens.connect import STATUS_COL, ConnectScreen
 from iyzee.tui.screens.console import ConsoleScreen, IyzeeConsole
