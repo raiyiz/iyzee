@@ -123,9 +123,9 @@ class VICPTransport:
     """
 
     HEADER_SIZE = 8
-    # LeCroy's VICP header version is encoded as 0x02 ("version 1").
-    # This is a wire value, not the human-facing version number.
-    HEADER_VERSION = 0x02
+    # VICP header version 1. The sequence number is a separate byte and must
+    # be non-zero; it is used by LeCroy to match writes and reads.
+    HEADER_VERSION = 1
     DEFAULT_PORT = 1861
     DEFAULT_CONNECT_TIMEOUT = 5.0
     DEFAULT_IO_TIMEOUT = 3.0
@@ -148,6 +148,7 @@ class VICPTransport:
         self._socket: object | None = None
         self._address: str | None = None
         self._lock = threading.RLock()
+        self._next_sequence = 1
 
     @property
     def connected(self) -> bool:
@@ -239,6 +240,7 @@ class VICPTransport:
 
             self._socket = sock
             self._address = address
+            self._next_sequence = 1
             self.connect_timeout = connect_timeout
             self.io_timeout = io_timeout
 
@@ -262,11 +264,13 @@ class VICPTransport:
 
     def _write_frame(self, payload: bytes) -> None:
         sock = self._require_socket()
+        sequence = self._next_sequence
+        self._next_sequence = 1 if sequence == 255 else sequence + 1
         header = struct.pack(
             "!4BI",
             VICP_DATA_FLAG | VICP_EOI_FLAG,
             self.HEADER_VERSION,
-            0,
+            sequence,
             0,
             len(payload),
         )
