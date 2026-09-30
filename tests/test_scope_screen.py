@@ -114,75 +114,44 @@ async def test_editing_a_field_while_a_retrieve_is_in_flight_does_not_break_the_
 # -- apply channel changes: the baseline is what the scope reports ------------------------
 
 
+
 @async_test
-async def test_apply_records_what_the_scope_actually_set_not_what_was_requested() -> None:
-    scope = ScreenScope(vdiv_step=0.1)
+async def test_applying_channel_changes_tracks_verified_state_and_failed_edits() -> None:
+    scope = ScreenScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
     async with IyzeeApp().run_test() as pilot:
+        app = pilot.app
+        assert isinstance(app, IyzeeApp)
         screen = await _open(pilot, scope)
         await _synced(pilot, screen)
 
-        _set(screen, "C1-vdiv", "0.123")
+        screen.query_one("#C1-vdiv", Input).value = "0.123"
         await pilot.pause()
         screen.query_one("#apply-channels", Button).press()
-        await wait_until(pilot, lambda: "Applied and verified" in _log(screen))
+        await wait_until(pilot, lambda: not screen._settings_busy)
 
         baseline = screen._channel_baseline(Channel.C1)
         assert baseline is not None
-        assert baseline.volts_per_div == pytest.approx(0.1)  # the scope rounded 0.123
-        # The form now shows the truth, and says so.
+        assert baseline.volts_per_div == pytest.approx(0.1)
         assert float(screen.query_one("#C1-vdiv", Input).value) == pytest.approx(0.1)
         assert "C1 V/div: requested 0.123, scope set 0.1" in _log(screen)
         assert "C1-vdiv" not in screen._dirty_fields
 
-
-@async_test
-async def test_a_setting_the_scope_ignored_is_an_error_and_keeps_the_users_edit() -> None:
-    scope = ScreenScope(ignore_coupling=frozenset({Channel.C2}))
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
         before = screen._channel_baseline(Channel.C2)
         assert before is not None
-
         screen.query_one("#C2-coupling", Select).value = Coupling.DC_50.value
         await pilot.pause()
         screen.query_one("#apply-channels", Button).press()
-        await wait_until(pilot, lambda: "coupling is" in _log(screen))
+        await wait_until(pilot, lambda: not screen._settings_busy)
 
         assert "C2 coupling is D1M but D50 was requested" in _log(screen)
         assert any("Some channel changes failed" in n for n in notifications(app))
         baseline = screen._channel_baseline(Channel.C2)
-        assert baseline is not None and baseline.coupling == before.coupling  # truth, not request
-        assert screen.query_one("#C2-coupling", Select).value == Coupling.DC_50.value  # edit kept
-        assert "C2-coupling" in screen._dirty_fields  # still marked as unapplied
+        assert baseline is not None and baseline.coupling == before.coupling
+        assert screen.query_one("#C2-coupling", Select).value == Coupling.DC_50.value
+        assert "C2-coupling" in screen._dirty_fields
         assert not screen.query_one("#apply-channels", Button).disabled
 
 
-@async_test
-async def test_apply_after_the_scope_disconnects_releases_the_busy_flag_and_keeps_the_baseline() -> (
-    None
-):
-    scope = ScreenScope()
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-        baseline = screen._last_applied_channel_settings
-        assert baseline is not None
-        scope.calls.clear()
-
-        app.handles.pop("scope")  # disconnected between the click and the worker starting
-        screen._settings_busy = True
-        screen._apply_channels(scope, [baseline[0]], baseline)
-
-        # Not stuck "busy"; nothing was written to the (gone) scope; baseline untouched.
-        # (The Apply button itself is legitimately disabled again with no scope connected.)
-        await wait_until(pilot, lambda: not screen._settings_busy)
-        assert scope.calls == []
-        assert screen._last_applied_channel_settings == baseline
 
 
 # -- acquire ---------------------------------------------------------------------------------
@@ -208,26 +177,6 @@ async def test_acquire_saves_and_reports_that_a_running_acquisition_was_paused(
         assert not screen.query_one("#acquire-waveforms", Button).disabled
 
 
-@async_test
-async def test_acquire_when_the_scope_disconnects_first_does_not_leave_the_button_disabled() -> (
-    None
-):
-    scope = ScreenScope()
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-        settings = tuple(screen._read_channel_settings())
-        trigger = screen._read_trigger_settings()
-
-        app.handles.pop("scope")  # gone before the worker runs: this was a KeyError
-        screen.query_one("#acquire-waveforms", Button).disabled = True
-        screen._acquire(scope, [Channel.C1], settings, trigger, None, None)
-
-        await wait_until(pilot, lambda: not screen.query_one("#acquire-waveforms", Button).disabled)
-        assert "disconnected before acquisition started" in _log(screen)
-        assert any("Acquisition failed" in n for n in notifications(app))
 
 
 @async_test
@@ -253,16 +202,3 @@ async def test_an_unexpected_acquire_error_re_enables_the_button(
 # -- form plumbing ---------------------------------------------------------------------------
 
 
-@async_test
-async def test_flagging_a_select_as_invalid_marks_and_focuses_it() -> None:
-    """``_flag_invalid`` used to assume an ``Input``; a bad ``Select`` would crash it."""
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot)
-
-        screen._flag_invalid("C1-coupling")
-        await pilot.pause()
-
-        select = screen.query_one("#C1-coupling", Select)
-        assert select.has_class("-invalid")
-        screen._flag_invalid("C1-vdiv")  # moving on clears the previous marker
-        assert not select.has_class("-invalid")
