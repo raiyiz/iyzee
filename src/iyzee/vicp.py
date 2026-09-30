@@ -123,7 +123,9 @@ class VICPTransport:
     """
 
     HEADER_SIZE = 8
-    HEADER_VERSION = 1
+    # LeCroy's VICP header version is encoded as 0x02 ("version 1").
+    # This is a wire value, not the human-facing version number.
+    HEADER_VERSION = 0x02
     DEFAULT_PORT = 1861
     DEFAULT_CONNECT_TIMEOUT = 5.0
     DEFAULT_IO_TIMEOUT = 3.0
