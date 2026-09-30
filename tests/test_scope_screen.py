@@ -96,6 +96,7 @@ class DisconnectingScope(ScreenScope):
         self.trigger_reads += 1
         raise AssertionError("trigger read must not run after the link is lost")
 
+
 @async_test
 async def test_editing_a_field_while_a_retrieve_is_in_flight_does_not_break_the_result() -> None:
     """Regression: this raised "Set changed size during iteration" in the retrieve
@@ -140,6 +141,7 @@ async def test_retrieve_handles_a_connection_loss_between_channel_and_trigger_re
         assert scope.trigger_reads == 0
         assert not screen._settings_synced
         assert "Trigger: scope connection lost while reading trigger settings" in _log(screen)
+
 
 @async_test
 async def test_opening_scope_pane_does_not_start_a_hardware_retrieve() -> None:
