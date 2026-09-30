@@ -38,6 +38,8 @@ class FakeScope:
         fail_reads: frozenset = frozenset(),
     ):
         self.calls: list[tuple] = []
+        # Match the real scope driver's public connection-state interface.
+        self.connected = True
         self._fail_channels = fail_channels
         self._fail_hor = fail_hor
         self._fail_reads = fail_reads

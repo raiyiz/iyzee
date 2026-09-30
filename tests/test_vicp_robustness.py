@@ -21,8 +21,8 @@ EOI = 0x01
 DATA_EOI = DATA | EOI
 
 
-def frame(flags: int, payload: bytes, version: int = 1) -> bytes:
-    return struct.pack("!4BI", flags, version, 0, 0, len(payload)) + payload
+def frame(flags: int, payload: bytes, version: int = 1, sequence: int = 1) -> bytes:
+    return struct.pack("!4BI", flags, version, sequence, 0, len(payload)) + payload
 
 
 def block_header(count: int, prefix: bytes = b"C1:WF DAT1,") -> bytes:
@@ -280,16 +280,16 @@ def test_block_ends_with_a_separate_terminator_frame(terminator):
     assert scope._transport.read_definite_block() == body
 
 
-def test_legacy_first_command_uses_sequence_zero() -> None:
+def test_first_command_uses_sequence_one() -> None:
     scope, sock = attached()
     scope.send("C1:TEST")
 
     first = struct.unpack("!4BI", bytes(sock.sent[:8]))
 
-    assert first[:4] == (DATA_EOI, VICPTransport.HEADER_VERSION, 0, 0)
+    assert first[:4] == (DATA_EOI, VICPTransport.HEADER_VERSION, 1, 0)
 
 
-def test_nonzero_response_sequence_enables_vicp_1a_for_later_commands() -> None:
+def test_sequence_increments_for_later_commands() -> None:
     response = frame(DATA_EOI, b"OK\n", version=1)
     scope, sock = attached(response)
 
