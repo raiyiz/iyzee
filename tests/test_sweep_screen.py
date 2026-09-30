@@ -50,7 +50,7 @@ def test_positive_float_rejects_invalid_input(raw: str) -> None:
     "raw,maximum,expected",
     [
         ("19", None, 19),
-                (str(MAX_POINTS), MAX_POINTS, MAX_POINTS),
+        (str(MAX_POINTS), MAX_POINTS, MAX_POINTS),
     ],
 )
 def test_positive_int_accepts_valid_input(raw: str, maximum: int | None, expected: int) -> None:
@@ -62,9 +62,9 @@ def test_positive_int_accepts_valid_input(raw: str, maximum: int | None, expecte
     [
         ("0", None, "field"),
         ("-1", None, "field"),
-                ("abc", None, "field"),
+        ("abc", None, "field"),
         (str(MAX_POINTS + 1), MAX_POINTS, f"at most {MAX_POINTS}"),
-            ],
+    ],
 )
 def test_positive_int_rejects_invalid_input(raw: str, maximum: int | None, match: str) -> None:
     with pytest.raises(ValueError, match=match):
@@ -94,10 +94,10 @@ async def test_form_defaults_build_the_documented_runs() -> None:
 @pytest.mark.parametrize(
     "field_id,label,bad,kind",
     [
-                ("rbw-stop", "RBW stop", "abc", "bandwidth"),
-                ("rbw-steps", "Steps", "0", "bandwidth"),
+        ("rbw-stop", "RBW stop", "abc", "bandwidth"),
+        ("rbw-steps", "Steps", "0", "bandwidth"),
         ("freq-points", "Points", "5000", "frequency"),
-            ],
+    ],
 )
 @async_test
 async def test_an_invalid_field_is_named_marked_and_focused(
