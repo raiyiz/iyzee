@@ -22,7 +22,7 @@ import json
 import logging
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
@@ -42,14 +42,13 @@ from textual_plotext import PlotextPlot
 from ...experiment.io import DATA_ROOT, load_recording
 from ...waveform_math import (
     Trace,
-    build_waveform_figure,
     save_waveform_figure,
     scale_trace,
     subtract_background,
     subtract_traces,
     traces_from_scope_recording,
 )
-from ..plotting import draw_series, figure_series
+from ..plotting import downsample_series, draw_series
 from .page import FieldError, Page, _field, _finite_float
 from .traces import _run_label
 
@@ -153,6 +152,8 @@ class DataScreen(Page):
         self._measured: dict[str, Trace] = {}
         self._derived: dict[str, Trace] = {}
         self._checkboxes: dict[str, Checkbox] = {}
+        self._render_generation = 0
+        self._load_generation = 0
         self.refresh_runs()
 
     def on_show(self) -> None:
@@ -222,13 +223,36 @@ class DataScreen(Page):
     # -- selecting a run ---------------------------------------------------------------------
 
     def _select(self, path: Path) -> None:
-        summary = self.query_one("#data-summary", Static)
+        self._load_generation += 1
+        generation = self._load_generation
+        self.query_one("#data-summary", Static).update(
+            f"[b]{escape(path.name)}[/b]\n\nLoading waveform data…"
+        )
+        self._load(path, generation)
+
+    @work(thread=True, exclusive=True, group="data-load", exit_on_error=False)
+    def _load(self, path: Path, generation: int) -> None:
         try:
             recording = load_recording(path)
             measured = traces_from_scope_recording(recording)
-        except Exception as exc:  # noqa: BLE001 - shown to the user, not raised
-            summary.update(
-                f"[b]{escape(path.name)}[/b]\n\n[red]Could not read file: {escape(str(exc))}[/red]"
+        except Exception as exc:  # noqa: BLE001 - reported on the UI thread
+            self._ui(self._finish_load, generation, path, (), None, exc)
+            return
+        self._ui(self._finish_load, generation, path, tuple(measured), recording.metadata, None)
+
+    def _finish_load(
+        self,
+        generation: int,
+        path: Path,
+        measured: tuple[Trace, ...],
+        metadata: dict | None,
+        error: Exception | None,
+    ) -> None:
+        if generation != self._load_generation:
+            return
+        if error is not None:
+            self.query_one("#data-summary", Static).update(
+                f"[b]{escape(path.name)}[/b]\n\n[red]Could not read file: {escape(str(error))}[/red]"
             )
             self._path = None
             self._measured = {}
@@ -243,15 +267,15 @@ class DataScreen(Page):
         self._derived = {}
 
         lines = [f"[b]{escape(path.name)}[/b]"]
-        instrument = recording.metadata.get("instrument")
+        instrument = metadata.get("instrument") if metadata else None
         if isinstance(instrument, dict) and instrument.get("identity"):
             lines.append(escape(str(instrument["identity"])))
-        acquisition = recording.metadata.get("acquisition")
+        acquisition = metadata.get("acquisition") if metadata else None
         if isinstance(acquisition, dict) and acquisition.get("warnings"):
             lines.append(f"[yellow]{escape('; '.join(acquisition['warnings']))}[/yellow]")
         if not measured:
             lines.append("\n[yellow]No channel data in this recording.[/yellow]")
-        summary.update("\n".join(lines))
+        self.query_one("#data-summary", Static).update("\n".join(lines))
 
         self._rebuild_channel_checkboxes()
         self._refresh_operand_choices()
@@ -289,20 +313,44 @@ class DataScreen(Page):
         ]
 
     def _redraw(self) -> None:
-        plot = self.query_one("#data-plot", PlotextPlot)
-        traces = self._selected_traces()
+        self._render_generation += 1
+        generation = self._render_generation
+        traces = tuple(self._selected_traces())
         title = self._path.name if self._path else None
-        fig = build_waveform_figure(traces, title=title)
-        try:
-            lines, labels = figure_series(fig)
-        finally:
-            plt.close(fig)
+        self._render_plot(generation, traces, title)
+
+    @work(thread=True, exclusive=True, group="data-render", exit_on_error=False)
+    def _render_plot(
+        self, generation: int, traces: tuple[Trace, ...], title: str | None
+    ) -> None:
+        lines = []
+        for trace in traces:
+            x, y = downsample_series(trace.time, trace.values)
+            lines.append((x, y, trace.label))
+        time_units = {trace.time_unit for trace in traces}
+        value_units = {trace.value_unit for trace in traces}
+        time_unit = next(iter(time_units), "")
+        value_unit = next(iter(value_units), "")
+        xlabel = f"Time ({time_unit if len(time_units) == 1 else 'mixed units'})" if traces else None
+        ylabel = f"Signal ({value_unit if len(value_units) == 1 else 'mixed units'})" if traces else None
+        self._ui(self._finish_render, generation, lines, title, xlabel, ylabel)
+
+    def _finish_render(
+        self,
+        generation: int,
+        lines: list[tuple[list[float], list[float], str]],
+        title: str | None,
+        xlabel: str | None,
+        ylabel: str | None,
+    ) -> None:
+        if generation != self._render_generation:
+            return
         draw_series(
-            plot,
+            self.query_one("#data-plot", PlotextPlot),
             lines,
             title=title,
-            xlabel=labels["xlabel"] or None,
-            ylabel=labels["ylabel"] or None,
+            xlabel=xlabel,
+            ylabel=ylabel,
         )
 
     # -- math operations -----------------------------------------------------------------------
