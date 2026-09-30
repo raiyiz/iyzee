@@ -292,10 +292,10 @@ def test_vicp_transport_reads_fragmented_frame():
 def test_vicp_transport_rejects_unknown_header_version():
     transport = VICPTransport()
     transport.attach_socket(
-        FragmentingFakeSocket(struct.pack("B3BI", 0x01, 1, 0, 0, 0), chunk_size=2)
+        FragmentingFakeSocket(struct.pack("B3BI", 0x01, 2, 0, 0, 0), chunk_size=2)
     )
 
-    with pytest.raises(VICPProtocolError, match="unsupported VICP header version 1"):
+    with pytest.raises(VICPProtocolError, match="unsupported VICP header version 2"):
         transport.read_frame()
 
 
