@@ -79,6 +79,25 @@ class GatedScope(ScreenScope):
         return super().get_volts_per_div(channel)
 
 
+class DisconnectingScope(ScreenScope):
+    """Loses the link after channel reads, before trigger settings are read."""
+
+    connected = True
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.trigger_reads = 0
+
+    def get_trace_display(self, channel: Channel) -> str:
+        result = super().get_trace_display(channel)
+        if channel == Channel.C4:
+            self.connected = False
+        return result
+
+    def get_trigger_source(self) -> str:
+        self.trigger_reads += 1
+        raise AssertionError("trigger read must not run after the link is lost")
+
 @async_test
 async def test_editing_a_field_while_a_retrieve_is_in_flight_does_not_break_the_result() -> None:
     """Regression: this raised "Set changed size during iteration" in the retrieve
@@ -110,6 +129,19 @@ async def test_editing_a_field_while_a_retrieve_is_in_flight_does_not_break_the_
         assert "C1-vdiv" not in screen._dirty_fields
         assert not screen.query_one("#C1-vdiv", Input).has_class("scope-dirty")
 
+
+@async_test
+async def test_retrieve_handles_a_connection_loss_between_channel_and_trigger_reads() -> None:
+    scope = DisconnectingScope()
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open(pilot, scope)
+        await wait_until(
+            pilot, lambda: not screen._retrieve_in_flight and not screen._settings_busy
+        )
+
+        assert scope.trigger_reads == 0
+        assert not screen._settings_synced
+        assert "Trigger: scope connection lost while reading trigger settings" in _log(screen)
 
 # -- apply channel changes: the baseline is what the scope reports ------------------------
 
