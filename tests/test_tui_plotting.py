@@ -7,7 +7,7 @@ from textual.app import App
 from textual.widgets import Label
 from textual_plotext import PlotextPlot
 
-from iyzee.tui.plotting import draw_series, figure_series
+from iyzee.tui.plotting import downsample_series, draw_series, figure_series
 
 
 class _PlotApp(App):
@@ -67,3 +67,21 @@ def test_figure_series_extracts_lines_and_axis_labels() -> None:
 
     assert lines == [([0, 1], [2, 3], "a")]
     assert labels == {"xlabel": "x", "ylabel": "y"}
+
+
+def test_downsample_series_preserves_extrema_and_bounds_output() -> None:
+    x = list(range(100))
+    y = [0.0] * 100
+    y[23] = 10.0
+    y[77] = -10.0
+
+    reduced_x, reduced_y = downsample_series(x, y, max_points=20)
+
+    assert len(reduced_x) <= 20
+    assert len(reduced_y) == len(reduced_x)
+    assert max(reduced_y) == 10.0
+    assert min(reduced_y) == -10.0
+
+
+def test_downsample_series_keeps_small_series_unchanged() -> None:
+    assert downsample_series([0, 1], [2.0, 3.0], max_points=20) == ([0, 1], [2.0, 3.0])
