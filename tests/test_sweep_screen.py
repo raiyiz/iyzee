@@ -250,7 +250,7 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
         await pilot.pause()
         assert str(abort.label) == "Aborting…" and abort.disabled
         log = app.query_one("#sweep-log", RichLog)
-        assert "Abort requested" in " ".join(str(seg) for seg in log.lines for seg in line)
+        assert "Abort requested" in " ".join(str(seg) for line in log.lines for seg in line)
 
         release.set()
         await wait_until(pilot, lambda: app.last_run is not None)
