@@ -350,11 +350,10 @@ class ScopeScreen(Page):
     def refresh_readiness(self) -> None:
         """Keep connection readiness and scope-state synchronization current.
 
-        A newly connected scope is read automatically once so the form starts
-        from the instrument's real state instead of its UI defaults. The
-        explicit *Retrieve current settings* button remains useful after a
-        front-panel change or whenever the user wants a fresh baseline for
-        fine-grained edits.
+        A newly connected scope is not queried implicitly: opening the page must
+        not start hardware I/O before the user asks for it. The explicit
+        *Retrieve current settings* action is what establishes the instrument
+        baseline before editing or applying settings.
         """
         status = self.query_one("#scope-status", Static)
         connected = "scope" in self.iyzee_app.handles
@@ -369,8 +368,6 @@ class ScopeScreen(Page):
                 for widget in self.query(".scope-dirty"):
                     widget.remove_class("scope-dirty")
             status.update("Not ready: connect the Scope first — press F1 for the Connect page.")
-        elif not self._settings_synced and not self._retrieve_in_flight:
-            self._start_retrieve(silent=True)
         status.display = not connected
 
     def _scope_is_current(self, scope: LeCroy) -> bool:
