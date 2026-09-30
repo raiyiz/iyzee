@@ -265,6 +265,7 @@ async def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
         await pilot.press("up")
         assert await _wait(pilot, app, "In [4]: x"), _console_text(app)
 
+@async_test
 async def test_console_interrupt_scrollback_and_shutdown() -> None:
     app = IyzeeApp()
     async with app.run_test(size=(110, 32)) as pilot:

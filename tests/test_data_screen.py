@@ -329,6 +329,7 @@ async def test_export_disables_the_button_while_running_and_reenables_after(
         await wait_until(pilot, lambda: not screen.query_one("#data-export", Button).disabled)
         assert "Saved plot" in _log(screen)
 
+@async_test
 async def test_visiting_console_then_data_leaves_the_backend_pinned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
