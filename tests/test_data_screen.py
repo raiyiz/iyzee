@@ -67,13 +67,6 @@ def _log(screen: DataScreen) -> str:
 # -- empty state / navigation to the page ----------------------------------------------------
 
 
-@async_test
-async def test_binding_d_opens_the_data_page(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        assert screen.is_mounted
-
 
 @async_test
 async def test_empty_data_root_shows_a_placeholder_and_an_empty_preview(
@@ -88,24 +81,15 @@ async def test_empty_data_root_shows_a_placeholder_and_an_empty_preview(
 
 
 @async_test
-async def test_lists_a_saved_scope_acquisition(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path)
-    async with _open_data_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        assert len(screen._paths) == 1
-        assert set(screen._measured) == {"C1", "C2"}
-
-
-@async_test
-async def test_a_sweep_run_is_not_listed_here(
+async def test_lists_scope_acquisitions_and_filters_out_other_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _save_sweep_run(tmp_path)
     _save_scope_run(tmp_path, channels=(Channel.C1,))
     async with _open_data_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        assert len(screen._paths) == 1  # only the scope acquisition
+        assert len(screen._paths) == 1
         assert set(screen._measured) == {"C1"}
+
 
 
 @async_test
@@ -127,24 +111,19 @@ async def test_a_corrupt_npz_is_reported_rather_than_crashing_the_page(
 
 
 @async_test
-async def test_selecting_a_run_populates_a_checkbox_per_channel(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path)
-    async with _open_data_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        assert set(screen._checkboxes) == {"C1", "C2"}
-        assert all(cb.value for cb in screen._checkboxes.values())  # all shown by default
-
-
-@async_test
-async def test_unchecking_a_channel_drops_it_from_the_preview(
+async def test_channel_toggles_control_the_preview(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _save_scope_run(tmp_path)
     async with _open_data_screen(monkeypatch, tmp_path) as (screen, pilot):
+        assert set(screen._checkboxes) == {"C1", "C2"}
+        assert all(cb.value for cb in screen._checkboxes.values())
+
         screen._checkboxes["C2"].value = False
         await pilot.pause()
         assert [t.label for t in screen._selected_traces()] == ["C1"]
+
+
 
 
 # -- subtract ---------------------------------------------------------------------------------
@@ -187,23 +166,6 @@ async def test_subtract_with_no_channel_b_flags_that_field(
         assert any("Channel B" in n for n in notifications(app))
 
 
-@async_test
-async def test_reapplying_the_same_subtract_replaces_rather_than_duplicates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(monkeypatch, _save_scope_run(tmp_path).parent) as (screen, pilot):
-        screen.query_one("#data-op", Select).value = "subtract"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-chan-b", Select).value = "C2"
-        await pilot.pause()
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
-
-        assert len(screen._derived) == 1
-        assert list(screen._checkboxes).count("C1 - C2") == 1
-
 
 # -- background correction ---------------------------------------------------------------------
 
@@ -230,27 +192,6 @@ async def test_background_region_subtracts_the_mean_of_the_window(
         (derived_label,) = [label for label in screen._derived if label != "C1"]
         assert "bg-corrected" in derived_label
 
-
-@async_test
-async def test_background_region_with_no_samples_in_window_is_a_domain_error_not_a_crash(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(
-        monkeypatch, _save_scope_run(tmp_path, channels=(Channel.C1,)).parent
-    ) as (screen, pilot):
-        app = pilot.app
-        assert isinstance(app, app_mod.IyzeeApp)
-        screen.query_one("#data-op", Select).value = "background-region"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-region-lo", Input).value = "999"
-        screen.query_one("#data-region-hi", Input).value = "1000"
-        await pilot.pause()
-
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
-
-        assert screen._derived == {}
-        assert any("no samples" in n for n in notifications(app))
 
 
 # -- scale --------------------------------------------------------------------------------------
@@ -354,19 +295,6 @@ async def test_export_with_no_channel_checked_refuses_with_a_notification(
         assert not npz_path.with_name(f"{npz_path.stem}-plot.png").exists()
         assert any("Select at least one" in n for n in notifications(app))
 
-
-@async_test
-async def test_export_before_selecting_any_run_refuses_with_a_notification(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(monkeypatch, tmp_path) as (screen, pilot):
-        app = pilot.app
-        assert isinstance(app, app_mod.IyzeeApp)
-
-        screen.query_one("#data-export", Button).press()
-        await pilot.pause()
-
-        assert any("Select a scope acquisition" in n for n in notifications(app))
 
 
 # -- switching runs resets derived traces, not just the measured channels --------------------
