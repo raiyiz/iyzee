@@ -82,7 +82,7 @@ async def test_a_slow_load_does_not_clobber_a_newer_ones_result(
     import threading
 
     old = save_run(tmp_path, "2026-09-17_bandwidth", mtime=1_000)
-    new = save_run(tmp_path, "2026-09-18_frequency", mtime=2_000)
+    save_run(tmp_path, "2026-09-18_frequency", mtime=2_000)
 
     real_prepare = traces_mod._prepare_view
     calls: list[Path] = []
