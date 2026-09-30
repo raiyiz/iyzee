@@ -148,6 +148,11 @@ class VICPTransport:
         self._socket: object | None = None
         self._address: str | None = None
         self._lock = threading.RLock()
+        # Start with the original VICP v1 framing (sequence 0), which is the
+        # form used by the legacy WaveSurfer driver this transport replaced.
+        # If a response carries a non-zero sequence number, switch to VICP 1a
+        # for subsequent requests.
+        self._sequence_supported = False
         self._next_sequence = 1
 
     @property
@@ -240,6 +245,7 @@ class VICPTransport:
 
             self._socket = sock
             self._address = address
+            self._sequence_supported = False
             self._next_sequence = 1
             self.connect_timeout = connect_timeout
             self.io_timeout = io_timeout
@@ -261,11 +267,13 @@ class VICPTransport:
                 raise RuntimeError("Already connected")
             self._socket = sock
             self._address = None
+            self._sequence_supported = False
 
     def _write_frame(self, payload: bytes) -> None:
         sock = self._require_socket()
-        sequence = self._next_sequence
-        self._next_sequence = 1 if sequence == 255 else sequence + 1
+        sequence = self._next_sequence if self._sequence_supported else 0
+        if self._sequence_supported:
+            self._next_sequence = 1 if sequence == 255 else sequence + 1
         header = struct.pack(
             "!4BI",
             VICP_DATA_FLAG | VICP_EOI_FLAG,
@@ -298,7 +306,7 @@ class VICPTransport:
         sock = self._require_socket()
         try:
             header = recv_exact(sock, self.HEADER_SIZE, timeout_error=self._timeout_error)
-            flags, version, _reserved_1, _reserved_2, length = struct.unpack("!4BI", header)
+            flags, version, sequence, _reserved, length = struct.unpack("!4BI", header)
             if version != self.HEADER_VERSION:
                 raise VICPProtocolError(
                     f"unsupported VICP header version {version}; expected {self.HEADER_VERSION}"
@@ -308,6 +316,10 @@ class VICPTransport:
             # Mid-frame failure: the stream position is unknown.
             self._invalidate(exc)
             raise
+        if not self._sequence_supported and sequence != 0:
+            # A non-zero response sequence proves the peer supports VICP 1a.
+            self._sequence_supported = True
+            self._next_sequence = 1 if sequence == 255 else sequence + 1
         return VICPFrame(flags=flags, payload=payload)
 
     def read_message(self) -> tuple[int, bytes]:
