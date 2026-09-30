@@ -422,11 +422,20 @@ class ScopeScreen(Page):
         channel_settings, channel_errors = read_channel_settings(scope, CHANNELS, lock=lock)
         trigger_settings: TriggerSettings | None = None
         trigger_error: Exception | None = None
-        try:
-            trigger_settings = read_trigger_settings(scope, lock=lock)
-        except Exception as exc:  # noqa: BLE001
-            log.exception("scope: failed to read trigger settings")
-            trigger_error = exc
+        if not scope.connected:
+            trigger_error = ConnectionError("scope connection lost while reading trigger settings")
+        else:
+            try:
+                trigger_settings = read_trigger_settings(scope, lock=lock)
+            except ConnectionError as exc:
+                # The scope can disconnect between the channel and trigger reads.
+                # Treat that as a normal connection-loss outcome; the next
+                # explicit reconnect can restore the page state.
+                log.warning("scope: connection lost while reading trigger settings: %s", exc)
+                trigger_error = exc
+            except Exception as exc:  # noqa: BLE001
+                log.exception("scope: failed to read trigger settings")
+                trigger_error = exc
         self._ui(
             self._finish_retrieve,
             scope,
