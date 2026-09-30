@@ -42,11 +42,9 @@ def _log(screen: ScopeScreen) -> str:
 
 
 async def _synced(pilot: Pilot[Any], screen: ScopeScreen) -> None:
-    """Wait for the retrieve the page runs by itself when shown.
-
-    Do not press "Retrieve" on top of it: a second retrieve finishing later
-    would overwrite whatever the test has typed into the form by then.
-    """
+    """Run the page's explicit sync action once, then wait for it to finish."""
+    if not screen._settings_synced and not screen._retrieve_in_flight:
+        screen.query_one("#retrieve-settings", Button).press()
     await wait_until(
         pilot,
         lambda: (
@@ -142,6 +140,21 @@ async def test_retrieve_handles_a_connection_loss_between_channel_and_trigger_re
         assert scope.trigger_reads == 0
         assert not screen._settings_synced
         assert "Trigger: scope connection lost while reading trigger settings" in _log(screen)
+
+@async_test
+async def test_opening_scope_pane_does_not_start_a_hardware_retrieve() -> None:
+    """Scope navigation is UI-only until the user explicitly requests a sync."""
+    scope = GatedScope()
+    scope.gate.clear()
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open(pilot, scope)
+        await pilot.pause()
+
+        assert not screen._retrieve_in_flight
+        assert not screen._settings_busy
+        assert not screen._settings_synced
+        assert not scope.entered.is_set()
+
 
 # -- apply channel changes: the baseline is what the scope reports ------------------------
 
