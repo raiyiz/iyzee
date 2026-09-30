@@ -24,6 +24,7 @@ from .logging_support import LogEntry
 from .logging_support import install as install_logging
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
+from .screens.data import DataScreen
 from .screens.log import LogScreen
 from .screens.page import Page
 from .screens.scope import ScopeScreen
@@ -39,6 +40,7 @@ PAGE_SPECS = (
     ("sweep", "Sweep", SweepScreen),
     ("scope", "Scope", ScopeScreen),
     ("traces", "Traces", TracesScreen),
+    ("data", "Data", DataScreen),
     ("console", "Console", ConsoleScreen),
     ("log", "Log", LogScreen),
 )
@@ -167,6 +169,7 @@ class IyzeeApp(App):
         Binding("s", "show_page('sweep')", "Sweep"),
         Binding("o", "show_page('scope')", "Scope"),
         Binding("t", "show_page('traces')", "Traces"),
+        Binding("d", "show_page('data')", "Data"),
         Binding("i", "show_page('console')", "Console"),
         Binding("l", "show_page('log')", "Log"),
         Binding("f1", "show_page('connect')", "Connect", priority=True),

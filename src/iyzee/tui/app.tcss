@@ -382,6 +382,122 @@ Screen {
     margin: 1 2;
 }
 
+/* -- Data ------------------------------------------------------------------
+   Reuses #traces-body/#traces-list/#traces-plot's shape (list left, scrolling
+   detail right) and .channel-panel/.field-grid from Scope for the math-op
+   form — a bordered form box and a reflowing field grid look the same
+   regardless of which page they're on. */
+
+#data-body {
+    layout: horizontal;
+    height: 1fr;
+    min-height: 20;
+}
+
+#data-list {
+    width: 40%;
+    margin: 1 2;
+    overflow-x: auto;
+}
+
+#data-list > ListItem {
+    width: auto;
+    min-width: 100%;
+}
+
+#data-detail {
+    width: 1fr;
+    margin: 1 2 1 0;
+    border: round $primary;
+    padding: 1 2;
+}
+
+/* One checkbox per available channel/trace: 2 columns (narrow), 4 (wide) —
+   a checkbox label is short, so this needn't drop to 1 column the way
+   .field-grid and #scope-channels do. */
+#data-channels {
+    layout: grid;
+    grid-size: 2;
+    grid-rows: auto;
+    grid-gutter: 0 2;
+    height: auto;
+    margin: 1 0;
+}
+
+.-wide #data-channels {
+    grid-size: 4;
+}
+
+#data-op-panel {
+    height: auto;
+    margin: 1 0;
+}
+
+#data-op-buttons {
+    layout: grid;
+    grid-size: 1;
+    grid-columns: 1fr;
+    grid-rows: auto;
+    grid-gutter: 0 1;
+    height: auto;
+    margin-top: 1;
+}
+
+.-medium #data-op-buttons {
+    grid-size: 2;
+}
+
+#data-op-buttons Button {
+    width: 100%;
+    min-width: 0;
+}
+
+#data-export-row {
+    layout: grid;
+    grid-size: 1;
+    grid-columns: 1fr;
+    height: auto;
+    margin: 1 0;
+}
+
+.-wide #data-export-row {
+    grid-columns: 22;
+}
+
+#data-export-row Button {
+    width: 100%;
+    min-width: 0;
+}
+
+#data-plot {
+    height: 1fr;
+    min-height: 12;
+    border: round $primary-darken-1;
+}
+
+#data-log {
+    height: 8;
+    margin: 1 0 0 0;
+    border: round $primary-darken-1;
+}
+
+.-narrow #data-body {
+    layout: vertical;
+    height: auto;
+}
+
+.-narrow #data-list {
+    width: 1fr;
+    height: 10;
+    margin: 1 2 0 2;
+}
+
+.-narrow #data-detail {
+    width: 1fr;
+    height: auto;
+    margin: 1 2;
+}
+
 /* -- Log ------------------------------------------------------------------ */
 
 #log-controls {

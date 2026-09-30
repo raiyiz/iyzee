@@ -866,7 +866,17 @@ class ScopeScreen(Page):
         except Exception as exc:  # noqa: BLE001 - acquisition stays available in memory
             log.exception("scope: failed to save acquisition")
             save_error = exc
-        self._ui(self._finish_acquire, recording, path, save_error)
+        # .tolist() on a long-memory waveform is real, measurable work (tens
+        # of ms per million samples) — worth doing here, off the UI thread,
+        # rather than in _finish_acquire, which runs on it. draw_series()
+        # itself still has to run there (it's the one thing here that
+        # actually touches a Textual widget), so this is as far off the
+        # main thread as the plotting work can move.
+        series = [
+            (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
+            for waveform in recording.waveforms
+        ]
+        self._ui(self._finish_acquire, recording, series, path, save_error)
 
     def _acquire_failed(self, reason: str) -> None:
         self.query_one("#acquire-waveforms", Button).disabled = False
@@ -878,6 +888,7 @@ class ScopeScreen(Page):
     def _finish_acquire(
         self,
         recording: ScopeAcquisition,
+        series: list[tuple[list[float], list[float], str]],
         path: Path | None,
         save_error: Exception | None,
     ) -> None:
@@ -893,10 +904,6 @@ class ScopeScreen(Page):
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
         if recording.waveforms:
             plot = self.query_one("#scope-plot", PlotextPlot)
-            series = [
-                (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
-                for waveform in recording.waveforms
-            ]
             first = recording.waveforms[0]
             draw_series(
                 plot,

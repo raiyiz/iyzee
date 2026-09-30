@@ -44,10 +44,10 @@ from ...experiment import (
     Step,
     StepResult,
     acquire_trace,
-    bandwidth_sweep_steps,
+    build_bandwidth_sweep,
+    build_frequency_sweep,
     create_dirs,
     difference_series,
-    frequency_sweep_steps,
     prepare_analyzer,
     run_sequence,
     save_step_results,
@@ -264,35 +264,26 @@ class SweepScreen(Page):
         self.iyzee_app.sweep_running = True
         self._run(mx_handle.device, shutter, steps, config, kind)
 
-    def _build_bandwidth_run(self) -> tuple[Sequence[Step], AnalyzerConfig]:
+    def _build_bandwidth_run(self):
         start = self._read("rbw-start", _positive_float, "RBW start")
         stop = self._read("rbw-stop", _positive_float, "RBW stop")
         count = self._read("rbw-steps", _positive_int, "Steps", maximum=MAX_POINTS)
         rbw_values = list(np.linspace(start, stop, count))
-        config = AnalyzerConfig(
-            center_hz=1e6, span_hz=0, avg_count=200, sweep_duration_ms=10, res_bw_hz=rbw_values[0]
-        )
-        return bandwidth_sweep_steps(rbw_values), config
+        return build_bandwidth_sweep(rbw_values, sweep_duration_ms=10, res_bw_hz=rbw_values[0])
 
-    def _build_frequency_run(self) -> tuple[Sequence[Step], AnalyzerConfig]:
+    def _build_frequency_run(self):
         center = self._read("freq-center", _positive_float, "Laser center")
         channel = self._read("freq-channel", _positive_int, "Wavemeter channel")
         points = self._read("freq-points", _positive_int, "Points", maximum=MAX_POINTS)
         step_khz = self._read("freq-offset-khz", _positive_float, "Offset step")
         step_thz = step_khz * 1e-9
         offsets = [(i - (points // 2)) * step_thz for i in range(points)]
-
-        config = AnalyzerConfig(
-            center_hz=1.5e6, span_hz=0, avg_count=150, sweep_duration_ms=10, res_bw_hz=24e3
-        )
-        relax_time_s = config.sweep_duration_ms * config.avg_count / 1000
-        steps = frequency_sweep_steps(
+        return build_frequency_sweep(
             laser_center_thz=center,
             wavemeter_channel=channel,
-            relax_time_s=relax_time_s,
             offsets_thz=offsets,
+            sweep_duration_ms=10,
         )
-        return steps, config
 
     # -- the run itself, off the UI thread -----------------------------------
 

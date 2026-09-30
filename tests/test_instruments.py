@@ -133,6 +133,14 @@ class _FakeShutterControl:
         self.chan = chan
         self.ip = ip
         self.psu = _FakePsu()
+        self.connected = False
+
+    def connect(self) -> None:
+        self.connected = True
+
+    def disconnect(self) -> None:
+        self.psu.close()
+        self.connected = False
 
 
 class _FakePsu:
@@ -157,7 +165,9 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
     # the runtime constructor, so narrow it explicitly for the test-only fake.
     shutter = cast(_FakeShutterControl, handle.shutter)
     psu = shutter.psu
+    assert shutter.connected is True
     handle.disconnect()
+    assert shutter.connected is False
     assert psu.closed is True
     assert handle.shutter is None
 

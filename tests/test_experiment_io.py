@@ -13,6 +13,7 @@ from iyzee.experiment.io import (
     STEM_PATTERN,
     create_dirs,
     difference_series,
+    difference_series_many,
     multiplot,
     save_step_results,
 )
@@ -175,8 +176,8 @@ def test_multiplot_plots_each_result(monkeypatch):
     plotted = []
 
     class FakeAx:
-        def plot(self, values):
-            plotted.append(list(values))
+        def plot(self, x_values, values):
+            plotted.append((list(x_values), list(values)))
 
         def legend(self, *a, **k):
             pass
@@ -205,13 +206,26 @@ def test_multiplot_plots_each_result(monkeypatch):
 
     multiplot(results)
 
-    assert plotted == [[2.0, 3.0]]
+    assert plotted == [([0, 1], [2.0, 3.0])]
 
 
 def test_difference_series_computes_x_y_and_label():
     result = difference_series([3.0, 4.0], [1.0, 1.0], "pt0")
 
     assert result == ([0, 1], [2.0, 3.0], "pt0")
+
+
+def test_difference_series_many_skips_unusable_rows():
+    result = difference_series_many(
+        [[3.0, 4.0], None, [5.0, 6.0]],
+        [[1.0, 1.0], [1.0, 1.0], [2.0, 2.0]],
+        ["first", "missing", "third"],
+    )
+
+    assert result == [
+        ([0, 1], [2.0, 3.0], "first"),
+        ([0, 1], [3.0, 4.0], "third"),
+    ]
 
 
 def test_difference_series_returns_none_without_usable_traces():
