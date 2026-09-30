@@ -5,7 +5,9 @@ on:
   push:
     branches:
       - main
-      - moonshine
+      - refab
+      - cleanup/refab-consolidation
+      - cleanup/refabulation
 
 jobs:
   checks:
@@ -19,12 +21,12 @@ jobs:
           - typecheck
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.19"
+          version: "0.12.20"
           python-version: "3.14"
 
       - name: Run check
@@ -34,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Typst
         uses: typst-community/setup-typst@v5
@@ -46,7 +48,7 @@ jobs:
         run: ./ci.sh docs
 
       - name: Upload compiled documentation
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iyzee-documentation
           path: build/docs/*.pdf
