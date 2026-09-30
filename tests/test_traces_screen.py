@@ -39,8 +39,10 @@ async def _open_traces_screen(
         await pilot.pause(0.3)
         yield app.query_one(TracesScreen), pilot
 
+
 def _summary(screen: TracesScreen) -> str:
     return plain(screen.query_one("#traces-summary", Static))
+
 
 def _write_corrupt_run(root: Path) -> Path:
     run_dir = root / "2026-09"
@@ -51,11 +53,13 @@ def _write_corrupt_run(root: Path) -> Path:
     path.write_bytes(b"not actually a numpy archive")
     return path
 
+
 def _write_badmeta_run(root: Path) -> Path:
     path = save_run(root, "2026-09")
     # Metadata that fails json.loads: a hand-edited or partially written sidecar.
     path.with_suffix(".json").write_text("{not json")
     return path
+
 
 @async_test
 async def test_lists_runs_newest_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,6 +67,7 @@ async def test_lists_runs_newest_first(tmp_path: Path, monkeypatch: pytest.Monke
     newer = save_run(tmp_path, "2026-09-14_frequency", mtime=2_000)
     async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
         assert screen._paths == [newer, older]
+
 
 @async_test
 async def test_a_slow_load_does_not_clobber_a_newer_ones_result(
@@ -114,6 +119,7 @@ async def test_a_slow_load_does_not_clobber_a_newer_ones_result(
 
         assert drawn == [old.name]
 
+
 @async_test
 async def test_reselecting_the_currently_shown_run_does_not_reload_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -141,6 +147,7 @@ async def test_reselecting_the_currently_shown_run_does_not_reload_it(
 
         assert calls == first_count  # no redundant reload
 
+
 @async_test
 async def test_a_run_shows_its_summary_verbatim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -163,6 +170,7 @@ async def test_a_run_shows_its_summary_verbatim(
         assert "2 point(s)" in text and "analyzer" in text
         assert "see [/docs] and [nan, nan]" in text
 
+
 @pytest.mark.parametrize(
     "make_run,expected",
     [
@@ -182,6 +190,7 @@ async def test_a_damaged_run_degrades_to_a_message_instead_of_crashing(
         screen._path = None  # force a real (re)load of `path` below
         screen._select(path)  # must not raise
         await wait_until(pilot, lambda: expected in _summary(screen))
+
 
 @async_test
 async def test_preview_follows_the_highlight_and_survives_a_revisit(
@@ -207,6 +216,7 @@ async def test_preview_follows_the_highlight_and_survives_a_revisit(
         await pilot.press("t")
         # Used to snap back to row 0 while the preview still showed row 1.
         await wait_until(pilot, lambda: listing.index == 1 and _summary(screen) == shown)
+
 
 @async_test
 async def test_an_empty_folder_explains_itself_and_names_the_folder(

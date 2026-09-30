@@ -23,6 +23,7 @@ from iyzee.tui import app as app_mod
 from iyzee.tui.screens import data as data_mod
 from iyzee.tui.screens.data import DataScreen
 
+
 def _save_scope_run(data_root: Path, *, channels=(Channel.C1, Channel.C2), scope=None) -> Path:
     """A real acquire -> save round trip, so these tests exercise the exact
     on-disk schema traces_from_scope_recording actually reads."""
@@ -30,6 +31,7 @@ def _save_scope_run(data_root: Path, *, channels=(Channel.C1, Channel.C2), scope
     recording = acquire_scope_recording(scope, list(channels))
     stem = save_scope_acquisition(recording, data_root)
     return stem.with_suffix(".npz")
+
 
 def _save_sweep_run(data_root: Path) -> Path:
     """A non-scope recording, to check the Data list filters it out."""
@@ -53,13 +55,16 @@ async def _open_data_screen(
         await pilot.pause(0.3)
         yield app.query_one(DataScreen), pilot
 
+
 def _summary(screen: DataScreen) -> str:
     return plain(screen.query_one("#data-summary", Static))
+
 
 def _log(screen: DataScreen) -> str:
     return "\n".join(strip.text for strip in screen.query_one("#data-log", RichLog).lines)
 
 # -- empty state / navigation to the page ----------------------------------------------------
+
 
 @async_test
 async def test_empty_data_root_shows_a_placeholder_and_an_empty_preview(
@@ -71,6 +76,7 @@ async def test_empty_data_root_shows_a_placeholder_and_an_empty_preview(
 
 # -- run list: filtered to scope acquisitions -------------------------------------------------
 
+
 @async_test
 async def test_lists_scope_acquisitions_and_filters_out_other_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -80,6 +86,7 @@ async def test_lists_scope_acquisitions_and_filters_out_other_runs(
     async with _open_data_screen(monkeypatch, tmp_path) as (screen, _pilot):
         assert len(screen._paths) == 1
         assert set(screen._measured) == {"C1"}
+
 
 @async_test
 async def test_a_corrupt_npz_is_reported_rather_than_crashing_the_page(
@@ -97,6 +104,7 @@ async def test_a_corrupt_npz_is_reported_rather_than_crashing_the_page(
 
 # -- selecting a channel toggles the preview, not an error ------------------------------------
 
+
 @async_test
 async def test_channel_toggles_control_the_preview(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -111,6 +119,7 @@ async def test_channel_toggles_control_the_preview(
         assert [t.label for t in screen._selected_traces()] == ["C1"]
 
 # -- subtract ---------------------------------------------------------------------------------
+
 
 @async_test
 async def test_subtract_adds_a_derived_trace_and_a_checkbox_for_it(
@@ -128,6 +137,7 @@ async def test_subtract_adds_a_derived_trace_and_a_checkbox_for_it(
         assert "C1 - C2" in screen._derived
         assert "C1 - C2" in screen._checkboxes
         assert "Added derived trace: C1 - C2" in _log(screen)
+
 
 @async_test
 async def test_subtract_with_no_channel_b_flags_that_field(
@@ -148,6 +158,7 @@ async def test_subtract_with_no_channel_b_flags_that_field(
         assert any("Channel B" in n for n in notifications(app))
 
 # -- background correction ---------------------------------------------------------------------
+
 
 @async_test
 async def test_background_region_subtracts_the_mean_of_the_window(
@@ -173,6 +184,7 @@ async def test_background_region_subtracts_the_mean_of_the_window(
 
 # -- scale --------------------------------------------------------------------------------------
 
+
 @async_test
 async def test_scale_axes_applies_the_form_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -192,6 +204,7 @@ async def test_scale_axes_applies_the_form_values(
         import numpy as np
 
         np.testing.assert_allclose(derived.values, screen._measured["C1"].values * 1000)
+
 
 @async_test
 async def test_a_non_numeric_scale_field_flags_that_field(
@@ -213,6 +226,7 @@ async def test_a_non_numeric_scale_field_flags_that_field(
 
 # -- clear derived --------------------------------------------------------------------------
 
+
 @async_test
 async def test_clear_derived_removes_every_derived_trace_and_its_checkbox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -233,6 +247,7 @@ async def test_clear_derived_removes_every_derived_trace_and_its_checkbox(
         assert "Cleared derived traces." in _log(screen)
 
 # -- threaded rendering: a slow render must never land after a newer one -------------------
+
 
 @async_test
 async def test_a_slow_redraw_does_not_clobber_a_newer_ones_result(
@@ -289,6 +304,7 @@ async def test_a_slow_redraw_does_not_clobber_a_newer_ones_result(
         # request's result may ever reach the plot.
         assert drawn == [["C1"]]
 
+
 @async_test
 async def test_export_disables_the_button_while_running_and_reenables_after(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -340,6 +356,7 @@ async def test_visiting_console_then_data_leaves_the_backend_pinned(
 
 # -- export ------------------------------------------------------------------------------------
 
+
 @async_test
 async def test_export_writes_a_real_png_next_to_the_recording(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -354,6 +371,7 @@ async def test_export_writes_a_real_png_next_to_the_recording(
         assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
         assert f"Saved plot: {out}" in _log(screen)
         assert not screen.query_one("#data-export", Button).disabled
+
 
 @async_test
 async def test_export_with_no_channel_checked_refuses_with_a_notification(
@@ -373,6 +391,7 @@ async def test_export_with_no_channel_checked_refuses_with_a_notification(
         assert any("Select at least one" in n for n in notifications(app))
 
 # -- switching runs resets derived traces, not just the measured channels --------------------
+
 
 @async_test
 async def test_switching_to_a_different_run_clears_derived_traces_from_the_previous_one(

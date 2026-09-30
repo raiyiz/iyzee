@@ -25,6 +25,7 @@ from iyzee.tui.screens.console import ConsoleScreen, IyzeeConsole
 from iyzee.tui.screens.sweep import SweepScreen
 from iyzee.tui.screens.traces import TracesScreen
 
+
 @async_test
 async def test_page_navigation_uses_a_shared_content_switcher() -> None:
     """Pages used to be independent Screens swapped via App.MODES; they're
@@ -66,6 +67,7 @@ async def test_page_navigation_uses_a_shared_content_switcher() -> None:
         assert pilot.app.screen.focused is not None
         assert pilot.app.screen.focused.id == "console-terminal"
 
+
 @async_test
 async def test_footer_offers_navigation_to_other_pages_only_and_always_quit() -> None:
     async with IyzeeApp().run_test() as pilot:
@@ -82,6 +84,7 @@ async def test_footer_offers_navigation_to_other_pages_only_and_always_quit() ->
 
         binding = pilot.app.screen.active_bindings["ctrl+q"].binding
         assert binding.action == "quit" and binding.show is True, "Quit must be advertised"
+
 
 @async_test
 async def test_nav_rail_and_sweep_banner_update_the_moment_a_connect_finishes(
@@ -125,6 +128,7 @@ async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(
         console = app.screen.query_one(IyzeeConsole)
         assert history_manager(console.session.shell).hist_file == str(history_file)
 
+
 @async_test
 async def test_exiting_the_app_disconnects_every_connected_instrument() -> None:
     one, two = FakeHandle(), FakeHandle()
@@ -137,6 +141,7 @@ async def test_exiting_the_app_disconnects_every_connected_instrument() -> None:
     assert (one.disconnect_calls, two.disconnect_calls) == (1, 1)
     assert app.handles == {}
 
+
 def test_a_failing_disconnect_does_not_stop_the_others_from_closing() -> None:
     app = IyzeeApp()
     broken, fine = FakeHandle(disconnect_error="link already gone"), FakeHandle()
@@ -144,6 +149,7 @@ def test_a_failing_disconnect_does_not_stop_the_others_from_closing() -> None:
     app.close_instruments(timeout=2.0)
     assert broken.disconnect_calls == 1 and fine.disconnect_calls == 1
     assert app.handles == {}
+
 
 @pytest.mark.parametrize(
     "release_lock_after,timeout,busy_is_closed",

@@ -3,6 +3,7 @@ import pytest
 import iyzee.base as base_module
 from iyzee.mxa import KeysightMXA
 
+
 class FakeInstrument:
     def __init__(self):
         self.commands = []
@@ -32,6 +33,7 @@ class FakeInstrument:
         self.close_count += 1
         self.commands.append("<CLOSE>")
 
+
 class FakeResourceManager:
     def __init__(self):
         self.opened = []
@@ -41,12 +43,14 @@ class FakeResourceManager:
         self.opened.append((address, instrument))
         return instrument
 
+
 def make_mxa():
     instrument = FakeInstrument()
     mxa = KeysightMXA.__new__(KeysightMXA)
     mxa.instrument = instrument
     mxa.timeout_ms = 5000
     return mxa, instrument
+
 
 def test_constructor_connects_with_the_configured_visa_settings():
     resource_manager = FakeResourceManager()
@@ -73,6 +77,7 @@ def test_constructor_connects_with_the_configured_visa_settings():
     assert mxa.instrument is None
     assert instrument.close_count == 1
 
+
 def test_wait_opc_requires_explicit_completion_response():
     mxa, instrument = make_mxa()
     assert mxa.wait_opc() is True
@@ -80,12 +85,14 @@ def test_wait_opc_requires_explicit_completion_response():
     instrument.responses["*OPC?"] = "0"
     assert mxa.wait_opc() is False
 
+
 def test_get_errors_drains_scpi_error_queue():
     mxa, instrument = make_mxa()
     responses = iter(["-100,Command error", "-200,Execution error", "0,No error"])
     instrument.query = lambda command: next(responses)
 
     assert mxa.get_errors() == ["-100,Command error", "-200,Execution error"]
+
 
 def test_frequency_configuration_is_sent_to_instrument():
     mxa, instrument = make_mxa()
