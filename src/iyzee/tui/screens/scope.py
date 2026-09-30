@@ -516,6 +516,8 @@ class ScopeScreen(Page):
                 self.query_one(f"#{field_id}").remove_class("scope-dirty")
         for err in channel_errors:
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
+        if trigger_error is not None:
+            log_widget.write(f"[red]Trigger: {escape(one_line(trigger_error))}[/red]")
         self._last_applied_channel_settings = tuple(channel_settings) or None
         self._last_applied_trigger_settings = trigger_settings
         self._settings_synced = not channel_errors and trigger_error is None
