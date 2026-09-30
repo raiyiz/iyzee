@@ -280,16 +280,25 @@ def test_block_ends_with_a_separate_terminator_frame(terminator):
     assert scope._transport.read_definite_block() == body
 
 
-def test_command_sequence_numbers_are_nonzero_and_advance() -> None:
+def test_legacy_first_command_uses_sequence_zero() -> None:
     scope, sock = attached()
     scope.send("C1:TEST")
-    scope.send("C2:TEST")
 
     first = struct.unpack("!4BI", bytes(sock.sent[:8]))
+
+    assert first[:4] == (DATA_EOI, VICPTransport.HEADER_VERSION, 0, 0)
+
+
+def test_nonzero_response_sequence_enables_vicp_1a_for_later_commands() -> None:
+    response = frame(DATA_EOI, b"OK\n", version=1)
+    scope, sock = attached(response)
+
+    assert scope.query("C1:TEST") == "OK"
+    scope.send("C2:TEST")
+
     second_offset = 8 + len(b"C1:TEST")
     second = struct.unpack("!4BI", bytes(sock.sent[second_offset : second_offset + 8]))
 
-    assert first[:4] == (DATA_EOI, VICPTransport.HEADER_VERSION, 1, 0)
     assert second[:4] == (DATA_EOI, VICPTransport.HEADER_VERSION, 2, 0)
 
 
