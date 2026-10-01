@@ -360,9 +360,44 @@ Screen {
     padding: 1 2;
 }
 
+#traces-options {
+    height: auto;
+    margin: 0 2 1 2;
+    align: left middle;
+}
+
+#traces-options .hint {
+    padding: 0 1 0 0;
+}
+
+#traces-statistic {
+    width: 18;
+    min-width: 18;
+}
+
 #traces-plot {
-    height: 1fr;
+    height: 20;
     min-height: 12;
+    margin-bottom: 1;
+}
+
+#traces-points {
+    height: auto;
+    max-height: 10;
+    margin-bottom: 1;
+}
+
+#traces-point-summary {
+    height: auto;
+    margin: 0 0 1 0;
+    padding: 0 1;
+    border-left: thick $primary-darken-1;
+}
+
+#traces-point-plot {
+    height: 18;
+    min-height: 12;
+    margin-bottom: 1;
 }
 
 .-narrow #traces-body {

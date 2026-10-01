@@ -350,6 +350,40 @@ def difference_series_many(
     return series
 
 
+def difference_statistic(
+    squeezing: object, shot_noise: object, statistic: str = "mean"
+) -> float | None:
+    """Reduce one squeezing-minus-shot-noise trace pair to one scalar value.
+
+    "mean" and "minimum" operate only on samples where both traces are finite,
+    so one missing analyzer bin does not discard an otherwise usable point.
+    """
+    if squeezing is None or shot_noise is None:
+        return None
+    difference = np.asarray(squeezing, dtype=np.float64) - np.asarray(shot_noise, dtype=np.float64)
+    finite = np.isfinite(difference)
+    if not np.any(finite):
+        return None
+    values = difference[finite]
+    if statistic == "mean":
+        return float(np.mean(values))
+    if statistic == "minimum":
+        return float(np.min(values))
+    raise ValueError(f"unknown statistic {statistic!r}")
+
+
+def difference_values_many(
+    squeezing_rows: Sequence[object],
+    shot_noise_rows: Sequence[object],
+    statistic: str = "mean",
+) -> list[float | None]:
+    """Reduce every point in a sweep to one difference statistic."""
+    return [
+        difference_statistic(squeezing, shot_noise, statistic)
+        for squeezing, shot_noise in zip(squeezing_rows, shot_noise_rows, strict=True)
+    ]
+
+
 def build_figure(results: list[StepResult]):
     """Build (but do not display) the squeezing-minus-shot-noise figure.
 

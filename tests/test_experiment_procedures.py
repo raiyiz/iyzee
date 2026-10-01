@@ -40,9 +40,14 @@ class BoomStep:
 class FakeWavemeter:
     def __init__(self):
         self.setpoints = []
+        self.read_channels = []
 
     def set_pid_setpoint(self, freq, channel):
         self.setpoints.append((freq, channel))
+
+    def read_frequency(self, channel):
+        self.read_channels.append(channel)
+        return 377.100001
 
 
 class FakeShutterControl:
@@ -124,10 +129,12 @@ def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
     result = FrequencyStep(frequency_thz=377.1, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
     assert wavemeter.setpoints == [(377.1, 1)]
+    assert wavemeter.read_channels == [1]
     assert shutter.events == ["open", "close"]
     assert mx.trace_calls == [1, 2]
     assert result.traces["squeezing"] == [1]
     assert result.traces["shot_noise"] == [2]
+    assert result.meta["measured_frequency_thz"] == pytest.approx(377.100001)
 
 
 def test_frequency_step_requires_shutter():

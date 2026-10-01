@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from helpers import async_test, make_result, plain, save_run, wait_until
 from textual.pilot import Pilot
-from textual.widgets import ListView, Static
+from textual.widgets import DataTable, ListView, Select, Static
 
 from iyzee.tui import app as app_mod
 from iyzee.tui.screens import traces as traces_mod
@@ -223,3 +223,50 @@ async def test_an_empty_folder_explains_itself_and_names_the_folder(
     async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
         assert "No recordings yet" in _summary(screen)
         assert str(tmp_path) in plain(screen.query_one("#traces-hint", Static))
+
+
+@async_test
+async def test_frequency_run_is_navigable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from iyzee.experiment.core import StepResult
+
+    results = [
+        StepResult(
+            label="pt0",
+            x_value=377.100000,
+            x_unit="THz",
+            traces={"squeezing": [1.0, 3.0], "shot_noise": [0.0, 0.0]},
+            meta={"wavemeter_channel": 4, "measured_frequency_thz": 377.100001},
+        ),
+        StepResult(
+            label="pt1",
+            x_value=377.100010,
+            x_unit="THz",
+            traces={"squeezing": [2.0, 4.0], "shot_noise": [0.0, 0.0]},
+            meta={"wavemeter_channel": 4, "measured_frequency_thz": 377.100011},
+        ),
+    ]
+    save_run(tmp_path, "2026-10", *results)
+
+    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, pilot):
+        await wait_until(pilot, lambda: "2 point(s)" in _summary(screen))
+
+        table = screen.query_one("#traces-points", DataTable)
+        assert len(table.rows) == 2
+        point_summary = plain(screen.query_one("#traces-point-summary", Static))
+        assert "Requested: 377.100000 THz" in point_summary
+        assert "Measured: 377.100001 THz" in point_summary
+        assert "Mean delta: 2.000" in point_summary
+
+        table.focus()
+        await pilot.press("down")
+        await wait_until(
+            pilot, lambda: "Point 1" in plain(screen.query_one("#traces-point-summary", Static))
+        )
+        point_summary = plain(screen.query_one("#traces-point-summary", Static))
+        assert "Measured: 377.100011 THz" in point_summary
+
+        selector = screen.query_one("#traces-statistic", Select)
+        selector.value = "minimum"
+        await pilot.pause()
+        point_summary = plain(screen.query_one("#traces-point-summary", Static))
+        assert "Minimum delta: 2.000" in point_summary
