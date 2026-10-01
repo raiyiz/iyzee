@@ -49,7 +49,7 @@ from ...scope_workflows import (
     read_trigger_settings,
     save_scope_acquisition,
 )
-from ..plotting import draw_series
+from ..plotting import draw_series, prepare_series
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
 
@@ -866,14 +866,11 @@ class ScopeScreen(Page):
         except Exception as exc:  # noqa: BLE001 - acquisition stays available in memory
             log.exception("scope: failed to save acquisition")
             save_error = exc
-        # .tolist() on a long-memory waveform is real, measurable work (tens
-        # of ms per million samples) — worth doing here, off the UI thread,
-        # rather than in _finish_acquire, which runs on it. draw_series()
-        # itself still has to run there (it's the one thing here that
-        # actually touches a Textual widget), so this is as far off the
-        # main thread as the plotting work can move.
+        # Reduce to terminal-sized data before crossing back to the UI thread.
+        # The full-resolution recording remains untouched for later analysis;
+        # only the disposable preview is reduced.
         series = [
-            (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
+            prepare_series(waveform.time, waveform.values, str(waveform.channel))
             for waveform in recording.waveforms
         ]
         self._ui(self._finish_acquire, recording, series, path, save_error)
@@ -888,7 +885,7 @@ class ScopeScreen(Page):
     def _finish_acquire(
         self,
         recording: ScopeAcquisition,
-        series: list[tuple[list[float], list[float], str]],
+        series: list[tuple[list[float], list[float], str | None]],
         path: Path | None,
         save_error: Exception | None,
     ) -> None:

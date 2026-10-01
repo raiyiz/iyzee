@@ -120,6 +120,7 @@ class FrequencyStep:
             raise ValueError("FrequencyStep requires ctx.wavemeter to be set")
         ctx.wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
         time.sleep(self.relax_time_s)
+        measured_frequency = ctx.wavemeter.read_frequency(self.wavemeter_channel)
 
         try:
             ctx.shutter.open()
@@ -137,6 +138,7 @@ class FrequencyStep:
             meta={
                 "wavemeter_channel": self.wavemeter_channel,
                 "relax_time_s": self.relax_time_s,
+                "measured_frequency_thz": measured_frequency,
             },
         )
 
