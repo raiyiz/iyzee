@@ -76,6 +76,39 @@ class WavemeterReadoutError(RuntimeError):
     """Raised when a wavemeter measurement cannot be obtained or parsed."""
 
 
+class Wavemeter:
+    """Client for the WS-7 HTTP API.
+
+    The instrument has no persistent session; each operation is an HTTP request.
+    This object owns the default channel so callers can pass an explicit
+    wavemeter device around instead of module-level helpers.
+    """
+
+    def __init__(self, channel: int = 0) -> None:
+        self.channel = channel
+
+    def read_frequency(self, channel: int | None = None) -> float:
+        selected = self.channel if channel is None else channel
+        try:
+            return float(_request(f"{selected}/", timeout=READ_TIMEOUT_S))
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise WavemeterReadoutError(f"Failed to read wavemeter channel {selected}") from exc
+
+    def set_pid_setpoint(self, freq: float, channel: int | None = None) -> None:
+        selected = self.channel if channel is None else channel
+        try:
+            _request(
+                "set_pid/",
+                data=f"freq_thz={freq}&channel={selected}".encode("ascii"),
+                timeout=SETPOINT_TIMEOUT_S,
+            )
+        except (OSError, UnicodeError) as exc:
+            raise WavemeterReadoutError(
+                f"Failed to set the setpoint of wavemeter channel {selected} to {freq} THz"
+            ) from exc
+        log.info("[WS-7] set PID setpoint of channel %s to %s THz", selected, freq)
+
+
 def compute_two_photon_detuning(f1: float, f2: float):
     """
     Helper function to compute the two photon detuning
@@ -121,22 +154,8 @@ def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
 def single_readout(
     channel: int, reference_f: float = 0, label: str = "", printing: bool = True
 ) -> float:
-    """
-    Fetch the laser frequency once from a wavemeter channel with urllib
-    and compare to a reference frequency.
-
-    Parameters:
-        channel (int): Wavemeter channel (0-8 or 0-4 depending on switch)
-        reference_f (float): Reference frequency value which is substracted. Default is 0.
-        label (str): Optional labeling of the print
-        printing (bool): Enable/Disable printing of the readout
-    """
-    try:
-        ls_frequency = float(_request(f"{channel}/", timeout=READ_TIMEOUT_S))
-    except (OSError, ValueError, UnicodeError) as exc:
-        raise WavemeterReadoutError(f"Failed to read wavemeter channel {channel}") from exc
-
-    ls_frequency -= reference_f
+    """Fetch one laser frequency and optionally subtract a reference."""
+    ls_frequency = Wavemeter(channel=channel).read_frequency() - reference_f
     if printing:
         print(
             f"[WS-7] Laser Frequency in Channel {channel} (THz) (Ref: {label}): ",
@@ -157,32 +176,8 @@ def fast_readout(ch: int) -> float:
 
 
 def set_pid_setpoint(freq: float, channel: int) -> None:
-    """
-    Set the PID-setpoint of the wavemeter lock.
-    The regulation has to be turned on manually due to safety reasons.
-
-    The server only accepts a setpoint; it cannot report one back, so a
-    successful return means "the request was accepted", not "the laser is
-    there". Read the frequency (``single_readout``) to learn where it is.
-
-    Parameters:
-        channel (int): Which channel the setpoint should be changed
-        freq (float): Frequency in THz to be set.
-
-    Raises:
-        WavemeterReadoutError: the server did not accept the request in time.
-    """
-    try:
-        _request(
-            "set_pid/",
-            data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
-            timeout=SETPOINT_TIMEOUT_S,
-        )
-    except (OSError, UnicodeError) as exc:
-        raise WavemeterReadoutError(
-            f"Failed to set the setpoint of wavemeter channel {channel} to {freq} THz"
-        ) from exc
-    log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
+    """Set a PID setpoint, retained as a convenience wrapper."""
+    Wavemeter(channel=channel).set_pid_setpoint(freq)
 
 
 def track_frequency(total_time, time_step, save_path, channel, reference_f=0, save_csv=False):

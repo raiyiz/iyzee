@@ -108,3 +108,34 @@ def test_set_pid_setpoint_failure_is_a_wavemeter_error_naming_channel_and_value(
 
     with pytest.raises(wavemeter_readout.WavemeterReadoutError, match=r"channel 4 to 377\.1 THz"):
         wavemeter_readout.set_pid_setpoint(377.1, 4)
+
+
+def test_wavemeter_client_reads_selected_channel(monkeypatch):
+    calls = []
+
+    def fake_request(path, *, timeout, data=None):
+        calls.append((path, timeout, data))
+        return "377.123456"
+
+    monkeypatch.setattr(wavemeter_readout, "_request", fake_request)
+    wavemeter = wavemeter_readout.Wavemeter(channel=4)
+
+    assert wavemeter.read_frequency() == pytest.approx(377.123456)
+    assert calls == [("4/", wavemeter_readout.READ_TIMEOUT_S, None)]
+
+
+def test_wavemeter_client_sets_pid_setpoint(monkeypatch):
+    calls = []
+
+    def fake_request(path, *, timeout, data=None):
+        calls.append((path, timeout, data))
+        return ""
+
+    monkeypatch.setattr(wavemeter_readout, "_request", fake_request)
+    wavemeter = wavemeter_readout.Wavemeter(channel=4)
+
+    wavemeter.set_pid_setpoint(377.105, channel=5)
+
+    assert calls == [
+        ("set_pid/", wavemeter_readout.SETPOINT_TIMEOUT_S, b"freq_thz=377.105&channel=5")
+    ]
