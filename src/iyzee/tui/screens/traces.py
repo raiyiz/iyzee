@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -24,13 +23,13 @@ from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.markup import escape
-from textual.widgets import DataTable, Label, ListItem, ListView, Select, Static
+from textual.widgets import DataTable, ListView, Select, Static
 from textual_plotext import PlotextPlot
 
 from ...experiment import difference_values_many
-from ...experiment.io import DATA_ROOT, STEM_PATTERN, Recording, load_recording
+from ...experiment.io import DATA_ROOT, Recording, load_recording
 from ..plotting import draw_series, prepare_series
-from .page import Page
+from .runlist import RunListPage
 
 # Kept separate so tests can redirect the results directory without touching
 # the persistence module's global.
@@ -40,15 +39,6 @@ _STATISTICS = (
     ("Mean delta", "mean"),
     ("Minimum delta", "minimum"),
 )
-
-
-def _run_label(path: Path, mtime: float) -> str:
-    """List label for one saved run: its name (if any) and save time."""
-    when = datetime.fromtimestamp(mtime).astimezone()
-    match = STEM_PATTERN.match(path.stem)
-    name = match["name"] if match else None
-    prefix = f"{escape(name)}  " if name else ""
-    return f"{prefix}{when:%Y-%m-%d %H:%M:%S}"
 
 
 @dataclass(frozen=True)
@@ -196,7 +186,7 @@ def _sweep_data(recording: Recording, statistic: str) -> _SweepData:
     return _SweepData(frequency, plot_x, requested, measured, labels, values)
 
 
-class TracesScreen(Page):
+class TracesScreen(RunListPage):
     """Browse runs, inspect a sweep, and drill into individual points."""
 
     def compose(self) -> ComposeResult:
@@ -220,54 +210,22 @@ class TracesScreen(Page):
             id="traces-body",
         )
 
+    LIST_ID = "traces-list"
+    HINT_ID = "traces-hint"
+
     def on_mount(self) -> None:
-        self._paths: list[Path] = []
-        self._path: Path | None = None
+        self._init_run_list()
         self._recording: Recording | None = None
         self._selected_point = 0
         self._render_generation = 0
         self._point_render_generation = 0
-        self._suppress_events = False
         self.refresh_runs()
 
-    def on_show(self) -> None:
-        self.refresh_runs()
+    def _scan_runs(self) -> list[Path]:
+        return list(_DATA_ROOT.glob("**/*.npz"))
 
-    def refresh_runs(self) -> None:
-        """Re-scan the data directory while keeping the current selection.
-
-        ListView can emit Highlighted while its children are rebuilt, so the
-        one explicit selection below is the only load/render request we trust.
-        """
-        list_view = self.query_one("#traces-list", ListView)
-        index = list_view.index
-        previous = (
-            self._paths[index] if index is not None and 0 <= index < len(self._paths) else None
-        )
-        self._paths = sorted(
-            _DATA_ROOT.glob("**/*.npz"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
-        self.query_one("#traces-hint", Static).update(
-            f"Runs are read from {escape(str(_DATA_ROOT))}"
-        )
-        self._suppress_events = True
-        try:
-            list_view.clear()
-            for path in self._paths:
-                list_view.append(ListItem(Label(_run_label(path, path.stat().st_mtime))))
-            if self._paths:
-                list_view.index = self._paths.index(previous) if previous in self._paths else 0
-        finally:
-            self._suppress_events = False
-
-        if self._paths:
-            # Select explicitly after rebuilding; child mounting can emit its
-            # own highlight event before the list is fully populated.
-            self._select(self._paths[list_view.index or 0])
-        else:
-            self._path = None
-            self._recording = None
-            self._show_empty()
+    def _hint_text(self) -> str:
+        return f"Runs are read from {escape(str(_DATA_ROOT))}"
 
     def _set_sweep_visible(self, visible: bool) -> None:
         for widget_id in (
@@ -280,6 +238,8 @@ class TracesScreen(Page):
             self.query_one(widget_id).display = visible
 
     def _show_empty(self) -> None:
+        self._path = None
+        self._recording = None
         self._set_sweep_visible(False)
         self.query_one("#traces-summary", Static).update(
             "No recordings yet.\n\nSweep and Scope acquisitions are saved automatically "
@@ -291,16 +251,8 @@ class TracesScreen(Page):
             plot.refresh()
         self.query_one("#traces-point-summary", Static).update("")
 
-    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
-        """Follow Up/Down directly; Enter/click still select the same row."""
-        if self._suppress_events or event.list_view.id != "traces-list":
-            return
-        index = event.list_view.index
-        if index is not None and 0 <= index < len(self._paths):
-            self._select(self._paths[index])
-
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        if event.list_view.id != "traces-list":
+        if event.list_view.id != self.LIST_ID:
             return
         if 0 <= event.index < len(self._paths):
             self._select(self._paths[event.index])
