@@ -16,7 +16,7 @@ import hashlib
 import json
 import re
 import secrets
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -337,9 +337,9 @@ def difference_series(
 
 
 def difference_series_many(
-    squeezing_rows: Sequence[object],
-    shot_noise_rows: Sequence[object],
-    labels: Sequence[str],
+    squeezing_rows: Iterable[object],
+    shot_noise_rows: Iterable[object],
+    labels: Iterable[str],
 ) -> list[tuple[list[float], list[float], str]]:
     """Build all usable squeezing-minus-shot-noise series for a recording."""
     series = []
@@ -373,8 +373,8 @@ def difference_statistic(
 
 
 def difference_values_many(
-    squeezing_rows: Sequence[object],
-    shot_noise_rows: Sequence[object],
+    squeezing_rows: Iterable[object],
+    shot_noise_rows: Iterable[object],
     statistic: str = "mean",
 ) -> list[float | None]:
     """Reduce every point in a sweep to one difference statistic."""

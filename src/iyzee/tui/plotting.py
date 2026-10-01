@@ -24,10 +24,12 @@ from textual_plotext import PlotextPlot
 
 MAX_DISPLAY_POINTS = 2000
 
+Samples = Sequence[float] | np.ndarray
+
 
 def prepare_series(
-    x: Sequence[float],
-    y: Sequence[float],
+    x: Samples,
+    y: Samples,
     label: str | None = None,
     *,
     max_points: int = MAX_DISPLAY_POINTS,

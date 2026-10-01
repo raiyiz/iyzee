@@ -66,7 +66,8 @@ def _record_with(*outcomes: Exception | None):
 
     record = RunRecord(config={"center_hz": 1e6})
     for index, error in enumerate(outcomes):
-        record.on_step(index, len(outcomes), object(), None if error else object(), error)
+        result = None if error else StepResult(f"p{index}", 0.0, "Hz", {})
+        record.on_step(index, len(outcomes), object(), result, error)
     return record
 
 

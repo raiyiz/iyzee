@@ -1,4 +1,5 @@
 import urllib.error
+from email.message import Message
 
 import pytest
 
@@ -95,7 +96,7 @@ def test_set_pid_setpoint_posts_a_bounded_request_and_logs_instead_of_printing(
     [
         TimeoutError("timed out"),
         urllib.error.URLError("unreachable"),
-        urllib.error.HTTPError("http://wm/api/set_pid/", 500, "boom", {}, None),
+        urllib.error.HTTPError("http://wm/api/set_pid/", 500, "boom", Message(), None),
     ],
 )
 def test_set_pid_setpoint_failure_is_a_wavemeter_error_naming_channel_and_value(

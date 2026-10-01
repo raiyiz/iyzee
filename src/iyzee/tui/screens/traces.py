@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import numpy as np
 from textual import work
@@ -140,7 +141,7 @@ def _is_frequency_run(points: Sequence[dict]) -> bool:
     )
 
 
-def _finite(value: object) -> float | None:
+def _finite(value: Any) -> float | None:
     try:
         number = float(value)
     except TypeError, ValueError:
@@ -152,16 +153,16 @@ def _format_value(value: float | None, digits: int = 3) -> str:
     return "—" if value is None else f"{value:.{digits}f}"
 
 
-def _sweep_data(
-    recording: Recording, statistic: str
-) -> tuple[
-    bool,
-    list[float],
-    list[float],
-    list[float | None],
-    list[str],
-    list[float | None],
-]:
+class _SweepData(NamedTuple):
+    frequency: bool  # a laser-frequency sweep (else an RBW sweep)
+    plot_x: list[float]  # measured frequency where there is one, else the requested x
+    requested: list[float]
+    measured: list[float | None]
+    labels: list[str]
+    values: list[float | None]
+
+
+def _sweep_data(recording: Recording, statistic: str) -> _SweepData:
     arrays = recording.arrays
     x_values = np.asarray(arrays.get("x_values", []), dtype=np.float64)
     points = recording.metadata.get("points", [])
@@ -187,12 +188,12 @@ def _sweep_data(
         else None
         for index in range(rows)
     ]
-    plot_x = [
-        measured[index] if measured[index] is not None else float(x_values[index])
-        for index in range(rows)
-    ]
     requested = [float(value) for value in x_values]
-    return frequency, plot_x, requested, measured, labels, values
+    plot_x = [
+        measured_x if measured_x is not None else requested[index]
+        for index, measured_x in enumerate(measured)
+    ]
+    return _SweepData(frequency, plot_x, requested, measured, labels, values)
 
 
 class TracesScreen(Page):
@@ -377,6 +378,7 @@ class TracesScreen(Page):
         self._suppress_events = True
         try:
             table.clear(columns=True)
+            rows: list[tuple[str, ...]]
             if frequency:
                 table.add_columns("Point", "Requested (THz)", "Measured (THz)", "delta")
                 rows = [
