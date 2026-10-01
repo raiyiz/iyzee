@@ -56,6 +56,7 @@ class ExperimentContext:
     mx: Any
     run_id: str
     shutter: Any | None = None
+    wavemeter: Any | None = None
     config: dict[str, Any] = field(default_factory=dict)
 
 

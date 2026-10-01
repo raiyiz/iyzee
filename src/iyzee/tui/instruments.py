@@ -30,7 +30,7 @@ from ..base import CH, IP
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
 from ..scope import LeCroy, LeCroyTimeoutError
-from ..wavemeter_readout import WavemeterReadoutError, single_readout
+from ..wavemeter_readout import Wavemeter, WavemeterReadoutError
 
 log = logging.getLogger("iyzee.instruments")
 
@@ -183,25 +183,27 @@ class WavemeterHandle(_LockedHandle):
 
     def __init__(self, channel: int = 0) -> None:
         super().__init__()
-        self._channel = channel
+        self._wavemeter = Wavemeter(channel=channel)
 
     def connect(self) -> None:
+        # HTTP has no persistent session to open; probe() below proves the
+        # endpoint is reachable before the handle is published.
         return None
 
     def disconnect(self) -> None:
         return None
 
     @property
-    def device(self) -> None:
-        """The wavemeter has no persistent live device object."""
-        return None
+    def device(self) -> Wavemeter:
+        """The configured wavemeter HTTP client."""
+        return self._wavemeter
 
     def probe(self) -> str:
         try:
-            freq = single_readout(self._channel, printing=False)
+            freq = self._wavemeter.read_frequency()
         except WavemeterReadoutError as exc:
             raise ConnectionError(str(exc)) from exc
-        return f"ch{self._channel} = {freq:.6f} THz"
+        return f"ch{self._wavemeter.channel} = {freq:.6f} THz"
 
 
 class ScopeHandle(_LockedHandle):

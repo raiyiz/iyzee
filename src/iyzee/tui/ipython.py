@@ -100,7 +100,12 @@ class LabProxy:
     ``device`` property — nothing else in the proxy needs to change.
     """
 
-    _INSTRUMENT_KEYS = {"mx": "mxa", "shutter": "shutter", "scope": "scope"}
+    _INSTRUMENT_KEYS = {
+        "mx": "mxa",
+        "shutter": "shutter",
+        "scope": "scope",
+        "wavemeter": "wavemeter",
+    }
 
     def __init__(self, app: AppState) -> None:
         object.__setattr__(self, "_app", app)

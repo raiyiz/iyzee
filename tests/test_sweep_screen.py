@@ -108,6 +108,7 @@ async def test_an_invalid_field_is_named_marked_and_focused(
         screen = await _open_sweep_screen(pilot)
         app.handles["mxa"] = FakeHandle()
         app.handles["shutter"] = FakeHandle()
+        app.handles["wavemeter"] = FakeHandle()
         screen.query_one("#sweep-type", Select).value = kind
         await pilot.pause()
         field = screen.query_one(f"#{field_id}", Input)
@@ -141,6 +142,7 @@ async def test_an_invalid_field_is_named_marked_and_focused(
         ("bandwidth", (), "_start_sweep", "Connect the MXA", "#run-sweep"),
         ("bandwidth", (), "_start_capture", "Connect the MXA", "#capture-trace"),
         ("frequency", ("mxa",), "_start_sweep", "Connect the shutter", "#run-sweep"),
+        ("frequency", ("mxa", "shutter"), "_start_sweep", "Connect the wavemeter", "#run-sweep"),
     ],
 )
 @async_test
@@ -181,6 +183,12 @@ async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
         assert "shutter" in plain(banner) and "MXA" not in plain(banner)
 
         app.handles["shutter"] = FakeHandle()
+        app.instruments_changed()
+        await pilot.pause()
+        assert banner.display
+        assert "wavemeter" in plain(banner)
+
+        app.handles["wavemeter"] = FakeHandle()
         app.instruments_changed()
         await pilot.pause()
         assert not banner.display

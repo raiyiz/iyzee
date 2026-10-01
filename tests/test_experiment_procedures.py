@@ -37,6 +37,14 @@ class BoomStep:
         raise RuntimeError("boom")
 
 
+class FakeWavemeter:
+    def __init__(self):
+        self.setpoints = []
+
+    def set_pid_setpoint(self, freq, channel):
+        self.setpoints.append((freq, channel))
+
+
 class FakeShutterControl:
     """Stand-in for power.ShutterControl as a context manager."""
 
@@ -106,20 +114,16 @@ def test_frequency_sweep_builder_derives_relax_time_from_config():
 
 def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
-    setpoints = []
-    monkeypatch.setattr(
-        "iyzee.experiment.procedures.set_pid_setpoint",
-        lambda freq, channel: setpoints.append((freq, channel)),
-    )
     monkeypatch.setattr("iyzee.experiment.procedures.time.sleep", lambda s: None)
 
     mx = FakeMXA()
     shutter = FakeShutterControl()
-    ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter)
+    wavemeter = FakeWavemeter()
+    ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter, wavemeter=wavemeter)
 
     result = FrequencyStep(frequency_thz=377.1, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
-    assert setpoints == [(377.1, 1)]
+    assert wavemeter.setpoints == [(377.1, 1)]
     assert shutter.events == ["open", "close"]
     assert mx.trace_calls == [1, 2]
     assert result.traces["squeezing"] == [1]
@@ -127,9 +131,16 @@ def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
 
 
 def test_frequency_step_requires_shutter():
-    ctx = ExperimentContext(mx=FakeMXA(), run_id="t")
+    ctx = ExperimentContext(mx=FakeMXA(), run_id="t", wavemeter=FakeWavemeter())
 
     with pytest.raises(ValueError, match="shutter"):
+        FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
+
+
+def test_frequency_step_requires_wavemeter():
+    ctx = ExperimentContext(mx=FakeMXA(), run_id="t", shutter=FakeShutterControl())
+
+    with pytest.raises(ValueError, match="wavemeter"):
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
 

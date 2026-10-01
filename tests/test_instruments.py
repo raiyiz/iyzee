@@ -169,16 +169,28 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
 
 
 def test_wavemeter_handle_probe_reports_frequency(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(instruments_mod, "single_readout", lambda ch, printing=False: 377.105)
+    class FakeWavemeter:
+        def __init__(self, channel):
+            self.channel = channel
+
+        def read_frequency(self):
+            return 377.105
+
+    monkeypatch.setattr(instruments_mod, "Wavemeter", FakeWavemeter)
     handle = WavemeterHandle(channel=1)
     assert handle.probe() == "ch1 = 377.105000 THz"
+    assert handle.device.channel == 1
 
 
 def test_wavemeter_handle_probe_wraps_readout_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _raise(_ch, printing=False):
-        raise instruments_mod.WavemeterReadoutError("switch unreachable")
+    class FakeWavemeter:
+        def __init__(self, channel):
+            self.channel = channel
 
-    monkeypatch.setattr(instruments_mod, "single_readout", _raise)
+        def read_frequency(self):
+            raise instruments_mod.WavemeterReadoutError("switch unreachable")
+
+    monkeypatch.setattr(instruments_mod, "Wavemeter", FakeWavemeter)
     handle = WavemeterHandle(channel=0)
     with pytest.raises(ConnectionError, match="switch unreachable"):
         handle.probe()
