@@ -1,3 +1,5 @@
+import urllib.error
+
 import pytest
 
 import iyzee.wavemeter_readout as wavemeter_readout
@@ -9,6 +11,12 @@ class FakeResponse:
 
     def read(self):
         return self.value.encode("ascii")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 def test_single_readout_returns_measured_frequency(monkeypatch):
@@ -59,3 +67,44 @@ def test_monitoring_frequencies_matches_channels_by_position(monkeypatch, capsys
     printed = capsys.readouterr().out
     assert "ch2" in printed
     assert "ch5" in printed
+
+
+def test_set_pid_setpoint_posts_a_bounded_request_and_logs_instead_of_printing(
+    monkeypatch, capsys, caplog
+):
+    seen = {}
+
+    def fake_urlopen(url, data=None, timeout=None):
+        seen.update(url=url, data=data, timeout=timeout)
+        return FakeResponse("")
+
+    monkeypatch.setattr(wavemeter_readout.urllib.request, "urlopen", fake_urlopen)
+
+    with caplog.at_level("INFO", logger="iyzee.wavemeter"):
+        wavemeter_readout.set_pid_setpoint(377.1052, 4)
+
+    assert seen["url"].endswith(":8000/api/set_pid/")
+    assert seen["data"] == b"freq_thz=377.1052&channel=4"
+    assert seen["timeout"] == wavemeter_readout.SETPOINT_TIMEOUT_S  # never unbounded
+    assert "channel 4" in caplog.text
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        TimeoutError("timed out"),
+        urllib.error.URLError("unreachable"),
+        urllib.error.HTTPError("http://wm/api/set_pid/", 500, "boom", {}, None),
+    ],
+)
+def test_set_pid_setpoint_failure_is_a_wavemeter_error_naming_channel_and_value(
+    monkeypatch, failure
+):
+    def fail(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(wavemeter_readout.urllib.request, "urlopen", fail)
+
+    with pytest.raises(wavemeter_readout.WavemeterReadoutError, match=r"channel 4 to 377\.1 THz"):
+        wavemeter_readout.set_pid_setpoint(377.1, 4)

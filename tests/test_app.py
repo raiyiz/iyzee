@@ -13,13 +13,14 @@ from helpers import (
     connect_app,
     enter_on_first_row,
     history_manager,
+    notifications,
     plain,
     wait_until,
 )
 from textual.widgets import ContentSwitcher, Static
 
 from iyzee.tui.app import IyzeeApp, NavRail
-from iyzee.tui.screens.connect import STATUS_COL, ConnectScreen
+from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL, ConnectScreen
 from iyzee.tui.screens.console import ConsoleScreen, IyzeeConsole
 from iyzee.tui.screens.sweep import SweepScreen
 from iyzee.tui.screens.traces import TracesScreen
@@ -181,3 +182,96 @@ def test_close_instruments_waits_for_a_busy_instrument_but_never_hangs(
     assert time.monotonic() - started < timeout + 2.0
     assert idle.disconnect_calls == 1, "the other instruments are still closed"
     assert (busy.disconnect_calls == 1) is busy_is_closed
+
+
+# -- a link that dies while connected ------------------------------------------------------
+
+
+@async_test
+async def test_a_link_that_dies_is_shown_as_lost_everywhere_and_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Until now nothing noticed: the row, the rail and the readiness banners
+    kept saying "connected" and every later command failed with "not connected"."""
+    handle = FakeHandle()
+    app = connect_app(monkeypatch, handle, key="mxa")
+    async with app.run_test() as pilot:
+        screen, table = await enter_on_first_row(app, pilot)
+        await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")
+        await pilot.pause()
+        nav = app.query_one("#nav-instruments", Static)
+        assert "● Fk" in plain(nav)
+
+        handle.alive = False
+        app._check_links()
+        await pilot.pause()
+
+        assert "mxa" not in app.handles  # "in handles" keeps meaning "usable"
+        assert table.get_cell("mxa", STATUS_COL) == "lost"
+        assert "Enter to reconnect" in str(table.get_cell("mxa", DETAIL_COL))
+        assert "○ Fk" in plain(nav)
+        assert app.query_one("#sweep-status", Static).display
+        assert any("connection lost" in m for m in notifications(app))
+        await wait_until(pilot, lambda: handle.disconnect_calls > 0)  # the dead link was released
+        assert "reconnect Fake" in plain(app.query_one("#connect-hint", Static))
+
+
+@async_test
+async def test_a_lost_link_is_reported_once_and_a_reconnect_clears_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dead, fresh = FakeHandle(), FakeHandle(probe="back")
+    app = connect_app(monkeypatch, dead, fresh, key="mxa")
+    async with app.run_test() as pilot:
+        screen, table = await enter_on_first_row(app, pilot)
+        await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")
+        dead.alive = False
+        app._check_links()
+        app._check_links()  # the next poll must not announce it again
+        await pilot.pause()
+        assert len([m for m in notifications(app) if "connection lost" in m]) == 1
+        assert "mxa" in app.lost_links
+
+        await pilot.press("enter")  # Enter on a lost row is "reconnect"
+        await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")
+
+        assert app.handles["mxa"] is fresh
+        assert "mxa" not in app.lost_links
+        assert table.get_cell("mxa", DETAIL_COL) == "back"
+
+
+@async_test
+async def test_the_console_says_a_lost_instrument_is_not_connected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iyzee.tui.ipython import LabProxy
+
+    handle = FakeHandle()
+    app = connect_app(monkeypatch, handle, key="mxa")
+    async with app.run_test():
+        app.handles["mxa"] = handle
+        lab = LabProxy(app)
+        assert "mx" in lab.connected
+
+        handle.alive = False
+        app._check_links()
+
+        assert lab.connected == ()
+        with pytest.raises(AttributeError, match="not connected"):
+            lab.mx
+
+
+@async_test
+async def test_handles_that_cannot_tell_are_never_dropped() -> None:
+    class NoAlive:
+        lock = threading.Lock()
+
+    app = IyzeeApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.handles["x"] = NoAlive()  # type: ignore[assignment]
+
+        app._check_links()
+
+        assert "x" in app.handles
+        app.handles.clear()  # nothing to disconnect on the way out

@@ -18,7 +18,9 @@ live driver expose that driver as ``.device``; stateless adapters may return ``N
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -29,6 +31,8 @@ from ..mxa import KeysightMXA
 from ..power import ShutterControl
 from ..scope import LeCroy, LeCroyTimeoutError
 from ..wavemeter_readout import WavemeterReadoutError, single_readout
+
+log = logging.getLogger("iyzee.instruments")
 
 
 class InstrumentHandle(Protocol):
@@ -58,6 +62,17 @@ class InstrumentHandle(Protocol):
 
         Stateless adapters such as the wavemeter return ``None``; the
         Connect/Sweep/Scope/console paths only use handles with a live device.
+        """
+        ...
+
+    @property
+    def alive(self) -> bool:
+        """Whether the link is still believed usable. No instrument I/O; cheap.
+
+        ``False`` once the driver has dropped the connection (a timeout, the
+        peer closing it, a keepalive failure). Adapters that cannot tell
+        report ``True``. The app polls this so a lost link is shown as lost
+        instead of staying "connected" until the next command fails.
         """
         ...
 
@@ -93,6 +108,11 @@ class _LockedHandle:
     @property
     def lock(self) -> threading.RLock:
         return self._lock
+
+    @property
+    def alive(self) -> bool:
+        # Overridden by adapters whose driver can tell (see ScopeHandle).
+        return True
 
 
 class _VisaHandle(_LockedHandle):
@@ -207,13 +227,20 @@ class ScopeHandle(_LockedHandle):
         The first reply after connecting can be slow, and a timeout is fatal to
         the VICP stream, so this one query gets a wider bound than steady state.
         """
+        started = time.monotonic()
         try:
-            return self._scope.idn(timeout=self.FIRST_RESPONSE_TIMEOUT)
+            identity = self._scope.idn(timeout=self.FIRST_RESPONSE_TIMEOUT)
         except LeCroyTimeoutError as exc:
             raise ConnectionError(
                 f"{self._ip} accepted the connection but did not answer *IDN? within "
                 f"{self.FIRST_RESPONSE_TIMEOUT:g}s (is another VICP client holding the scope?)"
             ) from exc
+        log.info("scope answered *IDN? after %.2fs", time.monotonic() - started)
+        return identity
+
+    @property
+    def alive(self) -> bool:
+        return self._scope.check_link()
 
     @property
     def lock(self) -> threading.RLock:

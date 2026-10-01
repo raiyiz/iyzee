@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import uuid
 from collections.abc import Sequence
 from dataclasses import asdict
 from functools import partial
@@ -41,6 +40,7 @@ from ...experiment import (
     TRACE_SQZ,
     AnalyzerConfig,
     ExperimentContext,
+    RunRecord,
     Step,
     StepResult,
     acquire_trace,
@@ -126,6 +126,8 @@ class SweepScreen(Page):
     def on_mount(self) -> None:
         self._abort_event = Event()
         self._collected: list[StepResult] = []
+        # How the current run is going/ended; saved as the file's run_metadata.
+        self._record: RunRecord | None = None
         self._reset_checkpoint()
         self.query_one("#freq-fields").display = False
         plot = self.query_one("#sweep-plot", PlotextPlot)
@@ -312,10 +314,14 @@ class SweepScreen(Page):
                 self._ui(self._finish, kind, aborted=False, setup_error=exc)
                 return
 
-            run_id = uuid.uuid4().hex[:8]
-            ctx = ExperimentContext(mx=mx, run_id=run_id, shutter=shutter, config=asdict(config))
+            record = RunRecord(config=asdict(config))
+            self._record = record
+            ctx = ExperimentContext(
+                mx=mx, run_id=record.run_id, shutter=shutter, config=record.config
+            )
 
             def on_step(index, total, step, result, error) -> None:
+                record.on_step(index, total, step, result, error)
                 if result is not None:
                     self._collected.append(result)
                     # Straight to disk, before anything else: a crash, a
@@ -326,7 +332,7 @@ class SweepScreen(Page):
                 if self._abort_event.is_set() or self.iyzee_app.shutdown_requested.is_set():
                     raise SweepAborted()
 
-            aborted = False
+            aborted = failed = False
             try:
                 run_sequence(steps, ctx, on_error="skip", on_step=on_step)
             except SweepAborted:
@@ -335,6 +341,13 @@ class SweepScreen(Page):
                 # already handled per-step by run_sequence(on_error="skip") plus
                 # on_step above, so anything reaching here is unexpected.
                 log.exception("sweep: run_sequence raised unexpectedly")
+                failed = True
+
+            # Rewrite the file with how the run ended: until now it says
+            # "running", which is what a run that died would leave behind.
+            record.finish(aborted=aborted, failed=failed)
+            if self._collected:
+                self._checkpoint(kind)
 
         self._ui(self._finish, kind, aborted=aborted, setup_error=None)
 
@@ -424,6 +437,7 @@ class SweepScreen(Page):
         self._savedir: Path | None = None
         self._save_path: Path | None = None
         self._save_warned = False
+        self._record = None
 
     def _checkpoint(self, kind: str, *, on_ui_thread: bool = False) -> None:
         """Write everything collected so far to disk.
@@ -444,7 +458,11 @@ class SweepScreen(Page):
             if self._savedir is None:
                 self._savedir = create_dirs()
             self._save_path = save_step_results(
-                list(self._collected), self._savedir, name=kind, path=self._save_path
+                list(self._collected),
+                self._savedir,
+                self._record.as_metadata() if self._record is not None else None,
+                name=kind,
+                path=self._save_path,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("sweep: could not save results")

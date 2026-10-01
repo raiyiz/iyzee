@@ -213,6 +213,10 @@ class LeCroy:
             io_timeout=delayval,
         )
 
+    def check_link(self) -> bool:
+        """Whether the connection is still usable (no I/O; see ``VICPTransport.check_link``)."""
+        return self._transport.check_link()
+
     def disconnect(self):
         """Disconnect from the Scope and clear connection state (idempotent)."""
         self._transport.close()

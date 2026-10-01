@@ -345,3 +345,70 @@ async def test_capture_trace_plots_power_vs_frequency() -> None:
             str(seg) for line in screen.query_one("#sweep-log", RichLog).lines for seg in line
         )
         assert "Captured 3 point(s)" in log
+
+
+# -- the saved file says how the run ended ------------------------------------------------
+
+
+def _saved_run_metadata(directory: Path) -> dict[str, Any]:
+    import json
+
+    (sidecar,) = directory.glob("*.json")
+    return json.loads(sidecar.read_text())["run_metadata"]
+
+
+@async_test
+async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Saved sweeps used to carry run_metadata=null: no run id, no analyzer settings."""
+    seen: list[str] = []
+
+    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+        seen.append(ctx.run_id)
+        on_step(0, 2, object(), _result(0), None)
+        # while it is running the file must already say so
+        seen.append(_saved_run_metadata(tmp_path)["status"])
+        on_step(1, 2, object(), None, TimeoutError("lock lagged"))
+
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    await _press_run_and_wait(app)
+
+    meta = _saved_run_metadata(tmp_path)
+    assert seen[1] == "running"
+    assert meta["run_id"] == seen[0]
+    assert meta["status"] == "completed_with_errors"
+    assert meta["finished_at_utc"] and meta["started_at_utc"]
+    assert meta["config"]["res_bw_hz"] > 0  # AnalyzerConfig, as the sweep used it
+    assert [(f["index"], f["error_type"]) for f in meta["failed_steps"]] == [(1, "TimeoutError")]
+
+
+@async_test
+async def test_an_aborted_sweep_is_marked_aborted_in_the_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+        screen = app.query_one(sweep_mod.SweepScreen)
+        screen._abort_event.set()
+        on_step(0, 3, object(), _result(0), None)  # raises SweepAborted after the point is kept
+
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    await _press_run_and_wait(app)
+
+    assert _saved_run_metadata(tmp_path)["status"] == "aborted"
+    assert _points_on_disk(tmp_path) == 1
+
+
+@async_test
+async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+        on_step(0, 3, object(), _result(0), None)
+        raise RuntimeError("scheduler exploded")
+
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    await _press_run_and_wait(app)
+
+    assert _saved_run_metadata(tmp_path)["status"] == "failed"
+    assert _points_on_disk(tmp_path) == 1

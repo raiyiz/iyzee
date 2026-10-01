@@ -538,3 +538,139 @@ def test_every_frame_split_point_yields_the_same_block(chunk):
         transport, _ = attached(data, chunk=chunk)
 
         assert transport.read_definite_block() == body, f"cut at {cut}"
+
+
+# -- a link that dies while nobody is talking ------------------------------------------------
+
+
+def _connected_pair() -> tuple[VICPTransport, socket.socket, socket.socket]:
+    """A transport attached to one end of a real socket pair; ``far`` is the 'scope'."""
+    near, far = socket.socketpair()
+    transport = VICPTransport(io_timeout=1.0)
+    transport.attach_socket(near)
+    return transport, near, far
+
+
+def test_check_link_is_true_for_a_healthy_idle_connection_and_sends_nothing():
+    transport, near, far = _connected_pair()
+    try:
+        assert transport.check_link() is True
+        assert transport.connected
+        far.setblocking(False)
+        with pytest.raises(BlockingIOError):
+            far.recv(1)  # nothing was written to the peer
+        assert near.gettimeout() == transport.io_timeout  # blocking mode restored
+    finally:
+        near.close()
+        far.close()
+
+
+def test_check_link_notices_the_peer_closing_and_invalidates():
+    transport, near, far = _connected_pair()
+    try:
+        far.close()
+
+        assert transport.check_link() is False
+
+        assert transport.connected is False
+        with pytest.raises(ConnectionError, match="not connected"):
+            transport.query("*IDN?")
+    finally:
+        near.close()
+
+
+def test_check_link_does_not_consume_an_unexpected_reply():
+    transport, near, far = _connected_pair()
+    try:
+        far.sendall(frame(DATA_EOI, b"LATE\n"))
+
+        assert transport.check_link() is True  # judged by the next read, not here
+        assert transport.read_message() == (DATA_EOI, b"LATE\n")  # still all there
+    finally:
+        near.close()
+        far.close()
+
+
+def test_check_link_reports_false_when_never_connected():
+    assert VICPTransport().check_link() is False
+
+
+def test_check_link_never_blocks_behind_a_transaction_in_flight():
+    transport, near, far = _connected_pair()
+    holding, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with transport.transaction():
+            holding.set()
+            release.wait(2.0)
+
+    worker = threading.Thread(target=hold)
+    worker.start()
+    try:
+        assert holding.wait(2.0)
+        far.close()  # even a dead peer: the transaction in flight reports that itself
+
+        assert transport.check_link() is True
+    finally:
+        release.set()
+        worker.join(2.0)
+        near.close()
+
+
+def test_check_link_tolerates_test_doubles_without_peek_support():
+    transport, _ = attached()  # ScriptedSocket.recv() takes no flags
+
+    assert transport.check_link() is True
+    assert transport.connected is True
+
+
+def test_connect_enables_keepalive_so_a_dead_peer_is_noticed():
+    server = _listener()
+    try:
+        transport = VICPTransport(port=server.getsockname()[1])
+        transport.connect("127.0.0.1")
+        try:
+            sock = transport.socket
+            assert isinstance(sock, socket.socket)
+            assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) != 0
+            if hasattr(socket, "TCP_KEEPIDLE"):
+                assert (
+                    sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE)
+                    == VICPTransport.KEEPALIVE_IDLE_S
+                )
+        finally:
+            transport.close()
+    finally:
+        server.close()
+
+
+def test_close_shuts_the_connection_down_before_closing_it():
+    events: list[str] = []
+
+    class Recording(ScriptedSocket):
+        def shutdown(self, how: int) -> None:
+            events.append(f"shutdown:{how}")
+
+        def close(self) -> None:
+            events.append("close")
+
+    transport = VICPTransport()
+    transport.attach_socket(Recording())
+
+    transport.close()
+
+    assert events == [f"shutdown:{socket.SHUT_RDWR}", "close"]
+
+
+def test_a_failed_shutdown_does_not_stop_the_close():
+    class Reset(ScriptedSocket):
+        def shutdown(self, how: int) -> None:
+            raise OSError("not connected")
+
+    transport = VICPTransport()
+    sock = Reset()
+    transport.attach_socket(sock)
+
+    transport.close()
+
+    assert sock.closed and not transport.connected

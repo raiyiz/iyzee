@@ -1,3 +1,4 @@
+import logging
 import time
 import urllib.request
 
@@ -7,6 +8,14 @@ import pandas as pd
 from tabulate import tabulate
 
 from iyzee import IP
+
+log = logging.getLogger("iyzee.wavemeter")
+
+# Every request to the wavemeter server is bounded: a sweep calls it while it
+# holds the instrument locks, so an unanswered request would freeze the run
+# (and make quitting wait for it).
+READ_TIMEOUT_S = 1.0
+SETPOINT_TIMEOUT_S = 3.0
 
 """
 Readout of single laser frequency with Wavemeter switch over network
@@ -98,6 +107,16 @@ def compute_two_photon_detuning(f1: float, f2: float):
     return two_photon_detuning
 
 
+def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
+    """One bounded HTTP request to the wavemeter server; returns the decoded body.
+
+    Raises ``OSError`` (including ``HTTPError`` and timeouts), ``UnicodeError``.
+    """
+    url = f"http://{IP.WAVEMETER}:8000/api/{path}"
+    with urllib.request.urlopen(url, data=data, timeout=timeout) as response:
+        return response.read().decode("ascii")
+
+
 # ls_frequency = float(urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/").read().decode("ascii")) - 377.107385690
 def single_readout(
     channel: int, reference_f: float = 0, label: str = "", printing: bool = True
@@ -112,14 +131,8 @@ def single_readout(
         label (str): Optional labeling of the print
         printing (bool): Enable/Disable printing of the readout
     """
-    timeout = 1  # Request timeout in secs
-
     try:
-        ls_frequency = float(
-            urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=timeout)
-            .read()
-            .decode("ascii")
-        )
+        ls_frequency = float(_request(f"{channel}/", timeout=READ_TIMEOUT_S))
     except (OSError, ValueError, UnicodeError) as exc:
         raise WavemeterReadoutError(f"Failed to read wavemeter channel {channel}") from exc
 
@@ -143,21 +156,33 @@ def fast_readout(ch: int) -> float:
     )
 
 
-def set_pid_setpoint(freq: float, channel: int):
+def set_pid_setpoint(freq: float, channel: int) -> None:
     """
     Set the PID-setpoint of the wavemeter lock.
     The regulation has to be turned on manually due to safety reasons.
 
+    The server only accepts a setpoint; it cannot report one back, so a
+    successful return means "the request was accepted", not "the laser is
+    there". Read the frequency (``single_readout``) to learn where it is.
+
     Parameters:
         channel (int): Which channel the setpoint should be changed
         freq (float): Frequency in THz to be set.
-    """
 
-    urllib.request.urlopen(
-        f"http://{IP.WAVEMETER}:8000/api/set_pid/",
-        data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
-    )
-    print(f"[WS-7] Set new PID-setpoint of channel {channel} to be {freq} THz.")
+    Raises:
+        WavemeterReadoutError: the server did not accept the request in time.
+    """
+    try:
+        _request(
+            "set_pid/",
+            data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
+            timeout=SETPOINT_TIMEOUT_S,
+        )
+    except (OSError, UnicodeError) as exc:
+        raise WavemeterReadoutError(
+            f"Failed to set the setpoint of wavemeter channel {channel} to {freq} THz"
+        ) from exc
+    log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
 
 
 def track_frequency(total_time, time_step, save_path, channel, reference_f=0, save_csv=False):

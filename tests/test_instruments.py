@@ -241,3 +241,23 @@ def test_instrument_registry_has_unique_nonempty_specs() -> None:
     keys = [spec.key for spec in INSTRUMENTS]
     assert len(keys) == len(set(keys))
     assert all(spec.label for spec in INSTRUMENTS)
+
+
+def test_scope_handle_alive_follows_the_drivers_link_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Link(_FakeLeCroy):
+        healthy = True
+
+        def check_link(self) -> bool:
+            return self.healthy
+
+    monkeypatch.setattr(instruments_mod, "LeCroy", Link)
+    handle = ScopeHandle()
+    assert handle.alive
+
+    cast(Link, handle.scope).healthy = False
+
+    assert not handle.alive
+
+
+def test_handles_that_cannot_tell_report_alive() -> None:
+    assert instruments_mod._LockedHandle().alive is True

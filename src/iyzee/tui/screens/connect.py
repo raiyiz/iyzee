@@ -74,6 +74,8 @@ class ConnectScreen(Page):
             hint.update(f"{escape(spec.label)}: working…")
         elif spec.key in self.iyzee_app.handles:
             hint.update(f"Enter, then Enter again: disconnect {escape(spec.label)}")
+        elif spec.key in self.iyzee_app.lost_links:
+            hint.update(f"Link lost. Enter: reconnect {escape(spec.label)}")
         else:
             hint.update(f"Enter: connect {escape(spec.label)}")
 
@@ -88,6 +90,14 @@ class ConnectScreen(Page):
         for spec in INSTRUMENTS:
             if spec.key in self.iyzee_app.handles:
                 table.update_cell(spec.key, STATUS_COL, "connected")
+            elif spec.key in self.iyzee_app.lost_links:
+                self.show_lost(spec.key, self.iyzee_app.lost_links[spec.key])
+
+    def show_lost(self, key: str, reason: str) -> None:
+        """Mark a row whose link died (called by the app's idle-link check)."""
+        self._armed = None
+        self._busy.discard(key)
+        self._set_row(key, "lost", reason)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         # NOTE: this is the correct hook for "Enter pressed on a row" — a
@@ -174,6 +184,7 @@ class ConnectScreen(Page):
                 )
                 return
             self.iyzee_app.handles[spec.key] = handle
+            self.iyzee_app.lost_links.pop(spec.key, None)
             outcome = ConnectOutcome(key=spec.key, ok=True, detail=detail)
             log.info("connected %s (%s)", spec.key, outcome.detail)
             self._ui(self._set_row, outcome.key, "connected", outcome.detail)
