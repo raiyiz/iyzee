@@ -28,7 +28,7 @@ from textual_plotext import PlotextPlot
 
 from ...experiment import difference_values_many
 from ...experiment.io import DATA_ROOT, STEM_PATTERN, Recording, load_recording
-from ..plotting import draw_series
+from ..plotting import draw_series, prepare_series
 from .page import Page
 
 # Kept separate so tests can redirect the results directory without touching
@@ -82,7 +82,7 @@ def _prepare_scope_view(path: Path, arrays: dict[str, np.ndarray], metadata: dic
         if time_array is None or value_array is None:
             continue
         unit = str(waveform.get("value_unit", ""))
-        series.append((time_array.tolist(), value_array.tolist(), channel))
+        series.append(prepare_series(time_array, value_array, channel))
         stats = waveform.get("stats")
         if isinstance(stats, dict):
             lines.append(
@@ -225,6 +225,7 @@ class TracesScreen(Page):
         self._recording: Recording | None = None
         self._selected_point = 0
         self._render_generation = 0
+        self._point_render_generation = 0
         self._suppress_events = False
         self.refresh_runs()
 
@@ -450,7 +451,7 @@ class TracesScreen(Page):
         summary.update("\n".join(lines))
 
         arrays = recording.arrays
-        series: list[tuple[list[float], list[float], str | None]] = []
+        rows_for_worker: list[tuple[str, np.ndarray]] = []
         for name in ("squeezing", "shot_noise"):
             rows = arrays.get(f"trace_{name}")
             if rows is None or rows.ndim != 2 or index >= rows.shape[0]:
@@ -458,7 +459,40 @@ class TracesScreen(Page):
             row = rows[index]
             if np.all(np.isnan(row)):
                 continue
-            series.append((list(range(len(row))), row.tolist(), name))
+            rows_for_worker.append((name, row))
+
+        self._point_render_generation += 1
+        generation = self._point_render_generation
+        self._prepare_point_plot(
+            generation,
+            recording.path,
+            index,
+            rows_for_worker,
+        )
+
+    @work(thread=True, exclusive=True, group="traces-point-render", exit_on_error=False)
+    def _prepare_point_plot(
+        self,
+        generation: int,
+        path: Path,
+        index: int,
+        rows: list[tuple[str, np.ndarray]],
+    ) -> None:
+        series = [prepare_series(np.arange(len(row)), row, name) for name, row in rows]
+        self._ui(self._apply_point_plot, generation, path, index, series)
+
+    def _apply_point_plot(
+        self,
+        generation: int,
+        path: Path,
+        index: int,
+        series: list[tuple[list[float], list[float], str | None]],
+    ) -> None:
+        if generation != self._point_render_generation:
+            return
+        recording = self._recording
+        if recording is None or recording.path != path or self._selected_point != index:
+            return
         plot = self.query_one("#traces-point-plot", PlotextPlot)
         draw_series(
             plot,

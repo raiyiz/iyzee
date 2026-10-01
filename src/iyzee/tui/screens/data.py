@@ -36,9 +36,11 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
@@ -56,7 +58,7 @@ from textual.widgets import (
 )
 from textual_plotext import PlotextPlot
 
-from ...experiment.io import DATA_ROOT, load_recording
+from ...experiment.io import DATA_ROOT, Recording, load_recording
 from ...waveform_math import (
     Trace,
     build_waveform_figure,
@@ -66,7 +68,7 @@ from ...waveform_math import (
     subtract_traces,
     traces_from_scope_recording,
 )
-from ..plotting import draw_series, figure_series
+from ..plotting import draw_series, figure_series, prepare_series
 from .page import FieldError, Page, _field, _finite_float
 from .traces import _run_label
 
@@ -171,6 +173,7 @@ class DataScreen(Page):
         self._derived: dict[str, Trace] = {}
         self._checkboxes: dict[str, Checkbox] = {}
         self._suppress_events = False
+        self._load_generation = 0
         self._render_generation = 0
         self.refresh_runs()
 
@@ -262,24 +265,53 @@ class DataScreen(Page):
 
     def _select(self, path: Path) -> None:
         if path == self._path:
-            # Reached again for the run already showing — most often ListView
-            # re-posting Highlighted for an index that didn't actually change
-            # (it fires on the implicit None -> 0 a freshly-populated list
-            # makes for itself, not just on a real explicit change), or
-            # on_mount and on_show both scanning at once. Filenames are
-            # timestamped and never rewritten under the same name, so "same
-            # path" reliably means "nothing to redo" — skip re-reading the
-            # file and re-rendering rather than trusting how many times
-            # Textual happens to have called this for one visible selection.
+            # Reached again for the run already showing, or while its worker
+            # is still loading. Timestamped files are immutable, so there is
+            # nothing useful to do until a different path is selected.
             return
-        summary = self.query_one("#data-summary", Static)
+        self._path = path
+        self._load_generation += 1
+        generation = self._load_generation
+        self._measured = {}
+        self._derived = {}
+        self._render_generation += 1  # supersede any render for the old run
+
+        self.query_one("#data-summary", Static).update(f"[b]{escape(path.name)}[/b]\n\nLoading…")
+        self._rebuild_channel_checkboxes()
+        self._refresh_operand_choices()
+        plot = self.query_one("#data-plot", PlotextPlot)
+        plot.plt.clear_data()
+        plot.refresh()
+        self._load_selected(generation, path)
+
+    @work(thread=True, exclusive=True, group="data-load", exit_on_error=False)
+    def _load_selected(self, generation: int, path: Path) -> None:
         try:
             recording = load_recording(path)
             measured = traces_from_scope_recording(recording)
         except Exception as exc:  # noqa: BLE001 - shown to the user, not raised
-            summary.update(
-                f"[b]{escape(path.name)}[/b]\n\n[red]Could not read file: {escape(str(exc))}[/red]"
+            self._ui(self._apply_selected, generation, path, None, [], str(exc))
+            return
+        self._ui(self._apply_selected, generation, path, recording, measured, None)
+
+    def _apply_selected(
+        self,
+        generation: int,
+        path: Path,
+        recording: Recording | None,
+        measured: list[Trace],
+        error: str | None,
+    ) -> None:
+        if generation != self._load_generation or path != self._path:
+            return
+        summary = self.query_one("#data-summary", Static)
+        if error is not None or recording is None:
+            message = (
+                f"[b]{escape(path.name)}[/b]\n\n"
+                f"[red]Could not read file: "
+                f"{escape(error or 'unknown error')}[/red]"
             )
+            summary.update(message)
             self._path = None
             self._measured = {}
             self._derived = {}
@@ -288,7 +320,6 @@ class DataScreen(Page):
             self._redraw()
             return
 
-        self._path = path
         self._measured = {trace.label: trace for trace in measured}
         self._derived = {}
 
@@ -369,7 +400,11 @@ class DataScreen(Page):
 
     @work(thread=True, exclusive=True, group="data-render", exit_on_error=False)
     def _render_waveforms(self, generation: int, traces: list[Trace], title: str | None) -> None:
-        fig = build_waveform_figure(traces, title=title)
+        display_traces: list[Trace] = []
+        for trace in traces:
+            x, y, _ = prepare_series(trace.time, trace.values, trace.label)
+            display_traces.append(replace(trace, time=np.asarray(x), values=np.asarray(y)))
+        fig = build_waveform_figure(display_traces, title=title)
         try:
             lines, labels = figure_series(fig)
         finally:
