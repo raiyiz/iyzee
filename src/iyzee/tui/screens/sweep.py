@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from functools import partial
 from threading import Event
+from time import monotonic
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -52,7 +53,7 @@ from ...experiment import (
     run_sequence,
     save_step_results,
 )
-from ..plotting import draw_series
+from ..plotting import draw_series, prepare_series
 from ..text import one_line
 from ..workers import LastRun
 from .page import FieldError, Page, _field, _positive_float, _positive_int
@@ -68,6 +69,7 @@ log = logging.getLogger("iyzee.tui")
 # exists to turn a stray extra zero (or 10**9) into a clear message instead
 # of a frozen UI and gigabytes of linspace.
 MAX_POINTS = 1000
+LIVE_PLOT_INTERVAL_S = 0.1
 
 
 class SweepAborted(Exception):
@@ -340,15 +342,37 @@ class SweepScreen(Page):
                 config=record.config,
             )
 
+            next_live_plot = monotonic()
+
             def on_step(index, total, step, result, error) -> None:
+                nonlocal next_live_plot
                 record.on_step(index, total, step, result, error)
+                display_series = None
                 if result is not None:
                     self._collected.append(result)
                     # Straight to disk, before anything else: a crash, a
                     # power cut or a quit part-way through a long run then
                     # costs at most the step in flight, not the whole run.
                     self._checkpoint(kind)
-                self._ui(self._on_step, index, total, step, result, error)
+                    now = monotonic()
+                    if now >= next_live_plot or index + 1 == total:
+                        difference = difference_series(
+                            result.traces.get("squeezing"),
+                            result.traces.get("shot_noise"),
+                            result.label,
+                        )
+                        if difference is not None:
+                            display_series = prepare_series(*difference)
+                        next_live_plot = now + LIVE_PLOT_INTERVAL_S
+                self._ui(
+                    self._on_step,
+                    index,
+                    total,
+                    step,
+                    result,
+                    error,
+                    display_series,
+                )
                 if self._abort_event.is_set() or self.iyzee_app.shutdown_requested.is_set():
                     raise SweepAborted()
 
@@ -371,7 +395,15 @@ class SweepScreen(Page):
 
         self._ui(self._finish, kind, aborted=aborted, setup_error=None)
 
-    def _on_step(self, index, total, step: Step, result: StepResult | None, error) -> None:
+    def _on_step(
+        self,
+        index,
+        total,
+        step: Step,
+        result: StepResult | None,
+        error,
+        display_series: tuple[list[float], list[float], str | None] | None,
+    ) -> None:
         self.query_one("#sweep-progress", ProgressBar).update(progress=index + 1)
         log = self.query_one("#sweep-log", RichLog)
         label = getattr(step, "label", None) or f"step[{index}]"
@@ -381,17 +413,9 @@ class SweepScreen(Page):
             )
             return
         log.write(f"[{index + 1}/{total}] {escape(label)}: ok")
-        if result is not None:
-            self._plot_result(result)
-
-    def _plot_result(self, result: StepResult) -> None:
-        series = difference_series(
-            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
-        )
-        if series is None:
-            return
-        plot = self.query_one("#sweep-plot", PlotextPlot)
-        draw_series(plot, [series], clear=False)
+        if display_series is not None:
+            plot = self.query_one("#sweep-plot", PlotextPlot)
+            draw_series(plot, [display_series], clear=False)
 
     # -- "Capture trace": one raw spectrum off the analyzer, right now ------
 
