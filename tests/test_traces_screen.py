@@ -99,7 +99,8 @@ async def test_a_slow_load_does_not_clobber_a_newer_ones_result(
     real_draw_series = traces_mod.draw_series
 
     def spying_draw_series(plot, series, **kwargs):  # type: ignore[no-untyped-def]
-        drawn.append(kwargs.get("title", ""))
+        if plot.id == "traces-plot":
+            drawn.append(kwargs.get("title", ""))
         return real_draw_series(plot, series, **kwargs)
 
     monkeypatch.setattr(traces_mod, "draw_series", spying_draw_series)
@@ -253,8 +254,8 @@ async def test_frequency_run_is_navigable(tmp_path: Path, monkeypatch: pytest.Mo
         table = screen.query_one("#traces-points", DataTable)
         assert len(table.rows) == 2
         point_summary = plain(screen.query_one("#traces-point-summary", Static))
-        assert "Requested: 377.100000 THz" in point_summary
-        assert "Measured: 377.100001 THz" in point_summary
+        assert "Requested: 377.100000000 THz" in point_summary
+        assert "Measured: 377.100001000 THz" in point_summary
         assert "Mean delta: 2.000" in point_summary
 
         table.focus()
@@ -263,7 +264,7 @@ async def test_frequency_run_is_navigable(tmp_path: Path, monkeypatch: pytest.Mo
             pilot, lambda: "Point 1" in plain(screen.query_one("#traces-point-summary", Static))
         )
         point_summary = plain(screen.query_one("#traces-point-summary", Static))
-        assert "Measured: 377.100011 THz" in point_summary
+        assert "Measured: 377.100011000 THz" in point_summary
 
         selector = screen.query_one("#traces-statistic", Select)
         selector.value = "minimum"
