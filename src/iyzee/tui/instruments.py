@@ -27,7 +27,7 @@ from typing import Any, Protocol
 from ..base import CH, IP
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
-from ..scope import LeCroy
+from ..scope import LeCroy, LeCroyTimeoutError
 from ..wavemeter_readout import WavemeterReadoutError, single_readout
 
 
@@ -185,12 +185,10 @@ class WavemeterHandle(_LockedHandle):
 
 
 class ScopeHandle(_LockedHandle):
-    """Adapter for the legacy :class:`~iyzee.scope.LeCroy` raw-socket driver.
+    """Adapter for the legacy :class:`~iyzee.scope.LeCroy` raw-socket driver."""
 
-    This driver predates :class:`~iyzee.base.BaseDevice` and has no
-    ``*IDN?``-style query, so ``probe()`` can only report that the TCP
-    handshake succeeded, not identify the instrument.
-    """
+    #: Seconds the scope gets to answer its first query after connecting.
+    FIRST_RESPONSE_TIMEOUT = 15.0
 
     def __init__(self, ip: IP = IP.SCOPE) -> None:
         super().__init__()
@@ -204,7 +202,18 @@ class ScopeHandle(_LockedHandle):
         self._scope.disconnect()
 
     def probe(self) -> str:
-        return f"socket connected @ {self._ip}"
+        """Prove the scope *answers*, not just that port 1861 accepted a TCP connection.
+
+        The first reply after connecting can be slow, and a timeout is fatal to
+        the VICP stream, so this one query gets a wider bound than steady state.
+        """
+        try:
+            return self._scope.idn(timeout=self.FIRST_RESPONSE_TIMEOUT)
+        except LeCroyTimeoutError as exc:
+            raise ConnectionError(
+                f"{self._ip} accepted the connection but did not answer *IDN? within "
+                f"{self.FIRST_RESPONSE_TIMEOUT:g}s (is another VICP client holding the scope?)"
+            ) from exc
 
     @property
     def lock(self) -> threading.RLock:

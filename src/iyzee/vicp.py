@@ -184,6 +184,29 @@ class VICPTransport:
             pass
 
     @contextmanager
+    def _io_timeout(self, timeout: float | None) -> Iterator[None]:
+        """Apply ``timeout`` to the live socket for one transaction, then restore it.
+
+        The first reply after connecting can be much slower than steady state,
+        and a timeout is fatal to the stream (see the class docstring), so the
+        caller that knows it is waiting on a slow answer widens the bound
+        instead of failing and reconnecting.
+        """
+        sock = self._socket
+        settimeout = getattr(sock, "settimeout", None)
+        if timeout is None or settimeout is None:
+            yield
+            return
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        settimeout(timeout)
+        try:
+            yield
+        finally:
+            if self._socket is sock:  # not invalidated meanwhile
+                settimeout(self.io_timeout)
+
+    @contextmanager
     def _message(self) -> Iterator[_MessageState]:
         """Guard one response: invalidate if it fails before EOI was consumed."""
         state = _MessageState()
@@ -251,7 +274,7 @@ class VICPTransport:
             _close_socket(sock)
 
     def attach_socket(self, sock: object) -> None:
-        """Attach a socket-like object for tests and legacy LeCroy.s use."""
+        """Attach an already-connected socket-like object (used by tests)."""
         with self._lock:
             if self._socket is not None:
                 raise RuntimeError("Already connected")
@@ -393,14 +416,17 @@ class VICPTransport:
                 f"binary response exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
             )
 
-    def query(self, message: str) -> str:
-        """Send one command and atomically read its complete ASCII response."""
+    def query(self, message: str, *, timeout: float | None = None) -> str:
+        """Send one command and atomically read its complete ASCII response.
+
+        ``timeout`` replaces the I/O timeout for this exchange only.
+        """
         payload = message.encode("ascii")
         if len(payload) > self.max_command_length:
             raise ValueError(
                 f"command is {len(payload)} bytes; maximum is {self.max_command_length}"
             )
-        with self._lock:
+        with self._lock, self._io_timeout(timeout):
             self._write_frame(payload)
             _flag, response = self.read_message()
             try:

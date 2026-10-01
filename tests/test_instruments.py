@@ -17,6 +17,7 @@ from typing import cast
 
 import pytest
 
+from iyzee.scope import LeCroyTimeoutError
 from iyzee.tui import instruments as instruments_mod
 from iyzee.tui.instruments import (
     INSTRUMENTS,
@@ -187,9 +188,12 @@ def test_wavemeter_handle_probe_wraps_readout_error(monkeypatch: pytest.MonkeyPa
 
 
 class _FakeLeCroy:
+    answer: str | Exception = "LECROY,WS452,SN1,9.0"
+
     def __init__(self) -> None:
         self.connected_to: str | None = None
         self.disconnected = False
+        self.idn_timeouts: list[float | None] = []
 
     def connect(self, ip: str) -> None:
         self.connected_to = ip
@@ -197,14 +201,37 @@ class _FakeLeCroy:
     def disconnect(self) -> None:
         self.disconnected = True
 
+    def idn(self, *, timeout: float | None = None) -> str:
+        self.idn_timeouts.append(timeout)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
 
-def test_scope_handle_connect_and_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_scope_handle_connects_then_probe_identifies_the_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
     handle = ScopeHandle()
     handle.connect()
     scope = cast(_FakeLeCroy, handle.scope)
     assert scope.connected_to == str(handle._ip)
-    assert "socket connected" in handle.probe()
+
+    assert handle.probe() == "LECROY,WS452,SN1,9.0"
+    # the first reply gets the widened bound, not the steady-state one
+    assert scope.idn_timeouts == [ScopeHandle.FIRST_RESPONSE_TIMEOUT]
+
+
+def test_scope_handle_probe_turns_a_silent_scope_into_an_actionable_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
+    monkeypatch.setattr(_FakeLeCroy, "answer", LeCroyTimeoutError("no response after 15.0s"))
+    handle = ScopeHandle()
+    handle.connect()
+
+    with pytest.raises(ConnectionError, match=r"did not answer \*IDN\? within 15s"):
+        handle.probe()
 
 
 # -- registry ----------------------------------------------------------

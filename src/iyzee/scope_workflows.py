@@ -703,27 +703,6 @@ def acquire_scope_recording(
     )
 
 
-def acquire_waveforms(
-    scope: LeCroy,
-    channels: Sequence[Channel],
-    *,
-    lock: LockLike | None = None,
-    freeze: bool = True,
-) -> tuple[list[tuple[list[float], list[float], str]], list[ChannelError]]:
-    """Return the legacy plot-series shape without adding persistence.
-
-    New callers that need a durable scientific record should use
-    :func:`acquire_scope_recording` followed by :func:`save_scope_acquisition`.
-    This wrapper remains for existing presentation/script callers that only
-    need ``(x, y, label)`` series."""
-    recording = acquire_scope_recording(scope, channels, lock=lock, freeze=freeze)
-    series = [
-        (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
-        for waveform in recording.waveforms
-    ]
-    return series, list(recording.errors)
-
-
 def save_scope_acquisition(
     recording: ScopeAcquisition,
     savedir: Path,
