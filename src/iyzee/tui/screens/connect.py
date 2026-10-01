@@ -20,7 +20,6 @@ from textual.widgets import DataTable, Static
 
 from ..instruments import INSTRUMENTS, InstrumentSpec
 from ..text import one_line
-from ..workers import ConnectOutcome
 from .page import Page
 
 log = logging.getLogger("iyzee.tui")
@@ -185,9 +184,8 @@ class ConnectScreen(Page):
                 return
             self.iyzee_app.handles[spec.key] = handle
             self.iyzee_app.lost_links.pop(spec.key, None)
-            outcome = ConnectOutcome(key=spec.key, ok=True, detail=detail)
-            log.info("connected %s (%s)", spec.key, outcome.detail)
-            self._ui(self._set_row, outcome.key, "connected", outcome.detail)
+            log.info("connected %s (%s)", spec.key, detail)
+            self._ui(self._set_row, spec.key, "connected", detail)
         finally:
             self._ui(self._release, spec.key)
 

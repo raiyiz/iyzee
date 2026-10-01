@@ -36,7 +36,7 @@ src/iyzee/
     ├── terminal_view.py    # widget that shows the virtual terminal and types into it
     ├── plotting.py         # plotext drawing shared by the Sweep, Scope, Traces and Console pages
     ├── text.py             # showing externally produced text safely (markup-safe)
-    ├── workers.py          # cross-thread message types (LastRun, StepProgress, ...)
+    ├── workers.py          # LastRun: the sweep result handed to the console
     └── screens/            # the six pages
         ├── page.py         # shared page base, form helpers/validation, readiness hook, and worker→UI plumbing
         ├── connect.py      # ConnectScreen
