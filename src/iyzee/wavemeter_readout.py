@@ -2,10 +2,7 @@ import logging
 import time
 import urllib.request
 
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-from tabulate import tabulate
 
 from iyzee import IP
 
@@ -181,6 +178,12 @@ def set_pid_setpoint(freq: float, channel: int) -> None:
 
 
 def track_frequency(total_time, time_step, save_path, channel, reference_f=0, save_csv=False):
+    # Plotting and the CSV export are only needed here. Imported lazily because
+    # this module is also imported for its HTTP client by the TUI, where
+    # pandas alone was a fifth of the startup time.
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
     # Initialize numpy arrays for time and frequency data
     times = np.array([])
     track_freq = np.array([])
@@ -263,6 +266,8 @@ def track_frequency(total_time, time_step, save_path, channel, reference_f=0, sa
 
 
 def monitoring_frequencies(channels, two_photon=True):
+    from tabulate import tabulate  # lazy: see track_frequency
+
     header = ["Transition"] + ["Frequencies (THz)"] + [f"Detuning (ch{c}) / GHz" for c in channels]
     rows = []
     freqs = [single_readout(c, reference_f=0, printing=False) for c in channels]
