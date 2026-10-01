@@ -31,6 +31,8 @@ from ...experiment.io import DATA_ROOT, STEM_PATTERN, Recording, load_recording
 from ..plotting import draw_series
 from .page import Page
 
+# Kept separate so tests can redirect the results directory without touching
+# the persistence module's global.
 _DATA_ROOT = DATA_ROOT
 
 _STATISTICS = (
@@ -230,7 +232,11 @@ class TracesScreen(Page):
         self.refresh_runs()
 
     def refresh_runs(self) -> None:
-        """Re-scan the data directory while keeping the current selection."""
+        """Re-scan the data directory while keeping the current selection.
+
+        ListView can emit Highlighted while its children are rebuilt, so the
+        one explicit selection below is the only load/render request we trust.
+        """
         list_view = self.query_one("#traces-list", ListView)
         index = list_view.index
         previous = (
@@ -253,6 +259,8 @@ class TracesScreen(Page):
             self._suppress_events = False
 
         if self._paths:
+            # Select explicitly after rebuilding; child mounting can emit its
+            # own highlight event before the list is fully populated.
             self._select(self._paths[list_view.index or 0])
         else:
             self._path = None
@@ -282,6 +290,7 @@ class TracesScreen(Page):
         self.query_one("#traces-point-summary", Static).update("")
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        """Follow Up/Down directly; Enter/click still select the same row."""
         if self._suppress_events or event.list_view.id != "traces-list":
             return
         index = event.list_view.index
@@ -296,6 +305,8 @@ class TracesScreen(Page):
 
     def _select(self, path: Path) -> None:
         if path == self._path:
+            # A ListView rebuild can report the same highlight more than once;
+            # immutable files do not need another load.
             return
         self._path = path
         self._recording = None
@@ -310,6 +321,7 @@ class TracesScreen(Page):
 
     def _apply_view(self, generation: int, path: Path, prepared: _PreparedView) -> None:
         if generation != self._render_generation:
+            # A slower load for an older selection must never replace a newer one.
             return
         self.query_one("#traces-summary", Static).update(prepared.summary)
         if prepared.recording is not None:
