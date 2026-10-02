@@ -112,7 +112,8 @@ def set_pid_setpoint(freq: float, channel: int = DEFAULT_CHANNEL) -> None:
         ) from exc
     log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
 
-def track_frequency(total_time, time_step, save_path, channel, reference_f=0, save_csv=False):
+
+def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, reference_f=0, save_csv=False):
     # Plotting and the CSV export are only needed here. Imported lazily because
     # this module is also imported for its HTTP client by the TUI, where
     # pandas alone was a fifth of the startup time.
@@ -138,15 +139,8 @@ def track_frequency(total_time, time_step, save_path, channel, reference_f=0, sa
 
         # Fetch laser frequency from the URL
         try:  # readout laser frequency and plot laser detuning or absolute laser frequency
-            ls_frequency = (
-                float(
-                    requests.get(f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=2)
-                    .read()
-                    .decode("ascii")
-                )
-                - reference_f
-            )
-        except (OSError, ValueError, UnicodeError) as exc:
+            ls_frequency = read_frequency(channel) - reference_f
+        except WavemeterReadoutError as exc:
             print(f"Error fetching data: {exc}")
             return
 
