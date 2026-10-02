@@ -1,21 +1,10 @@
-"""Sweep screen: configure and run a bandwidth or frequency sweep.
-
-This deliberately does *not* call the convenience
-``run_bandwidth_sweep``/``run_frequency_sweep`` wrappers in
-``experiment.procedures`` — those don't take a progress callback. Instead
-it composes the same lower-level pieces they're built from
-(``AnalyzerConfig``, ``prepare_analyzer``, ``ExperimentContext``,
-``run_sequence``) directly, which is exactly what that layer is meant for:
-a new caller with different needs (here, live progress) is a few lines
-against the existing building blocks, not a change to ``experiment/``.
-"""
+"""Sweep screen: configure and run a bandwidth or frequency sweep."""
 
 from __future__ import annotations
 
 import contextlib
 import logging
 from collections.abc import Sequence
-from dataclasses import asdict
 from functools import partial
 from threading import Event
 from time import monotonic
@@ -37,20 +26,18 @@ from textual.widgets import (
 from textual_plotext import PlotextPlot
 
 from ...experiment import (
-    TRACE_SHOT,
     TRACE_SQZ,
     AnalyzerConfig,
-    ExperimentContext,
     RunRecord,
     Step,
     StepResult,
+    SweepSetupError,
     acquire_trace,
     build_bandwidth_sweep,
     build_frequency_sweep,
     create_dirs,
     difference_series,
-    prepare_analyzer,
-    run_sequence,
+    run_sweep,
     save_step_results,
 )
 from ..plotting import draw_series, prepare_series
@@ -73,12 +60,11 @@ LIVE_PLOT_INTERVAL_S = 0.1
 
 
 class SweepAborted(Exception):
-    """Raised from inside the progress callback to stop a running sweep.
+    """Raised from the progress callback to stop at a step boundary.
 
-    ``run_sequence`` propagates exceptions raised by its ``on_step``
-    callback immediately (see its docstring), which is what makes a clean
-    "stop after the current step" abort possible without touching
-    ``run_sequence`` itself.
+    ``run_sweep`` forwards callback exceptions through ``run_sequence``
+    unchanged, so the UI can request a clean stop without changing the
+    sequence runner itself.
     """
 
 
@@ -317,27 +303,17 @@ class SweepScreen(Page):
             for lock in locks:
                 stack.enter_context(lock)
 
-            try:
-                prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
-            except Exception as exc:  # noqa: BLE001
-                log.exception("sweep: failed to configure analyzer")
-                self._ui(self._finish, kind, aborted=False, setup_error=exc)
-                return
+            self._next_live_plot = monotonic()
 
-            record = RunRecord(config=asdict(config))
-            self._record = record
-            ctx = ExperimentContext(
-                mx=mx,
-                run_id=record.run_id,
-                shutter=shutter,
-                config=record.config,
-            )
-
-            next_live_plot = monotonic()
-
-            def on_step(index, total, step, result, error) -> None:
-                nonlocal next_live_plot
-                record.on_step(index, total, step, result, error)
+            def on_step(
+                record: RunRecord,
+                index: int,
+                total: int,
+                step: Step,
+                result: StepResult | None,
+                error: BaseException | None,
+            ) -> None:
+                self._record = record
                 display_series = None
                 if result is not None:
                     self._collected.append(result)
@@ -346,7 +322,7 @@ class SweepScreen(Page):
                     # costs at most the step in flight, not the whole run.
                     self._checkpoint(kind)
                     now = monotonic()
-                    if now >= next_live_plot or index + 1 == total:
+                    if now >= self._next_live_plot or index + 1 == total:
                         difference = difference_series(
                             result.traces.get("squeezing"),
                             result.traces.get("shot_noise"),
@@ -354,7 +330,7 @@ class SweepScreen(Page):
                         )
                         if difference is not None:
                             display_series = prepare_series(*difference)
-                        next_live_plot = now + LIVE_PLOT_INTERVAL_S
+                        self._next_live_plot = now + LIVE_PLOT_INTERVAL_S
                 self._ui(
                     self._on_step,
                     index,
@@ -369,17 +345,29 @@ class SweepScreen(Page):
 
             aborted = failed = False
             try:
-                run_sequence(steps, ctx, on_error="skip", on_step=on_step)
+                record, _results = run_sweep(
+                    mx,
+                    steps,
+                    config,
+                    shutter=shutter,
+                    on_error="skip",
+                    on_step=on_step,
+                )
+            except SweepSetupError as exc:
+                log.exception("sweep: failed to configure analyzer")
+                self._ui(self._finish, kind, aborted=False, setup_error=exc)
+                return
             except SweepAborted:
                 aborted = True
+                record = self._record
             except Exception:  # noqa: BLE001 - last-resort net; specific errors are
-                # already handled per-step by run_sequence(on_error="skip") plus
+                # already handled per-step by run_sweep(on_error="skip") plus
                 # on_step above, so anything reaching here is unexpected.
-                log.exception("sweep: run_sequence raised unexpectedly")
+                log.exception("sweep: run_sweep raised unexpectedly")
                 failed = True
+                record = self._record
 
-            # Rewrite the file with how the run ended: until now it says
-            # "running", which is what a run that died would leave behind.
+            assert record is not None
             record.finish(aborted=aborted, failed=failed)
             if self._collected:
                 self._checkpoint(kind)

@@ -35,6 +35,8 @@ from .procedures import (
     AnalyzerConfig,
     BandwidthStep,
     FrequencyStep,
+    SweepSetupError,
+    SweepStepCallback,
     acquire_trace,
     bandwidth_sweep_steps,
     build_bandwidth_sweep,
@@ -43,6 +45,7 @@ from .procedures import (
     prepare_analyzer,
     run_bandwidth_sweep,
     run_frequency_sweep,
+    run_sweep,
 )
 
 __all__ = [
@@ -74,6 +77,9 @@ __all__ = [
     "prepare_analyzer",
     "run_bandwidth_sweep",
     "run_frequency_sweep",
+    "run_sweep",
+    "SweepSetupError",
+    "SweepStepCallback",
     "run_sequence",
     "save_step_results",
 ]

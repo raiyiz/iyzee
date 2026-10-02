@@ -9,14 +9,13 @@ measurement point, plus a factory function that builds the scan and a
 from __future__ import annotations
 
 import time
-import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
 from ..wavemeter_readout import read_frequency, set_pid_setpoint
-from .core import ExperimentContext, Step, StepResult, run_sequence
+from .core import ExperimentContext, RunRecord, Step, StepResult, run_sequence
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
@@ -220,29 +219,66 @@ def build_frequency_sweep(
     return steps, config
 
 
-def _run_steps(
+class SweepSetupError(RuntimeError):
+    """The analyzer could not be configured for a sweep."""
+
+
+SweepStepCallback = Callable[
+    [RunRecord, int, int, Step, StepResult | None, BaseException | None], None
+]
+
+
+def run_sweep(
     mx,
     steps: Sequence[Step],
     config: AnalyzerConfig,
     *,
     shutter: ShutterControl | None = None,
     on_error: str = "raise",
-) -> list[StepResult]:
-    """Configure the MXA, build one run context, and execute its steps."""
-    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
+    on_step: SweepStepCallback | None = None,
+) -> tuple[RunRecord, list[StepResult]]:
+    """Configure the analyzer, create the run context, and execute a sweep.
+
+    The caller owns device locking and any UI-facing persistence around this
+    operation. The progress callback receives the same step information as
+    run_sequence, plus the run record created and updated here. Exceptions
+    raised by the callback propagate unchanged so a caller can stop a live
+    sweep at a step boundary.
+    """
+    try:
+        prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
+    except Exception as exc:
+        raise SweepSetupError(str(exc)) from exc
+
+    record = RunRecord(config=asdict(config))
     ctx = ExperimentContext(
         mx=mx,
-        run_id=uuid.uuid4().hex[:8],
+        run_id=record.run_id,
         shutter=shutter,
-        config=asdict(config),
+        config=record.config,
     )
-    return run_sequence(steps, ctx, on_error=on_error)
+
+    def report_step(
+        index: int,
+        total: int,
+        step: Step,
+        result: StepResult | None,
+        error: BaseException | None,
+    ) -> None:
+        record.on_step(index, total, step, result, error)
+        if on_step is not None:
+            on_step(record, index, total, step, result, error)
+
+    results = run_sequence(steps, ctx, on_error=on_error, on_step=report_step)
+    return record, results
 
 
 def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> list[StepResult]:
     """Measure squeezing/shot-noise traces using the caller-owned MXA."""
     steps, config = build_bandwidth_sweep(rbw_values_hz)
-    return _run_steps(mx, steps, config, on_error=on_error)
+    record, results = run_sweep(mx, steps, config, on_error=on_error)
+    record.finish()
+    return results
 
 
 def run_frequency_sweep(
@@ -258,4 +294,6 @@ def run_frequency_sweep(
         laser_center_thz=laser_center_thz,
         wavemeter_channel=wavemeter_channel,
     )
-    return _run_steps(mx, steps, config, shutter=shutter, on_error=on_error)
+    record, results = run_sweep(mx, steps, config, shutter=shutter, on_error=on_error)
+    record.finish()
+    return results
