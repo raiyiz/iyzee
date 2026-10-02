@@ -15,7 +15,6 @@ READ_TIMEOUT_S = 1.0
 SETPOINT_TIMEOUT_S = 3.0
 DEFAULT_CHANNEL = 0
 WAVEMETER_PORT = 8000
-TWO_PHOTON_776_D5_2 = 386.3411662603302 * THz
 
 
 # Scaling is a bit tricky here, since we span several orders of magnitude, but
@@ -24,6 +23,7 @@ TWO_PHOTON_776_D5_2 = 386.3411662603302 * THz
 THz = 1
 GHz = 1e-3
 MHz = 1e-6
+TWO_PHOTON_776_D5_2 = 386.3411662603302 * THz
 
 # Rubidium transition frequencies in vacuum as reference (D.Steck), THz
 
