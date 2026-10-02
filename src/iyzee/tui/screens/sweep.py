@@ -300,9 +300,7 @@ class SweepScreen(Page):
     # -- the run itself, off the UI thread -----------------------------------
 
     @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
-    def _run(
-        self, mx, shutter, steps: Sequence[Step], config: AnalyzerConfig, kind: str
-    ) -> None:
+    def _run(self, mx, shutter, steps: Sequence[Step], config: AnalyzerConfig, kind: str) -> None:
         # Hold the MXA's lock (and the shutter's, for a frequency sweep) for
         # the whole run, not just individual calls — a sweep is one logical
         # operation, and interleaving a console cell's commands partway

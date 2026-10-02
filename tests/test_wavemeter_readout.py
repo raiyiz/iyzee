@@ -83,9 +83,9 @@ def test_read_frequency_rejects_invalid_measurement(monkeypatch):
 def test_single_readout_applies_reference_without_duplicating_http_logic(monkeypatch):
     monkeypatch.setattr(wavemeter_readout, "read_frequency", lambda channel=0: 377.123456)
 
-    assert wavemeter_readout.single_readout(
-        1, reference_f=377.0, printing=False
-    ) == pytest.approx(0.123456)
+    assert wavemeter_readout.single_readout(1, reference_f=377.0, printing=False) == pytest.approx(
+        0.123456
+    )
 
 
 def test_monitoring_frequencies_matches_channels_by_position(monkeypatch, capsys):
