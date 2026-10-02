@@ -91,7 +91,6 @@ def compute_two_photon_detuning(f1: float, f2: float) -> list[tuple[str, float]]
     """
     f_sum = f1 + f2
     return [
-        ("absolute_diff (GHz)", f1 - f2),
         (
             "Rb85_D5/2_F2,0-4 (MHz)",
             f_sum - (D2_center_85 + TWO_PHOTON_776_D5_2) - 1.770843922 * GHz,
