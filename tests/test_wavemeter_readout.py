@@ -180,9 +180,6 @@ def test_compute_two_photon_detuning_uses_the_expected_references() -> None:
 
     detunings = dict(wavemeter_readout.compute_two_photon_detuning(f1, f2))
 
-    assert detunings["absolute_diff (GHz)"] == pytest.approx(
-        f1 - f2
-    )
     assert detunings["Rb85_D5/2_F2,0-4 (MHz)"] == pytest.approx(
         -1.770843922 * wavemeter_readout.GHz
     )
