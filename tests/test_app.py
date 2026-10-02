@@ -24,7 +24,7 @@ from iyzee.tui.ipython import LabProxy
 from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL, ConnectScreen
 from iyzee.tui.screens.console import ConsoleScreen, IyzeeConsole
 from iyzee.tui.screens.sweep import SweepScreen
-from iyzee.tui.screens.traces import TracesScreen
+from iyzee.tui.screens.results import ResultsScreen
 
 
 @async_test
@@ -44,7 +44,7 @@ async def test_page_navigation_uses_a_shared_content_switcher() -> None:
         for page_id, page_type in [
             ("connect", ConnectScreen),
             ("sweep", SweepScreen),
-            ("traces", TracesScreen),
+            ("results", ResultsScreen),
             ("console", ConsoleScreen),
         ]:
             assert isinstance(switcher.get_child_by_id(page_id), page_type)
@@ -55,14 +55,14 @@ async def test_page_navigation_uses_a_shared_content_switcher() -> None:
         assert not nav.query_one("#nav-connect").has_class("-active")
 
         await pilot.press("t")
-        assert switcher.current == "traces"
+        assert switcher.current == "results"
         await pilot.press("i")
         assert switcher.current == "console"
         assert pilot.app.screen.focused is not None
         assert pilot.app.screen.focused.id == "console-terminal"
 
         # From the console only the F-keys navigate (the terminal owns the letters).
-        for key, page in [("f1", "connect"), ("f3", "traces"), ("f2", "sweep"), ("f4", "console")]:
+        for key, page in [("f1", "connect"), ("f3", "results"), ("f2", "sweep"), ("f4", "console")]:
             await pilot.press(key)
             assert switcher.current == page
         assert pilot.app.screen.focused is not None

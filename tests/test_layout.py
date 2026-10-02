@@ -90,7 +90,7 @@ async def test_the_console_terminal_stays_reachable_on_short_terminals() -> None
 async def test_pages_scroll_instead_of_clipping_and_fit_horizontally(width: int) -> None:
     app = IyzeeApp()
     async with app.run_test(size=(width, 30)) as pilot:
-        for key, page_id in [("c", "connect"), ("s", "sweep"), ("t", "traces"), ("i", "console")]:
+        for key, page_id in [("c", "connect"), ("s", "sweep"), ("t", "results"), ("i", "console")]:
             await pilot.press(key)
             await pilot.pause()
             page = app.query_one(f"#{page_id}")
@@ -123,7 +123,7 @@ async def test_the_sweep_form_reflows_with_the_width(
 
 @pytest.mark.parametrize("size,side_by_side", [((120, 30), True), ((60, 24), False)])
 @async_test
-async def test_the_traces_list_and_preview_stack_when_narrow(
+async def test_the_results_list_and_preview_stack_when_narrow(
     size: tuple[int, int], side_by_side: bool
 ) -> None:
     app = IyzeeApp()
@@ -131,8 +131,8 @@ async def test_the_traces_list_and_preview_stack_when_narrow(
         await pilot.press("t")
         await pilot.pause()
         listing, detail = (
-            app.query_one("#traces-list").region,
-            app.query_one("#traces-detail").region,
+            app.query_one("#results-list").region,
+            app.query_one("#results-detail").region,
         )
         if side_by_side:
             assert detail.x >= listing.x + listing.width

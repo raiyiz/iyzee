@@ -1,8 +1,7 @@
-"""Shared plumbing for the pages that list saved recordings (Traces, Data).
+"""Shared plumbing for the Results screen recording browser.
 
-Both show a list of saved runs on the left and a preview of the selected one
-on the right. The list handling is subtle enough to want one copy: see
-:meth:`RunListPage.refresh_runs`.
+The list handling is subtle enough to keep in one place: see
+RunListPage.refresh_runs.
 """
 
 from __future__ import annotations

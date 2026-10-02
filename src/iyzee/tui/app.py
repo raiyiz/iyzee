@@ -24,12 +24,11 @@ from .logging_support import LogEntry
 from .logging_support import install as install_logging
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
-from .screens.data import DataScreen
 from .screens.log import LogScreen
 from .screens.page import Page
 from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
-from .screens.traces import TracesScreen
+from .screens.results import ResultsScreen
 from .workers import LastRun
 
 log = logging.getLogger("iyzee.tui")
@@ -39,8 +38,7 @@ PAGE_SPECS = (
     ("connect", "Connect", ConnectScreen),
     ("sweep", "Sweep", SweepScreen),
     ("scope", "Scope", ScopeScreen),
-    ("traces", "Traces", TracesScreen),
-    ("data", "Data", DataScreen),
+    ("results", "Results", ResultsScreen),
     ("console", "Console", ConsoleScreen),
     ("log", "Log", LogScreen),
 )
@@ -169,15 +167,14 @@ class IyzeeApp(App):
     # later) follows the same reasoning.
     BINDINGS = [
         Binding("c", "show_page('connect')", "Connect"),
-        Binding("s", "show_page('sweep')", "Sweep"),
-        Binding("o", "show_page('scope')", "Scope"),
-        Binding("t", "show_page('traces')", "Traces"),
-        Binding("d", "show_page('data')", "Data"),
-        Binding("i", "show_page('console')", "Console"),
+    Binding("s", "show_page('sweep')", "Sweep"),
+    Binding("o", "show_page('scope')", "Scope"),
+    Binding("t", "show_page('results')", "Results"),
+    Binding("i", "show_page('console')", "Console"),
         Binding("l", "show_page('log')", "Log"),
         Binding("f1", "show_page('connect')", "Connect", priority=True),
         Binding("f2", "show_page('sweep')", "Sweep", priority=True),
-        Binding("f3", "show_page('traces')", "Traces", priority=True),
+        Binding("f3", "show_page('results')", "Results", priority=True),
         Binding("f4", "show_page('console')", "Console", priority=True),
         # Quit is Ctrl+Q only, deliberately not a bare "q": one stray
         # keystroke shouldn't be able to shut down an app that is holding
