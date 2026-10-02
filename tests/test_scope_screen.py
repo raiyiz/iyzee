@@ -8,6 +8,7 @@ here is what the page adds: reading the form, reporting what the scope
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,7 @@ from test_scope_workflows import DetailedFakeScope, StatefulScope
 from textual.pilot import Pilot
 from textual.widgets import Button, Checkbox, Input, RichLog, Select
 
-from iyzee.scope import Channel, Coupling
+from iyzee.scope import Channel, Coupling, TriggerSlope
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens import scope as scope_screen_mod
 from iyzee.tui.screens.scope import ScopeScreen
@@ -174,6 +175,120 @@ async def test_apply_after_the_scope_disconnects_releases_the_busy_flag_and_keep
         await wait_until(pilot, lambda: not screen._settings_busy)
         assert scope.calls == []
         assert screen._last_applied_channel_settings == baseline
+
+
+# -- apply trigger changes -------------------------------------------------------------------
+
+
+class TriggerScope(ScreenScope):
+    """Remembers trigger writes like the channel fake does; can refuse or stall a write."""
+
+    def __init__(
+        self, *, refuse_level: bool = False, gate_reads: bool = False, **kwargs: Any
+    ) -> None:
+        super().__init__(**kwargs)
+        self.refuse_level = refuse_level
+        self.gate_reads = gate_reads  # stall V/div reads (a retrieve) instead of level writes
+        self.gate = threading.Event()
+        self.gate.set()
+        self.entered = threading.Event()
+
+    def get_volts_per_div(self, channel: Channel) -> str:
+        if self.gate_reads:
+            self.entered.set()
+            self.gate.wait(timeout=5)
+        return super().get_volts_per_div(channel)
+
+    def set_trigger_level(self, source: Channel, level: float) -> None:
+        if not self.gate_reads:
+            self.entered.set()
+            self.gate.wait(timeout=5)
+        if self.refuse_level:
+            raise RuntimeError("level refused")
+        super().set_trigger_level(source, level)
+        self.trigger_state = replace(self.trigger_state, level_volts=level)
+
+    def set_trigger_slope(self, source: Channel, slope: TriggerSlope) -> None:
+        super().set_trigger_slope(source, slope)
+        self.trigger_state = replace(self.trigger_state, slope=slope)
+
+
+def _trigger_dirty(screen: ScopeScreen) -> set[str]:
+    return {field_id for field_id in screen._dirty_fields if field_id.startswith("trig-")}
+
+
+@async_test
+async def test_applying_trigger_changes_shows_what_the_scope_reports_and_cleans_the_form() -> None:
+    scope = TriggerScope()
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open(pilot, scope)
+        await _synced(pilot, screen)
+
+        _set(screen, "trig-level", "0.25")
+        screen.query_one("#trig-slope", Select).value = TriggerSlope.NEGATIVE.value
+        await wait_until(pilot, lambda: _trigger_dirty(screen) == {"trig-level", "trig-slope"})
+        screen.query_one("#apply-trigger", Button).press()
+        await wait_until(pilot, lambda: "Trigger settings applied and verified." in _log(screen))
+
+        verified = screen._last_applied_trigger_settings
+        assert verified is not None
+        assert verified.level_volts == 0.25 and verified.slope is TriggerSlope.NEGATIVE
+        assert _trigger_dirty(screen) == set()
+        assert not screen.query_one("#trig-level", Input).has_class("scope-dirty")
+        assert not screen._settings_busy and screen._settings_synced
+
+
+@async_test
+async def test_a_refused_trigger_apply_is_reported_keeps_the_edit_and_releases_the_busy_flag() -> (
+    None
+):
+    scope = TriggerScope(refuse_level=True)
+    async with IyzeeApp().run_test() as pilot:
+        app = pilot.app
+        assert isinstance(app, IyzeeApp)
+        screen = await _open(pilot, scope)
+        await _synced(pilot, screen)
+
+        _set(screen, "trig-level", "0.25")
+        await wait_until(pilot, lambda: "trig-level" in screen._dirty_fields)
+        screen.query_one("#apply-trigger", Button).press()
+        await wait_until(pilot, lambda: "level refused" in _log(screen))
+
+        assert not screen._settings_busy
+        assert "trig-level" in screen._dirty_fields  # still editable, so the user can retry
+        assert not screen._settings_synced
+        assert any("Trigger settings failed" in n for n in notifications(app))
+
+
+@pytest.mark.parametrize("operation", ["retrieve", "apply-trigger"])
+@async_test
+async def test_an_operation_finishing_after_a_disconnect_releases_its_flags(
+    operation: str,
+) -> None:
+    scope = TriggerScope(gate_reads=operation == "retrieve")
+    async with IyzeeApp().run_test() as pilot:
+        app = pilot.app
+        assert isinstance(app, IyzeeApp)
+        screen = await _open(pilot, scope)
+        await _synced(pilot, screen)
+        scope.entered.clear()
+        scope.gate.clear()
+
+        if operation == "retrieve":
+            screen.query_one("#retrieve-settings", Button).press()
+        else:
+            _set(screen, "trig-level", "0.25")
+            await wait_until(pilot, lambda: "trig-level" in screen._dirty_fields)
+            screen.query_one("#apply-trigger", Button).press()
+        await wait_until(pilot, scope.entered.is_set)  # the worker is inside the scope call
+
+        app.handles.pop("scope")  # the link goes away mid-operation
+        scope.gate.set()
+
+        await wait_until(pilot, lambda: not screen._settings_busy)
+        assert not screen._retrieve_in_flight
+        if operation == "retrieve":
+            assert not screen.query_one("#retrieve-settings", Button).disabled
 
 
 # -- acquire ---------------------------------------------------------------------------------
