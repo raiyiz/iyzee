@@ -13,7 +13,7 @@ log = logging.getLogger("iyzee.wavemeter")
 # (and make quitting wait for it).
 READ_TIMEOUT_S = 1.0
 SETPOINT_TIMEOUT_S = 3.0
-DEFAULT_CHANNEL = 0
+DEFAULT_CHANNEL = 4
 WAVEMETER_PORT = 8000
 
 
@@ -23,6 +23,7 @@ WAVEMETER_PORT = 8000
 THz = 1
 GHz = 1e-3
 MHz = 1e-6
+TWO_PHOTON_776_D5_2 = 386.3411662603302 * THz
 
 # Rubidium transition frequencies in vacuum as reference (D.Steck), THz
 
@@ -72,13 +73,24 @@ def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
     Raises ``OSError`` (including ``HTTPError`` and timeouts), ``UnicodeError``.
     """
     url = f"http://{IP.WAVEMETER}:{WAVEMETER_PORT}/api/{path}"
-    with requests.get(url, data=data, timeout=timeout) as response:
+    if data is None:
+        response = requests.get(url, timeout=timeout)
+    else:
+        response = requests.post(url, data=data, timeout=timeout)
+
+    if not response:
+        raise requests.ConnectionError
+
+    with response:
         response.raise_for_status()
         return response.content.decode("ascii")
 
 
 def single_readout(
-    channel: int = DEFAULT_CHANNEL, reference_f: float = 0, label: str = "", printing: bool = True
+    channel: int = DEFAULT_CHANNEL,
+    reference_f: float = 0,
+    label: str = "",
+    printing: bool = True,
 ) -> float:
     """Fetch one laser frequency and optionally subtract a reference."""
     ls_frequency = read_frequency(channel) - reference_f
@@ -196,9 +208,10 @@ def track_frequency(
     return times, track_freq
 
 
-def monitoring_frequencies(channels, two_photon=True):
+def monitoring_frequencies(channels):
     from tabulate import tabulate  # lazy: see track_frequency
 
+    channels = list(channels)
     header = ["Transition"] + ["Frequencies (THz)"] + [f"Detuning (ch{c}) / GHz" for c in channels]
     rows = []
     freqs = [single_readout(c, reference_f=0, printing=False) for c in channels]
@@ -207,12 +220,6 @@ def monitoring_frequencies(channels, two_photon=True):
     for label, f in Rb_transitions:
         row = [label, f] + [(freq - f) * 1e3 for freq in freqs]
         rows.append(row)
-
-    if two_photon:
-        delta = compute_two_photon_detuning(f1=freqs[0], f2=freqs[1])
-        for label, d in delta:
-            row = [label] + [""] + [d * 1e6]  # detuning in MHz
-            rows.append(row)
 
     print(tabulate(rows, headers=header, tablefmt="psql", floatfmt="+.7f"))
 

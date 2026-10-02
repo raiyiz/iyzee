@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any, Mapping, Protocol
 from platformdirs import user_data_dir
 from traitlets.config import Config
 
-from .instruments import LockedProxy
 from .. import wavemeter_readout
+from .instruments import LockedProxy
 
 if TYPE_CHECKING:
     from .workers import LastRun
