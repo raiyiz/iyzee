@@ -42,7 +42,6 @@ src/iyzee/
         ├── connect.py      # ConnectScreen
         ├── sweep.py        # SweepScreen
         ├── scope.py        # ScopeScreen — form/plot only; operations live in scope_workflows.py
-        ├── runlist.py      # RunListPage: saved-run list + preview plumbing (base of ResultsScreen)
         ├── results.py      # ResultsScreen — browse saved Sweep/Scope runs, derive/export waveforms
         ├── console.py      # ConsoleScreen + IyzeeConsole: the page around IPython's terminal UI
         └── log.py          # LogScreen: the app's own logging, live and browsable
@@ -262,91 +261,68 @@ in typical application code:
 
 ## Documentation
 
-Two technical guides, both Typst source compiled to PDF in CI:
+Two technical guides, Typst source compiled to PDF in CI (GitHub Actions and
+GitLab publish them as pipeline artifacts):
 
-- The **MXA and measurement guide** connects the measurement physics to the
-  analyzer state, SCPI commands, and Python implementation — the measurement
-  chain, RBW/VBW, detector and averaging semantics, ENBW, synchronization,
-  trace transfer, noise density and band power, analyzer noise cancellation,
-  trigger timing, and the squeezing/shot-noise workflow.
-- The **TUI and device interaction guide** covers how `iyzee-tui` and the
-  `iyzee` script both build on the same `experiment/` layer, connection
-  details and command/endpoint references for every instrument (including
-  the PSU/shutter, scope, and wavemeter — not just the MXA), and how the
-  TUI itself is put together: screens, the instrument registry and its
-  per-instrument locking, the navigation model, and the embedded IPython
-  console's `lab` object.
+- [MXA and measurement guide](docs/mxa-and-measurements.typ): the measurement
+  physics tied to analyzer state, SCPI commands and the Python implementation
+  (RBW/VBW, detectors, ENBW, noise density, squeezing/shot-noise workflow).
+- [TUI and device interaction guide](docs/tui-and-devices.typ): how `iyzee-tui`
+  and the `iyzee` script share the `experiment/` layer, per-instrument
+  connection details and command references, and how the TUI is built
+  (screens, instrument registry and locking, navigation, the console's `lab`).
 
-- [MXA and measurement guide](docs/mxa-and-measurements.typ) — source
-- [TUI and device interaction guide](docs/tui-and-devices.typ) — source
-- [GitHub Actions documentation artifacts](https://github.com/raiyiz/iyzee/actions/workflows/ci.yml)
-- GitLab CI publishes the same documentation set as pipeline artifacts; the
-  repository does not currently declare its GitLab mirror URL.
+[`docs/adr_0001_tui_vs_devices_separation.md`](docs/adr_0001_tui_vs_devices_separation.md)
+records the architecture decision behind the layering below.
 
-For a reproducible measurement, the relevant instrument state should travel
-with the data. Sweep records carry frequency/range and analyzer settings in
-`StepResult.meta` and the JSON sidecar; Scope records carry requested and
-channel/trigger configuration (the applied values are what the scope reported
-after a read-back, not what was requested), scope-reported calibration and
-per-channel timebase metadata, instrument identity (`*IDN?`), whether a running
-acquisition was paused for the capture, raw waveform codes when available, and derived statistics
-beside the numeric arrays.
+For a reproducible measurement, the relevant instrument state travels with the
+data. Sweep records carry frequency/range and analyzer settings in
+`StepResult.meta` and the JSON sidecar. Scope records carry the requested
+configuration, what the scope reported after a read-back (not what was
+requested), scope calibration and per-channel timebase, instrument identity
+(`*IDN?`), whether a running acquisition was paused for the capture, raw
+waveform codes when available, and derived statistics beside the arrays.
 
 ## Design direction
 
-Keep the separation simple while the project is small:
+Python first, TUI second: the TUI organizes, displays and controls; it does not
+contain machinery a script could reasonably need.
 
-1. **`main.py` / `tui/app.py` — application boundaries:** resource ownership
-   and composition, for the script and interactive paths respectively. Both
-   sit on top of the same `experiment/` and driver layers below rather than
-   duplicating anything from them.
-2. **`experiment/procedures.py` — what to measure:** concrete procedures,
-   analyzer setup, scan parameters, sequencing.
-3. **`experiment/{core,io}.py` — the machinery a procedure is built from:**
-   the `Step` abstraction and execution (`core.py`), saving and plotting
-   (`io.py`).
-4. **`mxa.py` / `power.py` / `scope.py` / `wavemeter_readout.py` — how to
-   control each instrument:** reusable, hardware-specific operations.
-5. **`base.py` — shared infrastructure:** connection lifecycle, addresses,
-   channel definitions.
+1. **`main.py` / `tui/app.py`**: resource ownership and composition for the
+   script and interactive paths. Both sit on the same layers below.
+2. **`experiment/procedures.py`**: what to measure (analyzer setup, scan
+   parameters, sequencing).
+3. **`experiment/{core,io}.py`**: the machinery procedures are built from
+   (`Step` execution, saving, plotting).
+4. **`mxa.py` / `power.py` / `scope.py` / `wavemeter_readout.py`**: reusable,
+   hardware-specific instrument control.
+5. **`base.py`**: connection lifecycle, addresses, channel definitions.
 
-As more procedures are added, split `procedures.py` further rather than
-letting one file grow indefinitely. The same applies to `tui/screens/` as
-more screens are added. Keyboard navigation itself doesn't need its own
-module — it's Textual's native focus/binding-priority system end to end,
-with nothing app-specific to maintain there.
-
-**Screens display and control; they don't implement.** A page's job is the
-form, the buttons, the plot, and reporting a result — not the operation
-itself. `scope_workflows.py` is the template: `ScopeScreen`'s buttons read
-and validate the form, then call a plain function (`apply_channel_settings`,
-`apply_trigger_settings`, `acquire_scope_recording`) that takes the driver
-directly and has no Textual import. The same call works from a script with
-its own `LeCroy` instance, or from the console as
-`apply_channel_settings(lab.scope, [...])` — not just from the button that
-happens to trigger it in the TUI. `InstrumentHandle.lock` (each handle owns
-one — see `instruments.py`) is what makes that safe without an `IyzeeApp`
-in the picture: pass it as the optional `lock=` argument when a script or
-screen needs to serialize against concurrent access; a script with a
-private, uncontended connection can leave it out entirely. The lock is
-re-entrant, and for the scope it *is* the driver's own transaction lock, so
-passing it (even through the console's `lab.scope` proxy) cannot deadlock, and
-the operations take the driver's transaction themselves either way. Use
-`apply_and_verify_channel_settings` when you need to know what the scope
-actually holds afterwards: it reads every channel back and reports
-adjustments and ignored settings. A new screen
-with real device-orchestration logic (not just reading a form) should
-follow this shape from the start, in a module beside the driver it
-operates on — the way `ScopeScreen` originally didn't, and now does.
+**Screens display and control; they don't implement.** `scope_workflows.py` is
+the template: `ScopeScreen` reads and validates the form, then calls a plain
+function (`apply_channel_settings`, `apply_and_verify_channel_settings`,
+`acquire_scope_recording`) that takes the driver directly and has no Textual
+import. The same call works from a script, or from the console as
+`apply_channel_settings(lab.scope, [...])`. Pass an `InstrumentHandle.lock` as
+`lock=` to serialize against concurrent access; a script with a private
+connection can omit it. For the scope the lock is the driver's own re-entrant
+transaction lock, so passing it, even through `lab.scope`, cannot deadlock.
+Use `apply_and_verify_channel_settings` when you need to know what the scope
+actually holds afterwards. A new screen with real device-orchestration logic
+should follow this shape from the start, in a module beside the driver it
+operates on. Split `procedures.py` (and `tui/screens/`) further as they grow.
 
 ## Development
 
 ```sh
 uv sync
-uv run pytest
-uv run ruff check . && uv run ruff format --check .
-uv run mypy src tests      # advisory in CI (the job is allowed to fail)
+scripts/ci.sh test        # pytest
+scripts/ci.sh lint        # ruff check + format --check
+scripts/ci.sh typecheck   # mypy src tests
+scripts/ci.sh docs        # compile the Typst guides (needs typst)
+scripts/ci.sh all         # everything, as the dependency-update workflow does
 ```
 
-CI (`.github/workflows/ci.yml`) runs the tests, ruff and mypy, and compiles the
-Typst guides; `.gitlab-ci.yml` compiles the guides too.
+GitHub Actions (`.github/workflows/ci.yml`) and GitLab (`.gitlab-ci.yml`) run
+the same `scripts/ci.sh` targets. `.pre-commit-config.yaml` runs the lint
+target on commit.

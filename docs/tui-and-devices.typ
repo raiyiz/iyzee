@@ -143,7 +143,7 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
   inset: 5pt,
   align: (left, left),
   [*Endpoint*], [*Used by*],
-  [`GET /api/{channel}/`], [`single_readout()`, `fast_readout()` — current frequency (THz) on that channel],
+  [`GET /api/{channel}/`], [`read_frequency()` (and `single_readout()`, which subtracts an optional reference) — current frequency (THz) on that channel],
   [`POST /api/set_pid/` (body `freq_thz=...&channel=...`)], [`set_pid_setpoint()` — set the PID lock setpoint; regulation itself is left off by design and must be enabled manually],
 )
 
