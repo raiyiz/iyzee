@@ -13,7 +13,7 @@ log = logging.getLogger("iyzee.wavemeter")
 # (and make quitting wait for it).
 READ_TIMEOUT_S = 1.0
 SETPOINT_TIMEOUT_S = 3.0
-DEFAULT_CHANNEL = 0
+DEFAULT_CHANNEL = 4
 WAVEMETER_PORT = 8000
 
 
@@ -81,33 +81,6 @@ def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
     with response:
         response.raise_for_status()
         return response.content.decode("ascii")
-
-
-def compute_two_photon_detuning(f1: float, f2: float) -> list[tuple[str, float]]:
-    """Return two-photon detunings for the Rb D2 -> 5D5/2 lines.
-
-    Frequencies are in THz; detunings are returned in THz so callers can
-    choose their preferred display unit.
-    """
-    f_sum = f1 + f2
-    return [
-        (
-            "Rb85_D5/2_F2,0-4 (MHz)",
-            f_sum - (D2_center_85 + TWO_PHOTON_776_D5_2) - 1.770843922 * GHz,
-        ),
-        (
-            "Rb85_D5/2_F3,1-5 (MHz)",
-            f_sum - (D2_center_85 + TWO_PHOTON_776_D5_2) + 1.264888516 * GHz,
-        ),
-        (
-            "Rb87_D5/2_F1,1-3 (MHz)",
-            f_sum - (D2_center_87 + TWO_PHOTON_776_D5_2) - 4.27167663181519 * GHz,
-        ),
-        (
-            "Rb87_D5/2_F2,1-4 (MHz)",
-            f_sum - (D2_center_87 + TWO_PHOTON_776_D5_2) + 2.5630059790891 * GHz,
-        ),
-    ]
 
 
 def single_readout(
@@ -232,7 +205,7 @@ def track_frequency(
     return times, track_freq
 
 
-def monitoring_frequencies(channels, two_photon=True):
+def monitoring_frequencies(channels):
     from tabulate import tabulate  # lazy: see track_frequency
 
     channels = list(channels)
@@ -244,14 +217,6 @@ def monitoring_frequencies(channels, two_photon=True):
     for label, f in Rb_transitions:
         row = [label, f] + [(freq - f) * 1e3 for freq in freqs]
         rows.append(row)
-
-    if two_photon:
-        if len(freqs) < 2:
-            raise ValueError("two_photon monitoring requires two channels")
-        delta = compute_two_photon_detuning(f1=freqs[0], f2=freqs[1])
-        for label, d in delta:
-            row = [label] + [""] + [d * 1e6]  # detuning in MHz
-            rows.append(row)
 
     print(tabulate(rows, headers=header, tablefmt="psql", floatfmt="+.7f"))
 
