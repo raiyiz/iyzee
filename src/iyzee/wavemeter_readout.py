@@ -13,6 +13,8 @@ log = logging.getLogger("iyzee.wavemeter")
 # (and make quitting wait for it).
 READ_TIMEOUT_S = 1.0
 SETPOINT_TIMEOUT_S = 3.0
+DEFAULT_CHANNEL = 0
+WAVEMETER_PORT = 8000
 
 
 # Scaling is a bit tricky here, since we span several orders of magnitude, but
@@ -64,54 +66,22 @@ class WavemeterReadoutError(RuntimeError):
     """Raised when a wavemeter measurement cannot be obtained or parsed."""
 
 
-class Wavemeter:
-    """Client for the WS-7 HTTP API.
-
-    The instrument has no persistent session; each operation is an HTTP request.
-    This object owns the default channel so callers can pass an explicit
-    wavemeter device around instead of module-level helpers.
-    """
-
-    def __init__(self, channel: int = 0) -> None:
-        self.channel = channel
-
-    def read_frequency(self, channel: int | None = None) -> float:
-        selected = self.channel if channel is None else channel
-        try:
-            return float(_request(f"{selected}/", timeout=READ_TIMEOUT_S))
-        except (OSError, ValueError, UnicodeError) as exc:
-            raise WavemeterReadoutError(f"Failed to read wavemeter channel {selected}") from exc
-
-    def set_pid_setpoint(self, freq: float, channel: int | None = None) -> None:
-        selected = self.channel if channel is None else channel
-        try:
-            _request(
-                "set_pid/",
-                data=f"freq_thz={freq}&channel={selected}".encode("ascii"),
-                timeout=SETPOINT_TIMEOUT_S,
-            )
-        except (OSError, UnicodeError) as exc:
-            raise WavemeterReadoutError(
-                f"Failed to set the setpoint of wavemeter channel {selected} to {freq} THz"
-            ) from exc
-        log.info("[WS-7] set PID setpoint of channel %s to %s THz", selected, freq)
-
-
 def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
     """One bounded HTTP request to the wavemeter server; returns the decoded body.
 
     Raises ``OSError`` (including ``HTTPError`` and timeouts), ``UnicodeError``.
     """
-    url = f"http://{IP.WAVEMETER}:8000/api/{path}"
+    url = f"http://{IP.WAVEMETER}:{WAVEMETER_PORT}/api/{path}"
     with requests.get(url, data=data, timeout=timeout) as response:
-        return response.read().decode("ascii")
+        response.raise_for_status()
+        return response.content.decode("ascii")
 
 
 def single_readout(
-    channel: int, reference_f: float = 0, label: str = "", printing: bool = True
+    channel: int = DEFAULT_CHANNEL, reference_f: float = 0, label: str = "", printing: bool = True
 ) -> float:
     """Fetch one laser frequency and optionally subtract a reference."""
-    ls_frequency = Wavemeter(channel=channel).read_frequency() - reference_f
+    ls_frequency = read_frequency(channel) - reference_f
     if printing:
         print(
             f"[WS-7] Laser Frequency in Channel {channel} (THz) (Ref: {label}): ",
@@ -120,17 +90,27 @@ def single_readout(
     return ls_frequency
 
 
-def fast_readout(ch: int) -> float:
-    """request, without try/except"""
-    return float(
-        requests.get(f"http://{IP.WAVEMETER}:8000/api/{ch}/", timeout=0.1).read().decode("ascii")
-    )
+def read_frequency(channel: int = DEFAULT_CHANNEL) -> float:
+    """Read one frequency from the wavemeter server."""
+    try:
+        return float(_request(f"{channel}/", timeout=READ_TIMEOUT_S))
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise WavemeterReadoutError(f"Failed to read wavemeter channel {channel}") from exc
 
 
-def set_pid_setpoint(freq: float, channel: int) -> None:
-    """Set a PID setpoint, retained as a convenience wrapper."""
-    Wavemeter(channel=channel).set_pid_setpoint(freq)
-
+def set_pid_setpoint(freq: float, channel: int = DEFAULT_CHANNEL) -> None:
+    """Set the PID setpoint on one wavemeter channel."""
+    try:
+        _request(
+            "set_pid/",
+            data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
+            timeout=SETPOINT_TIMEOUT_S,
+        )
+    except (OSError, UnicodeError) as exc:
+        raise WavemeterReadoutError(
+            f"Failed to set the setpoint of wavemeter channel {channel} to {freq} THz"
+        ) from exc
+    log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
 
 def track_frequency(total_time, time_step, save_path, channel, reference_f=0, save_csv=False):
     # Plotting and the CSV export are only needed here. Imported lazily because
