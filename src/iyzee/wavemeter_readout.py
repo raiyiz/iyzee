@@ -15,6 +15,7 @@ READ_TIMEOUT_S = 1.0
 SETPOINT_TIMEOUT_S = 3.0
 DEFAULT_CHANNEL = 0
 WAVEMETER_PORT = 8000
+TWO_PHOTON_776_D5_2 = 386.3411662603302 * THz
 
 
 # Scaling is a bit tricky here, since we span several orders of magnitude, but
@@ -72,9 +73,38 @@ def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
     Raises ``OSError`` (including ``HTTPError`` and timeouts), ``UnicodeError``.
     """
     url = f"http://{IP.WAVEMETER}:{WAVEMETER_PORT}/api/{path}"
-    with requests.get(url, data=data, timeout=timeout) as response:
+    request = requests.post if data is not None else requests.get
+    with request(url, data=data, timeout=timeout) as response:
         response.raise_for_status()
         return response.content.decode("ascii")
+
+
+def compute_two_photon_detuning(f1: float, f2: float) -> list[tuple[str, float]]:
+    """Return two-photon detunings for the Rb D2 -> 5D5/2 lines.
+
+    Frequencies are in THz; detunings are returned in THz so callers can
+    choose their preferred display unit.
+    """
+    f_sum = f1 + f2
+    return [
+        ("absolute_diff (GHz)", f1 - f2),
+        (
+            "Rb85_D5/2_F2,0-4 (MHz)",
+            f_sum - (D2_center_85 + TWO_PHOTON_776_D5_2) - 1.770843922 * GHz,
+        ),
+        (
+            "Rb85_D5/2_F3,1-5 (MHz)",
+            f_sum - (D2_center_85 + TWO_PHOTON_776_D5_2) + 1.264888516 * GHz,
+        ),
+        (
+            "Rb87_D5/2_F1,1-3 (MHz)",
+            f_sum - (D2_center_87 + TWO_PHOTON_776_D5_2) - 4.27167663181519 * GHz,
+        ),
+        (
+            "Rb87_D5/2_F2,1-4 (MHz)",
+            f_sum - (D2_center_87 + TWO_PHOTON_776_D5_2) + 2.5630059790891 * GHz,
+        ),
+    ]
 
 
 def single_readout(
