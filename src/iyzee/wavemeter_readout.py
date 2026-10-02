@@ -73,8 +73,12 @@ def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
     Raises ``OSError`` (including ``HTTPError`` and timeouts), ``UnicodeError``.
     """
     url = f"http://{IP.WAVEMETER}:{WAVEMETER_PORT}/api/{path}"
-    request = requests.post if data is not None else requests.get
-    with request(url, data=data, timeout=timeout) as response:
+    if data is None:
+        response = requests.get(url, timeout=timeout)
+    else:
+        response = requests.post(url, data=data, timeout=timeout)
+
+    with response:
         response.raise_for_status()
         return response.content.decode("ascii")
 
@@ -232,6 +236,7 @@ def track_frequency(
 def monitoring_frequencies(channels, two_photon=True):
     from tabulate import tabulate  # lazy: see track_frequency
 
+    channels = list(channels)
     header = ["Transition"] + ["Frequencies (THz)"] + [f"Detuning (ch{c}) / GHz" for c in channels]
     rows = []
     freqs = [single_readout(c, reference_f=0, printing=False) for c in channels]
@@ -242,6 +247,8 @@ def monitoring_frequencies(channels, two_photon=True):
         rows.append(row)
 
     if two_photon:
+        if len(freqs) < 2:
+            raise ValueError("two_photon monitoring requires two channels")
         delta = compute_two_photon_detuning(f1=freqs[0], f2=freqs[1])
         for label, d in delta:
             row = [label] + [""] + [d * 1e6]  # detuning in MHz
