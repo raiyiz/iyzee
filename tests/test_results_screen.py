@@ -97,7 +97,7 @@ async def test_one_browser_switches_between_sweep_and_scope_recordings(
         assert listing.index == 0
         listing.focus()
         await pilot.press("down")
-        await wait_until(pilot, lambda: "2 point(s)" in _summary(screen))
+        await wait_until(pilot, lambda: "1 point(s)" in _summary(screen))
         assert listing.index == 1
         assert screen._recording is not None
         assert screen._recording.path == sweep

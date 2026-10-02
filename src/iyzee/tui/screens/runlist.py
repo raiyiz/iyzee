@@ -1,7 +1,8 @@
-"""Shared plumbing for the Results screen recording browser.
+"""Shared plumbing for the pages that list saved recordings (Traces, Data).
 
-The list handling is subtle enough to keep in one place: see
-RunListPage.refresh_runs.
+Both show a list of saved runs on the left and a preview of the selected one
+on the right. The list handling is subtle enough to want one copy: see
+:meth:`RunListPage.refresh_runs`.
 """
 
 from __future__ import annotations
@@ -77,29 +78,15 @@ class RunListPage(Page):
             list_view.clear()
             for path in self._paths:
                 list_view.append(ListItem(Label(run_label(path, path.stat().st_mtime))))
+            if self._paths:
+                list_view.index = self._paths.index(previous) if previous in self._paths else 0
         finally:
             self._suppress_events = False
 
         if self._paths:
-            # ListItem mounting is deferred. Set the index only after the
-            # refresh has completed, otherwise ListView may validate it
-            # against an empty child list and leave the browser unhighlighted.
-            self.call_after_refresh(self._finish_refresh, list_view, previous)
+            self._select(self._paths[list_view.index or 0])
         else:
             self._show_empty()
-
-    def _finish_refresh(self, list_view: ListView, previous: Path | None) -> None:
-        """Select the preserved run once the rebuilt ListView is mounted."""
-        if not self._paths:
-            self._show_empty()
-            return
-        index = self._paths.index(previous) if previous in self._paths else 0
-        self._suppress_events = True
-        try:
-            list_view.index = index
-        finally:
-            self._suppress_events = False
-        self._select(self._paths[index])
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         """Follow Up/Down directly."""
