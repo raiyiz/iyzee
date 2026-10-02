@@ -556,6 +556,39 @@ def read_trigger_settings(scope: LeCroy, *, lock: LockLike | None = None) -> Tri
     return TriggerSettings(source, mode, slope, coupling, level_volts)
 
 
+def _download_waveform(scope: LeCroy, channel: Channel) -> ScopeWaveform:
+    """Download one channel's ``DAT1`` block with its own timebase (caller holds the lock)."""
+    time_unit, time_offset, time_interval = scope.getHorProperties(channel=channel)
+    detailed = getattr(scope, "getDataFloatsDetailed", None)
+    raw_codes = vertical_gain = vertical_offset = None
+    if callable(detailed):
+        data = detailed(channel=channel, block="DAT1")
+        value_unit = str(data["unit"])
+        values = np.asarray(data["values"], dtype=np.float64)
+        raw_codes = np.asarray(data["raw_codes"], dtype=np.int16)
+        vertical_gain = float(data["vertical_gain"])
+        vertical_offset = float(data["vertical_offset"])
+    else:
+        value_unit, values_raw = scope.getDataFloats(channel=channel, block="DAT1")
+        values = np.asarray(values_raw, dtype=np.float64)
+    if values.size == 0:
+        raise ValueError(f"{channel} returned an empty waveform")
+    time_values = time_offset + np.arange(values.size, dtype=np.float64) * time_interval
+    return ScopeWaveform(
+        channel=channel,
+        time=time_values,
+        values=values,
+        raw_codes=raw_codes,
+        value_unit=value_unit,
+        time_unit=str(time_unit),
+        time_offset=float(time_offset),
+        time_interval=float(time_interval),
+        vertical_gain=vertical_gain,
+        vertical_offset=vertical_offset,
+        stats=_stats(time_values, values),
+    )
+
+
 def acquire_scope_recording(
     scope: LeCroy,
     channels: Sequence[Channel],
@@ -622,41 +655,7 @@ def acquire_scope_recording(
         try:
             for index, channel in enumerate(channels):
                 try:
-                    time_unit, time_offset, time_interval = scope.getHorProperties(channel=channel)
-                    detailed = getattr(scope, "getDataFloatsDetailed", None)
-                    if callable(detailed):
-                        data = detailed(channel=channel, block="DAT1")
-                        value_unit = str(data["unit"])
-                        values = np.asarray(data["values"], dtype=np.float64)
-                        raw_codes = np.asarray(data["raw_codes"], dtype=np.int16)
-                        vertical_gain = float(data["vertical_gain"])
-                        vertical_offset = float(data["vertical_offset"])
-                    else:
-                        value_unit, values_raw = scope.getDataFloats(channel=channel, block="DAT1")
-                        values = np.asarray(values_raw, dtype=np.float64)
-                        raw_codes = None
-                        vertical_gain = None
-                        vertical_offset = None
-                    if values.size == 0:
-                        raise ValueError(f"{channel} returned an empty waveform")
-                    time_values = (
-                        time_offset + np.arange(values.size, dtype=np.float64) * time_interval
-                    )
-                    waveforms.append(
-                        ScopeWaveform(
-                            channel=channel,
-                            time=time_values,
-                            values=values,
-                            raw_codes=raw_codes,
-                            value_unit=value_unit,
-                            time_unit=str(time_unit),
-                            time_offset=float(time_offset),
-                            time_interval=float(time_interval),
-                            vertical_gain=vertical_gain,
-                            vertical_offset=vertical_offset,
-                            stats=_stats(time_values, values),
-                        )
-                    )
+                    waveforms.append(_download_waveform(scope, channel))
                 except Exception as exc:  # noqa: BLE001
                     log.exception("scope: failed to acquire %s", channel)
                     errors.append(ChannelError(channel, exc))

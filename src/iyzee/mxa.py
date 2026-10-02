@@ -1,5 +1,4 @@
 import time
-from typing import ClassVar
 
 import pyvisa
 
@@ -12,36 +11,6 @@ class KeysightMXA(BaseDevice):
     Optimized for noise analysis workflows: trace control, markers,
     triggering synchronization, and binary data transfer.
     """
-
-    TRACE_IDS: ClassVar[list[str]] = [
-        "TRACE1",
-        "TRACE2",
-        "TRACE3",
-        "TRACE4",
-        "TRACE5",
-        "TRACE6",
-    ]
-    TRACE_MODES: ClassVar[dict[str, str]] = {
-        "WRIT": "Write",
-        "MAXH": "MaxHold",
-        "MINH": "MinHold",
-        "AVER": "Average",
-        "VIEW": "View",
-        "BLAN": "Blank",
-    }
-    MARKER_MODES: ClassVar[dict[str, str]] = {
-        "POS": "Normal",
-        "DELT": "Delta",
-        "BAND": "BandPower",
-        "NOIS": "Noise",
-    }
-    TRIG_SOURCES: ClassVar[dict[str, str]] = {
-        "IMM": "FreeRun",
-        "VID": "Video",
-        "EXT": "External",
-        "RFB": "RFBurst",
-        "FRAM": "Frame",
-    }
 
     def __init__(self, ip: IP = IP.NOISE_ANALYZER, timeout_ms: int = 5_000, resource_manager=None):
         super().__init__(
@@ -211,14 +180,6 @@ class KeysightMXA(BaseDevice):
         step = (stop - start) / (pts - 1)
         return [start + i * step for i in range(pts)]
 
-    def _set_trace_math(self, result: str, operation: str, operand1: str, operand2: str):
-        """
-        Perform trace math (e.g., phase noise cancellation).
-        Example: result='TRACE3', operation='POW',
-                 operand1='TRACE1', operand2='TRACE2'
-        """
-        self.write(f"TRAC:MATH {result},{operation},{operand1},{operand2}")
-
     def set_average_count(self, count: int):
         self.write(f"AVER:COUN {count}")
 
@@ -232,9 +193,6 @@ class KeysightMXA(BaseDevice):
     # -- Trace Control (suffix syntax) --------------------------------
     def set_trace_mode(self, trace_num: int | str, mode: str):
         self.write(f":TRACe{trace_num}:TYPE {mode}")
-
-    def set_trace_type_average(self, trace_num):
-        self.write(f":TRACe{trace_num}:TYPE AVERAGE")
 
     def set_trace_update(self, trace_num, state: bool = True):
         self.write(f":TRACe{trace_num}:UPDATE {'ON' if state else 'OFF'}")
@@ -274,15 +232,6 @@ class KeysightMXA(BaseDevice):
 
     def set_marker_x(self, marker: int, freq_hz: float):
         self.write(f"CALC:MARK{marker}:X {freq_hz}")
-
-    def marker_to_peak(self, marker: int):
-        self.write(f"CALC:MARK{marker}:MAX")
-
-    def marker_to_next_peak(self, marker: int):
-        self.write(f"CALC:MARK{marker}:MAX:NEXT")
-
-    def marker_to_center(self, marker: int):
-        self.write(f"CALC:MARK{marker}:CENT")
 
     def get_marker_x(self, marker: int) -> float:
         return float(self.query(f"CALC:MARK{marker}:X?"))

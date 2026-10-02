@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 import requests
 
@@ -15,7 +17,7 @@ def response(body: str, status: int = 200) -> requests.Response:
 def test_read_frequency_reads_selected_channel_with_bounded_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    seen = {}
+    seen: dict[str, Any] = {}
 
     def get(url, **kwargs):
         seen.update(url=url, **kwargs)
@@ -31,7 +33,7 @@ def test_read_frequency_reads_selected_channel_with_bounded_request(
 
 
 def test_read_frequency_uses_default_channel(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = {}
+    seen: dict[str, Any] = {}
 
     def get(url, **kwargs):
         seen.update(url=url, **kwargs)
@@ -100,7 +102,7 @@ def test_single_readout_applies_reference_to_one_measurement(
 
 
 def test_set_pid_setpoint_posts_a_form_request(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = {}
+    seen: dict[str, Any] = {}
 
     def get(*args, **kwargs):
         raise AssertionError("PID setpoint must not use GET")
@@ -122,7 +124,7 @@ def test_set_pid_setpoint_posts_a_form_request(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_set_pid_setpoint_uses_default_channel(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = {}
+    seen: dict[str, Any] = {}
 
     monkeypatch.setattr(
         wavemeter_readout.requests,

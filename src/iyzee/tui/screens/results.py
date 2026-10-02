@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -22,11 +23,22 @@ from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
-from textual.widgets import Button, Checkbox, DataTable, Input, ListView, RichLog, Select, Static
+from textual.widgets import (
+    Button,
+    Checkbox,
+    DataTable,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    RichLog,
+    Select,
+    Static,
+)
 from textual_plotext import PlotextPlot
 
 from ...experiment import difference_values_many
-from ...experiment.io import DATA_ROOT, Recording, load_recording
+from ...experiment.io import DATA_ROOT, STEM_PATTERN, Recording, load_recording
 from ...waveform_math import (
     Trace,
     save_waveform_figure,
@@ -36,8 +48,7 @@ from ...waveform_math import (
     traces_from_scope_recording,
 )
 from ..plotting import draw_series, prepare_series
-from .page import FieldError, _field, _finite_float
-from .runlist import RunListPage
+from .page import FieldError, Page, _field, _finite_float
 
 _DATA_ROOT = DATA_ROOT
 
@@ -199,7 +210,16 @@ def _sweep_data(recording: Recording, statistic: str) -> _SweepData:
     return _SweepData(frequency, plot_x, requested, measured, labels, values)
 
 
-class ResultsScreen(RunListPage):
+def run_label(path: Path, mtime: float) -> str:
+    """List label for one saved run: its name (if any) and save time."""
+    when = datetime.fromtimestamp(mtime).astimezone()
+    match = STEM_PATTERN.match(path.stem)
+    name = match["name"] if match else None
+    prefix = f"{escape(name)}  " if name else ""
+    return f"{prefix}{when:%Y-%m-%d %H:%M:%S}"
+
+
+class ResultsScreen(Page):
     """Browse saved runs and inspect either sweep or scope results."""
 
     LIST_ID = "results-list"
@@ -295,7 +315,9 @@ class ResultsScreen(RunListPage):
         )
 
     def on_mount(self) -> None:
-        self._init_run_list()
+        self._paths: list[Path] = []
+        self._path: Path | None = None
+        self._suppress_events = False
         self._recording: Recording | None = None
         self._measured: dict[str, Trace] = {}
         self._derived: dict[str, Trace] = {}
@@ -307,6 +329,53 @@ class ResultsScreen(RunListPage):
         self._set_sweep_visible(False)
         self._set_scope_visible(False)
         self._set_operation_fields("subtract")
+
+    def on_show(self) -> None:
+        self.refresh_runs()
+
+    def refresh_runs(self) -> None:
+        """Re-scan the data directory (newest first), keeping the selection.
+
+        ``ListView`` posts its own ``Highlighted`` message on every change to
+        ``.index``, including the implicit ``None -> 0`` it makes the moment
+        the first item is mounted into a previously-empty list, not just the
+        explicit assignment below. Rebuilding the list would otherwise drive
+        :meth:`on_list_view_highlighted` (and everything it triggers: a file
+        load, a worker-threaded render) two or three times for what is, to
+        the person looking at the screen, one visit to this page.
+        ``_suppress_events`` turns those off for the rebuild, and this method
+        makes the one call that matters, to ``_select`` or ``_show_empty``,
+        itself.
+        """
+        list_view = self.query_one(f"#{self.LIST_ID}", ListView)
+        index = list_view.index
+        previous = (
+            self._paths[index] if index is not None and 0 <= index < len(self._paths) else None
+        )
+        self._paths = sorted(self._scan_runs(), key=lambda p: p.stat().st_mtime, reverse=True)
+        self.query_one(f"#{self.HINT_ID}", Static).update(self._hint_text())
+        self._suppress_events = True
+        try:
+            list_view.clear()
+            for path in self._paths:
+                list_view.append(ListItem(Label(run_label(path, path.stat().st_mtime))))
+            if self._paths:
+                list_view.index = self._paths.index(previous) if previous in self._paths else 0
+        finally:
+            self._suppress_events = False
+
+        if self._paths:
+            self._select(self._paths[list_view.index or 0])
+        else:
+            self._show_empty()
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        """Follow Up/Down directly."""
+        if self._suppress_events or event.list_view.id != self.LIST_ID:
+            return
+        index = event.list_view.index
+        if index is not None and 0 <= index < len(self._paths):
+            self._select(self._paths[index])
 
     def _scan_runs(self) -> list[Path]:
         return list(_DATA_ROOT.glob("**/*.npz"))
@@ -467,6 +536,7 @@ class ResultsScreen(RunListPage):
         self._suppress_events = True
         try:
             table.clear(columns=True)
+            rows: list[tuple[str, ...]]
             if frequency:
                 table.add_columns("Point", "Requested (THz)", "Measured (THz)", "delta")
                 rows = [

@@ -168,12 +168,11 @@ async def test_apply_after_the_scope_disconnects_releases_the_busy_flag_and_keep
 
         app.handles.pop("scope")  # disconnected between the click and the worker starting
         screen._settings_busy = True
-        screen._apply_channels(scope, [baseline[0]], baseline)
+        screen._apply_channels(scope, [baseline[0]], baseline, threading.Lock())
 
-        # Not stuck "busy"; nothing was written to the (gone) scope; baseline untouched.
+        # Not stuck "busy", and the stale result is discarded: baseline untouched.
         # (The Apply button itself is legitimately disabled again with no scope connected.)
         await wait_until(pilot, lambda: not screen._settings_busy)
-        assert scope.calls == []
         assert screen._last_applied_channel_settings == baseline
 
 

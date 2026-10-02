@@ -140,6 +140,18 @@ class ScopeScreen(Page):
     action that records the selected waveforms before plotting them.
     """
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Set here, not in on_mount: refresh_readiness() and the Changed handlers
+        # can run before the page is mounted.
+        self._last_applied_channel_settings: tuple[ChannelSettings, ...] | None = None
+        self._last_applied_trigger_settings: TriggerSettings | None = None
+        self._settings_synced = False
+        self._settings_busy = False
+        self._retrieve_in_flight = False
+        self._suppress_dirty_events = False
+        self._dirty_fields: set[str] = set()
+
     def compose(self) -> ComposeResult:
         yield Static("Scope", classes="panel-title")
         # Shown only while the scope isn't connected; see refresh_readiness().
@@ -201,13 +213,6 @@ class ScopeScreen(Page):
         plot.plt.title("Scope waveforms")
         plot.plt.xlabel("Time (s)")
         plot.plt.ylabel("Voltage (V)")
-        self._last_applied_channel_settings: tuple[ChannelSettings, ...] | None = None
-        self._last_applied_trigger_settings: TriggerSettings | None = None
-        self._settings_synced = False
-        self._settings_busy = False
-        self._retrieve_in_flight = False
-        self._suppress_dirty_events = False
-        self._dirty_fields: set[str] = set()
         self.refresh_readiness()
         self._refresh_scope_ui()
 
@@ -295,8 +300,6 @@ class ScopeScreen(Page):
 
     def _refresh_scope_ui(self) -> None:
         """Update dirty styling, status text, and which actions can run."""
-        if not hasattr(self, "_dirty_fields"):
-            return
         for channel in CHANNELS:
             self._set_channel_dirty_style(channel)
         trigger_dirty = any(field_id.startswith("trig-") for field_id in self._dirty_fields)
@@ -370,10 +373,9 @@ class ScopeScreen(Page):
             self._settings_synced = False
             self._settings_busy = False
             self._retrieve_in_flight = False
-            if hasattr(self, "_dirty_fields"):
-                self._dirty_fields.clear()
-                for widget in self.query(".scope-dirty"):
-                    widget.remove_class("scope-dirty")
+            self._dirty_fields.clear()
+            for widget in self.query(".scope-dirty"):
+                widget.remove_class("scope-dirty")
             status.update("Not ready: connect the Scope first — press F1 for the Connect page.")
         elif not self._settings_synced and not self._retrieve_in_flight:
             self._start_retrieve(silent=True)
@@ -534,8 +536,8 @@ class ScopeScreen(Page):
         return settings
 
     def _start_apply_channels(self) -> None:
-        scope = self._scope()
-        if scope is None:
+        handle = self._scope_handle()
+        if handle is None:
             return
         if self._settings_busy:
             self.notify("Another scope settings operation is already running.", severity="warning")
@@ -568,7 +570,7 @@ class ScopeScreen(Page):
             self._refresh_scope_ui()
             return
         self._begin_settings_op("apply-channels")
-        self._apply_channels(scope, changed, baseline)
+        self._apply_channels(handle.device, changed, baseline, handle.lock)
 
     @work(thread=True, exclusive=True, group="scope-apply-channels", exit_on_error=False)
     def _apply_channels(
@@ -576,21 +578,11 @@ class ScopeScreen(Page):
         scope: LeCroy,
         settings: Sequence[ChannelSettings],
         baseline: Sequence[ChannelSettings],
+        lock,
     ) -> None:
-        handle = self.iyzee_app.handles.get("scope")
-        if handle is None:
-            result = ChannelApplyResult(
-                (),
-                tuple(
-                    ChannelError(s.channel, RuntimeError("scope disconnected")) for s in settings
-                ),
-                (),
-            )
-            self._ui(self._finish_apply_channels, scope, settings, result, baseline)
-            return
         try:
             result = apply_and_verify_channel_settings(
-                scope, settings, current_settings=baseline, lock=handle.lock
+                scope, settings, current_settings=baseline, lock=lock
             )
         except Exception as exc:  # noqa: BLE001 - never leave the Apply button disabled
             log.exception("scope: applying channel settings failed")

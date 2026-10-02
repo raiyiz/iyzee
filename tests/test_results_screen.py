@@ -7,15 +7,16 @@ import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
 from helpers import async_test, notifications, plain, save_run, wait_until
 from test_scope_workflows import DetailedFakeScope
 from textual.pilot import Pilot
-from textual.widgets import Button, Input, ListView, Select, Static
+from textual.widgets import Button, DataTable, Input, ListView, Select, Static
 
-from iyzee.scope import Channel
+from iyzee.scope import Channel, LeCroy
 from iyzee.scope_workflows import acquire_scope_recording, save_scope_acquisition
 from iyzee.tui import app as app_mod
 from iyzee.tui.screens import results as results_mod
@@ -28,7 +29,7 @@ def _save_scope_run(
     *,
     channels: tuple[Channel, ...] = (Channel.C1, Channel.C2),
 ) -> Path:
-    recording = acquire_scope_recording(DetailedFakeScope(), list(channels))
+    recording = acquire_scope_recording(cast(LeCroy, DetailedFakeScope()), list(channels))
     return save_scope_acquisition(recording, data_root).with_suffix(".npz")
 
 
@@ -146,7 +147,7 @@ async def test_frequency_sweep_keeps_requested_and_measured_frequency_navigation
 
     async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
         await wait_until(pilot, lambda: "2 point(s)" in _summary(screen))
-        table = screen.query_one("#results-points")
+        table = screen.query_one("#results-points", DataTable)
         assert len(table.rows) == 2
         point_summary = plain(screen.query_one("#results-point-summary", Static))
         assert "Requested: 377.100000000 THz" in point_summary
@@ -321,7 +322,9 @@ async def test_invalid_scope_input_creates_no_derived_trace(
         await _apply_op(screen, pilot, "scale", a="C1", yscale=invalid)
         assert screen._derived == {}
         assert screen.query_one("#results-yscale").has_class("-invalid")
-        assert any("Y scale" in message for message in notifications(pilot.app))
+        assert any(
+            "Y scale" in message for message in notifications(cast(app_mod.IyzeeApp, pilot.app))
+        )
 
 
 @async_test
@@ -380,7 +383,7 @@ async def test_export_writes_a_real_png_and_runs_off_the_ui_thread(
 
     monkeypatch.setattr(results_mod, "save_waveform_figure", gated_save)
     async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        screen.query_one("#results-export").press()
+        screen.query_one("#results-export", Button).press()
         await wait_until(pilot, entered.is_set)
         assert screen.query_one("#results-export").disabled
         release.set()
