@@ -6,18 +6,15 @@ touch the real ``data/`` directory.
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 
 import pytest
-from helpers import async_test, make_result, plain, save_run
+from helpers import async_test, make_result, plain, save_run, wait_until
 from textual.pilot import Pilot
-from textual.widgets import Label, ListView, Static
+from textual.widgets import DataTable, ListView, Select, Static
 
-from iyzee.experiment import save_step_results
 from iyzee.tui import app as app_mod
 from iyzee.tui.screens import traces as traces_mod
 from iyzee.tui.screens.traces import TracesScreen
@@ -71,6 +68,86 @@ async def test_lists_runs_newest_first(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 @async_test
+async def test_a_slow_load_does_not_clobber_a_newer_ones_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression guard for the generation check in _apply_view: select a
+    second run while the first (now-stale) load is still reading its file,
+    and confirm the plot itself ends up drawn from the second selection,
+    not whichever load happened to finish first.
+    """
+    import threading
+
+    old = save_run(tmp_path, "2026-09-17_bandwidth", mtime=1_000)
+    save_run(tmp_path, "2026-09-18_frequency", mtime=2_000)
+
+    real_prepare = traces_mod._prepare_view
+    calls: list[Path] = []
+    release = threading.Event()
+    entered_first = threading.Event()
+
+    def gated_prepare(path: Path):  # type: ignore[no-untyped-def]
+        calls.append(path)
+        if len(calls) == 1:
+            entered_first.set()
+            release.wait(timeout=5)
+        return real_prepare(path)
+
+    monkeypatch.setattr(traces_mod, "_prepare_view", gated_prepare)
+
+    drawn: list[str] = []
+    real_draw_series = traces_mod.draw_series
+
+    def spying_draw_series(plot, series, **kwargs):  # type: ignore[no-untyped-def]
+        if plot.id == "traces-plot":
+            drawn.append(kwargs.get("title", ""))
+        return real_draw_series(plot, series, **kwargs)
+
+    monkeypatch.setattr(traces_mod, "draw_series", spying_draw_series)
+
+    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, pilot):
+        # the initial auto-select (of `new`) is now blocked inside gated_prepare
+        await wait_until(pilot, entered_first.is_set)
+
+        screen._select(old)  # a second, newer selection while the first is still loading
+        await wait_until(pilot, lambda: len(calls) == 2)
+        release.set()  # let the first (now stale) load proceed and finish
+
+        await wait_until(pilot, lambda: len(drawn) >= 1)
+        await pilot.pause(0.2)  # give a stale, wrongly-applied draw a chance to land
+
+        assert drawn == [old.name]
+
+
+@async_test
+async def test_reselecting_the_currently_shown_run_does_not_reload_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ListView posts Highlighted on changes it makes to itself (e.g. the
+    implicit None -> 0 a freshly-populated list makes), not just on a real
+    navigation — _select()'s same-path check is what keeps that from
+    reloading the file and rebuilding the plot for no reason."""
+    path = save_run(tmp_path, "2026-09-17_bandwidth")
+    calls = 0
+    real_prepare = traces_mod._prepare_view
+
+    def counting_prepare(p: Path):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        return real_prepare(p)
+
+    monkeypatch.setattr(traces_mod, "_prepare_view", counting_prepare)
+    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, pilot):
+        await wait_until(pilot, lambda: calls >= 1)
+        first_count = calls
+
+        screen._select(path)  # already showing this run
+        await pilot.pause(0.2)
+
+        assert calls == first_count  # no redundant reload
+
+
+@async_test
 async def test_a_run_shows_its_summary_verbatim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -84,8 +161,10 @@ async def test_a_run_shows_its_summary_verbatim(
         # raise, or silently swallow the text.
         note="see [/docs] and [nan, nan]",
     )
-    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        screen._show(path)
+    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, pilot):
+        screen._path = None  # force a real (re)load of `path` below
+        screen._select(path)
+        await wait_until(pilot, lambda: "2 point(s)" in _summary(screen))
         text = _summary(screen)
         assert "2 point(s)" in text and "analyzer" in text
         assert "see [/docs] and [nan, nan]" in text
@@ -106,9 +185,10 @@ async def test_a_damaged_run_degrades_to_a_message_instead_of_crashing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = make_run(tmp_path)
-    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        screen._show(path)  # must not raise
-        assert expected in _summary(screen)
+    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, pilot):
+        screen._path = None  # force a real (re)load of `path` below
+        screen._select(path)  # must not raise
+        await wait_until(pilot, lambda: expected in _summary(screen))
 
 
 @async_test
@@ -119,13 +199,12 @@ async def test_preview_follows_the_highlight_and_survives_a_revisit(
     new = save_run(tmp_path, "2026-09-18_frequency", mtime=2_000)
     async with _open_traces_screen(monkeypatch, tmp_path) as (screen, pilot):
         # On arrival the newest run is highlighted *and* previewed.
-        assert new.name in _summary(screen)
+        await wait_until(pilot, lambda: new.name in _summary(screen))
 
         listing = screen.query_one("#traces-list", ListView)
         listing.focus()
         await pilot.press("down")  # no Enter needed
-        await pilot.pause(0.3)
-        assert listing.index == 1 and old.name in _summary(screen)
+        await wait_until(pilot, lambda: listing.index == 1 and old.name in _summary(screen))
         shown = _summary(screen)
         await pilot.press("enter")  # selecting explicitly (Enter / click) still works
         await pilot.pause(0.2)
@@ -134,9 +213,8 @@ async def test_preview_follows_the_highlight_and_survives_a_revisit(
         await pilot.press("escape", "c")  # leave and come back
         await pilot.pause()
         await pilot.press("t")
-        await pilot.pause(0.5)
         # Used to snap back to row 0 while the preview still showed row 1.
-        assert listing.index == 1 and _summary(screen) == shown
+        await wait_until(pilot, lambda: listing.index == 1 and _summary(screen) == shown)
 
 
 @async_test
@@ -144,19 +222,52 @@ async def test_an_empty_folder_explains_itself_and_names_the_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        assert "No runs recorded yet" in _summary(screen)
+        assert "No recordings yet" in _summary(screen)
         assert str(tmp_path) in plain(screen.query_one("#traces-hint", Static))
 
 
 @async_test
-async def test_the_list_shows_the_run_name_and_save_time_not_the_raw_filename(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    run = tmp_path / "2026-09"
-    run.mkdir()
-    saved = save_step_results([make_result()], run, name="bandwidth")
-    when = datetime(2026, 9, 18, 14, 10, 5).timestamp()
-    os.utime(saved, (when, when))
-    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        item = screen.query_one("#traces-list", ListView).children[0]
-        assert item.query_one(Label).render().plain == "bandwidth  2026-09-18 14:10:05"  # type: ignore[union-attr]
+async def test_frequency_run_is_navigable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from iyzee.experiment.core import StepResult
+
+    results = [
+        StepResult(
+            label="pt0",
+            x_value=377.100000,
+            x_unit="THz",
+            traces={"squeezing": [1.0, 3.0], "shot_noise": [0.0, 0.0]},
+            meta={"wavemeter_channel": 4, "measured_frequency_thz": 377.100001},
+        ),
+        StepResult(
+            label="pt1",
+            x_value=377.100010,
+            x_unit="THz",
+            traces={"squeezing": [2.0, 4.0], "shot_noise": [0.0, 0.0]},
+            meta={"wavemeter_channel": 4, "measured_frequency_thz": 377.100011},
+        ),
+    ]
+    save_run(tmp_path, "2026-10", *results)
+
+    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, pilot):
+        await wait_until(pilot, lambda: "2 point(s)" in _summary(screen))
+
+        table = screen.query_one("#traces-points", DataTable)
+        assert len(table.rows) == 2
+        point_summary = plain(screen.query_one("#traces-point-summary", Static))
+        assert "Requested: 377.100000000 THz" in point_summary
+        assert "Measured: 377.100001000 THz" in point_summary
+        assert "Mean delta: 2.000" in point_summary
+
+        table.focus()
+        await pilot.press("down")
+        await wait_until(
+            pilot, lambda: "Point 1" in plain(screen.query_one("#traces-point-summary", Static))
+        )
+        point_summary = plain(screen.query_one("#traces-point-summary", Static))
+        assert "Measured: 377.100011000 THz" in point_summary
+
+        selector = screen.query_one("#traces-statistic", Select)
+        selector.value = "minimum"
+        await pilot.pause()
+        point_summary = plain(screen.query_one("#traces-point-summary", Static))
+        assert "Minimum delta: 2.000" in point_summary

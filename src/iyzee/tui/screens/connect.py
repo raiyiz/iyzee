@@ -12,7 +12,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from typing import TYPE_CHECKING, cast
 
 from rich.markup import escape
 from textual import work
@@ -21,11 +20,7 @@ from textual.widgets import DataTable, Static
 
 from ..instruments import INSTRUMENTS, InstrumentSpec
 from ..text import one_line
-from ..workers import ConnectOutcome
 from .page import Page
-
-if TYPE_CHECKING:
-    from ..app import IyzeeApp
 
 log = logging.getLogger("iyzee.tui")
 
@@ -35,17 +30,6 @@ DETAIL_COL = "detail"
 
 class ConnectScreen(Page):
     """Table of instruments with live connect/disconnect status."""
-
-    @property
-    def iyzee_app(self) -> IyzeeApp:
-        """``self.app`` narrowed to the concrete app type.
-
-        ``Widget.app`` is typed as ``App[Any]`` in Textual's stubs, which
-        doesn't know about ``handles``/``instrument_locks`` — this app is
-        always an ``IyzeeApp`` at runtime (``IyzeeApp().run()`` is the
-        only entry point), so the cast is safe.
-        """
-        return cast("IyzeeApp", self.app)
 
     def compose(self) -> ComposeResult:
         yield Static("Instruments", classes="panel-title")
@@ -89,6 +73,8 @@ class ConnectScreen(Page):
             hint.update(f"{escape(spec.label)}: working…")
         elif spec.key in self.iyzee_app.handles:
             hint.update(f"Enter, then Enter again: disconnect {escape(spec.label)}")
+        elif spec.key in self.iyzee_app.lost_links:
+            hint.update(f"Link lost. Enter: reconnect {escape(spec.label)}")
         else:
             hint.update(f"Enter: connect {escape(spec.label)}")
 
@@ -103,6 +89,14 @@ class ConnectScreen(Page):
         for spec in INSTRUMENTS:
             if spec.key in self.iyzee_app.handles:
                 table.update_cell(spec.key, STATUS_COL, "connected")
+            elif spec.key in self.iyzee_app.lost_links:
+                self.show_lost(spec.key, self.iyzee_app.lost_links[spec.key])
+
+    def show_lost(self, key: str, reason: str) -> None:
+        """Mark a row whose link died (called by the app's idle-link check)."""
+        self._armed = None
+        self._busy.discard(key)
+        self._set_row(key, "lost", reason)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         # NOTE: this is the correct hook for "Enter pressed on a row" — a
@@ -156,24 +150,6 @@ class ConnectScreen(Page):
         self._busy.discard(key)
         self._update_hint()
 
-    def _ui(self, callback, *args, **kwargs) -> None:
-        """Call back into the UI thread from a worker, without ever letting
-        that call blow up the worker itself.
-
-        If the user has switched screens (or the table has been torn down
-        for some other reason) by the time a background connect/disconnect
-        finishes, the widget this tries to update may be gone. Textual
-        propagates any exception raised inside a ``call_from_thread``
-        callback back to the calling (worker) thread; left unguarded, that
-        turns an ordinary "switched screens mid-connect" moment into an
-        unhandled worker exception, which is a much worse failure mode
-        than just skipping a now-irrelevant UI update.
-        """
-        try:
-            self.app.call_from_thread(callback, *args, **kwargs)
-        except Exception:
-            log.exception("connect screen: UI update from worker thread failed")
-
     # Not ``exclusive``: that cancels the previous worker in the group, so
     # connecting a second instrument used to "cancel" the first one's
     # worker mid-connect. Per-instrument re-entry is prevented by
@@ -182,9 +158,9 @@ class ConnectScreen(Page):
     def _connect(self, spec: InstrumentSpec) -> None:
         try:
             self._ui(self._set_row, spec.key, "connecting...", "-")
+            handle = spec.build()
             try:
-                with self.iyzee_app.instrument_locks[spec.key]:
-                    handle = spec.build()
+                with handle.lock:
                     try:
                         handle.connect()
                         detail = handle.probe()
@@ -207,9 +183,9 @@ class ConnectScreen(Page):
                 )
                 return
             self.iyzee_app.handles[spec.key] = handle
-            outcome = ConnectOutcome(key=spec.key, ok=True, detail=detail)
-            log.info("connected %s (%s)", spec.key, outcome.detail)
-            self._ui(self._set_row, outcome.key, "connected", outcome.detail)
+            self.iyzee_app.lost_links.pop(spec.key, None)
+            log.info("connected %s (%s)", spec.key, detail)
+            self._ui(self._set_row, spec.key, "connected", detail)
         finally:
             self._ui(self._release, spec.key)
 
@@ -220,7 +196,7 @@ class ConnectScreen(Page):
             self._ui(self._set_row, spec.key, "disconnecting...", "-")
             if handle is not None:
                 try:
-                    with self.iyzee_app.instrument_locks[spec.key]:
+                    with handle.lock:
                         handle.disconnect()
                 except Exception as exc:  # noqa: BLE001
                     log.exception("error closing %s", spec.key)

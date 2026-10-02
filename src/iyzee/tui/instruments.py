@@ -5,31 +5,39 @@ The lab's devices are deliberately heterogeneous at the driver level —
 (:class:`~iyzee.base.BaseDevice`), the wavemeter is a stateless HTTP API,
 and the scope is a raw-socket legacy driver. Rather than teaching the TUI
 about each of those, every device is wrapped in a small adapter that
-implements the same three operations: ``connect()``, ``disconnect()``, and
-``probe()`` (a cheap call that both confirms the link is alive and returns
+implements the same lifecycle operations: ``connect()``, ``disconnect()``,
+and ``probe()`` (a cheap call that both confirms the link is alive and returns
 a short human-readable status string).
 
 Adding a new instrument to the Connect screen is: write one adapter class
 here, add one :class:`InstrumentSpec` to ``INSTRUMENTS`` below. No screen
 code changes required.
+All handles also expose ``.lock`` for shared serialization. Handles with a
+live driver expose that driver as ``.device``; stateless adapters may return ``None``.
 """
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ..base import CH, IP
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
-from ..scope import LeCroy
-from ..wavemeter_readout import WavemeterReadoutError, single_readout
+from ..scope import LeCroy, LeCroyTimeoutError
+from ..wavemeter_readout import Wavemeter, WavemeterReadoutError
+
+log = logging.getLogger("iyzee.instruments")
 
 
 class InstrumentHandle(Protocol):
-    """What the Connect screen needs from any device adapter."""
+    """What the Connect screen — and anything else that talks to this
+    instrument, TUI or not — needs from any device adapter."""
 
     def connect(self) -> None:
         """Open the link. Raises on failure."""
@@ -48,11 +56,70 @@ class InstrumentHandle(Protocol):
         """
         ...
 
+    @property
+    def device(self) -> Any | None:
+        """The live underlying device, if this handle exposes one.
 
-class _VisaHandle:
+        Stateless adapters such as the wavemeter return ``None``; the
+        Connect/Sweep/Scope/console paths only use handles with a live device.
+        """
+        ...
+
+    @property
+    def alive(self) -> bool:
+        """Whether the link is still believed usable. No instrument I/O; cheap.
+
+        ``False`` once the driver has dropped the connection (a timeout, the
+        peer closing it, a keepalive failure). Adapters that cannot tell
+        report ``True``. The app polls this so a lost link is shown as lost
+        instead of staying "connected" until the next command fails.
+        """
+        ...
+
+    @property
+    def lock(self) -> threading.Lock | threading.RLock:
+        """Serializes every call to this instrument's hardware, from
+        whichever caller — a screen's background worker, the IPython
+        console (via :class:`LockedProxy`), or a plain script holding this
+        same handle directly.
+
+        Owned by the handle, not by :class:`~iyzee.tui.app.IyzeeApp`
+        (which used to keep a separate ``dict[str, threading.Lock]``
+        alongside ``handles``): a handle built and connected outside any
+        running app — the whole point of a script/console-first design —
+        still comes with correct synchronization for free, rather than
+        safety being something only the TUI happens to provide.
+        """
+        ...
+
+
+class _LockedHandle:
+    """Base for handles whose instrument access must be serialized.
+
+    Every concrete adapter gets one lock owned by the handle itself; callers
+    do not need a second lock table to coordinate access to the same device.
+    """
+
+    def __init__(self) -> None:
+        # Re-entrant: a caller holding the handle lock (a workflow batch) may go
+        # through a LockedProxy that takes the same lock again without deadlocking.
+        self._lock = threading.RLock()
+
+    @property
+    def lock(self) -> threading.RLock:
+        return self._lock
+
+    @property
+    def alive(self) -> bool:
+        # Overridden by adapters whose driver can tell (see ScopeHandle).
+        return True
+
+
+class _VisaHandle(_LockedHandle):
     """Adapter for any :class:`~iyzee.base.BaseDevice` (MXA, raw PSU)."""
 
     def __init__(self, device) -> None:
+        super().__init__()
         self._device = device
 
     def connect(self) -> None:
@@ -73,37 +140,40 @@ class _VisaHandle:
         return self._device
 
 
-class ShutterHandle:
-    """Adapter for :class:`~iyzee.power.ShutterControl`.
-
-    ``ShutterControl.__init__`` opens the PSU connection eagerly (it has
-    to, to set the shutter's trigger voltage/current), so ``connect()``
-    here is really "construct it" and ``disconnect()`` releases the PSU.
-    """
+class ShutterHandle(_LockedHandle):
+    """Adapter for :class:`~iyzee.power.ShutterControl`."""
 
     def __init__(self, chan: CH = CH.THREE, ip: IP = IP.POWER_SUPPLY) -> None:
+        super().__init__()
         self._chan = chan
         self._ip = ip
         self._shutter: ShutterControl | None = None
 
     def connect(self) -> None:
-        self._shutter = ShutterControl(chan=self._chan, ip=self._ip)
+        if self._shutter is None:
+            self._shutter = ShutterControl(chan=self._chan, ip=self._ip)
+            self._shutter.connect()
 
     def disconnect(self) -> None:
         if self._shutter is not None:
-            self._shutter.psu.close()
+            self._shutter.disconnect()
             self._shutter = None
 
     def probe(self) -> str:
         return f"shutter ready on CH{int(self._chan)}"
 
     @property
-    def shutter(self) -> ShutterControl | None:
-        """The live :class:`ShutterControl`, once connected."""
+    def device(self) -> ShutterControl | None:
+        """The underlying live shutter controller, once connected."""
         return self._shutter
 
+    @property
+    def shutter(self) -> ShutterControl | None:
+        """The live :class:`ShutterControl`, once connected."""
+        return self.device
 
-class WavemeterHandle:
+
+class WavemeterHandle(_LockedHandle):
     """Adapter for the wavemeter's stateless HTTP API.
 
     There is no persistent connection to open — ``connect()`` is a no-op,
@@ -112,31 +182,38 @@ class WavemeterHandle:
     """
 
     def __init__(self, channel: int = 0) -> None:
-        self._channel = channel
+        super().__init__()
+        self._wavemeter = Wavemeter(channel=channel)
 
     def connect(self) -> None:
+        # HTTP has no persistent session to open; probe() below proves the
+        # endpoint is reachable before the handle is published.
         return None
 
     def disconnect(self) -> None:
         return None
 
+    @property
+    def device(self) -> Wavemeter:
+        """The configured wavemeter HTTP client."""
+        return self._wavemeter
+
     def probe(self) -> str:
         try:
-            freq = single_readout(self._channel, printing=False)
+            freq = self._wavemeter.read_frequency()
         except WavemeterReadoutError as exc:
             raise ConnectionError(str(exc)) from exc
-        return f"ch{self._channel} = {freq:.6f} THz"
+        return f"ch{self._wavemeter.channel} = {freq:.6f} THz"
 
 
-class ScopeHandle:
-    """Adapter for the legacy :class:`~iyzee.scope.LeCroy` raw-socket driver.
+class ScopeHandle(_LockedHandle):
+    """Adapter for the legacy :class:`~iyzee.scope.LeCroy` raw-socket driver."""
 
-    This driver predates :class:`~iyzee.base.BaseDevice` and has no
-    ``*IDN?``-style query, so ``probe()`` can only report that the TCP
-    handshake succeeded, not identify the instrument.
-    """
+    #: Seconds the scope gets to answer its first query after connecting.
+    FIRST_RESPONSE_TIMEOUT = 15.0
 
     def __init__(self, ip: IP = IP.SCOPE) -> None:
+        super().__init__()
         self._ip = ip
         self._scope = LeCroy()
 
@@ -147,7 +224,40 @@ class ScopeHandle:
         self._scope.disconnect()
 
     def probe(self) -> str:
-        return f"socket connected @ {self._ip}"
+        """Prove the scope *answers*, not just that port 1861 accepted a TCP connection.
+
+        The first reply after connecting can be slow, and a timeout is fatal to
+        the VICP stream, so this one query gets a wider bound than steady state.
+        """
+        started = time.monotonic()
+        try:
+            identity = self._scope.idn(timeout=self.FIRST_RESPONSE_TIMEOUT)
+        except LeCroyTimeoutError as exc:
+            raise ConnectionError(
+                f"{self._ip} accepted the connection but did not answer *IDN? within "
+                f"{self.FIRST_RESPONSE_TIMEOUT:g}s (is another VICP client holding the scope?)"
+            ) from exc
+        log.info("scope answered *IDN? after %.2fs", time.monotonic() - started)
+        return identity
+
+    @property
+    def alive(self) -> bool:
+        return self._scope.check_link()
+
+    @property
+    def lock(self) -> threading.RLock:
+        """The driver's own transaction lock.
+
+        One lock guards the scope: the handle, the console's ``LockedProxy``,
+        workflow batches and the driver's compound transfers all share it, so
+        there is no second lock to order against or to deadlock on.
+        """
+        return self._scope.transaction_lock
+
+    @property
+    def device(self) -> LeCroy:
+        """The underlying live LeCroy driver."""
+        return self._scope
 
     @property
     def scope(self) -> LeCroy:
@@ -187,8 +297,9 @@ class LockedProxy:
 
     Wraps a device so attribute access passes straight through, but
     calling any method acquires ``lock`` for the call's duration — the
-    same :class:`threading.Lock` a screen holds around its own hardware
-    calls to this instrument (``IyzeeApp.instrument_locks``).
+    same lock a screen holds around its own hardware
+    calls to this instrument (the owning handle's own ``.lock``; see
+    :class:`InstrumentHandle`).
 
     Deliberately does *not* forward dunder methods such as ``__enter__``
     or ``__getitem__``: connection lifecycle belongs to the Connect
@@ -198,7 +309,7 @@ class LockedProxy:
     was actually closed).
     """
 
-    def __init__(self, target: Any, lock: threading.Lock) -> None:
+    def __init__(self, target: Any, lock: AbstractContextManager[Any]) -> None:
         object.__setattr__(self, "_target", target)
         object.__setattr__(self, "_lock", lock)
 

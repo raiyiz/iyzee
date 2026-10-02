@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
 
 from rich.markup import escape
 from textual.app import ComposeResult
@@ -21,9 +20,6 @@ from textual.widgets import Button, RichLog, Select, Static
 from .. import logging_support
 from ..logging_support import LogEntry
 from .page import Page
-
-if TYPE_CHECKING:
-    from ..app import IyzeeApp
 
 _LIVE = "__live__"
 
@@ -47,10 +43,6 @@ class LogScreen(Page):
     grow, and switching back to "Live session" is what to do next rather
     than waiting on it.
     """
-
-    @property
-    def iyzee_app(self) -> IyzeeApp:
-        return cast("IyzeeApp", self.app)
 
     def compose(self) -> ComposeResult:
         yield Static("Log", classes="panel-title")
@@ -109,7 +101,8 @@ class LogScreen(Page):
         self.query_one("#log-view", RichLog).write(entry.rich_markup())
 
     def _min_level(self) -> int:
-        return int(self.query_one("#log-level", Select).value)
+        level = self.query_one("#log-level", Select).value
+        return int(level) if isinstance(level, str) else logging.INFO
 
     def _refresh_sources(self) -> None:
         """Re-scan LOG_ROOT for rotated files, keeping the current
@@ -147,7 +140,8 @@ class LogScreen(Page):
         """
         view = self.query_one("#log-view", RichLog)
         view.clear()
-        source = self.query_one("#log-source", Select).value
+        selected = self.query_one("#log-source", Select).value
+        source = selected if isinstance(selected, str) else _LIVE  # allow_blank=False
         if source == _LIVE:
             min_level = self._min_level()
             for entry in self.iyzee_app.log_handler.records:

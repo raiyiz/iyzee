@@ -1,12 +1,17 @@
-import socket
-import struct  # for unpacking c structs
-from ctypes import Structure, c_int, c_ubyte
+import math
+import re
+import struct
+import threading
+from contextlib import contextmanager
 from enum import StrEnum
+from typing import Iterator
 
 import numpy as np
 
+from .vicp import VICPFrame, VICPProtocolError, VICPTimeoutError, VICPTransport
 
-class LeCroyTimeoutError(TimeoutError):
+
+class LeCroyTimeoutError(VICPTimeoutError):
     """The scope didn't respond (or accept data) within the configured
     socket timeout.
 
@@ -21,24 +26,6 @@ class LeCroyTimeoutError(TimeoutError):
     a message with real numbers in it (how long, how far into the
     transfer) instead of a bare, contextless timeout.
     """
-
-
-# c struct for header frame
-class LECROY_TCP_HEADER(Structure):
-    """defines LeCroy VICP protocol (TCP header)
-    _fields_ are byte, byte[3] and int (4-byte)
-    """
-
-    _fields_ = [("bEOI_Flag", c_ubyte), ("reserved", c_ubyte * 3), ("iLength", c_int)]
-
-
-# various flags just in case in hex
-LECROY_EOI_FLAG = 0x01
-LECROY_SRQ_FLAG = 0x08
-LECROY_CLEAR_FLAG = 0x10
-LECROY_LOCKOUT_FLAG = 0x20
-LECROY_REMOTE_FLAG = 0x40
-LECROY_DATA_FLAG = 0x80
 
 
 class Channel(StrEnum):
@@ -113,7 +100,32 @@ __all__ = [
     "TriggerCoupling",
     "TriggerMode",
     "TriggerSlope",
+    "VICPFrame",
+    "VICPProtocolError",
+    "VICPTransport",
 ]
+
+
+_IDENT = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,15}")
+
+
+def _ident(value: object, what: str = "identifier") -> str:
+    """A header-path token (``C1``, ``F2``, ``DAT1``) that is safe to interpolate.
+
+    Channels are normally the enums above, but several methods also accept a
+    plain ``str``; without this a value such as ``"C1:VOLT_DIV 1;C2"`` would be
+    sent to the instrument verbatim.
+    """
+    text = str(value)
+    if _IDENT.fullmatch(text) is None:
+        raise ValueError(f"invalid {what} {text!r}")
+    return text
+
+
+def _finite(value: float, what: str) -> float:
+    if not math.isfinite(float(value)):
+        raise ValueError(f"{what} must be finite, got {value!r}")
+    return value  # unchanged: ``10`` stays ``10``, not ``10.0``
 
 
 class LeCroy:
@@ -122,8 +134,8 @@ class LeCroy:
     tested for WaveSurfer 452
     Methods
     ------------
-    connect(IP) : after initializing to connect
-    disconnect() : to end communication
+    connect(IP) : after initializing to connect (raises if already connected)
+    disconnect() : to end communication (safe to call when not connected)
     send(message) : message to device (commands, etc.)
     readAll() : read a full framed response from the device, returns ascii string
     query(message) : send(message) + readAll(), returns the trimmed response text
@@ -150,189 +162,98 @@ class LeCroy:
     MAC_TCP_READ = 3  # time in s. to wait for the DSO to respond
     LECROY_SERVER_PORT = 1861  # as defined by LeCroy
     CMD_BUF_LEN = 8192
-    LECROY_EOI_FLAG = 0x01
-    LECROY_DATA_FLAG = 0x80
 
     def __init__(self):
-        self.CONNECTED = False
-
-    @staticmethod
-    def _recv_exact(sock: socket.socket, num_bytes: int) -> bytes:
-        """Read exactly ``num_bytes`` from ``sock``.
-
-        A single ``socket.recv()`` call is not guaranteed to return all the
-        bytes that are available/requested; it may return fewer. Loop until
-        the requested number of bytes has actually been received.
-
-        Each individual ``recv()`` is bounded by the socket's own timeout
-        (set once, in :meth:`connect`) — not the whole loop, so a large,
-        slow-but-still-arriving transfer isn't cut off just for taking a
-        while, but a stall with no data at all for a full timeout period is
-        reported rather than hanging forever.
-        """
-        chunks = bytearray()
-        while len(chunks) < num_bytes:
-            try:
-                chunk = sock.recv(num_bytes - len(chunks))
-            except TimeoutError as exc:
-                raise LeCroyTimeoutError(
-                    f"no response after {sock.gettimeout()}s "
-                    f"({len(chunks)}/{num_bytes} bytes received)"
-                ) from exc
-            if not chunk:
-                raise ConnectionError(f"Socket closed after {len(chunks)}/{num_bytes} bytes")
-            chunks.extend(chunk)
-        return bytes(chunks)
-
-    def connect(self, IP, delayval=None, connect_timeout=None):
-        """Connect to the IP, using LeCroy.LECROY_SERVER_PORT as port
-        creates a socket at LeCroy.s
-
-        ``connect_timeout`` (default :attr:`MAX_TCP_CONNECT`) bounds the
-        TCP handshake itself: if the scope is off, unplugged, or behind a
-        firewall that silently drops the connection, this raises
-        :class:`LeCroyTimeoutError` instead of blocking forever.
-
-        ``delayval`` (default :attr:`MAC_TCP_READ`) becomes the socket's
-        ongoing timeout for every read/write after that — applied via
-        ``socket.settimeout()``, so :meth:`send` and :meth:`_recv_exact`
-        (and everything built on them: :meth:`readAll`, :meth:`query`,
-        ``getDataFloats``, ...) inherit the same bound automatically.
-        """
-        if self.CONNECTED:
-            print("Already connected!")
-            return -2
-
-        if connect_timeout is None:
-            connect_timeout = self.MAX_TCP_CONNECT
-        if delayval is None:
-            delayval = self.MAC_TCP_READ
-
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.s.settimeout(connect_timeout)
-        try:
-            self.s.connect((IP, self.LECROY_SERVER_PORT))
-        except TimeoutError as exc:
-            self.s.close()
-            raise LeCroyTimeoutError(
-                f"no response connecting to {IP}:{self.LECROY_SERVER_PORT} "
-                f"within {connect_timeout}s"
-            ) from exc
-        except OSError:
-            self.s.close()
-            raise
-
-        self.SOCK_TIMEOUT = delayval
-        self.s.settimeout(self.SOCK_TIMEOUT)
-        self.CONNECTED = True
-
-    def disconnect(self):
-        """Disconnect from socket LeCroy.s"""
-        if not self.CONNECTED:
-            return -2
-
-        self.s.close()
-        self.CONNECTED = False
-
-    def send(self, message):
-        """Send a message through the socket to LeCroy oscilloscope.
-        Sends message length in header frame and then writes to the
-        socket until all is received by the oscilloscope
-        returns 0 if abnormal exit
-        """
-        msglen = len(message)
-        # set the header info
-        head = LECROY_TCP_HEADER(
-            self.LECROY_DATA_FLAG | self.LECROY_EOI_FLAG,
-            (1, 0, 0),
-            socket.htonl(msglen),
+        self._transport = VICPTransport(
+            port=self.LECROY_SERVER_PORT,
+            connect_timeout=self.MAX_TCP_CONNECT,
+            io_timeout=self.MAC_TCP_READ,
+            max_command_length=self.CMD_BUF_LEN,
+            timeout_error=LeCroyTimeoutError,
         )
 
-        # write the header first
-        try:
-            self.s.send(bytes(head))
-        except TimeoutError as exc:
-            raise LeCroyTimeoutError(
-                f"no response writing header after {self.s.gettimeout()}s"
-            ) from exc
+    @property
+    def connected(self) -> bool:
+        return self._transport.connected
 
-        # write the message
-        byteindx = 0
-        msgbytes = message.encode("ascii")
-        while byteindx < msglen:
-            try:
-                xferd = self.s.send(msgbytes[byteindx:])
-            except TimeoutError as exc:
-                raise LeCroyTimeoutError(
-                    f"no response after {self.s.gettimeout()}s ({byteindx}/{msglen} bytes sent)"
-                ) from exc
-            if xferd < 0:
-                raise RuntimeError(f"could not write the data block, returned {xferd}")
-            byteindx += xferd
+    @property
+    def address(self) -> str | None:
+        return self._transport.address
 
-    def __translate(self, data):
-        """Takes the device header (data) and finds the flag and data length
-        the device has specified in the usual Byte, Byte[3], Int format
-        See the documentation for possible eofflags
-        returns (eofflag, datalen)
-        """
-        headdata = struct.unpack("B3BI", data)  # get response (header from device)
-        datalen = socket.ntohl(headdata[-1])  # data length to be captured
-        eofflag = headdata[0]
-        return (eofflag, datalen)
+    @property
+    def transaction_lock(self) -> threading.RLock:
+        """The one re-entrant lock guarding this connection.
 
-    def __getHeader(self):
+        Anything that must serialize with the driver (e.g. an instrument
+        handle) should share this lock rather than keep a second one.
         """
-        Receive a 8-byte header from socket LeCroy.s
-        translate it and return the (eofflag, datalen)
+        return self._transport.transaction_lock
+
+    @property
+    def SOCK_TIMEOUT(self) -> float:
+        return self._transport.io_timeout
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Serialize a complete logical operation on the Scope connection."""
+        with self._transport.transaction():
+            yield
+
+    def connect(self, IP, delayval=None, connect_timeout=None):
+        """Connect to the IP with bounded handshake and I/O timeouts.
+
+        Raises ``RuntimeError`` if already connected, and
+        :class:`LeCroyTimeoutError` / ``OSError`` if the scope can't be reached.
         """
-        data = self._recv_exact(self.s, 8)
-        return self.__translate(data)
+        delayval = self.MAC_TCP_READ if delayval is None else delayval
+        connect_timeout = self.MAX_TCP_CONNECT if connect_timeout is None else connect_timeout
+        self._transport.connect(
+            IP,
+            connect_timeout=connect_timeout,
+            io_timeout=delayval,
+        )
+
+    def check_link(self) -> bool:
+        """Whether the connection is still usable (no I/O; see ``VICPTransport.check_link``)."""
+        return self._transport.check_link()
+
+    def disconnect(self):
+        """Disconnect from the Scope and clear connection state (idempotent)."""
+        self._transport.close()
+
+    def send(self, message):
+        """Send one VICP command frame."""
+        self._transport.send_command(message)
 
     def readAll(self):
-        """Read all that the device gives us (ascii) on Lecroy.s socket
-        1) Get header from device (flag, len)
-        2) receive len bytes and decode it
-        returns the flag of the last transmission frame and complete data string in ascii
-        NB! assumes all data frame transfers can be done in one go
-        """
-        dtstr = ""
-        while True:
-            flg, lnt = self.__getHeader()  # find how
-            dtstr += self._recv_exact(self.s, lnt).decode("ascii")  # gather data
-            if flg != self.LECROY_DATA_FLAG:  # data flag 0x80
-                break
-        return flg, dtstr
+        """Read all response frames through EOI and return ``(flags, text)``."""
+        flag, data = self._transport.read_message()
+        try:
+            return flag, data.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise VICPProtocolError("VICP response was not valid ASCII") from exc
 
-    def query(self, message: str) -> str:
-        """Send ``message`` and return the device's response, trimmed.
+    def query(self, message: str, *, timeout: float | None = None) -> str:
+        """Send ``message`` and atomically return the trimmed response text.
 
-        A thin building block over :meth:`send`/:meth:`readAll`, used by the
-        getters below. LeCroy responses echo the (short-form) command header
-        before the value — e.g. querying ``C1:COUPLING?`` gets back something
-        like ``C1:COUPLING D50`` — and for commands whose value can include a
-        unit suffix (``TIME_DIV 10 NS``) the two are space-separated tokens.
-        Because the exact response shape is command-specific, this method
-        deliberately does not try to strip the header or split out a unit:
-        it hands back the trimmed response text as-is, the same way the
-        existing ``getHorProperties``/``getDataFloats`` methods each parse
-        their own specific response format rather than relying on one
-        generic parser.
+        ``timeout`` overrides the I/O timeout for this exchange only.
         """
-        self.send(message)
-        _flag, text = self.readAll()
-        return text.strip()
+        return self._transport.query(message, timeout=timeout)
+
+    def idn(self, *, timeout: float | None = None) -> str:
+        """Return the scope's ``*IDN?`` identification string."""
+        return self.query("*IDN?", timeout=timeout)
 
     # ------------------------------------------------------------------
     # Channel (vertical) control
     # ------------------------------------------------------------------
     def set_volts_per_div(self, channel: Channel, volts_per_div: float) -> None:
         """Set the vertical scale for ``channel``, in volts/division."""
-        self.send(f"{channel}:VOLT_DIV {volts_per_div}")
+        self.send(f"{channel}:VOLT_DIV {_finite(volts_per_div, 'volts_per_div')}")
 
     def set_offset(self, channel: Channel, offset_volts: float) -> None:
         """Set the vertical offset for ``channel``, in volts."""
-        self.send(f"{channel}:OFFSET {offset_volts}")
+        self.send(f"{channel}:OFFSET {_finite(offset_volts, 'offset_volts')}")
 
     def set_coupling(self, channel: Channel, coupling: Coupling) -> None:
         """Set the input coupling and termination impedance for ``channel``.
@@ -347,7 +268,7 @@ class LeCroy:
     def set_attenuation(self, channel: Channel, factor: float) -> None:
         """Tell the scope the probe attenuation factor on ``channel`` (e.g.
         1, 10, or 100), so its vertical readings are scaled correctly."""
-        self.send(f"{channel}:ATTENUATION {factor}")
+        self.send(f"{channel}:ATTENUATION {_finite(factor, 'factor')}")
 
     def set_bandwidth_limit(self, channel: Channel, limit: str) -> None:
         """Set the bandwidth limit for ``channel``.
@@ -367,19 +288,29 @@ class LeCroy:
         header-path prefix), which is why this accepts ``Channel |
         MathChannel`` rather than only ``Channel``.
         """
-        self.send(f"{channel}:TRACE {'ON' if state else 'OFF'}")
+        self.send(f"{_ident(channel, 'channel')}:TRACE {'ON' if state else 'OFF'}")
 
     def set_invert(self, channel: Channel | MathChannel | str, state: bool) -> None:
         """Invert (or un-invert) ``channel``'s waveform."""
-        self.send(f"{channel}:INVERT_SET {'ON' if state else 'OFF'}")
+        self.send(f"{_ident(channel, 'channel')}:INVERT_SET {'ON' if state else 'OFF'}")
 
     def get_coupling(self, channel: Channel) -> str:
         """Return the device's raw response to a coupling query (see
         :meth:`query` for why this isn't parsed further)."""
         return self.query(f"{channel}:COUPLING?")
 
+    def get_volts_per_div(self, channel: Channel) -> str:
+        """Return the device's raw response to a volts/div query (see
+        :meth:`query` for why this isn't parsed further)."""
+        return self.query(f"{channel}:VOLT_DIV?")
+
+    def get_offset(self, channel: Channel) -> str:
+        """Return the device's raw response to a vertical-offset query
+        (see :meth:`query` for why this isn't parsed further)."""
+        return self.query(f"{channel}:OFFSET?")
+
     def get_trace_display(self, channel: Channel | MathChannel | str) -> str:
-        return self.query(f"{channel}:TRACE?")
+        return self.query(f"{_ident(channel, 'channel')}:TRACE?")
 
     # ------------------------------------------------------------------
     # Trigger control
@@ -403,7 +334,7 @@ class LeCroy:
 
     def set_trigger_level(self, source: Channel, level_volts: float) -> None:
         """Set the trigger level for ``source``, in volts."""
-        self.send(f"{source}:TRIG_LEVEL {level_volts}")
+        self.send(f"{source}:TRIG_LEVEL {_finite(level_volts, 'level_volts')}")
 
     def set_trigger_slope(self, source: Channel, slope: TriggerSlope) -> None:
         self.send(f"{source}:TRIG_SLOPE {slope}")
@@ -422,10 +353,29 @@ class LeCroy:
         A negative value delays the trigger point (showing more pre-trigger
         data); a positive value shows less pre-trigger data, or none.
         """
-        self.send(f"TRIG_DELAY {delay_seconds}")
+        self.send(f"TRIG_DELAY {_finite(delay_seconds, 'delay_seconds')}")
 
     def get_trigger_mode(self) -> str:
         return self.query("TRIG_MODE?")
+
+    def get_trigger_source(self) -> str:
+        """Return the device's raw response to ``TRIG_SELECT?``.
+
+        Unlike the other trigger getters, this reads back a whole
+        multi-field line (trigger type, source, and qualifiers), not a
+        single value — LeCroy's ``TRIG_SELECT?`` is the only query that
+        reports which channel :meth:`set_trigger_source` last armed, and
+        it echoes the full trigger-type description that command family
+        uses. :func:`iyzee.scope_workflows.read_trigger_settings` parses
+        out just the source field, assuming the ``EDGE,SR,<source>,...``
+        shape :meth:`set_trigger_source` itself writes.
+        """
+        return self.query("TRIG_SELECT?")
+
+    def get_trigger_level(self, source: Channel) -> str:
+        """Return the device's raw response to a trigger-level query (see
+        :meth:`query` for why this isn't parsed further)."""
+        return self.query(f"{source}:TRIG_LEVEL?")
 
     def get_trigger_slope(self, source: Channel) -> str:
         return self.query(f"{source}:TRIG_SLOPE?")
@@ -450,7 +400,9 @@ class LeCroy:
         :meth:`set_math_average`, and :meth:`set_math_fft` are thin
         convenience wrappers around the three operations mentioned above.
         """
-        self.send(f"{math_channel}:DEFINE EQN,'{equation}'")
+        if not equation or any(c in equation for c in "';\"\\") or not equation.isprintable():
+            raise ValueError(f"invalid math equation {equation!r}")
+        self.send(f"{_ident(math_channel, 'math channel')}:DEFINE EQN,'{equation}'")
 
     def set_math_difference(
         self, math_channel: MathChannel, minuend: Channel, subtrahend: Channel
@@ -470,132 +422,77 @@ class LeCroy:
         return self.query(f"{math_channel}:DEFINE?")
 
     def getDataBytes(self, channel="C1", block="DAT1"):
-        """
-        Simplest data retrieval, by byte values (low precision)
-        Use only for verification (should work regardless of data packing)
-        Channel can be "C1" or "C2",
-        data type "DAT1" for first block or "DAT2" for second (special, look at doc.)
-        returns list of values in 8-bit signed precision
-        """
-        self.send("CFMT DEF9,BYTE,BIN")  # by 1 byte, binary
-        # gets all the data of specified block on specified channel (waveform)
-        self.send(f"{channel}:WF? {block}")
-        self._recv_exact(self.s, 38)  # two data lines with headers 2*(8+11) characters
-        dta = b""
-        while True:
-            flg, aln = self.__getHeader()
-            if flg != self.LECROY_DATA_FLAG:
-                en = self._recv_exact(self.s, aln)
-                if en != b"\n":
-                    print(
-                        f"unexpected return, instead newline got {en} \n next length was {aln}, flag {flg}"
-                    )
-                break
-            # loop until all aln data is transferred
-            dta += self._recv_exact(self.s, aln)
-        # aa = [struct.unpack("b", ov) for ov in dta]
-        aa = [iup for iup in struct.iter_unpack("b", dta)]
-        return aa
+        """Return waveform samples as signed 8-bit values."""
+        with self.transaction():
+            channel, block = _ident(channel, "channel"), _ident(block, "block")
+            self.send("CFMT DEF9,BYTE,BIN")
+            self.send(f"{channel}:WF? {block}")
+            data = self._transport.read_definite_block()
+            return list(struct.iter_unpack("b", data))
+
+    def _read_words(self, channel: str, block: str) -> np.ndarray:
+        """Download one waveform as signed 16-bit codes (little-endian on the wire)."""
+        channel, block = _ident(channel, "channel"), _ident(block, "block")
+        with self.transaction():
+            # Format and byte order must be in force *before* the waveform is
+            # requested: the scope encodes the WF? reply when it executes it.
+            self.send("CFMT DEF9,WORD,BIN")
+            self.send("CORD LO")
+            self.send(f"{channel}:WF? {block}")
+            data = self._transport.read_definite_block()
+        if len(data) % 2:
+            raise VICPProtocolError(f"odd number of waveform bytes received: {len(data)}")
+        return np.frombuffer(data, dtype="<i2").astype(np.int16)
 
     def getDataWords(self, channel="C1", block="DAT1"):
-        """
-        return data in tuple of word values (-32768 to 32767)
-        Reads header, and double checks:
-        1: that the data stream ended correctly (!LECROY_DATA_FLAG flag with "\n" end),
-        2: length of the byte vector matches the specified length in the header
-        channel : "C1" or "C2"
-        block : "DAT1" (mostly), or "DAT2"
+        """Return waveform samples as a tuple of signed 16-bit values."""
+        return tuple(self._read_words(channel, block).tolist())
 
-        returns list of values (16-bit signed)
-        """
-
-        self.send("CFMT DEF9,WORD,BIN")  # by 2-byte word
-        self.send(f"{channel}:WF? {block}")  # gets all the data on C2 waveform data
-        self.send("CORD LO")  # <LSB><MSB>
-        # rethead : first 10 bytes ascii string (like response)
-        # followed by #9 xxxx xxxxx where x are 9 numbers to give len. of bin. blck
-        # so ... #9002000004 means 2000004 bytes in binary array
-        # or in our (2-byte word) case 1 000 002 numbers
-        rethead = self._recv_exact(self.s, 38)  # two data lines with headers 2*(8+11) characters
-
-        if rethead[-11:-9] != b"#9":
-            # we are not in a correct place, abort!
-            raise RuntimeError("incorrectly returned header")
-        # get the number of bytes expected by conv to str, lstrip leading 0
-        exp_bytes = int(rethead[-9:].decode("ascii").lstrip("0"))  # check later
-        if (exp_bytes % 2) != 0:
-            # incorrect, should be an even number of bytes
-            raise RuntimeError("odd number of bytes expected")
-
-        # accumulate the data from the socket
-        dta = b""  # bytes data accumulator
-        while True:
-            flg, alen = self.__getHeader()  # flg=LECROY_DATA_FLAG : more data coming
-            if flg != self.LECROY_DATA_FLAG:
-                # no more data expected
-                en = self._recv_exact(self.s, alen)
-                # does it end correctly
-                if en != b"\n":
-                    print(
-                        f"unexpected return, instead newline got {en} \n next length was {alen}, flag {flg}"
-                    )
-                break
-            # loop until all alen data is transferred
-            dta += self._recv_exact(self.s, alen)  # if the local accum. is done, only then append
-
-        # we have byte values now
-        # check if the length is correct
-        if len(dta) != exp_bytes:
-            raise AssertionError(f"Expected {exp_bytes} bytes, got {len(dta)}")
-        return struct.unpack(f"<{len(dta) // 2}h", dta)
+    def getDataFloatsDetailed(self, channel="C1", block="DAT1"):
+        """Return calibrated waveform data together with raw ADC codes."""
+        with self.transaction():
+            word_values = self._read_words(channel, block)
+            self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
+            _r1, r2 = self.readAll()
+            vertical_offset = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
+            self.send(f'{channel}:INSPECT? "VERTICAL_GAIN"')
+            _r1, r2 = self.readAll()
+            vertical_gain = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
+            self.send(f'{channel}:INSPECT? "VERTUNIT"')
+            _r1, r2 = self.readAll()
+            unit = r2.split("Unit Name = ")[-1].split('"\n')[0]
+            values = vertical_gain * word_values.astype(np.float64) - vertical_offset
+            return {
+                "unit": unit,
+                "values": values,
+                "raw_codes": word_values,
+                "vertical_gain": vertical_gain,
+                "vertical_offset": vertical_offset,
+            }
 
     def getDataFloats(self, channel="C1", block="DAT1"):
+        """Return one waveform in engineering units as ``(unit, values)``.
+
+        The detailed acquisition path is shared with scientific recording so
+        callers never need to download the same waveform twice just to retain
+        calibration metadata.
         """
-        return the data in measured units in np.float64
-        channel : "C1" or "C2"
-        block : "DAT1" (mostly), or "DAT2"
-        DAT1 is basic integer data block for storing measurements
-        DAT2 is used to hold the results of processing functions (extrema, FFT, etc.)
-        returns (VERTUNIT, array) : properly scaled numpy array of vertical value data
-        """
-        word_values = np.array(self.getDataWords(channel=channel, block=block))
-        # get vertical offset
-        self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
-        _r1, r2 = self.readAll()
-        VOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        # get vertical gain
-        self.send(f'{channel}:INSPECT? "VERTICAL_GAIN"')
-        _r1, r2 = self.readAll()
-        VG = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        # get vertical unit
-        self.send(f'{channel}:INSPECT? "VERTUNIT"')
-        _r1, r2 = self.readAll()
-        VERTUNIT = r2.split("Unit Name = ")[-1].split('"\n')[0]
-        # value = VERT_GAIN * data - VERT_OFFSET
-        return (VERTUNIT, VG * np.array(word_values, dtype=np.float64) - VOS)
+        data = self.getDataFloatsDetailed(channel=channel, block=block)
+        return data["unit"], data["values"]
 
     def getHorProperties(self, channel="C1"):
-        """
-        return the time vector data for the measurement for channel "channel"
-        for single sweep waveforms, for data point i, we have the horiz.
-        time from trigger being
-        t[i] = HORIZ_INTERVAL * i + HORIZ_OFFSET
-        in specified HORIZ_UNIT units
-        returns (HORUNIT, HORIZ_OFFSET, HORIZ_INTERVAL)
-        where
-        HORUNIT (string) is horizontal unit
-        HORIZ_OFFSET (double) is trigger offset for the first sweep of the trigger,
-                                 seconds b.w. the trig. and 1st data point
-        HORIZ_INTERVAL (float) is sampling interal for time domain waveforms
-        """
-        self.send(f'{channel}:INSPECT? "HORUNIT"')
-        _r1, r2 = self.readAll()
-        HORUNIT = r2.split("Unit Name = ")[-1].split('"\n')[0]
-        self.send(f'{channel}:INSPECT? "HORIZ_OFFSET"')
-        _r1, r2 = self.readAll()
-        HOS = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-        self.send(f'{channel}:INSPECT? "HORIZ_INTERVAL"')
-        _r1, r2 = self.readAll()
-        HInV = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
+        """Return the horizontal unit, offset, and sample interval."""
+        with self.transaction():
+            self.send(f'{channel}:INSPECT? "HORUNIT"')
+            _r1, r2 = self.readAll()
+            horunit = r2.split("Unit Name = ")[-1].split('"\n')[0]
 
-        return (HORUNIT, HOS, HInV)
+            self.send(f'{channel}:INSPECT? "HORIZ_OFFSET"')
+            _r1, r2 = self.readAll()
+            offset = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
+
+            self.send(f'{channel}:INSPECT? "HORIZ_INTERVAL"')
+            _r1, r2 = self.readAll()
+            interval = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
+
+            return horunit, offset, interval

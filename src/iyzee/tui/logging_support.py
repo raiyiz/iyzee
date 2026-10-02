@@ -20,15 +20,12 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
 from rich.markup import escape
 
-# A sibling of experiment.io.DATA_ROOT, not inside it: log files are
-# operational/debugging material, not measurement data, and mixing them
-# into data/ would make TracesScreen's **/*.npz glob — and a human
-# skimming that folder for actual runs — work harder for no reason.
-LOG_ROOT = Path(__file__).resolve().parents[3] / "logs"
+from iyzee.experiment.io import DATA_ROOT
+
+LOG_ROOT = DATA_ROOT / "logs"
 
 # The shared parent of every logger this application actually uses today
 # ("iyzee.tui", "iyzee.experiment") — attaching here, once, catches both
@@ -98,7 +95,7 @@ class TuiLogHandler(logging.Handler):
     ``on_record`` (supplied by the app) is responsible for getting back
     onto the app's own thread before touching any widget — the same
     ``call_from_thread`` pattern each screen's own worker->UI callbacks
-    already use (see e.g. ``ScopeScreen._ui``).
+    already use (see ``screens.page.Page._ui``).
     """
 
     def __init__(self, on_record: Callable[[LogEntry], None], maxlen: int = 2000) -> None:
@@ -117,6 +114,11 @@ class TuiLogHandler(logging.Handler):
             self._on_record(entry)
         except Exception:
             pass  # no app/event loop yet, or it's shutting down — buffer still has it
+
+
+def _mark_owned(handler: logging.Handler) -> None:
+    """Tag a handler as ours so a re-install can find and replace it."""
+    setattr(handler, "_iyzee_owned", True)  # noqa: B010 - attribute is dynamic by design
 
 
 def install(on_record: Callable[[LogEntry], None]) -> TuiLogHandler:
@@ -149,7 +151,7 @@ def install(on_record: Callable[[LogEntry], None]) -> TuiLogHandler:
             existing.close()
 
     handler = TuiLogHandler(on_record)
-    handler._iyzee_owned = True
+    _mark_owned(handler)
     handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(handler)
 
@@ -157,7 +159,7 @@ def install(on_record: Callable[[LogEntry], None]) -> TuiLogHandler:
     file_handler = logging.handlers.RotatingFileHandler(
         LOG_ROOT / "iyzee.log", maxBytes=2 * 1024 * 1024, backupCount=5
     )
-    file_handler._iyzee_owned = True
+    _mark_owned(file_handler)
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)-8s %(name)s: %(message)s")
     )

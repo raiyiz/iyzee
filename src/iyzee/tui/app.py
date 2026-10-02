@@ -7,7 +7,6 @@ import logging
 import os
 import threading
 import time
-from collections import defaultdict
 from pathlib import Path
 from typing import cast
 
@@ -25,13 +24,26 @@ from .logging_support import LogEntry
 from .logging_support import install as install_logging
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
+from .screens.data import DataScreen
 from .screens.log import LogScreen
+from .screens.page import Page
 from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
 from .screens.traces import TracesScreen
 from .workers import LastRun
 
 log = logging.getLogger("iyzee.tui")
+
+
+PAGE_SPECS = (
+    ("connect", "Connect", ConnectScreen),
+    ("sweep", "Sweep", SweepScreen),
+    ("scope", "Scope", ScopeScreen),
+    ("traces", "Traces", TracesScreen),
+    ("data", "Data", DataScreen),
+    ("console", "Console", ConsoleScreen),
+    ("log", "Log", LogScreen),
+)
 
 
 class NavRail(Static):
@@ -46,14 +58,9 @@ class NavRail(Static):
     dropped, and they are also refreshed on every page switch.
     """
 
-    PAGES = (
-        ("connect", "Connect"),
-        ("sweep", "Sweep"),
-        ("scope", "Scope"),
-        ("traces", "Traces"),
-        ("console", "Console"),
-        ("log", "Log"),
-    )
+    # Page ids, labels, and widget classes share one registry so adding a
+    # page cannot leave the nav rail and ContentSwitcher out of sync.
+    PAGES = tuple((page_id, label) for page_id, label, _screen in PAGE_SPECS)
 
     def compose(self) -> ComposeResult:
         yield Static("iyzee", id="nav-title")
@@ -101,6 +108,9 @@ class IyzeeApp(App):
 
     TITLE = "iyzee"
     SUB_TITLE = "lab instrument control"
+
+    # Seconds between idle-link checks (see ``_check_links``).
+    LINK_CHECK_INTERVAL = 2.0
     CSS_PATH = "app.tcss"
 
     # Width breakpoints. Textual adds exactly one of these class names to
@@ -162,6 +172,7 @@ class IyzeeApp(App):
         Binding("s", "show_page('sweep')", "Sweep"),
         Binding("o", "show_page('scope')", "Scope"),
         Binding("t", "show_page('traces')", "Traces"),
+        Binding("d", "show_page('data')", "Data"),
         Binding("i", "show_page('console')", "Console"),
         Binding("l", "show_page('log')", "Log"),
         Binding("f1", "show_page('connect')", "Connect", priority=True),
@@ -183,14 +194,10 @@ class IyzeeApp(App):
     # Screen per page). This is what makes a persistent NavRail possible —
     # MODES/switch_mode() tears down and rebuilds the whole screen on every
     # switch, so nothing outside the switched screen could ever persist.
-    PAGES = {
-        "connect": ConnectScreen,
-        "sweep": SweepScreen,
-        "scope": ScopeScreen,
-        "traces": TracesScreen,
-        "console": ConsoleScreen,
-        "log": LogScreen,
-    }
+    # Mount every page once; navigation labels come from the same registry
+    # used by NavRail.PAGES above. Key bindings remain explicit because F1-F4
+    # intentionally cover only four pages.
+    PAGES = {page_id: screen for page_id, _label, screen in PAGE_SPECS}
     DEFAULT_PAGE = "connect"
 
     def __init__(
@@ -210,16 +217,13 @@ class IyzeeApp(App):
         # time a new IyzeeApp() is constructed — see install()'s docstring.
         self.log_handler = install_logging(self._on_log_entry)
         self.handles: dict[str, InstrumentHandle] = {}
-        # One lock per instrument key, shared by every caller that talks to
-        # that instrument's hardware: a page's background worker (Connect,
-        # Sweep) and the IPython console via LockedProxy (see
-        # instruments.LockedProxy and ipython.namespace_from_handles). This
-        # is what stops the console and a page from issuing overlapping
-        # commands to the same physical instrument from two threads at once.
-        # defaultdict so any caller can address a key before that
-        # instrument has ever been connected, without pre-populating one
-        # lock per entry in instruments.INSTRUMENTS here.
-        self.instrument_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+        # No per-app lock table anymore — each InstrumentHandle owns its
+        # own threading.Lock (see instruments.InstrumentHandle.lock) so
+        # that a page's background worker (Connect, Sweep), the IPython
+        # console (via LockedProxy — see ipython.namespace_from_handles),
+        # and a handle used entirely outside this app all get the same
+        # correct synchronization for free, rather than it only existing
+        # because IyzeeApp happens to be running.
         # The most recently completed sweep, if any — set by
         # SweepScreen._finish, read by ConsoleScreen to expose `results` in
         # the console namespace. See workers.LastRun.
@@ -246,6 +250,56 @@ class IyzeeApp(App):
         self.console_editing_mode = console_editing_mode
         # Set by ConsoleScreen; closed on exit (see on_unmount).
         self.console_session: IPythonSession | None = None
+        # Instruments whose link died while connected: key -> why. A lost link
+        # is removed from ``handles`` (so "in handles" keeps meaning "usable"
+        # for the nav rail, readiness banners and the console alike) and
+        # remembered here so the Connect page can say what happened.
+        self.lost_links: dict[str, str] = {}
+
+    def on_mount(self) -> None:
+        self.set_interval(self.LINK_CHECK_INTERVAL, self._check_links)
+
+    def _check_links(self) -> None:
+        """Notice links that died while nobody was talking to them.
+
+        Cheap: ``alive`` does no instrument I/O. Handles without the
+        attribute (test doubles, adapters that cannot tell) count as alive.
+        """
+        for key, handle in list(self.handles.items()):
+            if not getattr(handle, "alive", True):
+                self._link_lost(key, handle)
+
+    def _link_lost(self, key: str, handle: InstrumentHandle) -> None:
+        if self.handles.get(key) is not handle:
+            return  # already disconnected or replaced
+        del self.handles[key]
+        spec = next((s for s in INSTRUMENTS if s.key == key), None)
+        label = spec.label if spec is not None else key
+        reason = "link lost - press Enter to reconnect"
+        self.lost_links[key] = reason
+        log.warning("%s: connection lost; dropped it so it can be reconnected", key)
+        # Release whatever is left of the dead link off the UI thread: the
+        # driver's disconnect takes the instrument lock.
+        threading.Thread(
+            target=self._release_dead_link, args=(key, handle), name=f"release-{key}", daemon=True
+        ).start()
+        for screen in self.query(ConnectScreen):
+            screen.show_lost(key, reason)
+        self.instruments_changed()
+        self.notify(
+            f"{label}: connection lost. Reconnect it on the Connect page.",
+            severity="error",
+            timeout=10,
+            markup=False,
+        )
+
+    @staticmethod
+    def _release_dead_link(key: str, handle: InstrumentHandle) -> None:
+        try:
+            with handle.lock:
+                handle.disconnect()
+        except Exception:  # noqa: BLE001 - the link is already dead; just don't leak
+            log.debug("releasing dead link %s failed", key, exc_info=True)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -279,13 +333,11 @@ class IyzeeApp(App):
         return True
 
     def instruments_changed(self) -> None:
-        """Something connected or disconnected: refresh everything that shows it."""
+        """Refresh every mounted view whose state depends on connections."""
         for nav in self.query(NavRail):
             nav.refresh_instruments()
-        for sweep in self.query(SweepScreen):
-            sweep.refresh_readiness()
-        for scope in self.query(ScopeScreen):
-            scope.refresh_readiness()
+        for page in self.query(Page):
+            page.refresh_readiness()
 
     def _on_log_entry(self, entry: LogEntry) -> None:
         """``TuiLogHandler``'s callback — runs on whichever thread just
@@ -343,7 +395,7 @@ class IyzeeApp(App):
         deadline = time.monotonic() + timeout
 
         def close(key: str, handle: InstrumentHandle) -> None:
-            lock = self.instrument_locks[key]
+            lock = handle.lock
             if not lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
                 log.warning("shutdown: %s still busy after %.0fs, not disconnecting", key, timeout)
                 return

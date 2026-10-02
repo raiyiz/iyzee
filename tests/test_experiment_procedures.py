@@ -6,8 +6,9 @@ from iyzee.experiment.procedures import (
     FrequencyStep,
     acquire_trace,
     bandwidth_sweep_steps,
+    build_bandwidth_sweep,
+    build_frequency_sweep,
     run_bandwidth_sweep,
-    run_frequency_sweep,
 )
 
 
@@ -34,6 +35,19 @@ class BoomStep:
 
     def run(self, ctx):
         raise RuntimeError("boom")
+
+
+class FakeWavemeter:
+    def __init__(self):
+        self.setpoints = []
+        self.read_channels = []
+
+    def set_pid_setpoint(self, freq, channel):
+        self.setpoints.append((freq, channel))
+
+    def read_frequency(self, channel):
+        self.read_channels.append(channel)
+        return 377.100001
 
 
 class FakeShutterControl:
@@ -77,32 +91,63 @@ def test_bandwidth_sweep_steps_defaults_match_20khz_scan():
     assert [s.rbw_hz for s in steps] == [20e3 * i for i in range(1, 20)]
 
 
+def test_bandwidth_sweep_builder_uses_shared_config():
+    steps, config = build_bandwidth_sweep([20e3, 40e3], sweep_duration_ms=10)
+
+    assert [step.rbw_hz for step in steps] == [20e3, 40e3]
+    assert config.avg_count == 200
+    assert config.sweep_duration_ms == 10
+    assert config.res_bw_hz == 24e3
+    assert config.trig_source == "IMM"
+
+
+def test_frequency_sweep_builder_derives_relax_time_from_config():
+    steps, config = build_frequency_sweep(
+        laser_center_thz=377.1,
+        wavemeter_channel=4,
+        offsets_thz=[-1e-9, 0.0, 1e-9],
+        sweep_duration_ms=10,
+    )
+
+    assert [step.frequency_thz for step in steps] == pytest.approx(
+        [377.099999999, 377.1, 377.100000001]
+    )
+    assert [step.relax_time_s for step in steps] == [1.5, 1.5, 1.5]
+    assert config.avg_count == 150
+    assert config.sweep_duration_ms == 10
+
+
 def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
-    setpoints = []
-    monkeypatch.setattr(
-        "iyzee.experiment.procedures.set_pid_setpoint",
-        lambda freq, channel: setpoints.append((freq, channel)),
-    )
     monkeypatch.setattr("iyzee.experiment.procedures.time.sleep", lambda s: None)
 
     mx = FakeMXA()
     shutter = FakeShutterControl()
-    ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter)
+    wavemeter = FakeWavemeter()
+    ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter, wavemeter=wavemeter)
 
     result = FrequencyStep(frequency_thz=377.1, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
-    assert setpoints == [(377.1, 1)]
+    assert wavemeter.setpoints == [(377.1, 1)]
+    assert wavemeter.read_channels == [1]
     assert shutter.events == ["open", "close"]
     assert mx.trace_calls == [1, 2]
     assert result.traces["squeezing"] == [1]
     assert result.traces["shot_noise"] == [2]
+    assert result.meta["measured_frequency_thz"] == pytest.approx(377.100001)
 
 
 def test_frequency_step_requires_shutter():
-    ctx = ExperimentContext(mx=FakeMXA(), run_id="t")
+    ctx = ExperimentContext(mx=FakeMXA(), run_id="t", wavemeter=FakeWavemeter())
 
     with pytest.raises(ValueError, match="shutter"):
+        FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
+
+
+def test_frequency_step_requires_wavemeter():
+    ctx = ExperimentContext(mx=FakeMXA(), run_id="t", shutter=FakeShutterControl())
+
+    with pytest.raises(ValueError, match="wavemeter"):
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
 
@@ -134,25 +179,6 @@ def test_run_bandwidth_sweep_does_not_disconnect_on_failure(monkeypatch):
 
     with pytest.raises(RuntimeError, match="boom"):
         run_bandwidth_sweep(mx)
-
-
-def test_run_frequency_sweep_uses_caller_owned_devices(monkeypatch):
-    mx = FakeMXA()
-    shutter = FakeShutterControl()
-    prepared = []
-    monkeypatch.setattr(
-        "iyzee.experiment.procedures.prepare_analyzer",
-        lambda analyzer, traces, config: prepared.append((analyzer, traces, config)),
-    )
-    monkeypatch.setattr(
-        "iyzee.experiment.procedures.frequency_sweep_steps",
-        lambda **kwargs: [],
-    )
-
-    result = run_frequency_sweep(mx, shutter)
-
-    assert result == []
-    assert prepared and prepared[0][0] is mx
 
 
 class FakeMXAForTraceAcquisition:

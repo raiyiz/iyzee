@@ -25,7 +25,7 @@ from textual_plotext import PlotextPlot
 
 from ..ipython import AppState
 from ..ipython_session import IPythonSession
-from ..plotting import draw_series
+from ..plotting import draw_series, figure_series
 from ..terminal_view import TerminalView
 
 if TYPE_CHECKING:
@@ -224,18 +224,10 @@ class IyzeeConsole(Vertical):
         if cycle:
             p.text("Figure(...)")
             return
-        lines = [
-            (list(line.get_xdata()), list(line.get_ydata()), line.get_label())
-            for ax in fig.axes
-            for line in ax.lines
-        ]
+        lines, labels = figure_series(fig)
         if not lines:
             p.text(f"<Figure size {fig.get_size_inches()} with {len(fig.axes)} Axes>")
             return
-        labels = {
-            "xlabel": fig.axes[0].get_xlabel() if fig.axes else "",
-            "ylabel": fig.axes[0].get_ylabel() if fig.axes else "",
-        }
         # Runs on the shell's thread, not the UI thread.
         self.app.call_from_thread(self._draw_figure, lines, labels)
         p.text(f"[plotted {len(lines)} line(s) in the plot panel below the terminal]")

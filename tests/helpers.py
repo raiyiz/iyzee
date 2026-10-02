@@ -13,7 +13,6 @@ import functools
 import os
 import threading
 import time
-from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -76,16 +75,22 @@ class FakeHandle:
         disconnect_error: str | None = None,
         connect_delay: float = 0.0,
         device: object | None = None,
+        scope: object | None = None,
     ) -> None:
         self._probe = probe
         self.connect_error = connect_error
         self.probe_error = probe_error
         self.disconnect_error = disconnect_error
         self.connect_delay = connect_delay
-        self.device = device if device is not None else object()
         self.shutter = object()
+        self.scope = scope if scope is not None else object()
+        self.device = (
+            device if device is not None else self.scope if scope is not None else object()
+        )
         self.connect_calls = 0
         self.disconnect_calls = 0
+        self.lock = threading.Lock()
+        self.alive = True  # flip to False to simulate a link that died
 
     @property
     def connected(self) -> bool:
@@ -118,9 +123,6 @@ class FakeApp:
     """Minimal stand-in for ``IyzeeApp`` satisfying ``ipython.AppState``."""
 
     handles: dict[str, Any] = field(default_factory=dict)
-    instrument_locks: dict[str, threading.Lock] = field(
-        default_factory=lambda: defaultdict(threading.Lock)
-    )
     last_run: LastRun | None = None
 
 

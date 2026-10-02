@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
-from ..wavemeter_readout import set_pid_setpoint
-from .core import ExperimentContext, StepResult, run_sequence
+from ..wavemeter_readout import Wavemeter
+from .core import ExperimentContext, Step, StepResult, run_sequence
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
@@ -31,7 +32,7 @@ class AnalyzerConfig:
     sweep_duration_ms: int = 10
     res_bw_hz: float = 10e4
     avg_type: str = "LOG"
-    trig_source: str = "EXT"
+    trig_source: str = "IMM"
 
 
 def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
@@ -115,8 +116,11 @@ class FrequencyStep:
         if ctx.shutter is None:
             raise ValueError("FrequencyStep requires ctx.shutter to be set")
 
-        set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
+        if ctx.wavemeter is None:
+            raise ValueError("FrequencyStep requires ctx.wavemeter to be set")
+        ctx.wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
         time.sleep(self.relax_time_s)
+        measured_frequency = ctx.wavemeter.read_frequency(self.wavemeter_channel)
 
         try:
             ctx.shutter.open()
@@ -134,6 +138,7 @@ class FrequencyStep:
             meta={
                 "wavemeter_channel": self.wavemeter_channel,
                 "relax_time_s": self.relax_time_s,
+                "measured_frequency_thz": measured_frequency,
             },
         )
 
@@ -151,7 +156,7 @@ def frequency_sweep_steps(
     relax_time_s: float = 1.5,
     offsets_thz=None,
 ) -> list[FrequencyStep]:
-    """Build a laser-frequency scan around ``laser_center_thz``."""
+    """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
         offsets_thz = [i * 10e-6 for i in range(-1, 1)]
     return [
@@ -164,48 +169,98 @@ def frequency_sweep_steps(
     ]
 
 
-def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> list[StepResult]:
-    """Measure squeezing/shot-noise traces using the caller-owned MXA."""
-    config = AnalyzerConfig(
+def bandwidth_sweep_config(
+    *, sweep_duration_ms: int = 5, res_bw_hz: float = 24e3
+) -> AnalyzerConfig:
+    """Return the standard analyzer configuration for an RBW sweep."""
+    return AnalyzerConfig(
         center_hz=1e6,
         span_hz=0,
         avg_count=200,
-        sweep_duration_ms=5,
-        res_bw_hz=24e3,
+        sweep_duration_ms=sweep_duration_ms,
+        res_bw_hz=res_bw_hz,
         trig_source="IMM",
     )
+
+
+def frequency_sweep_config(*, sweep_duration_ms: int = 10) -> AnalyzerConfig:
+    """Return the standard analyzer configuration for a frequency sweep."""
+    return AnalyzerConfig(
+        center_hz=1.5e6,
+        span_hz=0,
+        avg_count=150,
+        sweep_duration_ms=sweep_duration_ms,
+        res_bw_hz=24e3,
+    )
+
+
+def build_bandwidth_sweep(
+    rbw_values_hz=None, *, sweep_duration_ms: int = 5, res_bw_hz: float = 24e3
+) -> tuple[list[BandwidthStep], AnalyzerConfig]:
+    """Build an RBW sweep and the analyzer configuration it needs."""
+    return bandwidth_sweep_steps(rbw_values_hz), bandwidth_sweep_config(
+        sweep_duration_ms=sweep_duration_ms, res_bw_hz=res_bw_hz
+    )
+
+
+def build_frequency_sweep(
+    laser_center_thz: float = 377.1052067,
+    wavemeter_channel: int = 4,
+    offsets_thz=None,
+    *,
+    sweep_duration_ms: int = 10,
+) -> tuple[list[FrequencyStep], AnalyzerConfig]:
+    """Build a frequency sweep and derive its settle time from the analyzer config."""
+    config = frequency_sweep_config(sweep_duration_ms=sweep_duration_ms)
+    relax_time_s = config.sweep_duration_ms * config.avg_count / 1000
+    steps = frequency_sweep_steps(
+        laser_center_thz=laser_center_thz,
+        wavemeter_channel=wavemeter_channel,
+        relax_time_s=relax_time_s,
+        offsets_thz=offsets_thz,
+    )
+    return steps, config
+
+
+def _run_steps(
+    mx,
+    steps: Sequence[Step],
+    config: AnalyzerConfig,
+    *,
+    shutter: ShutterControl | None = None,
+    wavemeter: Wavemeter | None = None,
+    on_error: str = "raise",
+) -> list[StepResult]:
+    """Configure the MXA, build one run context, and execute its steps."""
     prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
-    ctx = ExperimentContext(mx=mx, run_id=uuid.uuid4().hex[:8], config=asdict(config))
-    return run_sequence(bandwidth_sweep_steps(rbw_values_hz), ctx, on_error=on_error)
+    ctx = ExperimentContext(
+        mx=mx,
+        run_id=uuid.uuid4().hex[:8],
+        shutter=shutter,
+        wavemeter=wavemeter,
+        config=asdict(config),
+    )
+    return run_sequence(steps, ctx, on_error=on_error)
+
+
+def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> list[StepResult]:
+    """Measure squeezing/shot-noise traces using the caller-owned MXA."""
+    steps, config = build_bandwidth_sweep(rbw_values_hz)
+    return _run_steps(mx, steps, config, on_error=on_error)
 
 
 def run_frequency_sweep(
     mx,
     shutter: ShutterControl,
+    wavemeter: Wavemeter,
     laser_center_thz: float = 377.1052067,
     wavemeter_channel: int = 4,
     *,
     on_error: str = "raise",
 ) -> list[StepResult]:
     """Measure squeezing/shot-noise traces using caller-owned devices."""
-    config = AnalyzerConfig(
-        center_hz=1.5e6,
-        span_hz=0,
-        avg_count=150,
-        sweep_duration_ms=10,
-        res_bw_hz=24e3,
-    )
-    relax_time_s = config.sweep_duration_ms * config.avg_count / 1000
-    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
-    ctx = ExperimentContext(
-        mx=mx,
-        run_id=uuid.uuid4().hex[:8],
-        shutter=shutter,
-        config=asdict(config),
-    )
-    steps = frequency_sweep_steps(
+    steps, config = build_frequency_sweep(
         laser_center_thz=laser_center_thz,
         wavemeter_channel=wavemeter_channel,
-        relax_time_s=relax_time_s,
     )
-    return run_sequence(steps, ctx, on_error=on_error)
+    return _run_steps(mx, steps, config, shutter=shutter, wavemeter=wavemeter, on_error=on_error)

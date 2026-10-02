@@ -13,7 +13,12 @@ src/iyzee/
 ├── base.py                # shared VISA lifecycle, instrument IPs, PSU channels
 ├── mxa.py                 # Keysight MXA SCPI/VISA driver
 ├── power.py                # power supply + optical shutter control
+├── vicp.py                 # VICP framing over TCP: thread-safe transport that drops the connection
+│                           # after any mid-message failure (no request IDs, so a late reply would desync)
 ├── scope.py                # LeCroy oscilloscope: waveform download + channel/trigger/math control
+├── scope_workflows.py     # scope operations + durable waveform recordings — plain
+│                           # functions/dataclasses on top of scope.py, no Textual; see
+│                           # "Design direction" below
 ├── wavemeter_readout.py  # wavemeter / laser setpoint control
 ├── experiment/            # composable measurement procedures
 │   ├── core.py             # Step protocol, ExperimentContext, StepResult, run_sequence()
@@ -22,21 +27,24 @@ src/iyzee/
 └── tui/                    # interactive terminal UI (`iyzee-tui`)
     ├── app.py              # IyzeeApp: nav rail, page switcher, key bindings, shared state, shutdown
     ├── app.tcss            # layout and responsive rules (width breakpoints)
-    ├── instruments.py      # InstrumentSpec registry, LockedProxy
+    ├── instruments.py      # InstrumentSpec registry, uniform InstrumentHandle (.device + lock), LockedProxy
     ├── ipython.py          # the `lab` namespace (LabProxy), shell configuration, history file location
     ├── ipython_session.py  # IPython's terminal shell, running in-process on a virtual terminal
+    ├── logging_support.py  # captures the app's own logging: session buffer + rotating file history
     ├── vterm.py            # terminal screen model (pyte) with scrollback
     ├── termkeys.py         # Textual key events -> terminal input bytes
     ├── terminal_view.py    # widget that shows the virtual terminal and types into it
-    ├── plotting.py         # plotext drawing shared by the Sweep, Traces and Console pages
+    ├── plotting.py         # plotext drawing shared by the Sweep, Scope, Traces and Console pages
     ├── text.py             # showing externally produced text safely (markup-safe)
-    ├── workers.py          # cross-thread message types (LastRun, StepProgress, ...)
-    └── screens/            # the four pages
-        ├── page.py         # Page: scrolling base class (content is never clipped)
+    ├── workers.py          # LastRun: the sweep result handed to the console
+    └── screens/            # the six pages
+        ├── page.py         # shared page base, form helpers/validation, readiness hook, and worker→UI plumbing
         ├── connect.py      # ConnectScreen
         ├── sweep.py        # SweepScreen
+        ├── scope.py        # ScopeScreen — form/plot only; operations live in scope_workflows.py
         ├── traces.py       # TracesScreen
-        └── console.py      # ConsoleScreen + IyzeeConsole: the page around IPython's terminal UI
+        ├── console.py      # ConsoleScreen + IyzeeConsole: the page around IPython's terminal UI
+        └── log.py          # LogScreen: the app's own logging, live and browsable
 ```
 
 ## Running the TUI
@@ -46,11 +54,12 @@ uv sync
 uv run iyzee-tui
 ```
 
-Four pages cover the common tasks (the classes keep their `*Screen` names, but
+Six pages cover the common tasks (the classes keep their `*Screen` names, but
 they are plain container widgets inside one `ContentSwitcher`, not Textual
-`Screen`s). Switch between them with `c` / `s` / `t` / `i`, `F1`–`F4`, or by
-clicking the nav rail; `Ctrl+Q` quits (a running cell is interrupted and
-connected instruments are disconnected on the way out):
+`Screen`s). Switch between them with `c` / `s` / `o` / `t` / `i` / `l`,
+`F1`–`F4` (Connect/Sweep/Traces/Console only — see below), or by clicking the
+nav rail; `Ctrl+Q` quits (a running cell is interrupted and connected
+instruments are disconnected on the way out):
 
 - **Connect** (`c`) — one row per instrument (MXA, shutter/PSU, wavemeter,
   scope). Enter connects the selected row; on a connected row it asks for a
@@ -62,10 +71,24 @@ connected instruments are disconnected on the way out):
   banner says which instrument still needs connecting, a bad field is marked
   and focused, and every point is saved to disk as it is measured, so an
   interrupted run keeps what it had.
+- **Scope** (`o`) — connect to the LeCroy and the page automatically retrieves
+  its current channel/trigger state once. The page shows whether the form is
+  synchronized, highlights local edits, and enables each Apply action only when
+  there is a delta to send. Apply writes only changed fields; *Retrieve current
+  settings* re-syncs after a front-panel change. **Acquire & save** is available
+  only for a synchronized, clean state and records enabled-channel waveforms
+  under `data/YYYY-MM/` as a numeric `.npz` plus JSON manifest.
 - **Traces** (`t`) — browse previously recorded `.npz` runs on disk; the
   preview follows the highlighted run.
 - **Console** (`i`) — IPython's own terminal UI, in the app process, with live
   access to connected instruments and the last sweep's results. See below.
+- **Log** (`l`) — the app's own logging, live by default, with a level
+  filter and a way to browse older rotated log files.
+
+`F1`–`F4` reach only Connect/Sweep/Traces/Console — Textual's own key
+handling reserves those four specifically to escape the console's embedded
+terminal (see the comment on `IyzeeApp.BINDINGS`); Scope and Log are
+letter-only (`o`, `l`) to avoid extending that.
 
 **Keyboard.** Outside text-entry widgets, `j`/`k` move focus (Textual's own
 `focus_next()`/`focus_previous()`) and `Escape` leaves a text field. `Ctrl+\`
@@ -133,9 +156,11 @@ already just picks a `Step` list and runs it.
   SCPI strings.
 - **`power.py`** — PSU control plus `ShutterControl`, a thin wrapper that
   drives the optical shutter through one PSU channel.
-- **`scope.py`** — LeCroy oscilloscope driver (VICP protocol over TCP). Not
+- **`scope.py`** — LeCroy oscilloscope driver (VICP protocol over TCP, framing in
+  `vicp.py`, which drops the connection after any mid-message failure). Not
   yet unified with `BaseDevice`'s connection lifecycle; treat as a standalone
-  legacy driver.
+  legacy driver. `scope_workflows.py` holds the operations built on top
+  (channel/trigger settings, waveform acquisition) — see "Design direction".
 - **`wavemeter_readout.py`** — wavemeter readout and PID setpoint control over
   HTTP, plus Rubidium transition-frequency reference tables used for
   reporting laser detuning.
@@ -154,6 +179,10 @@ lab.mx.set_center_freq(1.5e6)
 lab.mx.set_rbw(24e3)
 lab.mx.single_sweep_wait()
 trace = lab.mx.get_trace_data(1)
+
+from iyzee.scope_workflows import ChannelSettings, apply_channel_settings
+
+apply_channel_settings(lab.scope, [ChannelSettings(Channel.C1, True, 0.5, 0.0, Coupling.DC_1M)])
 
 lab.results[-1].traces["squeezing"]  # last completed sweep
 lab.connected  # e.g. ("mx", "shutter")
@@ -252,11 +281,14 @@ Two technical guides, both Typst source compiled to PDF in CI:
 - GitLab CI publishes the same documentation set as pipeline artifacts; the
   repository does not currently declare its GitLab mirror URL.
 
-For a reproducible measurement, the relevant analyzer settings should travel
-with the data: frequency range and points, RBW/VBW, detector, averaging,
-sweep time, attenuation/reference level, trigger state, and calibration
-context. `StepResult.meta` and `save_step_results()`'s per-point metadata are
-how that happens in practice.
+For a reproducible measurement, the relevant instrument state should travel
+with the data. Sweep records carry frequency/range and analyzer settings in
+`StepResult.meta` and the JSON sidecar; Scope records carry requested and
+channel/trigger configuration (the applied values are what the scope reported
+after a read-back, not what was requested), scope-reported calibration and
+per-channel timebase metadata, instrument identity (`*IDN?`), whether a running
+acquisition was paused for the capture, raw waveform codes when available, and derived statistics
+beside the numeric arrays.
 
 ## Design direction
 
@@ -282,6 +314,29 @@ more screens are added. Keyboard navigation itself doesn't need its own
 module — it's Textual's native focus/binding-priority system end to end,
 with nothing app-specific to maintain there.
 
+**Screens display and control; they don't implement.** A page's job is the
+form, the buttons, the plot, and reporting a result — not the operation
+itself. `scope_workflows.py` is the template: `ScopeScreen`'s buttons read
+and validate the form, then call a plain function (`apply_channel_settings`,
+`apply_trigger_settings`, `acquire_scope_recording`) that takes the driver
+directly and has no Textual import. The same call works from a script with
+its own `LeCroy` instance, or from the console as
+`apply_channel_settings(lab.scope, [...])` — not just from the button that
+happens to trigger it in the TUI. `InstrumentHandle.lock` (each handle owns
+one — see `instruments.py`) is what makes that safe without an `IyzeeApp`
+in the picture: pass it as the optional `lock=` argument when a script or
+screen needs to serialize against concurrent access; a script with a
+private, uncontended connection can leave it out entirely. The lock is
+re-entrant, and for the scope it *is* the driver's own transaction lock, so
+passing it (even through the console's `lab.scope` proxy) cannot deadlock, and
+the operations take the driver's transaction themselves either way. Use
+`apply_and_verify_channel_settings` when you need to know what the scope
+actually holds afterwards: it reads every channel back and reports
+adjustments and ignored settings. A new screen
+with real device-orchestration logic (not just reading a form) should
+follow this shape from the start, in a module beside the driver it
+operates on — the way `ScopeScreen` originally didn't, and now does.
+
 ## Development
 
 ```sh
@@ -293,15 +348,3 @@ uv run mypy src tests      # advisory in CI (the job is allowed to fail)
 
 CI (`.github/workflows/ci.yml`) runs the tests, ruff and mypy, and compiles the
 Typst guides; `.gitlab-ci.yml` compiles the guides too.
-
-## Known gaps
-
-- `scope.py`'s `LeCroy` driver is not integrated with `BaseDevice`'s
-  connection lifecycle (no context-manager support, no injectable transport
-  beyond the low-level socket helpers already covered by tests). The TUI's
-  Connect screen and `lab.scope` both expose it regardless, but no `Step`
-  type drives it yet — adding one is the natural next slice once it's
-  `BaseDevice`-integrated.
-- Aborting a running sweep (Sweep screen) stops after the current step
-  finishes, not mid-step — fine for the MXA's quick per-point calls today,
-  but worth revisiting if a future `Step` type has a long blocking call.

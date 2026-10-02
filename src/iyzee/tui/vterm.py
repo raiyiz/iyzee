@@ -102,9 +102,6 @@ class VTermScreen:
             return history[index]
         return self._screen.buffer[index - len(history)]
 
-    def total_lines(self) -> int:
-        return self.scrollback_lines + self.rows
-
     def text_lines(self, offset: int = 0) -> list[str]:
         """The visible window as plain text, ``offset`` lines above the bottom."""
         first = self._first_line(offset)

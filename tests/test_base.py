@@ -1,3 +1,4 @@
+import pytest
 import pyvisa
 
 from iyzee import IP, BaseDevice
@@ -73,3 +74,15 @@ def test_base_device_can_reconnect_after_close(monkeypatch):
 
     device.connect()
     assert resource_manager.open_calls == 2
+
+
+def test_base_device_closes_when_the_with_block_raises(monkeypatch):
+    resource_manager = FakeResourceManager()
+    monkeypatch.setattr(pyvisa, "ResourceManager", lambda: resource_manager)
+    device = BaseDevice(ip=IP.POWER_SUPPLY)
+
+    with pytest.raises(RuntimeError), device:
+        raise RuntimeError("acquisition failed")
+
+    assert device.instrument is None
+    assert resource_manager.instrument.close_calls == 1

@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from iyzee.experiment.io import (
     STEM_PATTERN,
     create_dirs,
     difference_series,
+    difference_series_many,
     multiplot,
     save_step_results,
 )
@@ -54,8 +56,16 @@ def _result(x_value=1.0, *, squeezing=None, shot_noise=None, **meta) -> StepResu
     )
 
 
-def test_save_step_results_writes_a_matched_npz_and_json_pair(tmp_path):
-    path = save_step_results([_result(1.0, squeezing=[3.0, 4.0], shot_noise=[1.0, 1.0])], tmp_path)
+def test_save_step_results_writes_data_and_metadata_pair(tmp_path):
+    results = [
+        _result(
+            1.0,
+            squeezing=[3.0, 4.0],
+            shot_noise=[1.0, 1.0],
+            rbw_hz=1000.0,
+        )
+    ]
+    path = save_step_results(results, tmp_path, run_metadata={"software_revision": "abc123"})
 
     assert path.suffix == ".npz"
     json_path = path.with_suffix(".json")
@@ -64,38 +74,21 @@ def test_save_step_results_writes_a_matched_npz_and_json_pair(tmp_path):
         "no stray .part file"
     )
 
-    # The .npz alone, with no allow_pickle, must be fully readable: that's
-    # the entire point of splitting the metadata out.
+    # The numeric archive is deliberately pickle-free; metadata lives in the JSON
+    # sidecar so loading sweep data never needs unsafe pickle deserialization.
     with np.load(path, allow_pickle=False) as archive:
         np.testing.assert_array_equal(archive["x_values"], [1.0])
         np.testing.assert_array_equal(archive["trace_squeezing"], [[3.0, 4.0]])
         np.testing.assert_array_equal(archive["trace_shot_noise"], [[1.0, 1.0]])
 
     sidecar = json.loads(json_path.read_text())
-    assert sidecar["points"] == [{"label": "x=1.0", "x_unit": "Hz"}]
-    assert sidecar["run_metadata"] is None
-
-
-def test_save_step_results_carries_per_point_and_run_metadata(tmp_path):
-    results = [
-        StepResult(
-            label="rbw=1000Hz",
-            x_value=1000.0,
-            x_unit="Hz",
-            traces={"squeezing": [1.0], "shot_noise": [2.0]},
-            meta={"rbw_hz": 1000.0},
-        )
-    ]
-
-    path = save_step_results(results, tmp_path, run_metadata={"software_revision": "abc123"})
-
-    with np.load(path, allow_pickle=False) as archive:
-        assert archive["x_values"][0] == 1000.0
-
-    sidecar = json.loads(path.with_suffix(".json").read_text())
-    assert sidecar["points"][0]["label"] == "rbw=1000Hz"
-    assert sidecar["points"][0]["rbw_hz"] == 1000.0
+    assert sidecar["format"] == "iyzee.numeric-recording"
+    assert len(sidecar["data_sha256"]) == 64
+    assert sidecar["data_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert sidecar["points"] == [{"label": "x=1.0", "x_unit": "Hz", "rbw_hz": 1000.0}]
     assert sidecar["run_metadata"] == {"software_revision": "abc123"}
+    # Per-point metadata and run-level metadata stay in the sidecar rather than
+    # contaminating the numeric NPZ payload.
 
 
 def test_save_step_results_can_overwrite_a_fixed_file_pair_atomically(tmp_path: Path) -> None:
@@ -165,26 +158,29 @@ def test_two_saves_in_the_same_second_do_not_collide(tmp_path):
 # -- multiplot / difference_series -------------------------------------------------------
 
 
-def test_multiplot_handles_empty_data(monkeypatch):
-    shown = False
+def test_difference_statistic_mean_and_minimum():
+    assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "mean") == pytest.approx(2.5)
+    assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "minimum") == pytest.approx(2.0)
+    assert io.difference_statistic([np.nan, 4.0], [1.0, 1.0], "mean") == pytest.approx(3.0)
+    assert io.difference_statistic([np.nan], [1.0], "mean") is None
+    assert io.difference_values_many(
+        [[3.0, 4.0], [5.0, 6.0]],
+        [[1.0, 1.0], [2.0, 2.0]],
+        "minimum",
+    ) == [2.0, 3.0]
 
-    def fake_show():
-        nonlocal shown
-        shown = True
 
-    monkeypatch.setattr("iyzee.experiment.io.plt.show", fake_show)
-
-    multiplot([])
-
-    assert shown
+def test_difference_statistic_rejects_unknown_statistic():
+    with pytest.raises(ValueError, match="unknown statistic"):
+        io.difference_statistic([1.0], [0.0], "median")
 
 
 def test_multiplot_plots_each_result(monkeypatch):
     plotted = []
 
     class FakeAx:
-        def plot(self, values):
-            plotted.append(list(values))
+        def plot(self, x_values, values):
+            plotted.append((list(x_values), list(values)))
 
         def legend(self, *a, **k):
             pass
@@ -213,7 +209,7 @@ def test_multiplot_plots_each_result(monkeypatch):
 
     multiplot(results)
 
-    assert plotted == [[2.0, 3.0]]
+    assert plotted == [([0, 1], [2.0, 3.0])]
 
 
 def test_difference_series_computes_x_y_and_label():
@@ -222,13 +218,21 @@ def test_difference_series_computes_x_y_and_label():
     assert result == ([0, 1], [2.0, 3.0], "pt0")
 
 
-def test_difference_series_returns_none_for_missing_traces():
+def test_difference_series_many_skips_unusable_rows():
+    result = difference_series_many(
+        [[3.0, 4.0], None, [5.0, 6.0]],
+        [[1.0, 1.0], [1.0, 1.0], [2.0, 2.0]],
+        ["first", "missing", "third"],
+    )
+
+    assert result == [
+        ([0, 1], [2.0, 3.0], "first"),
+        ([0, 1], [3.0, 4.0], "third"),
+    ]
+
+
+def test_difference_series_returns_none_without_usable_traces():
+    # A missing trace and a trace that is only NaNs are both unusable.
     assert difference_series(None, [1.0], "pt0") is None
     assert difference_series([1.0], None, "pt0") is None
-
-
-def test_difference_series_returns_none_for_an_all_nan_trace():
-    # How save_step_results marks a point that had no data for a trace at
-    # all (see test_save_step_results_fills_a_missing_trace_with_nan) —
-    # treated the same as the trace being absent outright.
     assert difference_series([np.nan, np.nan], [1.0, 1.0], "pt0") is None

@@ -4,7 +4,6 @@ its locking, and its configuration. (Running the shell lives in
 
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
 
@@ -45,7 +44,7 @@ class AppState(Protocol):
     A structural (duck-typed) view rather than importing ``IyzeeApp``
     directly — ``app.py`` imports the console screen, which imports this
     module, so importing ``IyzeeApp`` back here would be a cycle. Anything
-    with these three attributes works, which is also what makes this easy
+    with these two attributes works, which is also what makes this easy
     to unit test with a small stand-in instead of a full running app.
 
     Declared as read-only ``@property`` members rather than plain
@@ -60,9 +59,6 @@ class AppState(Protocol):
 
     @property
     def handles(self) -> Mapping[str, Any]: ...
-
-    @property
-    def instrument_locks(self) -> Mapping[str, threading.Lock]: ...
 
     @property
     def last_run(self) -> LastRun | None: ...
@@ -99,12 +95,17 @@ class LabProxy:
       scratch calculation and it's a completely ordinary Python variable
       with zero interaction with app state, forever.
 
-    Add a new instrument by adding one entry to ``_INSTRUMENT_KEYS``
-    below (attribute name -> ``app.handles``/``app.instrument_locks``
-    key) — nothing else needs to change.
+    Add a new console-visible instrument by adding one entry to ``_INSTRUMENT_KEYS``
+    below (attribute name -> ``app.handles`` key) and giving its handle a
+    ``device`` property — nothing else in the proxy needs to change.
     """
 
-    _INSTRUMENT_KEYS = {"mx": "mxa", "shutter": "shutter", "scope": "scope"}
+    _INSTRUMENT_KEYS = {
+        "mx": "mxa",
+        "shutter": "shutter",
+        "scope": "scope",
+        "wavemeter": "wavemeter",
+    }
 
     def __init__(self, app: AppState) -> None:
         object.__setattr__(self, "_app", app)
@@ -119,8 +120,10 @@ class LabProxy:
                 raise AttributeError(
                     f"lab.{name} is not connected — connect it on the Connect screen first"
                 )
-            device = _device_from_handle(name, handle)
-            return LockedProxy(device, app.instrument_locks[key])
+            device = getattr(handle, "device", None)
+            if device is None:
+                raise AttributeError(f"lab.{name} is connected but exposes no live device")
+            return LockedProxy(device, handle.lock)
         if name == "results":
             return app.last_run.results if app.last_run is not None else []
         if name == "last_run":
@@ -144,25 +147,6 @@ class LabProxy:
         """Names of the instruments currently connected, e.g. ``("mx",)``."""
         app = object.__getattribute__(self, "_app")
         return tuple(name for name, key in self._INSTRUMENT_KEYS.items() if key in app.handles)
-
-
-def _device_from_handle(name: str, handle: Any) -> Any:
-    """Unwrap an ``InstrumentHandle`` to the underlying live driver object.
-
-    Mirrors each handle's own accessor in ``instruments.py``
-    (``_VisaHandle.device``, ``ShutterHandle.shutter``,
-    ``ScopeHandle.scope``) — different names because the underlying
-    drivers themselves are heterogeneous (VISA vs. a PSU wrapper vs. a
-    raw-socket driver), not by accident.
-    """
-    if name == "mx":
-        return getattr(handle, "device", handle)
-    if name == "shutter":
-        live = getattr(handle, "shutter", None)
-        return live if live is not None else handle
-    if name == "scope":
-        return getattr(handle, "scope", handle)
-    return handle
 
 
 def shell_config(history_file: str | Path | None = None) -> Config:

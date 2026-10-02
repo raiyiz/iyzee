@@ -1,3 +1,8 @@
+"""Driver-level tests for :class:`~iyzee.scope.LeCroy`: commands sent, replies parsed.
+
+Framing and the failure contract of the byte stream are in ``test_vicp.py``.
+"""
+
 import socket
 import struct
 
@@ -19,10 +24,11 @@ from iyzee.scope import (
 class FragmentingFakeSocket:
     """A fake socket whose recv() returns data in small, arbitrary chunks."""
 
-    def __init__(self, data: bytes, chunk_size: int = 3):
+    def __init__(self, data: bytes = b"", chunk_size: int = 3):
         self._buf = data
         self._chunk_size = chunk_size
         self.sent = bytearray()
+        self.timeouts: list[float] = []
 
     def recv(self, n: int) -> bytes:
         take = min(n, self._chunk_size, len(self._buf))
@@ -33,259 +39,172 @@ class FragmentingFakeSocket:
         self.sent.extend(data)
         return len(data)
 
+    def settimeout(self, value: float) -> None:
+        self.timeouts.append(value)
+
+    def gettimeout(self) -> float:
+        return self.timeouts[-1] if self.timeouts else 3.0
+
 
 def vicp_frame(flag: int, payload: bytes) -> bytes:
     header = struct.pack("B3BI", flag, 1, 0, 0, socket.htonl(len(payload)))
     return header + payload
 
 
-def test_recv_exact_reassembles_fragmented_reads():
-    payload = b"0123456789ABCDEF"
-    sock = FragmentingFakeSocket(payload, chunk_size=3)
-
-    result = LeCroy._recv_exact(sock, len(payload))
-
-    assert result == payload
+def attach(scope: LeCroy, sock: FragmentingFakeSocket) -> FragmentingFakeSocket:
+    """Give ``scope`` an already-connected fake socket (no hardware I/O)."""
+    scope._transport.attach_socket(sock)
+    return sock
 
 
-def test_recv_exact_raises_on_closed_connection():
-    sock = FragmentingFakeSocket(b"short", chunk_size=3)
-
-    with pytest.raises(ConnectionError):
-        LeCroy._recv_exact(sock, 100)
-
-
-# -- timeouts: connect(), _recv_exact(), send() must not block forever --------------------
-
-
-class _TimingOutSocket:
-    """A fake socket that always times out, reporting a fixed ``gettimeout()``
-    the way a real socket would once ``settimeout()`` has been applied."""
-
-    def __init__(self, timeout: float = 3.0):
-        self._timeout = timeout
-
-    def gettimeout(self) -> float:
-        return self._timeout
-
-    def recv(self, n: int) -> bytes:
-        raise TimeoutError("timed out")
-
-    def send(self, data: bytes) -> int:
-        raise TimeoutError("timed out")
+def sent_commands(sock: FragmentingFakeSocket) -> list[bytes]:
+    """Split everything the fake socket received back into command payloads."""
+    sent, commands, pos = bytes(sock.sent), [], 0
+    while pos < len(sent):
+        length = struct.unpack("!I", sent[pos + 4 : pos + 8])[0]
+        commands.append(sent[pos + 8 : pos + 8 + length])
+        pos += 8 + length
+    return commands
 
 
-class _PartialThenTimeoutSocket:
-    """Delivers ``data`` two bytes at a time, then times out on every read
-    after that — for checking a timeout mid-transfer reports real progress,
-    not just "it failed"."""
-
-    def __init__(self, data: bytes, timeout: float = 1.5):
-        self._buf = data
-        self._timeout = timeout
-
-    def gettimeout(self) -> float:
-        return self._timeout
-
-    def recv(self, n: int) -> bytes:
-        if not self._buf:
-            raise TimeoutError("timed out")
-        chunk, self._buf = self._buf[:2], self._buf[2:]
-        return chunk
+# -- LeCroy wiring on top of the transport -----------------------------------------------------
 
 
-def test_lecroy_timeout_error_is_a_timeout_error():
-    # So existing `except TimeoutError`/`except OSError`/`except Exception`
-    # handlers keep catching it even without knowing this subclass exists.
-    assert issubclass(LeCroyTimeoutError, TimeoutError)
+class _ConnectableSocket(FragmentingFakeSocket):
+    """Connects instantly (or times out), recording the timeouts applied."""
 
-
-def test_recv_exact_raises_lecroy_timeout_not_a_bare_timeout():
-    sock = _TimingOutSocket(timeout=3.0)
-
-    with pytest.raises(LeCroyTimeoutError, match=r"3\.0s \(0/10 bytes received\)"):
-        LeCroy._recv_exact(sock, 10)
-
-
-def test_recv_exact_reports_how_far_it_got_before_timing_out():
-    sock = _PartialThenTimeoutSocket(b"abcd", timeout=1.5)
-
-    with pytest.raises(LeCroyTimeoutError, match=r"1\.5s \(4/10 bytes received\)"):
-        LeCroy._recv_exact(sock, 10)
-
-
-def test_send_raises_lecroy_timeout_when_the_header_write_stalls():
-    scope = LeCroy()
-    scope.s = _TimingOutSocket(timeout=2.0)
-
-    with pytest.raises(LeCroyTimeoutError, match=r"writing header after 2\.0s"):
-        scope.send("C1:VDIV 1.0")
-
-
-class _ConnectTimeoutSocket:
-    """Simulates a TCP handshake that never completes (e.g. the scope is
-    off, or a firewall is silently dropping the connection)."""
-
-    def __init__(self, *args, **kwargs):
-        self.timeout = None
+    def __init__(self, *args, fail_connect: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fail_connect = fail_connect
+        self.connected_to = None
         self.closed = False
 
-    def settimeout(self, value):
-        self.timeout = value
+    def setsockopt(self, *args) -> None:
+        pass
 
-    def connect(self, address):
-        raise TimeoutError("timed out")
+    def connect(self, address) -> None:
+        if self.fail_connect:
+            raise TimeoutError("timed out")
+        self.connected_to = address
 
-    def close(self):
+    def close(self) -> None:
         self.closed = True
 
 
-def test_connect_raises_lecroy_timeout_instead_of_hanging(monkeypatch):
-    fake_socket = _ConnectTimeoutSocket()
-    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_socket)
+@pytest.mark.parametrize(
+    "kwargs,expected",
+    [
+        ({}, [LeCroy.MAX_TCP_CONNECT, LeCroy.MAC_TCP_READ]),
+        ({"delayval": 7.0, "connect_timeout": 1.0}, [1.0, 7.0]),
+    ],
+)
+def test_connect_bounds_the_handshake_then_the_ongoing_io(monkeypatch, kwargs, expected):
+    fake = _ConnectableSocket()
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake)
 
     scope = LeCroy()
+    scope.connect("10.0.0.1", **kwargs)
+
+    assert scope.connected and scope.address == "10.0.0.1"
+    assert fake.connected_to == ("10.0.0.1", LeCroy.LECROY_SERVER_PORT)
+    # handshake bound first, then the bound every later send()/recv() inherits
+    assert fake.timeouts == expected
+
+    scope.disconnect()
+    assert fake.closed and not scope.connected and scope.address is None
+
+
+def test_connect_timeout_is_a_lecroy_timeout(monkeypatch):
+    fake = _ConnectableSocket(fail_connect=True)
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake)
+
     with pytest.raises(LeCroyTimeoutError, match=rf"within {LeCroy.MAX_TCP_CONNECT}s"):
-        scope.connect("10.0.0.1")
-
-    # The handshake was bounded by MAX_TCP_CONNECT specifically...
-    assert fake_socket.timeout == LeCroy.MAX_TCP_CONNECT
-    # ...and the half-open socket wasn't leaked.
-    assert fake_socket.closed
-    assert scope.CONNECTED is False
+        LeCroy().connect("10.0.0.1")
 
 
-class _ConnectableSocket:
-    """A fake socket that connects successfully, recording every
-    ``settimeout()`` call so the test can check both timeouts get applied."""
-
-    def __init__(self, *args, **kwargs):
-        self.timeouts: list[float] = []
-        self.connected_to = None
-
-    def settimeout(self, value):
-        self.timeouts.append(value)
-
-    def connect(self, address):
-        self.connected_to = address
-
-
-def test_connect_bounds_the_handshake_then_the_ongoing_socket_timeout(monkeypatch):
-    fake_socket = _ConnectableSocket()
-    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_socket)
+def test_a_silent_scope_raises_lecroy_timeout_and_drops_the_connection():
+    class Silent(FragmentingFakeSocket):
+        def recv(self, n: int) -> bytes:
+            raise TimeoutError("timed out")
 
     scope = LeCroy()
-    scope.connect("10.0.0.1")
+    attach(scope, Silent())
 
-    assert scope.CONNECTED is True
-    assert fake_socket.connected_to == ("10.0.0.1", LeCroy.LECROY_SERVER_PORT)
-    # settimeout() is called twice: once (MAX_TCP_CONNECT) before connect()
-    # so the handshake itself can't hang, and again (MAC_TCP_READ) once
-    # connected, so every later send()/recv() inherits a bound too.
-    assert fake_socket.timeouts == [LeCroy.MAX_TCP_CONNECT, LeCroy.MAC_TCP_READ]
+    with pytest.raises(LeCroyTimeoutError):
+        scope.query("C1:VOLT_DIV?")
+
+    assert scope.connected is False
 
 
-def test_connect_accepts_explicit_timeouts(monkeypatch):
-    fake_socket = _ConnectableSocket()
-    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_socket)
-
+def test_idn_asks_for_the_identity_and_can_widen_the_timeout():
     scope = LeCroy()
-    scope.connect("10.0.0.1", delayval=7.0, connect_timeout=1.0)
+    sock = attach(scope, FragmentingFakeSocket(vicp_frame(0x81, b"LECROY,WS452,1,9.0\n")))
 
-    assert fake_socket.timeouts == [1.0, 7.0]
-    assert scope.SOCK_TIMEOUT == 7.0
+    assert scope.idn(timeout=15.0) == "LECROY,WS452,1,9.0"
 
-
-def test_get_header_assembles_fragmented_header():
-    scope = LeCroy()
-    header = vicp_frame(0x80, b"")[:8]
-    scope.s = FragmentingFakeSocket(header, chunk_size=2)
-
-    flag, length = scope._LeCroy__getHeader()
-
-    assert flag == 0x80
-    assert length == 0
+    assert sent_commands(sock) == [b"*IDN?"]
+    assert sock.timeouts == [15.0, LeCroy.MAC_TCP_READ]  # widened, then restored
 
 
 def test_read_all_reassembles_fragmented_vicp_frames():
     scope = LeCroy()
-    response = vicp_frame(0x80, b"hello ") + vicp_frame(0x01, b"world")
-    scope.s = FragmentingFakeSocket(response, chunk_size=2)
+    attach(
+        scope, FragmentingFakeSocket(vicp_frame(0x80, b"hello ") + vicp_frame(0x01, b"world"), 2)
+    )
 
-    flag, text = scope.readAll()
-
-    assert flag == 0x01
-    assert text == "hello world"
+    assert scope.readAll() == (0x01, "hello world")
 
 
-def test_send_serializes_vicp_header_and_message():
+# -- waveform download -----------------------------------------------------------------------
+
+
+def test_get_data_bytes_reads_a_variable_length_definite_block():
     scope = LeCroy()
-    scope.s = FragmentingFakeSocket(b"")
-
-    scope.send("C1:VDIV 1.0")
-
-    flag, reserved_1, reserved_2, reserved_3, length = struct.unpack("B3BI", scope.s.sent[:8])
-    assert flag == LeCroy.LECROY_DATA_FLAG | LeCroy.LECROY_EOI_FLAG
-    assert (reserved_1, reserved_2, reserved_3) == (1, 0, 0)
-    assert socket.ntohl(length) == len("C1:VDIV 1.0")
-    assert scope.s.sent[8:] == b"C1:VDIV 1.0"
-
-
-def test_get_data_bytes_reassembles_fragmented_waveform():
-    scope = LeCroy()
-    preamble = b"x" * 38
-    waveform = vicp_frame(0x80, bytes([0, 1, 255])) + vicp_frame(0x01, b"\n")
-    scope.s = FragmentingFakeSocket(preamble + waveform, chunk_size=2)
+    response = (
+        vicp_frame(0x80, b"C1:WF DAT1,#9")
+        + vicp_frame(0x80, b"000000003")
+        + vicp_frame(0x80, bytes([0, 1, 255]))
+        + vicp_frame(0x81, b"\n")
+    )
+    sock = attach(scope, FragmentingFakeSocket(response, chunk_size=2))
 
     result = scope.getDataBytes(channel="C1", block="DAT1")
 
     assert result == [(0,), (1,), (-1,)]
+    # the format is set before the waveform is requested
+    assert sent_commands(sock) == [b"CFMT DEF9,BYTE,BIN", b"C1:WF? DAT1"]
 
 
-def test_get_data_words_reassembles_fragmented_waveform():
+def test_get_data_words_reads_definite_block_data_and_validates_word_size():
     scope = LeCroy()
     data = struct.pack("<2h", -123, 456)
-    preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
-    waveform = vicp_frame(0x80, data) + vicp_frame(0x01, b"\n")
-    scope.s = FragmentingFakeSocket(preamble + waveform, chunk_size=2)
+    response = (
+        vicp_frame(0x80, b"C1:WF DAT1,#9000000004")
+        + vicp_frame(0x80, data[:1])
+        + vicp_frame(0x80, data[1:])
+        + vicp_frame(0x81, b"\n")
+    )
+    sock = attach(scope, FragmentingFakeSocket(response, chunk_size=2))
 
     result = scope.getDataWords(channel="C1", block="DAT1")
 
     assert result == (-123, 456)
-
-
-def test_get_data_words_rejects_malformed_waveform_header():
-    scope = LeCroy()
-    scope.s = FragmentingFakeSocket(b"x" * 38, chunk_size=3)
-
-    with pytest.raises(RuntimeError, match="incorrectly returned header"):
-        scope.getDataWords(channel="C1", block="DAT1")
-
-
-def test_get_data_words_rejects_short_waveform_data():
-    scope = LeCroy()
-    data = struct.pack("<h", 123)
-    preamble = b"x" * 27 + b"#9" + f"{len(data) + 2:09d}".encode("ascii")
-    waveform = vicp_frame(0x80, data) + vicp_frame(0x01, b"\n")
-    scope.s = FragmentingFakeSocket(preamble + waveform, chunk_size=2)
-
-    with pytest.raises(AssertionError, match="Expected 4 bytes, got 2"):
-        scope.getDataWords(channel="C1", block="DAT1")
+    # format and byte order are set before the waveform is requested
+    assert sent_commands(sock) == [b"CFMT DEF9,WORD,BIN", b"CORD LO", b"C1:WF? DAT1"]
 
 
 def test_get_data_floats_applies_vertical_scaling_and_unit():
     scope = LeCroy()
     data = struct.pack("<2h", 100, -50)
-    preamble = b"x" * 27 + b"#9" + f"{len(data):09d}".encode("ascii")
     responses = (
-        preamble
+        vicp_frame(0x80, b"C1:WF DAT1,#9000000004")
         + vicp_frame(0x80, data)
-        + vicp_frame(0x01, b"\n")
+        + vicp_frame(0x81, b"\n")
         + vicp_frame(0x01, b'VALUE: 0.25"\n')
         + vicp_frame(0x01, b'VALUE: 2.0"\n')
         + vicp_frame(0x01, b'Unit Name = V"\n')
     )
-    scope.s = FragmentingFakeSocket(responses, chunk_size=2)
+    attach(scope, FragmentingFakeSocket(responses, chunk_size=2))
 
     unit, values = scope.getDataFloats(channel="C1", block="DAT1")
 
@@ -302,7 +221,7 @@ def test_get_horizontal_properties_reads_unit_offset_and_interval():
             vicp_frame(0x01, b'VALUE: 0.001"\n'),
         ]
     )
-    scope.s = FragmentingFakeSocket(responses, chunk_size=2)
+    attach(scope, FragmentingFakeSocket(responses, chunk_size=2))
 
     unit, offset, interval = scope.getHorProperties(channel="C1")
 
@@ -311,13 +230,36 @@ def test_get_horizontal_properties_reads_unit_offset_and_interval():
     assert interval == pytest.approx(0.001)
 
 
+def test_get_data_floats_detailed_retains_raw_codes_and_calibration():
+    scope = LeCroy()
+    data = struct.pack("<2h", 100, -50)
+    responses = (
+        vicp_frame(0x80, b"C1:WF DAT1,#9000000004")
+        + vicp_frame(0x80, data)
+        + vicp_frame(0x81, b"\n")
+        + vicp_frame(0x01, b'VALUE: 0.25"\n')
+        + vicp_frame(0x01, b'VALUE: 2.0"\n')
+        + vicp_frame(0x01, b'Unit Name = V"\n')
+    )
+    attach(scope, FragmentingFakeSocket(responses, chunk_size=2))
+
+    detailed = scope.getDataFloatsDetailed(channel="C1", block="DAT1")
+
+    assert detailed["unit"] == "V"
+    np.testing.assert_array_equal(detailed["raw_codes"], [100, -50])
+    np.testing.assert_allclose(detailed["values"], [199.75, -100.25])
+    assert detailed["vertical_gain"] == 2.0
+    assert detailed["vertical_offset"] == 0.25
+
+
 # -- channel / trigger / math control --------------------------------------------------------
 
 
-def sent_message(sock: FragmentingFakeSocket) -> str:
-    """Decode the ascii payload of the (single) VICP frame `sock` received."""
-    _flag, _r1, _r2, _r3, length = struct.unpack("B3BI", bytes(sock.sent[:8]))
-    return bytes(sock.sent[8 : 8 + socket.ntohl(length)]).decode("ascii")
+def sent_message(sock: object) -> str:
+    """Decode the ASCII payload of the single VICP frame received."""
+    sent = getattr(sock, "sent")
+    _flag, _r1, _r2, _r3, length = struct.unpack("B3BI", bytes(sent[:8]))
+    return bytes(sent[8 : 8 + socket.ntohl(length)]).decode("ascii")
 
 
 @pytest.mark.parametrize(
@@ -353,20 +295,20 @@ def sent_message(sock: FragmentingFakeSocket) -> str:
 )
 def test_setters_send_the_documented_command(call, expected):
     scope = LeCroy()
-    scope.s = FragmentingFakeSocket(b"")
+    sock = attach(scope, FragmentingFakeSocket(b""))
 
     call(scope)
 
-    assert sent_message(scope.s) == expected
+    assert sent_message(sock) == expected
 
 
 def test_query_sends_the_command_and_returns_the_trimmed_response():
     scope = LeCroy()
-    scope.s = FragmentingFakeSocket(vicp_frame(0x01, b"C1:COUPLING D50 \n"))
+    sock = attach(scope, FragmentingFakeSocket(vicp_frame(0x01, b"C1:COUPLING D50 \n")))
 
     response = scope.query("C1:COUPLING?")
 
-    assert sent_message(scope.s) == "C1:COUPLING?"
+    assert sent_message(sock) == "C1:COUPLING?"
     assert response == "C1:COUPLING D50"  # trailing whitespace/newline stripped
 
 
@@ -378,6 +320,18 @@ def test_query_sends_the_command_and_returns_the_trimmed_response():
             "C1:COUPLING?",
             b"C1:COUPLING A1M\n",
             "C1:COUPLING A1M",
+        ),
+        (
+            lambda s: s.get_volts_per_div(Channel.C1),
+            "C1:VOLT_DIV?",
+            b"C1:VOLT_DIV 5.00E-01V\n",
+            "C1:VOLT_DIV 5.00E-01V",
+        ),
+        (
+            lambda s: s.get_offset(Channel.C2),
+            "C2:OFFSET?",
+            b"C2:OFFSET 0.00E+00V\n",
+            "C2:OFFSET 0.00E+00V",
         ),
         (
             lambda s: s.get_trace_display(Channel.C2),
@@ -392,6 +346,12 @@ def test_query_sends_the_command_and_returns_the_trimmed_response():
             "TRIG_MODE AUTO",
         ),
         (
+            lambda s: s.get_trigger_source(),
+            "TRIG_SELECT?",
+            b"TRIG_SELECT EDGE,SR,C1,HT,OFF\n",
+            "TRIG_SELECT EDGE,SR,C1,HT,OFF",
+        ),
+        (
             lambda s: s.get_trigger_slope(Channel.C1),
             "C1:TRIG_SLOPE?",
             b"C1:TRIG_SLOPE NEG\n",
@@ -404,6 +364,12 @@ def test_query_sends_the_command_and_returns_the_trimmed_response():
             "C1:TRIG_COUPLING DC",
         ),
         (
+            lambda s: s.get_trigger_level(Channel.C1),
+            "C1:TRIG_LEVEL?",
+            b"C1:TRIG_LEVEL 0.00E+00V\n",
+            "C1:TRIG_LEVEL 0.00E+00V",
+        ),
+        (
             lambda s: s.get_math_equation(MathChannel.F1),
             "F1:DEFINE?",
             b"F1:DEFINE EQN,'C1-C2'\n",
@@ -413,9 +379,75 @@ def test_query_sends_the_command_and_returns_the_trimmed_response():
 )
 def test_getters_query_and_return_the_response(call, command, response, expected):
     scope = LeCroy()
-    scope.s = FragmentingFakeSocket(vicp_frame(0x01, response))
+    sock = attach(scope, FragmentingFakeSocket(vicp_frame(0x01, response)))
 
     result = call(scope)
 
-    assert sent_message(scope.s) == command
+    assert sent_message(sock) == command
     assert result == expected
+
+
+# -- internal word read decodes straight to an int16 array -------------------------------------
+
+
+def test_internal_word_read_returns_native_int16_array_without_python_tuples():
+    body = struct.pack("<3h", -32768, 0, 32767)
+    scope = LeCroy()
+    attach(
+        scope,
+        FragmentingFakeSocket(
+            vicp_frame(0x80, b"C1:WF DAT1,#9000000006")
+            + vicp_frame(0x80, body)
+            + vicp_frame(0x81, b"\n"),
+            4096,
+        ),
+    )
+
+    codes = scope._read_words("C1", "DAT1")
+
+    assert codes.dtype == np.int16
+    assert codes.tolist() == [-32768, 0, 32767]
+    assert codes.flags.writeable
+
+
+# -- command strings are validated before they reach the instrument ----------------------------
+
+
+@pytest.mark.parametrize("bad", ["C1:VOLT_DIV 1;C2", "C1\n"])
+def test_free_form_channel_names_must_be_plain_identifiers(bad):
+    scope = LeCroy()
+    sock = attach(scope, FragmentingFakeSocket())
+
+    with pytest.raises(ValueError, match="invalid channel"):
+        scope.set_trace_display(bad, True)
+    with pytest.raises(ValueError, match="invalid channel"):
+        scope.getDataWords(channel=bad)
+
+    assert not sock.sent, "nothing may be written for an invalid name"
+
+
+@pytest.mark.parametrize("bad", ["C1;C2", "a\nb"])
+def test_math_equation_rejects_quote_and_control_characters(bad):
+    scope = LeCroy()
+    sock = attach(scope, FragmentingFakeSocket())
+
+    with pytest.raises(ValueError, match="invalid math equation"):
+        scope.set_math_equation(MathChannel.F1, bad)
+
+    assert not sock.sent
+
+
+def test_numeric_setters_reject_non_finite_values():
+    scope = LeCroy()
+    sock = attach(scope, FragmentingFakeSocket())
+
+    for call in (
+        lambda: scope.set_volts_per_div(Channel.C1, float("nan")),
+        lambda: scope.set_offset(Channel.C1, float("nan")),
+        lambda: scope.set_trigger_level(Channel.C1, float("nan")),
+        lambda: scope.set_trigger_delay(float("nan")),
+    ):
+        with pytest.raises(ValueError, match="must be finite"):
+            call()
+
+    assert not sock.sent

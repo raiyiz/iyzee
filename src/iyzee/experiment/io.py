@@ -1,27 +1,26 @@
-"""Where experiment results go: measurement persistence (run directories,
-compressed archives) and plotting helpers.
+"""Measurement persistence and plotting helpers.
 
-A run is saved as a matched pair of files sharing one file stem: a
-``.npz`` holding purely numeric arrays (x-values, and one 2-D array per
-named trace), and a ``.json`` sidecar holding per-point and run-level
-metadata as plain JSON. Splitting them this way means the ``.npz`` never
-needs ``allow_pickle=True`` to load — every array in it is a plain numeric
-dtype — so reading back a saved run, including a run someone else wrote,
-never risks NumPy's pickle-based object-array deserialization executing
-code embedded in the file. (An earlier version of this module packed
-everything, including per-point dicts, into a single ``dtype=object``
-``.npz``; that required ``allow_pickle=True`` to read anything back at
-all. Files written that way are not supported by this version.)
-"""
+Every numeric recording is a matched pair of files sharing one stem: a
+compressed ``.npz`` containing numeric arrays only, plus a plain-JSON
+``.json`` manifest carrying the interpretation and provenance metadata.
+Sweep checkpoints use the long-standing ``x_values``/``trace_*`` schema;
+scope acquisitions use channel-specific ``time_*``/``value_*`` arrays and
+may also retain raw ``raw_*`` waveform codes. Keeping the arrays numeric means
+readers never need ``allow_pickle=True`` — loading a recording cannot invoke
+NumPy's pickle-based object-array deserialization. Older object-array archives
+written by a pre-split version of this module are intentionally unsupported."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -95,6 +94,114 @@ def _new_stem(name: str = "") -> str:
     return "_".join(part for part in (timestamp, slug, token) if part)
 
 
+@dataclass(frozen=True)
+class Recording:
+    """One saved measurement, loaded back from its ``.npz``/``.json`` pair.
+
+    ``arrays`` and ``metadata`` are exactly what ``save_numeric_recording``
+    (and, through it, ``save_step_results``/``scope_workflows.
+    save_scope_acquisition``) wrote. This layer doesn't interpret them: a
+    caller reads ``metadata["kind"]`` to pick the right accessor —
+    ``difference_series_many`` for a sweep checkpoint,
+    ``waveform_math.traces_from_scope_recording`` for a scope acquisition —
+    rather than this function guessing the schema.
+    """
+
+    path: Path
+    arrays: dict[str, np.ndarray]
+    metadata: dict[str, Any]
+
+
+def load_recording(path: Path) -> Recording:
+    """Load one saved recording's numeric arrays and JSON sidecar.
+
+    The single reader for the pair :func:`save_numeric_recording` writes;
+    ``TracesScreen`` and the Data screen both go through this rather than
+    each re-implementing "np.load a dict, then try to parse the matching
+    .json" — see the ``experiment.io`` design note in ``adr_0001`` on
+    consolidating a transformation applied more than once before it reaches
+    a renderer.
+
+    A missing or corrupt sidecar (partial write, hand edit) is tolerated —
+    ``metadata`` comes back ``{}`` rather than raising — because the numeric
+    arrays are still fully usable without it. An unreadable ``.npz`` *does*
+    raise ``Exception``: unlike the sidecar, there is no usable partial
+    result in that case, and every existing caller already handles this by
+    catching broadly and showing the error rather than expecting a
+    particular exception type.
+    """
+    with np.load(path, allow_pickle=False) as archive:
+        arrays = {key: archive[key] for key in archive.files}
+    metadata: dict[str, Any] = {}
+    try:
+        metadata = json.loads(path.with_suffix(".json").read_text())
+    except OSError, ValueError:
+        pass
+    return Recording(path=path, arrays=arrays, metadata=metadata)
+
+
+def _sha256_file(path: Path) -> str:
+    """Return a SHA-256 digest without loading the whole file into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def save_numeric_recording(
+    arrays: Mapping[str, np.ndarray],
+    savedir: Path,
+    metadata: Mapping[str, Any],
+    *,
+    name: str = "",
+    path: Path | None = None,
+) -> Path:
+    """Persist numeric arrays plus a JSON manifest as one recording.
+
+    The NPZ contains only numeric arrays and is written/read without pickle.
+    The sidecar is plain JSON and includes a SHA-256 digest of the completed
+    NPZ so copied or archived data can be checked for accidental modification.
+    Both files use the ``.part``-then-replace pattern used by experiment
+    checkpoints, keeping partially-written final files out of normal listings.
+
+    This is the shared persistence primitive for sweep checkpoints and scope
+    waveform recordings; higher layers define their own metadata schemas while
+    file naming, numeric validation, atomic replacement, and checksum handling
+    stay in one implementation.
+    """
+    if path is None:
+        path = savedir / f"{_new_stem(name)}.npz"
+
+    normalized: dict[str, np.ndarray] = {}
+    for key, value in arrays.items():
+        array = np.asarray(value)
+        if array.dtype.hasobject:
+            raise TypeError(f"recording array {key!r} has object dtype")
+        if not np.issubdtype(array.dtype, np.number):
+            raise TypeError(f"recording array {key!r} must be numeric, got {array.dtype}")
+        normalized[key] = array
+
+    partial_npz = path.with_name(path.name + ".part")
+    with partial_npz.open("wb") as handle:
+        np.savez_compressed(handle, **cast(Any, normalized))
+    partial_npz.replace(path)
+
+    digest = _sha256_file(path)
+    json_path = path.with_suffix(".json")
+    sidecar = {
+        **dict(metadata),
+        "format": "iyzee.numeric-recording",
+        "format_version": 1,
+        "data_file": path.name,
+        "data_sha256": digest,
+    }
+    partial_json = json_path.with_name(json_path.name + ".part")
+    partial_json.write_text(json.dumps(sidecar, indent=2, default=str))
+    partial_json.replace(json_path)
+    return path
+
+
 def save_step_results(
     results: list[StepResult],
     savedir: Path,
@@ -152,8 +259,6 @@ def save_step_results(
     """
     if path is None:
         path = savedir / f"{_new_stem(name)}.npz"
-    json_path = path.with_suffix(".json")
-
     trace_names = list(dict.fromkeys(name for result in results for name in result.traces))
     arrays: dict[str, np.ndarray] = {
         "x_values": np.asarray([result.x_value for result in results], dtype=np.float64)
@@ -162,21 +267,14 @@ def save_step_results(
         arrays[f"trace_{trace_name}"] = _stack_trace(results, trace_name)
 
     points = [{"label": result.label, "x_unit": result.x_unit, **result.meta} for result in results]
-    sidecar = {"run_metadata": run_metadata, "points": points}
 
-    # ".part", not ".npz.tmp"/".json.tmp": np.savez appends ".npz" to names
-    # that lack it (writing through a file object avoids that), and Traces
-    # globs *.npz, so an in-flight file must not match either way.
-    partial_npz = path.with_name(path.name + ".part")
-    with partial_npz.open("wb") as handle:
-        np.savez_compressed(handle, **arrays)
-    partial_npz.replace(path)
-
-    partial_json = json_path.with_name(json_path.name + ".part")
-    partial_json.write_text(json.dumps(sidecar, indent=2, default=str))
-    partial_json.replace(json_path)
-
-    return path
+    return save_numeric_recording(
+        arrays,
+        savedir,
+        {"run_metadata": run_metadata, "points": points},
+        name=name,
+        path=path,
+    )
 
 
 def _stack_trace(results: list[StepResult], trace_name: str) -> np.ndarray:
@@ -205,27 +303,20 @@ def _stack_trace(results: list[StepResult], trace_name: str) -> np.ndarray:
             )
         rows.append(row)
     stacked = np.full((len(results), width or 0), np.nan, dtype=np.float64)
-    for i, row in enumerate(rows):
-        if row is not None:
-            stacked[i] = row
+    for i, stored in enumerate(rows):
+        if stored is not None:
+            stacked[i] = stored
     return stacked
 
 
 def difference_series(
-    squeezing: object, shot_noise: object, label: str | None
-) -> tuple[list[float], list[float], str | None] | None:
+    squeezing: object, shot_noise: object, label: str
+) -> tuple[list[float], list[float], str] | None:
     """Compute one squeezing-minus-shot-noise line, ready to plot.
 
-    The single source of truth for this computation — before this, the
-    same three lines (subtract, build an x-index, attach a label) were
-    written out independently in four places: this module's own
-    ``build_figure`` (matplotlib), ``SweepScreen._plot_result`` (live,
-    per point, plotext), ``TracesScreen._show`` (re-derived from a saved
-    ``.npz``, plotext), and indirectly duplicated again in spirit by
-    ``IyzeeConsole``'s figure rendering. Callers only differ in *where*
-    the squeezing/shot_noise arrays came from (a live ``StepResult`` vs.
-    an archived point) and *how* they draw the result (matplotlib vs.
-    plotext) — this covers the part in between.
+    This is the shared measurement transformation used by live results and
+    archived recordings. Renderers only decide how the resulting (x, y,
+    label) series are displayed.
 
     Returns ``None`` if either trace is missing, matching the skip
     behavior ``SweepScreen``/``TracesScreen`` already had (``build_figure``
@@ -245,6 +336,54 @@ def difference_series(
     return list(range(len(difference))), list(difference), label
 
 
+def difference_series_many(
+    squeezing_rows: Iterable[object],
+    shot_noise_rows: Iterable[object],
+    labels: Iterable[str],
+) -> list[tuple[list[float], list[float], str]]:
+    """Build all usable squeezing-minus-shot-noise series for a recording."""
+    series = []
+    for squeezing, shot_noise, label in zip(squeezing_rows, shot_noise_rows, labels, strict=True):
+        result = difference_series(squeezing, shot_noise, label)
+        if result is not None:
+            series.append(result)
+    return series
+
+
+def difference_statistic(
+    squeezing: object, shot_noise: object, statistic: str = "mean"
+) -> float | None:
+    """Reduce one squeezing-minus-shot-noise trace pair to one scalar value.
+
+    "mean" and "minimum" operate only on samples where both traces are finite,
+    so one missing analyzer bin does not discard an otherwise usable point.
+    """
+    if squeezing is None or shot_noise is None:
+        return None
+    difference = np.asarray(squeezing, dtype=np.float64) - np.asarray(shot_noise, dtype=np.float64)
+    finite = np.isfinite(difference)
+    if not np.any(finite):
+        return None
+    values = difference[finite]
+    if statistic == "mean":
+        return float(np.mean(values))
+    if statistic == "minimum":
+        return float(np.min(values))
+    raise ValueError(f"unknown statistic {statistic!r}")
+
+
+def difference_values_many(
+    squeezing_rows: Iterable[object],
+    shot_noise_rows: Iterable[object],
+    statistic: str = "mean",
+) -> list[float | None]:
+    """Reduce every point in a sweep to one difference statistic."""
+    return [
+        difference_statistic(squeezing, shot_noise, statistic)
+        for squeezing, shot_noise in zip(squeezing_rows, shot_noise_rows, strict=True)
+    ]
+
+
 def build_figure(results: list[StepResult]):
     """Build (but do not display) the squeezing-minus-shot-noise figure.
 
@@ -254,22 +393,15 @@ def build_figure(results: list[StepResult]):
     to pop up a blocking GUI window.
     """
     fig, ax = plt.subplots()
-    labels: list[str] = []
+    series = difference_series_many(
+        [result.traces.get("squeezing") for result in results],
+        [result.traces.get("shot_noise") for result in results],
+        [result.label for result in results],
+    )
 
-    for result in results:
-        series = difference_series(
-            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
-        )
-        if series is None:
-            continue
-        _x, difference, label = series
-        ax.plot(difference)
-        # difference_series() types its returned label as `str | None` because
-        # it also accepts `None` in (for a caller with no label at all); here
-        # `result.label` is a plain `str` (StepResult.label is not Optional),
-        # so it comes back unchanged — this is just narrowing that for `legend()`.
-        if label is not None:
-            labels.append(label)
+    for x_values, difference, _label in series:
+        ax.plot(x_values, difference)
+    labels = [label for _, _, label in series]
 
     if labels:
         ax.legend(labels, ncol=4, loc="upper center", bbox_to_anchor=(0.5, 1.1))

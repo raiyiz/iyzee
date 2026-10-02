@@ -1,0 +1,10 @@
+# .pre-commit-config.yaml
+repos:
+  - repo: local
+    hooks:
+      - id: lint
+        name: Ruff lint + format
+        entry: ./ci.sh lint
+        language: unsupported
+        pass_filenames: false
+        always_run: true
