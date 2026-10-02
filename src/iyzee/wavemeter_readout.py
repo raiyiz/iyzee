@@ -108,7 +108,10 @@ def compute_two_photon_detuning(f1: float, f2: float) -> list[tuple[str, float]]
 
 
 def single_readout(
-    channel: int = DEFAULT_CHANNEL, reference_f: float = 0, label: str = "", printing: bool = True
+    channel: int = DEFAULT_CHANNEL,
+    reference_f: float = 0,
+    label: str = "",
+    printing: bool = True,
 ) -> float:
     """Fetch one laser frequency and optionally subtract a reference."""
     ls_frequency = read_frequency(channel) - reference_f
