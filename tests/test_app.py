@@ -20,6 +20,7 @@ from helpers import (
 from textual.widgets import ContentSwitcher, Static
 
 from iyzee.tui.app import IyzeeApp, NavRail
+from iyzee.tui.ipython import LabProxy
 from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL, ConnectScreen
 from iyzee.tui.screens.console import ConsoleScreen, IyzeeConsole
 from iyzee.tui.screens.sweep import SweepScreen
@@ -201,6 +202,8 @@ async def test_a_link_that_dies_is_shown_as_lost_everywhere_and_released(
         await pilot.pause()
         nav = app.query_one("#nav-instruments", Static)
         assert "● Fk" in plain(nav)
+        lab = LabProxy(app)
+        assert "mx" in lab.connected
 
         handle.alive = False
         app._check_links()
@@ -214,6 +217,9 @@ async def test_a_link_that_dies_is_shown_as_lost_everywhere_and_released(
         assert any("connection lost" in m for m in notifications(app))
         await wait_until(pilot, lambda: handle.disconnect_calls > 0)  # the dead link was released
         assert "reconnect Fake" in plain(app.query_one("#connect-hint", Static))
+        assert lab.connected == ()  # the console agrees
+        with pytest.raises(AttributeError, match="not connected"):
+            lab.mx
 
 
 @async_test
@@ -238,27 +244,6 @@ async def test_a_lost_link_is_reported_once_and_a_reconnect_clears_it(
         assert app.handles["mxa"] is fresh
         assert "mxa" not in app.lost_links
         assert table.get_cell("mxa", DETAIL_COL) == "back"
-
-
-@async_test
-async def test_the_console_says_a_lost_instrument_is_not_connected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from iyzee.tui.ipython import LabProxy
-
-    handle = FakeHandle()
-    app = connect_app(monkeypatch, handle, key="mxa")
-    async with app.run_test():
-        app.handles["mxa"] = handle
-        lab = LabProxy(app)
-        assert "mx" in lab.connected
-
-        handle.alive = False
-        app._check_links()
-
-        assert lab.connected == ()
-        with pytest.raises(AttributeError, match="not connected"):
-            lab.mx
 
 
 @async_test

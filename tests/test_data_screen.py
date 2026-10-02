@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import numpy as np
 import pytest
 from helpers import async_test, notifications, plain, wait_until
 from test_scope_workflows import DetailedFakeScope
@@ -63,6 +64,29 @@ def _summary(screen: DataScreen) -> str:
 
 def _log(screen: DataScreen) -> str:
     return "\n".join(strip.text for strip in screen.query_one("#data-log", RichLog).lines)
+
+
+async def _apply_op(
+    screen: DataScreen,
+    pilot: Pilot,
+    op: str,
+    *,
+    a: str | None = None,
+    b: str | None = None,
+    **inputs: str,
+) -> None:
+    """Fill the math-op form and press Apply. ``inputs`` are the text fields,
+    named by id with ``_`` for ``-`` (``region_lo`` is ``#data-region-lo``)."""
+    screen.query_one("#data-op", Select).value = op
+    if a is not None:
+        screen.query_one("#data-chan-a", Select).value = a
+    if b is not None:
+        screen.query_one("#data-chan-b", Select).value = b
+    for field, value in inputs.items():
+        screen.query_one(f"#data-{field.replace('_', '-')}", Input).value = value
+    await pilot.pause()
+    screen.query_one("#data-apply-op", Button).press()
+    await pilot.pause()
 
 
 # -- empty state / navigation to the page ----------------------------------------------------
@@ -127,40 +151,45 @@ async def test_channel_toggles_control_the_preview(
 
 
 @async_test
-async def test_subtract_adds_a_derived_trace_and_a_checkbox_for_it(
+async def test_subtract_adds_a_derived_trace_and_a_checkbox_and_clear_removes_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async with _open_data_screen(monkeypatch, _save_scope_run(tmp_path).parent) as (screen, pilot):
-        screen.query_one("#data-op", Select).value = "subtract"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-chan-b", Select).value = "C2"
-        await pilot.pause()
-
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
+        await _apply_op(screen, pilot, "subtract", a="C1", b="C2")
 
         assert "C1 - C2" in screen._derived
         assert "C1 - C2" in screen._checkboxes
         assert "Added derived trace: C1 - C2" in _log(screen)
 
-
-@async_test
-async def test_subtract_with_no_channel_b_flags_that_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(monkeypatch, _save_scope_run(tmp_path).parent) as (screen, pilot):
-        app = pilot.app
-        assert isinstance(app, app_mod.IyzeeApp)
-        screen.query_one("#data-op", Select).value = "subtract"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        await pilot.pause()
-
-        screen.query_one("#data-apply-op", Button).press()
+        screen.query_one("#data-clear-op", Button).press()
         await pilot.pause()
 
         assert screen._derived == {}
-        assert screen.query_one("#data-chan-b", Select).has_class("-invalid")
-        assert any("Channel B" in n for n in notifications(app))
+        assert set(screen._checkboxes) == {"C1", "C2"}
+        assert "Cleared derived traces." in _log(screen)
+
+
+@pytest.mark.parametrize(
+    "op,fields,invalid_id,notice",
+    [
+        ("subtract", {"a": "C1"}, "#data-chan-b", "Channel B"),
+        ("scale", {"a": "C1", "yscale": "not a number"}, "#data-yscale", None),
+    ],
+    ids=["subtract-without-b", "non-numeric-scale"],
+)
+@async_test
+async def test_a_bad_form_field_is_flagged_and_nothing_is_derived(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, op, fields, invalid_id, notice
+) -> None:
+    async with _open_data_screen(monkeypatch, _save_scope_run(tmp_path).parent) as (screen, pilot):
+        await _apply_op(screen, pilot, op, **fields)
+
+        assert screen._derived == {}
+        assert screen.query_one(invalid_id).has_class("-invalid")
+        if notice:
+            app = pilot.app
+            assert isinstance(app, app_mod.IyzeeApp)
+            assert any(notice in n for n in notifications(app))
 
 
 # -- background correction ---------------------------------------------------------------------
@@ -170,20 +199,15 @@ async def test_subtract_with_no_channel_b_flags_that_field(
 async def test_background_region_subtracts_the_mean_of_the_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scope = DetailedFakeScope()
     async with _open_data_screen(
-        monkeypatch, _save_scope_run(tmp_path, channels=(Channel.C1,), scope=scope).parent
+        monkeypatch, _save_scope_run(tmp_path, channels=(Channel.C1,)).parent
     ) as (screen, pilot):
         c1 = screen._measured["C1"]
         lo, hi = float(c1.time[0]), float(c1.time[min(1, len(c1.time) - 1)])
 
-        screen.query_one("#data-op", Select).value = "background-region"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-region-lo", Input).value = f"{lo}"
-        screen.query_one("#data-region-hi", Input).value = f"{hi}"
-        await pilot.pause()
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
+        await _apply_op(
+            screen, pilot, "background-region", a="C1", region_lo=f"{lo}", region_hi=f"{hi}"
+        )
 
         (derived_label,) = [label for label in screen._derived if label != "C1"]
         assert "bg-corrected" in derived_label
@@ -199,60 +223,13 @@ async def test_scale_axes_applies_the_form_values(
     async with _open_data_screen(
         monkeypatch, _save_scope_run(tmp_path, channels=(Channel.C1,)).parent
     ) as (screen, pilot):
-        screen.query_one("#data-op", Select).value = "scale"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-yscale", Input).value = "1000"
-        await pilot.pause()
-
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
+        await _apply_op(screen, pilot, "scale", a="C1", yscale="1000")
 
         (derived,) = screen._derived.values()
-        import numpy as np
-
         np.testing.assert_allclose(derived.values, screen._measured["C1"].values * 1000)
 
 
-@async_test
-async def test_a_non_numeric_scale_field_flags_that_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(
-        monkeypatch, _save_scope_run(tmp_path, channels=(Channel.C1,)).parent
-    ) as (screen, pilot):
-        screen.query_one("#data-op", Select).value = "scale"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-yscale", Input).value = "not a number"
-        await pilot.pause()
-
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
-
-        assert screen._derived == {}
-        assert screen.query_one("#data-yscale", Input).has_class("-invalid")
-
-
 # -- clear derived --------------------------------------------------------------------------
-
-
-@async_test
-async def test_clear_derived_removes_every_derived_trace_and_its_checkbox(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(monkeypatch, _save_scope_run(tmp_path).parent) as (screen, pilot):
-        screen.query_one("#data-op", Select).value = "subtract"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-chan-b", Select).value = "C2"
-        await pilot.pause()
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
-
-        screen.query_one("#data-clear-op", Button).press()
-        await pilot.pause()
-
-        assert screen._derived == {}
-        assert set(screen._checkboxes) == {"C1", "C2"}
-        assert "Cleared derived traces." in _log(screen)
 
 
 # -- threaded rendering: a slow render must never land after a newer one -------------------
@@ -417,11 +394,7 @@ async def test_switching_to_a_different_run_clears_derived_traces_from_the_previ
     _save_scope_run(tmp_path, channels=(Channel.C3,))  # newest -> highlighted first
     async with _open_data_screen(monkeypatch, tmp_path) as (screen, pilot):
         # newest run (C3) is highlighted first; apply an op, then switch away and back
-        screen.query_one("#data-op", Select).value = "scale"
-        screen.query_one("#data-chan-a", Select).value = "C3"
-        await pilot.pause()
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
+        await _apply_op(screen, pilot, "scale", a="C3")
         assert screen._derived
 
         list_view = screen.query_one("#data-list", ListView)

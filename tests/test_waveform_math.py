@@ -8,8 +8,10 @@ path to catch any schema drift between the writer and this module's reader.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from test_scope_workflows import DetailedFakeScope
@@ -147,12 +149,20 @@ def test_subtract_traces_resamples_a_mismatched_grid():
     np.testing.assert_allclose(result.values, [10.0, 8.0, 6.0])  # b interpolated to [0, 2, 4]
 
 
-def test_subtract_traces_rejects_different_units():
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda a, b: subtract_traces(a, b),
+        lambda a, b: subtract_background(a, reference=b),
+    ],
+    ids=["subtract", "background-reference"],
+)
+def test_operations_reject_traces_with_different_units(operation):
     a = _trace("C1", [0.0], [1.0], value_unit="V")
     b = _trace("C2", [0.0], [1.0], value_unit="A")
 
     with pytest.raises(ValueError, match="different units"):
-        subtract_traces(a, b)
+        operation(a, b)
 
 
 def test_subtract_traces_does_not_mutate_its_inputs():
@@ -203,14 +213,6 @@ def test_background_reference_is_subtracted_and_resampled_like_subtract_traces()
     np.testing.assert_allclose(result.values, [10.0, 9.0, 8.0])
 
 
-def test_background_reference_checks_units_like_subtract_traces():
-    trace = _trace("C1", [0.0], [1.0], value_unit="V")
-    dark = _trace("dark", [0.0], [1.0], value_unit="A")
-
-    with pytest.raises(ValueError, match="different units"):
-        subtract_background(trace, reference=dark)
-
-
 @pytest.mark.parametrize(
     "kwargs",
     [{}, {"region": (0.0, 1.0), "reference": _trace("dark", [0.0, 1.0], [0.0, 0.0])}],
@@ -245,78 +247,56 @@ def test_scale_trace_defaults_are_the_identity():
     assert result.label == trace.label  # no transform applied -> no change noted
 
 
-@pytest.mark.parametrize("kwargs", [{"x_scale": 0.0}, {"y_scale": 0.0}])
-def test_scale_trace_rejects_zero_scale(kwargs):
-    trace = _trace("C1", [0.0], [1.0])
-
-    with pytest.raises(ValueError, match="nonzero"):
-        scale_trace(trace, **kwargs)
-
-
-@pytest.mark.parametrize("kwargs", [{"x_scale": float("nan")}])
-def test_scale_trace_rejects_non_finite_values(kwargs):
-    trace = _trace("C1", [0.0], [1.0])
-
-    with pytest.raises(ValueError, match="finite"):
-        scale_trace(trace, **kwargs)
+@pytest.mark.parametrize(
+    "kwargs,message",
+    [
+        ({"x_scale": 0.0}, "nonzero"),
+        ({"y_scale": 0.0}, "nonzero"),
+        ({"x_scale": float("nan")}, "finite"),
+    ],
+)
+def test_scale_trace_rejects_a_zero_or_non_finite_scale(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        scale_trace(_trace("C1", [0.0], [1.0]), **kwargs)
 
 
-def test_build_waveform_figure_draws_one_line_per_trace_with_a_legend_label():
-    traces = [_trace("C1", [0.0, 1.0], [1.0, 2.0]), _trace("C2", [0.0, 1.0], [3.0, 4.0])]
-
-    fig = build_waveform_figure(traces)
+@contextlib.contextmanager
+def _figure(traces, **kwargs):
+    """A built waveform figure, always closed afterwards."""
+    fig = build_waveform_figure(traces, **kwargs)
     try:
-        (ax,) = fig.axes
-        assert len(ax.lines) == 2
-        assert [line.get_label() for line in ax.lines] == ["C1", "C2"]
-        assert ax.get_legend() is not None
+        yield fig
     finally:
-        import matplotlib.pyplot as plt
-
         plt.close(fig)
 
 
-def test_build_waveform_figure_legend_includes_provenance():
-    trace = _trace("C1", [0.0], [1.0], volts_per_div=0.5, coupling="D1M")
-
-    fig = build_waveform_figure([trace])
-    try:
-        label = fig.axes[0].lines[0].get_label()
-        assert "0.5 V/div" in label and "D1M" in label
-    finally:
-        import matplotlib.pyplot as plt
-
-        plt.close(fig)
-
-
-def test_build_waveform_figure_labels_axes_from_the_shared_unit():
-    traces = [_trace("C1", [0.0], [1.0], time_unit="S", value_unit="V")]
-
-    fig = build_waveform_figure(traces, title="My Run")
-    try:
-        ax = fig.axes[0]
-        assert ax.get_xlabel() == "Time (S)"
-        assert ax.get_ylabel() == "Signal (V)"
-        assert ax.get_title() == "My Run"
-    finally:
-        import matplotlib.pyplot as plt
-
-        plt.close(fig)
-
-
-def test_build_waveform_figure_notes_mixed_units_instead_of_guessing():
+def test_build_waveform_figure_draws_one_labelled_line_per_trace_with_provenance():
     traces = [
-        _trace("C1", [0.0], [1.0], value_unit="V"),
-        _trace("C2", [0.0], [1.0], value_unit="A"),
+        _trace("C1", [0.0, 1.0], [1.0, 2.0], volts_per_div=0.5, coupling="D1M"),
+        _trace("C2", [0.0, 1.0], [3.0, 4.0]),
     ]
 
-    fig = build_waveform_figure(traces)
-    try:
-        assert fig.axes[0].get_ylabel() == "Signal (mixed units)"
-    finally:
-        import matplotlib.pyplot as plt
+    with _figure(traces) as fig:
+        (ax,) = fig.axes
+        labels = [line.get_label() for line in ax.lines]
+        assert len(labels) == 2 and ax.get_legend() is not None
+        assert labels[1] == "C2"
+        assert "0.5 V/div" in labels[0] and "D1M" in labels[0]
 
-        plt.close(fig)
+
+@pytest.mark.parametrize(
+    "units,ylabel",
+    [(("V",), "Signal (V)"), (("V", "A"), "Signal (mixed units)")],
+    ids=["shared-unit", "mixed-units"],
+)
+def test_build_waveform_figure_labels_axes_without_guessing_units(units, ylabel):
+    traces = [_trace(f"C{i}", [0.0], [1.0], value_unit=unit) for i, unit in enumerate(units)]
+
+    with _figure(traces, title="My Run") as fig:
+        ax = fig.axes[0]
+        assert ax.get_xlabel() == "Time (S)"
+        assert ax.get_ylabel() == ylabel
+        assert ax.get_title() == "My Run"
 
 
 def test_build_waveform_figure_with_no_traces_does_not_crash():

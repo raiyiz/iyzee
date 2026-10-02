@@ -358,13 +358,24 @@ def test_connect_while_connected_raises():
         transport.connect("10.0.0.1")
 
 
-def test_close_clears_state_and_is_idempotent():
-    transport, sock = attached()
+def test_close_shuts_down_then_closes_clears_state_and_is_idempotent():
+    events: list[str] = []
+
+    class Recording(ScriptedSocket):
+        def shutdown(self, how: int) -> None:
+            events.append(f"shutdown:{how}")
+
+        def close(self) -> None:
+            events.append("close")
+
+    transport = VICPTransport()
+    transport.attach_socket(Recording())
 
     transport.close()
     transport.close()
 
-    assert sock.closed
+    # shutdown first so the scope sees a FIN and frees its session
+    assert events == [f"shutdown:{socket.SHUT_RDWR}", "close"]
     assert transport.connected is False
     assert transport.address is None
 
@@ -642,24 +653,6 @@ def test_connect_enables_keepalive_so_a_dead_peer_is_noticed():
             transport.close()
     finally:
         server.close()
-
-
-def test_close_shuts_the_connection_down_before_closing_it():
-    events: list[str] = []
-
-    class Recording(ScriptedSocket):
-        def shutdown(self, how: int) -> None:
-            events.append(f"shutdown:{how}")
-
-        def close(self) -> None:
-            events.append("close")
-
-    transport = VICPTransport()
-    transport.attach_socket(Recording())
-
-    transport.close()
-
-    assert events == [f"shutdown:{socket.SHUT_RDWR}", "close"]
 
 
 def test_a_failed_shutdown_does_not_stop_the_close():
