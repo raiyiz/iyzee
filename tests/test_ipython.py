@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-
 from helpers import FakeApp, FakeHandle, history_manager
 from IPython.core.interactiveshell import InteractiveShell
 
