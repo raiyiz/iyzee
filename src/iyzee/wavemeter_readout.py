@@ -3,6 +3,7 @@ import time
 import urllib.request
 
 import numpy as np
+import requests
 
 from iyzee import IP
 
@@ -14,58 +15,51 @@ log = logging.getLogger("iyzee.wavemeter")
 READ_TIMEOUT_S = 1.0
 SETPOINT_TIMEOUT_S = 3.0
 
-"""
-Readout of single laser frequency with Wavemeter switch over network
 
-Live plotting and single readout of a channel
-"""
-D1_center_85 = (
-    377.107385690  # D1 Rubidium 85 transition frequency vacuum as reference (D.Steck), THz
-)
-D2_center_85 = 384.230406373  # D2 Rubidium 85 transition frequency, THz
+# Scaling is a bit tricky here, since we span several orders of magnitude, but
+# want to avoid huge numbers, hwich would be the case, if we go straight for SI
+# units. So we define as the base unit here giga hertz and scale accordingly
+# up/down from that.
+THz = 1e3
+GHz = 1
+MHz = 1e-3
 
-D1_center_87 = 377.1074635  # D1 Rubidium 87 in THz
-D2_center_87 = 384.2304844685  # D2
+# Rubidium transition frequencies in vacuum as reference (D.Steck), THz
 
-two_photon_762 = 393.37534  # in THz = 762.10282 nm  (vacuum, recalculated from NIST)
-two_photon_778 = 385.285142375  # MEP
-two_photon_776_52 = 386.3411662603302  # THz, NIST recalculated with ratio of 'two_photon' to its NIST value (n in air).
-two_photon_776_32 = 386.25226107557904
-# channel = sys.argv[1] # Channel as input
 
-# Rb85 absolute transition frequencies (GHz)
-scal = 1e-3
+D1_center_85 = 377.107385690 * THz
+D2_center_85 = 384.23040637 * THz
 
-# From Daniel Stecks scripts on Rb 85 & 87..
+D1_center_87 = 377.1074635 * THz
+D2_center_87 = 384.2304844685 * THz
+
+
+
 Rb_transitions = [
-    ["D1 - Rb85_F22", D1_center_85 + (1.770843922 - 0.210923) * scal],  # D1 Rb85
-    ["D1 - Rb85_F23", D1_center_85 + (1.770843922 + 0.150659) * scal],
-    ["D1 - Rb85_F32", D1_center_85 + (-1.264888516 - 0.210923) * scal],
-    ["D1 - Rb85_F33", D1_center_85 + (-1.264888516 + 0.150659) * scal],
-    ["D1 - Rb87_F11", D1_center_87 + (4.27167663181519 - 0.510410) * scal],  # D1 Rb87
-    ["D1 - Rb87_F12", D1_center_87 + (4.27167663181519 + 0.306246) * scal],
-    ["D1 - Rb87_F21", D1_center_87 + (-2.5630059790891 - 0.510410) * scal],
-    ["D1 - Rb87_F22", D1_center_87 + (-2.5630059790891 + 0.306246) * scal],
-    ["D2 - Rb85_F21", D2_center_85 + (1.770843922 - 0.113307) * scal],  # D2 Rb85
-    ["D2 - Rb85_F22", D2_center_85 + (1.770843922 - 0.083955) * scal],
-    ["D2 - Rb85_F23", D2_center_85 + (1.770843922 - 0.020503) * scal],
-    ["D2 - Rb85_F32", D2_center_85 + (-1.264888516 - 0.083955) * scal],
-    ["D2 - Rb85_F33", D2_center_85 + (-1.264888516 - 0.020503) * scal],
-    ["D2 - Rb85_F34", D2_center_85 + (-1.264888516 + 0.100357) * scal],
-    ["D2 - Rb87_F10", D2_center_87 + (4.27167663181519 - 0.3020738) * scal],  # D2 Rb87
-    ["D2 - Rb87_F11", D2_center_87 + (4.27167663181519 - 0.2298518) * scal],
-    ["D2 - Rb87_F12", D2_center_87 + (4.27167663181519 - 0.0729113) * scal],
-    ["D2 - Rb87_F21", D2_center_87 + (-2.5630059790891 - 0.2298518) * scal],
-    ["D2 - Rb87_F22", D2_center_87 + (-2.5630059790891 - 0.0729113) * scal],
-    ["D2 - Rb87_F23", D2_center_87 + (-2.5630059790891 + 0.1937408) * scal],
+    ["D1 - Rb85_F22", D1_center_85 + (1.770843922 - 0.210923)  ],
+    ["D1 - Rb85_F23", D1_center_85 + (1.770843922 + 0.150659)  ],
+    ["D1 - Rb85_F32", D1_center_85 + (-1.264888516 - 0.210923) ],
+    ["D1 - Rb85_F33", D1_center_85 + (-1.264888516 + 0.150659) ],
+    ["D1 - Rb87_F11", D1_center_87 + (4.27167663181519 - 0.510410) ],
+    ["D1 - Rb87_F12", D1_center_87 + (4.27167663181519 + 0.306246) ],
+    ["D1 - Rb87_F21", D1_center_87 + (-2.5630059790891 - 0.510410) ],
+    ["D1 - Rb87_F22", D1_center_87 + (-2.5630059790891 + 0.306246) ],
+    ["D2 - Rb85_F21", D2_center_85 + (1.770843922 - 0.113307)  ],
+    ["D2 - Rb85_F22", D2_center_85 + (1.770843922 - 0.083955)  ],
+    ["D2 - Rb85_F23", D2_center_85 + (1.770843922 - 0.020503)  ],
+    ["D2 - Rb85_F32", D2_center_85 + (-1.264888516 - 0.083955) ],
+    ["D2 - Rb85_F33", D2_center_85 + (-1.264888516 - 0.020503) ],
+    ["D2 - Rb85_F34", D2_center_85 + (-1.264888516 + 0.100357) ],
+    ["D2 - Rb87_F10", D2_center_87 + (4.27167663181519 - 0.3020738) ],
+    ["D2 - Rb87_F11", D2_center_87 + (4.27167663181519 - 0.2298518) ],
+    ["D2 - Rb87_F12", D2_center_87 + (4.27167663181519 - 0.0729113) ],
+    ["D2 - Rb87_F21", D2_center_87 + (-2.5630059790891 - 0.2298518) ],
+    ["D2 - Rb87_F22", D2_center_87 + (-2.5630059790891 - 0.0729113) ],
+    ["D2 - Rb87_F23", D2_center_87 + (-2.5630059790891 + 0.1937408) ],
     ["Rb85_D1_center", D1_center_85],
     ["Rb87_D1_center", D1_center_87],
     ["Rb85_D2_center", D2_center_85],
     ["Rb87_D2_center", D2_center_87],
-    ["762_D3/2_center", two_photon_762],
-    ["776_D5/2_center", two_photon_776_52],
-    ["776_D3/2_center", two_photon_776_32],
-    ["778_D5/2_center", two_photon_778],
 ]
 
 
@@ -89,7 +83,9 @@ class Wavemeter:
         try:
             return float(_request(f"{selected}/", timeout=READ_TIMEOUT_S))
         except (OSError, ValueError, UnicodeError) as exc:
-            raise WavemeterReadoutError(f"Failed to read wavemeter channel {selected}") from exc
+            raise WavemeterReadoutError(
+                f"Failed to read wavemeter channel {selected}"
+            ) from exc
 
     def set_pid_setpoint(self, freq: float, channel: int | None = None) -> None:
         selected = self.channel if channel is None else channel
@@ -106,36 +102,6 @@ class Wavemeter:
         log.info("[WS-7] set PID setpoint of channel %s to %s THz", selected, freq)
 
 
-def compute_two_photon_detuning(f1: float, f2: float):
-    """
-    Helper function to compute the two photon detuning
-    to a F to F'' manifold transition in Rubidium
-    """
-    f_sum = f1 + f2
-    f_diff = f1 - f2
-    scal = 1e-3
-
-    two_photon_detuning = [
-        ["absolute_diff (GHz)", f_diff],
-        [
-            "Rb85_D5/2_F2,0-4 (MHz)",
-            f_sum - (D2_center_85 + two_photon_776_52) - 1.770843922 * scal,
-        ],
-        [
-            "Rb85_D5/2_F3,1-5 (MHz)",
-            f_sum - (D2_center_85 + two_photon_776_52) + 1.264888516 * scal,
-        ],
-        [
-            "Rb87_D5/2_F1,1-3 (MHz)",
-            f_sum - (D2_center_87 + two_photon_776_52) - 4.27167663181519 * scal,
-        ],
-        [
-            "Rb87_D5/2_F2,1-4 (MHz)",
-            f_sum - (D2_center_87 + two_photon_776_52) + 2.5630059790891 * scal,
-        ],
-    ]
-    return two_photon_detuning
-
 
 def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
     """One bounded HTTP request to the wavemeter server; returns the decoded body.
@@ -143,11 +109,11 @@ def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
     Raises ``OSError`` (including ``HTTPError`` and timeouts), ``UnicodeError``.
     """
     url = f"http://{IP.WAVEMETER}:8000/api/{path}"
-    with urllib.request.urlopen(url, data=data, timeout=timeout) as response:
-        return response.read().decode("ascii")
+    resp = requests.get(url)
+    # with urllib.request.urlopen(url, data=data, timeout=timeout) as response:
+    #     return response.read().decode("ascii")
 
 
-# ls_frequency = float(urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/").read().decode("ascii")) - 377.107385690
 def single_readout(
     channel: int, reference_f: float = 0, label: str = "", printing: bool = True
 ) -> float:
@@ -177,7 +143,9 @@ def set_pid_setpoint(freq: float, channel: int) -> None:
     Wavemeter(channel=channel).set_pid_setpoint(freq)
 
 
-def track_frequency(total_time, time_step, save_path, channel, reference_f=0, save_csv=False):
+def track_frequency(
+    total_time, time_step, save_path, channel, reference_f=0, save_csv=False
+):
     # Plotting and the CSV export are only needed here. Imported lazily because
     # this module is also imported for its HTTP client by the TUI, where
     # pandas alone was a fifth of the startup time.
@@ -205,7 +173,9 @@ def track_frequency(total_time, time_step, save_path, channel, reference_f=0, sa
         try:  # readout laser frequency and plot laser detuning or absolute laser frequency
             ls_frequency = (
                 float(
-                    urllib.request.urlopen(f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=2)
+                    urllib.request.urlopen(
+                        f"http://{IP.WAVEMETER}:8000/api/{channel}/", timeout=2
+                    )
                     .read()
                     .decode("ascii")
                 )
@@ -268,7 +238,11 @@ def track_frequency(total_time, time_step, save_path, channel, reference_f=0, sa
 def monitoring_frequencies(channels, two_photon=True):
     from tabulate import tabulate  # lazy: see track_frequency
 
-    header = ["Transition"] + ["Frequencies (THz)"] + [f"Detuning (ch{c}) / GHz" for c in channels]
+    header = (
+        ["Transition"]
+        + ["Frequencies (THz)"]
+        + [f"Detuning (ch{c}) / GHz" for c in channels]
+    )
     rows = []
     freqs = [single_readout(c, reference_f=0, printing=False) for c in channels]
 
