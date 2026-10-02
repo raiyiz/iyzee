@@ -227,14 +227,13 @@ class SweepScreen(Page):
                 shutter = None
             else:
                 shutter_handle = self.iyzee_app.handles.get("shutter")
-                wavemeter_handle = self.iyzee_app.handles.get("wavemeter")
                 if shutter_handle is None or shutter_handle.device is None:
                     self.notify(
                         "Connect the shutter first — press F1 for the Connect page.",
                         severity="error",
                     )
                     return
-                if wavemeter_handle is None or wavemeter_handle.device is None:
+                if "wavemeter" not in self.iyzee_app.handles:
                     self.notify(
                         "Connect the wavemeter first — press F1 for the Connect page.",
                         severity="error",
@@ -315,8 +314,6 @@ class SweepScreen(Page):
         locks = [self.iyzee_app.handles["mxa"].lock]
         if shutter is not None:
             locks.append(self.iyzee_app.handles["shutter"].lock)
-        if "wavemeter" in self.iyzee_app.handles:
-            locks.append(self.iyzee_app.handles["wavemeter"].lock)
 
         with contextlib.ExitStack() as stack:
             for lock in locks:
