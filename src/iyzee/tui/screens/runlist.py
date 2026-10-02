@@ -77,15 +77,29 @@ class RunListPage(Page):
             list_view.clear()
             for path in self._paths:
                 list_view.append(ListItem(Label(run_label(path, path.stat().st_mtime))))
-            if self._paths:
-                list_view.index = self._paths.index(previous) if previous in self._paths else 0
         finally:
             self._suppress_events = False
 
         if self._paths:
-            self._select(self._paths[list_view.index or 0])
+            # ListItem mounting is deferred. Set the index only after the
+            # refresh has completed, otherwise ListView may validate it
+            # against an empty child list and leave the browser unhighlighted.
+            self.call_after_refresh(self._finish_refresh, list_view, previous)
         else:
             self._show_empty()
+
+    def _finish_refresh(self, list_view: ListView, previous: Path | None) -> None:
+        """Select the preserved run once the rebuilt ListView is mounted."""
+        if not self._paths:
+            self._show_empty()
+            return
+        index = self._paths.index(previous) if previous in self._paths else 0
+        self._suppress_events = True
+        try:
+            list_view.index = index
+        finally:
+            self._suppress_events = False
+        self._select(self._paths[index])
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         """Follow Up/Down directly."""

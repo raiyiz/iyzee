@@ -94,9 +94,11 @@ async def test_one_browser_switches_between_sweep_and_scope_recordings(
         assert screen.query_one("#results-op-panel").display
 
         listing = screen.query_one("#results-list", ListView)
+        assert listing.index == 0
         listing.focus()
         await pilot.press("down")
         await wait_until(pilot, lambda: "2 point(s)" in _summary(screen))
+        assert listing.index == 1
         assert screen._recording is not None
         assert screen._recording.path == sweep
         assert screen.query_one("#results-points").display
