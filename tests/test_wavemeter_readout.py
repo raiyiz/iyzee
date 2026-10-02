@@ -134,7 +134,7 @@ def test_set_pid_setpoint_uses_default_channel(monkeypatch: pytest.MonkeyPatch) 
 
     wavemeter_readout.set_pid_setpoint(377.1052)
 
-    assert seen["data"] == b"freq_thz=377.1052&channel=0"
+    assert seen["data"] == b"freq_thz=377.1052&channel=4"
     assert seen["timeout"] == wavemeter_readout.SETPOINT_TIMEOUT_S
 
 

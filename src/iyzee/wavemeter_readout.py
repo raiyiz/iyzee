@@ -78,6 +78,9 @@ def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
     else:
         response = requests.post(url, data=data, timeout=timeout)
 
+    if not response:
+        raise requests.ConnectionError
+
     with response:
         response.raise_for_status()
         return response.content.decode("ascii")

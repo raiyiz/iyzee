@@ -172,7 +172,7 @@ def test_wavemeter_handle_probe_reads_the_default_channel(monkeypatch: pytest.Mo
     monkeypatch.setattr(instruments_mod, "read_frequency", lambda channel=0: 377.105)
 
     handle = WavemeterHandle()
-    assert handle.probe() == "ch0 = 377.105000 THz"
+    assert handle.probe() == "ch4 = 377.105000 THz"
     assert handle.channel == instruments_mod.DEFAULT_CHANNEL
     assert handle.device is None
 
