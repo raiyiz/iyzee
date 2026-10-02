@@ -26,9 +26,9 @@ from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.log import LogScreen
 from .screens.page import Page
+from .screens.results import ResultsScreen
 from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
-from .screens.results import ResultsScreen
 from .workers import LastRun
 
 log = logging.getLogger("iyzee.tui")
