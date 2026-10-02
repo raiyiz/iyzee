@@ -113,7 +113,9 @@ def set_pid_setpoint(freq: float, channel: int = DEFAULT_CHANNEL) -> None:
     log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
 
 
-def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, reference_f=0, save_csv=False):
+def track_frequency(
+    total_time, time_step, save_path, channel=DEFAULT_CHANNEL, reference_f=0, save_csv=False
+):
     # Plotting and the CSV export are only needed here. Imported lazily because
     # this module is also imported for its HTTP client by the TUI, where
     # pandas alone was a fifth of the startup time.
