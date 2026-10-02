@@ -11,6 +11,7 @@ from platformdirs import user_data_dir
 from traitlets.config import Config
 
 from .instruments import LockedProxy
+from .. import wavemeter_readout
 
 if TYPE_CHECKING:
     from .workers import LastRun
@@ -120,6 +121,8 @@ class LabProxy:
                 raise AttributeError(
                     f"lab.{name} is not connected — connect it on the Connect screen first"
                 )
+            if name == "wavemeter":
+                return wavemeter_readout
             device = getattr(handle, "device", None)
             if device is None:
                 raise AttributeError(f"lab.{name} is connected but exposes no live device")

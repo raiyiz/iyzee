@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
-from ..wavemeter_readout import Wavemeter
+from ..wavemeter_readout import read_frequency, set_pid_setpoint
 from .core import ExperimentContext, Step, StepResult, run_sequence
 
 TRACE_SQZ = 1
@@ -116,11 +116,9 @@ class FrequencyStep:
         if ctx.shutter is None:
             raise ValueError("FrequencyStep requires ctx.shutter to be set")
 
-        if ctx.wavemeter is None:
-            raise ValueError("FrequencyStep requires ctx.wavemeter to be set")
-        ctx.wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
+        set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
         time.sleep(self.relax_time_s)
-        measured_frequency = ctx.wavemeter.read_frequency(self.wavemeter_channel)
+        measured_frequency = read_frequency(self.wavemeter_channel)
 
         try:
             ctx.shutter.open()
@@ -228,7 +226,6 @@ def _run_steps(
     config: AnalyzerConfig,
     *,
     shutter: ShutterControl | None = None,
-    wavemeter: Wavemeter | None = None,
     on_error: str = "raise",
 ) -> list[StepResult]:
     """Configure the MXA, build one run context, and execute its steps."""
@@ -237,7 +234,6 @@ def _run_steps(
         mx=mx,
         run_id=uuid.uuid4().hex[:8],
         shutter=shutter,
-        wavemeter=wavemeter,
         config=asdict(config),
     )
     return run_sequence(steps, ctx, on_error=on_error)
@@ -252,7 +248,6 @@ def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> l
 def run_frequency_sweep(
     mx,
     shutter: ShutterControl,
-    wavemeter: Wavemeter,
     laser_center_thz: float = 377.1052067,
     wavemeter_channel: int = 4,
     *,
@@ -263,4 +258,4 @@ def run_frequency_sweep(
         laser_center_thz=laser_center_thz,
         wavemeter_channel=wavemeter_channel,
     )
-    return _run_steps(mx, steps, config, shutter=shutter, wavemeter=wavemeter, on_error=on_error)
+    return _run_steps(mx, steps, config, shutter=shutter, on_error=on_error)
