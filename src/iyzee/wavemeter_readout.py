@@ -23,7 +23,6 @@ WAVEMETER_PORT = 8000
 THz = 1
 GHz = 1e-3
 MHz = 1e-6
-TWO_PHOTON_776_D5_2 = 386.3411662603302 * THz
 
 # Rubidium transition frequencies in vacuum as reference (D.Steck), THz
 

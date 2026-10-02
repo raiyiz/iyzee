@@ -8,7 +8,7 @@
 
    1. Reflow — IyzeeApp.HORIZONTAL_BREAKPOINTS puts one of `-narrow`,
       `-medium` or `-wide` on the Screen, so a rule such as
-      `.-narrow #traces-body { ... }` applies only at that width tier.
+      `.-narrow #results-body { ... }` applies only at that width tier.
    2. Scrolling — every page (direct child of #page-switcher) scrolls on
       both axes when its content doesn't fit, and flexible widgets (`1fr`)
       carry a `min-height` so they stop shrinking at a usable size and

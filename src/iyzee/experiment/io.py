@@ -36,7 +36,7 @@ from .core import StepResult
 # Computed once, from this file's own location (`src/iyzee/experiment/io.py`
 # -> parents[3] is the checkout root), so it agrees with itself everywhere
 # it's used and callers never repeat the path arithmetic (see
-# `tui/screens/traces.py`, which reads from exactly this constant). This
+# `tui/screens/results.py`, which reads from exactly this constant). This
 # assumes a development checkout / editable install (this project's only
 # supported way to run it — see the README); a real wheel installed
 # elsewhere would resolve `parents[3]` to somewhere under site-packages, not
@@ -53,7 +53,7 @@ def create_dirs() -> Path:
     would mostly just be a lot of near-empty folders to click through.
     Grouping by month instead keeps the directory listing itself a
     reasonable size to browse, months or years into using this, without
-    losing any ability to find a particular run (Traces, and this
+    losing any ability to find a particular run (Results, and this
     module's own readers, glob recursively).
     """
     month = datetime.now().astimezone().strftime("%Y-%m")
@@ -68,7 +68,7 @@ def create_dirs() -> Path:
 # timestamp or the random suffix on either write or read.
 _UNSAFE_STEM_CHARS = re.compile(r"[^A-Za-z0-9-]+")
 
-# The inverse of _new_stem, used by the Traces page to recover a run's name
+# The inverse of _new_stem, used by the Results page to recover a run's name
 # (if it has one) from its filename for display. Matches only stems this
 # module actually produces; anything else (a hand-placed or older-format
 # file) simply doesn't match, which callers treat as "no name available"
@@ -116,8 +116,8 @@ def load_recording(path: Path) -> Recording:
     """Load one saved recording's numeric arrays and JSON sidecar.
 
     The single reader for the pair :func:`save_numeric_recording` writes;
-    ``TracesScreen`` and the Data screen both go through this rather than
-    each re-implementing "np.load a dict, then try to parse the matching
+    ``ResultsScreen`` goes through this rather than
+    re-implementing "np.load a dict, then try to parse the matching
     .json" — see the ``experiment.io`` design note in ``adr_0001`` on
     consolidating a transformation applied more than once before it reaches
     a renderer.
@@ -319,7 +319,7 @@ def difference_series(
     label) series are displayed.
 
     Returns ``None`` if either trace is missing, matching the skip
-    behavior ``SweepScreen``/``TracesScreen`` already had (``build_figure``
+    behavior ``SweepScreen``/``ResultsScreen`` already had (``build_figure``
     previously didn't guard against this and would have raised on missing
     traces — this closes that gap as a side effect of consolidating).
     A trace that's present but entirely NaN (how ``save_step_results``

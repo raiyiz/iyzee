@@ -11,7 +11,7 @@ data a renderer can draw: ``experiment.io.difference_series``/
 
 Every function below is pure — a :class:`Trace` in, a new ``Trace`` out, no
 ``Channel`` enum, socket, or Textual import — so the same call works
-identically from a script, the IPython console, or the Data screen. Loading
+identically from a script, the IPython console, or the Results screen. Loading
 a saved run happens one layer down, in ``experiment.io.load_recording``; this
 module only interprets the loaded arrays/metadata once they're a
 :class:`~iyzee.experiment.io.Recording`.
@@ -66,7 +66,7 @@ def traces_from_scope_recording(recording: Recording) -> list[Trace]:
     ``waveforms`` and ``configuration.applied_channel_settings`` manifest
     sections for units and legend metadata. A channel listed in the manifest
     but missing either array is skipped rather than raising — the same
-    tolerance ``TracesScreen`` already has for a partial or hand-edited
+    tolerance ``ResultsScreen`` already has for a partial or hand-edited
     recording, and the reason this returns whatever channels *are* usable
     instead of an all-or-nothing result.
 
@@ -260,7 +260,7 @@ def build_waveform_figure(traces: Sequence[Trace], *, title: str | None = None) 
     trace's provenance, a light grid — mirroring ``experiment.io.
     build_figure`` for sweep results. This is the one place that decides how
     a set of waveforms becomes a figure; :func:`save_waveform_figure` saves
-    it as an image, and the Data screen's inline preview extracts its line
+    it as an image, and the Results screen's inline preview extracts its line
     data with ``tui.plotting.figure_series`` — the same path the console
     already uses for any matplotlib figure a script builds — so the
     interactive preview and the static export are never two different
@@ -296,7 +296,7 @@ def save_waveform_figure(traces: Sequence[Trace], path: Path, *, title: str | No
 
     Uses ``fig.savefig`` rather than ``plt.show()`` — compare
     ``experiment.io.multiplot``, the interactive equivalent for sweep
-    results — because this is meant to be called from the Data screen (or
+    results — because this is meant to be called from the Results screen (or
     any non-interactive caller): a blocking GUI window has no display to
     attach to in that context and would just hang. The figure is closed
     immediately afterwards, since pyplot keeps every figure it creates alive

@@ -185,7 +185,7 @@ def save_run(
 ) -> Path:
     """Write one run archive under ``root/folder`` and return its path.
 
-    ``mtime`` pins the file's modification time (the Traces page orders runs
+    ``mtime`` pins the file's modification time (the Results page orders runs
     by it, and filesystem timestamps are too coarse to rely on).
     """
     directory = root / folder

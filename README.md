@@ -34,7 +34,7 @@ src/iyzee/
     ├── vterm.py            # terminal screen model (pyte) with scrollback
     ├── termkeys.py         # Textual key events -> terminal input bytes
     ├── terminal_view.py    # widget that shows the virtual terminal and types into it
-    ├── plotting.py         # plotext drawing shared by the Sweep, Scope, Traces and Console pages
+    ├── plotting.py         # plotext drawing shared by the Sweep, Scope, Results and Console pages
     ├── text.py             # showing externally produced text safely (markup-safe)
     ├── workers.py          # LastRun: the sweep result handed to the console
     └── screens/            # the six pages
@@ -42,7 +42,8 @@ src/iyzee/
         ├── connect.py      # ConnectScreen
         ├── sweep.py        # SweepScreen
         ├── scope.py        # ScopeScreen — form/plot only; operations live in scope_workflows.py
-        ├── traces.py       # TracesScreen
+        ├── runlist.py      # RunListPage: saved-run list + preview plumbing (base of ResultsScreen)
+        ├── results.py      # ResultsScreen — browse saved Sweep/Scope runs, derive/export waveforms
         ├── console.py      # ConsoleScreen + IyzeeConsole: the page around IPython's terminal UI
         └── log.py          # LogScreen: the app's own logging, live and browsable
 ```
@@ -57,7 +58,7 @@ uv run iyzee-tui
 Six pages cover the common tasks (the classes keep their `*Screen` names, but
 they are plain container widgets inside one `ContentSwitcher`, not Textual
 `Screen`s). Switch between them with `c` / `s` / `o` / `t` / `i` / `l`,
-`F1`–`F4` (Connect/Sweep/Traces/Console only — see below), or by clicking the
+`F1`–`F4` (Connect/Sweep/Results/Console only — see below), or by clicking the
 nav rail; `Ctrl+Q` quits (a running cell is interrupted and connected
 instruments are disconnected on the way out):
 
@@ -78,14 +79,15 @@ instruments are disconnected on the way out):
   settings* re-syncs after a front-panel change. **Acquire & save** is available
   only for a synchronized, clean state and records enabled-channel waveforms
   under `data/YYYY-MM/` as a numeric `.npz` plus JSON manifest.
-- **Traces** (`t`) — browse previously recorded `.npz` runs on disk; the
-  preview follows the highlighted run.
+- **Results** (`t`) — browse previously recorded `.npz` runs on disk (sweeps
+  and scope acquisitions); the preview follows the highlighted run, and scope
+  runs add channel selection, waveform operations and PNG export.
 - **Console** (`i`) — IPython's own terminal UI, in the app process, with live
   access to connected instruments and the last sweep's results. See below.
 - **Log** (`l`) — the app's own logging, live by default, with a level
   filter and a way to browse older rotated log files.
 
-`F1`–`F4` reach only Connect/Sweep/Traces/Console — Textual's own key
+`F1`–`F4` reach only Connect/Sweep/Results/Console — Textual's own key
 handling reserves those four specifically to escape the console's embedded
 terminal (see the comment on `IyzeeApp.BINDINGS`); Scope and Log are
 letter-only (`o`, `l`) to avoid extending that.

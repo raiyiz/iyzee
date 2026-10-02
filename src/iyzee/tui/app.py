@@ -102,7 +102,7 @@ class NavRail(Static):
 
 
 class IyzeeApp(App):
-    """Connect to lab instruments, browse traces, and use IPython."""
+    """Connect to lab instruments, browse results, and use IPython."""
 
     TITLE = "iyzee"
     SUB_TITLE = "lab instrument control"

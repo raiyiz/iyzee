@@ -1,7 +1,6 @@
-"""Shared plumbing for the pages that list saved recordings (Traces, Data).
+"""Shared plumbing for the pages that list saved recordings (see ResultsScreen).
 
-Both show a list of saved runs on the left and a preview of the selected one
-on the right. The list handling is subtle enough to want one copy: see
+A list of saved runs on the left, a preview of the selected one on the right. The list handling is subtle enough to want one copy: see
 :meth:`RunListPage.refresh_runs`.
 """
 
