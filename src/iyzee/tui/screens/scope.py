@@ -24,8 +24,9 @@ whatever the other fields happened to default to.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.markup import escape
 from textual import work
@@ -53,9 +54,22 @@ from ..plotting import draw_series, prepare_series
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
 
+if TYPE_CHECKING:
+    from ..instruments import InstrumentHandle
+
 log = logging.getLogger("iyzee.tui")
 
 CHANNELS: tuple[Channel, ...] = (Channel.C1, Channel.C2, Channel.C3, Channel.C4)
+
+# The form fields whose edits are tracked against what the scope last reported.
+_CHANNEL_FIELD_NAMES = ("enable", "vdiv", "offset", "coupling")
+TRIGGER_FIELDS = ("trig-source", "trig-mode", "trig-slope", "trig-coupling", "trig-level")
+
+
+def channel_fields(channel: Channel) -> tuple[str, ...]:
+    """Widget ids of one channel's tracked form fields."""
+    return tuple(f"{channel}-{name}" for name in _CHANNEL_FIELD_NAMES)
+
 
 # Matches the trace colours the instrument itself uses for C1-C4, so the
 # channel panel you're editing and the line it produces on "Acquire" read
@@ -378,15 +392,36 @@ class ScopeScreen(Page):
         handle = self.iyzee_app.handles.get("scope")
         return handle is not None and handle.device is scope
 
-    def _scope(self) -> LeCroy | None:
-        """The live driver, or ``None`` (after notifying) if not connected."""
+    def _scope_handle(self) -> InstrumentHandle | None:
+        """The connected scope's handle, or ``None`` (after notifying) if not connected."""
         handle = self.iyzee_app.handles.get("scope")
         if handle is None:
             self.notify(
                 "Connect the scope first — press F1 for the Connect page.", severity="error"
             )
-            return None
-        return handle.device
+        return handle
+
+    def _scope(self) -> LeCroy | None:
+        """The live driver, or ``None`` (after notifying) if not connected."""
+        handle = self._scope_handle()
+        return None if handle is None else handle.device
+
+    def _begin_settings_op(self, button_id: str, *, retrieve: bool = False) -> None:
+        """Mark a settings operation as running and lock out its own button."""
+        self._settings_busy = True
+        self._retrieve_in_flight = retrieve
+        self.query_one(f"#{button_id}", Button).disabled = True
+
+    def _end_settings_op(self, button_id: str) -> None:
+        self._settings_busy = False
+        self._retrieve_in_flight = False
+        self.query_one(f"#{button_id}", Button).disabled = False
+
+    def _mark_clean(self, field_ids: Iterable[str]) -> None:
+        """These fields now match what the scope reported: they are no longer 'edited'."""
+        for field_id in field_ids:
+            self._dirty_fields.discard(field_id)
+            self.query_one(f"#{field_id}").remove_class("scope-dirty")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "retrieve-settings":
@@ -401,21 +436,13 @@ class ScopeScreen(Page):
     # -- retrieve current settings ------------------------------------------
 
     def _start_retrieve(self, *, silent: bool = False) -> None:
-        scope = self._scope()
-        if scope is None or self._settings_busy:
+        handle = self._scope_handle()
+        if handle is None or self._settings_busy:
             return
-        self._settings_busy = True
-        self._retrieve_in_flight = True
-        self.query_one("#retrieve-settings", Button).disabled = True
+        self._begin_settings_op("retrieve-settings", retrieve=True)
         if not silent:
             self.query_one("#scope-log", RichLog).write("Retrieving current settings…")
-        handle = self.iyzee_app.handles.get("scope")
-        if handle is None:
-            self._settings_busy = False
-            self._retrieve_in_flight = False
-            self.query_one("#retrieve-settings", Button).disabled = False
-            return
-        self._retrieve(scope, handle.lock, silent)
+        self._retrieve(handle.device, handle.lock, silent)
 
     @work(thread=True, exclusive=True, group="scope-retrieve", exit_on_error=False)
     def _retrieve(self, scope: LeCroy, lock, silent: bool) -> None:
@@ -468,15 +495,10 @@ class ScopeScreen(Page):
         trigger_error: Exception | None,
         silent: bool,
     ) -> None:
+        self._end_settings_op("retrieve-settings")
         if not self._scope_is_current(scope):
-            self._settings_busy = False
-            self._retrieve_in_flight = False
-            self.query_one("#retrieve-settings", Button).disabled = False
             self._refresh_scope_ui()
             return
-        self._settings_busy = False
-        self._retrieve_in_flight = False
-        self.query_one("#retrieve-settings", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         self._suppress_dirty_events = True
         try:
@@ -487,24 +509,9 @@ class ScopeScreen(Page):
         finally:
             self._suppress_dirty_events = False
         for settings in channel_settings:
-            prefix = f"{settings.channel}-"
-            # Materialize first: difference_update() on a generator over the very
-            # same set raises "Set changed size during iteration".
-            self._dirty_fields.difference_update(
-                [field_id for field_id in self._dirty_fields if field_id.startswith(prefix)]
-            )
-            for field in ("enable", "vdiv", "offset", "coupling"):
-                self.query_one(f"#{settings.channel}-{field}").remove_class("scope-dirty")
+            self._mark_clean(channel_fields(settings.channel))
         if trigger_settings is not None:
-            for field_id in (
-                "trig-source",
-                "trig-mode",
-                "trig-slope",
-                "trig-coupling",
-                "trig-level",
-            ):
-                self._dirty_fields.discard(field_id)
-                self.query_one(f"#{field_id}").remove_class("scope-dirty")
+            self._mark_clean(TRIGGER_FIELDS)
         for err in channel_errors:
             log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
         self._last_applied_channel_settings = tuple(channel_settings) or None
@@ -568,8 +575,7 @@ class ScopeScreen(Page):
             self.query_one("#scope-log", RichLog).write("No channel changes to apply.")
             self._refresh_scope_ui()
             return
-        self._settings_busy = True
-        self.query_one("#apply-channels", Button).disabled = True
+        self._begin_settings_op("apply-channels")
         self._apply_channels(scope, changed, baseline)
 
     @work(thread=True, exclusive=True, group="scope-apply-channels", exit_on_error=False)
@@ -608,8 +614,7 @@ class ScopeScreen(Page):
         result: ChannelApplyResult,
         baseline: Sequence[ChannelSettings],
     ) -> None:
-        self._settings_busy = False
-        self.query_one("#apply-channels", Button).disabled = False
+        self._end_settings_op("apply-channels")
         if not self._scope_is_current(scope):
             self._refresh_scope_ui()
             return
@@ -629,14 +634,11 @@ class ScopeScreen(Page):
             if channel in error_channels:
                 # Keep what the user typed so they can retry; just re-evaluate
                 # "changed" against the now-truthful baseline.
-                for field in ("enable", "vdiv", "offset", "coupling"):
-                    self._refresh_field_dirty(f"{channel}-{field}")
+                for field_id in channel_fields(channel):
+                    self._refresh_field_dirty(field_id)
                 continue
             self._apply_retrieved_channel_settings(verified)  # shows any rounding
-            for field in ("enable", "vdiv", "offset", "coupling"):
-                field_id = f"{channel}-{field}"
-                self._dirty_fields.discard(field_id)
-                self.query_one(f"#{field_id}").remove_class("scope-dirty")
+            self._mark_clean(channel_fields(channel))
         self._settings_synced = (
             all(self._channel_baseline(channel) is not None for channel in CHANNELS)
             and self._last_applied_trigger_settings is not None
@@ -671,8 +673,8 @@ class ScopeScreen(Page):
         return TriggerSettings(source, mode, slope, coupling, level)
 
     def _start_apply_trigger(self) -> None:
-        scope = self._scope()
-        if scope is None:
+        handle = self._scope_handle()
+        if handle is None:
             return
         if self._settings_busy:
             self.notify("Another scope settings operation is already running.", severity="warning")
@@ -693,14 +695,8 @@ class ScopeScreen(Page):
             self.query_one("#scope-log", RichLog).write("No trigger changes to apply.")
             self._refresh_scope_ui()
             return
-        self._settings_busy = True
-        self.query_one("#apply-trigger", Button).disabled = True
-        handle = self.iyzee_app.handles.get("scope")
-        if handle is None:
-            self._settings_busy = False
-            self.query_one("#apply-trigger", Button).disabled = False
-            return
-        self._apply_trigger(scope, settings, baseline, handle.lock)
+        self._begin_settings_op("apply-trigger")
+        self._apply_trigger(handle.device, settings, baseline, handle.lock)
 
     @work(thread=True, exclusive=True, group="scope-apply-trigger", exit_on_error=False)
     def _apply_trigger(
@@ -738,13 +734,10 @@ class ScopeScreen(Page):
         verified: TriggerSettings | None,
         verification_error: Exception | None,
     ) -> None:
+        self._end_settings_op("apply-trigger")
         if not self._scope_is_current(scope):
-            self._settings_busy = False
-            self.query_one("#apply-trigger", Button).disabled = False
             self._refresh_scope_ui()
             return
-        self._settings_busy = False
-        self.query_one("#apply-trigger", Button).disabled = False
         log_widget = self.query_one("#scope-log", RichLog)
         if error is not None:
             self._settings_synced = False
@@ -775,15 +768,7 @@ class ScopeScreen(Page):
         self._settings_synced = all(
             self._channel_baseline(channel) is not None for channel in CHANNELS
         )
-        for field_id in (
-            "trig-source",
-            "trig-mode",
-            "trig-slope",
-            "trig-coupling",
-            "trig-level",
-        ):
-            self._dirty_fields.discard(field_id)
-            self.query_one(f"#{field_id}").remove_class("scope-dirty")
+        self._mark_clean(TRIGGER_FIELDS)
         self._refresh_scope_ui()
         log_widget.write("Trigger settings applied and verified.")
 
