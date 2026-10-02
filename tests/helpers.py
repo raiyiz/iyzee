@@ -90,6 +90,7 @@ class FakeHandle:
         self.connect_calls = 0
         self.disconnect_calls = 0
         self.lock = threading.Lock()
+        self.alive = True  # flip to False to simulate a link that died
 
     @property
     def connected(self) -> bool:

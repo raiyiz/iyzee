@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import uuid
 from collections.abc import Sequence
 from dataclasses import asdict
 from functools import partial
 from threading import Event
+from time import monotonic
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -41,6 +41,7 @@ from ...experiment import (
     TRACE_SQZ,
     AnalyzerConfig,
     ExperimentContext,
+    RunRecord,
     Step,
     StepResult,
     acquire_trace,
@@ -52,7 +53,7 @@ from ...experiment import (
     run_sequence,
     save_step_results,
 )
-from ..plotting import draw_series
+from ..plotting import draw_series, prepare_series
 from ..text import one_line
 from ..workers import LastRun
 from .page import FieldError, Page, _field, _positive_float, _positive_int
@@ -68,6 +69,7 @@ log = logging.getLogger("iyzee.tui")
 # exists to turn a stray extra zero (or 10**9) into a clear message instead
 # of a frozen UI and gigabytes of linspace.
 MAX_POINTS = 1000
+LIVE_PLOT_INTERVAL_S = 0.1
 
 
 class SweepAborted(Exception):
@@ -126,6 +128,8 @@ class SweepScreen(Page):
     def on_mount(self) -> None:
         self._abort_event = Event()
         self._collected: list[StepResult] = []
+        # How the current run is going/ended; saved as the file's run_metadata.
+        self._record: RunRecord | None = None
         self._reset_checkpoint()
         self.query_one("#freq-fields").display = False
         plot = self.query_one("#sweep-plot", PlotextPlot)
@@ -156,6 +160,9 @@ class SweepScreen(Page):
             shutter = handles.get("shutter")
             if shutter is None or shutter.device is None:
                 missing.append("shutter")
+            wavemeter = handles.get("wavemeter")
+            if wavemeter is None or wavemeter.device is None:
+                missing.append("wavemeter")
         return missing
 
     def refresh_readiness(self) -> None:
@@ -219,16 +226,25 @@ class SweepScreen(Page):
             if kind == "bandwidth":
                 steps, config = self._build_bandwidth_run()
                 shutter = None
+                wavemeter = None
             else:
                 shutter_handle = self.iyzee_app.handles.get("shutter")
+                wavemeter_handle = self.iyzee_app.handles.get("wavemeter")
                 if shutter_handle is None or shutter_handle.device is None:
                     self.notify(
                         "Connect the shutter first — press F1 for the Connect page.",
                         severity="error",
                     )
                     return
+                if wavemeter_handle is None or wavemeter_handle.device is None:
+                    self.notify(
+                        "Connect the wavemeter first — press F1 for the Connect page.",
+                        severity="error",
+                    )
+                    return
                 steps, config = self._build_frequency_run()
                 shutter = shutter_handle.device
+                wavemeter = wavemeter_handle.device
         except FieldError as exc:
             self._flag_invalid(exc.field_id)
             self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
@@ -262,7 +278,7 @@ class SweepScreen(Page):
         self.query_one("#abort-sweep", Button).disabled = False
         self.query_one("#capture-trace", Button).disabled = True
         self.iyzee_app.sweep_running = True
-        self._run(mx_handle.device, shutter, steps, config, kind)
+        self._run(mx_handle.device, shutter, wavemeter, steps, config, kind)
 
     def _build_bandwidth_run(self):
         start = self._read("rbw-start", _positive_float, "RBW start")
@@ -288,7 +304,9 @@ class SweepScreen(Page):
     # -- the run itself, off the UI thread -----------------------------------
 
     @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
-    def _run(self, mx, shutter, steps: Sequence[Step], config: AnalyzerConfig, kind: str) -> None:
+    def _run(
+        self, mx, shutter, wavemeter, steps: Sequence[Step], config: AnalyzerConfig, kind: str
+    ) -> None:
         # Hold the MXA's lock (and the shutter's, for a frequency sweep) for
         # the whole run, not just individual calls — a sweep is one logical
         # operation, and interleaving a console cell's commands partway
@@ -300,6 +318,8 @@ class SweepScreen(Page):
         locks = [self.iyzee_app.handles["mxa"].lock]
         if shutter is not None:
             locks.append(self.iyzee_app.handles["shutter"].lock)
+        if wavemeter is not None:
+            locks.append(self.iyzee_app.handles["wavemeter"].lock)
 
         with contextlib.ExitStack() as stack:
             for lock in locks:
@@ -312,21 +332,51 @@ class SweepScreen(Page):
                 self._ui(self._finish, kind, aborted=False, setup_error=exc)
                 return
 
-            run_id = uuid.uuid4().hex[:8]
-            ctx = ExperimentContext(mx=mx, run_id=run_id, shutter=shutter, config=asdict(config))
+            record = RunRecord(config=asdict(config))
+            self._record = record
+            ctx = ExperimentContext(
+                mx=mx,
+                run_id=record.run_id,
+                shutter=shutter,
+                wavemeter=wavemeter,
+                config=record.config,
+            )
+
+            next_live_plot = monotonic()
 
             def on_step(index, total, step, result, error) -> None:
+                nonlocal next_live_plot
+                record.on_step(index, total, step, result, error)
+                display_series = None
                 if result is not None:
                     self._collected.append(result)
                     # Straight to disk, before anything else: a crash, a
                     # power cut or a quit part-way through a long run then
                     # costs at most the step in flight, not the whole run.
                     self._checkpoint(kind)
-                self._ui(self._on_step, index, total, step, result, error)
+                    now = monotonic()
+                    if now >= next_live_plot or index + 1 == total:
+                        difference = difference_series(
+                            result.traces.get("squeezing"),
+                            result.traces.get("shot_noise"),
+                            result.label,
+                        )
+                        if difference is not None:
+                            display_series = prepare_series(*difference)
+                        next_live_plot = now + LIVE_PLOT_INTERVAL_S
+                self._ui(
+                    self._on_step,
+                    index,
+                    total,
+                    step,
+                    result,
+                    error,
+                    display_series,
+                )
                 if self._abort_event.is_set() or self.iyzee_app.shutdown_requested.is_set():
                     raise SweepAborted()
 
-            aborted = False
+            aborted = failed = False
             try:
                 run_sequence(steps, ctx, on_error="skip", on_step=on_step)
             except SweepAborted:
@@ -335,10 +385,25 @@ class SweepScreen(Page):
                 # already handled per-step by run_sequence(on_error="skip") plus
                 # on_step above, so anything reaching here is unexpected.
                 log.exception("sweep: run_sequence raised unexpectedly")
+                failed = True
+
+            # Rewrite the file with how the run ended: until now it says
+            # "running", which is what a run that died would leave behind.
+            record.finish(aborted=aborted, failed=failed)
+            if self._collected:
+                self._checkpoint(kind)
 
         self._ui(self._finish, kind, aborted=aborted, setup_error=None)
 
-    def _on_step(self, index, total, step: Step, result: StepResult | None, error) -> None:
+    def _on_step(
+        self,
+        index,
+        total,
+        step: Step,
+        result: StepResult | None,
+        error,
+        display_series: tuple[list[float], list[float], str | None] | None,
+    ) -> None:
         self.query_one("#sweep-progress", ProgressBar).update(progress=index + 1)
         log = self.query_one("#sweep-log", RichLog)
         label = getattr(step, "label", None) or f"step[{index}]"
@@ -348,17 +413,9 @@ class SweepScreen(Page):
             )
             return
         log.write(f"[{index + 1}/{total}] {escape(label)}: ok")
-        if result is not None:
-            self._plot_result(result)
-
-    def _plot_result(self, result: StepResult) -> None:
-        series = difference_series(
-            result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
-        )
-        if series is None:
-            return
-        plot = self.query_one("#sweep-plot", PlotextPlot)
-        draw_series(plot, [series], clear=False)
+        if display_series is not None:
+            plot = self.query_one("#sweep-plot", PlotextPlot)
+            draw_series(plot, [display_series], clear=False)
 
     # -- "Capture trace": one raw spectrum off the analyzer, right now ------
 
@@ -424,6 +481,7 @@ class SweepScreen(Page):
         self._savedir: Path | None = None
         self._save_path: Path | None = None
         self._save_warned = False
+        self._record = None
 
     def _checkpoint(self, kind: str, *, on_ui_thread: bool = False) -> None:
         """Write everything collected so far to disk.
@@ -444,7 +502,11 @@ class SweepScreen(Page):
             if self._savedir is None:
                 self._savedir = create_dirs()
             self._save_path = save_step_results(
-                list(self._collected), self._savedir, name=kind, path=self._save_path
+                list(self._collected),
+                self._savedir,
+                self._record.as_metadata() if self._record is not None else None,
+                name=kind,
+                path=self._save_path,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("sweep: could not save results")

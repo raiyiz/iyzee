@@ -193,15 +193,6 @@ class LeCroy:
     def SOCK_TIMEOUT(self) -> float:
         return self._transport.io_timeout
 
-    @property
-    def s(self) -> object | None:
-        """Compatibility access to the underlying socket for existing fakes."""
-        return self._transport.socket
-
-    @s.setter
-    def s(self, sock: object) -> None:
-        self._transport.attach_socket(sock)
-
     @contextmanager
     def transaction(self) -> Iterator[None]:
         """Serialize a complete logical operation on the Scope connection."""
@@ -222,6 +213,10 @@ class LeCroy:
             io_timeout=delayval,
         )
 
+    def check_link(self) -> bool:
+        """Whether the connection is still usable (no I/O; see ``VICPTransport.check_link``)."""
+        return self._transport.check_link()
+
     def disconnect(self):
         """Disconnect from the Scope and clear connection state (idempotent)."""
         self._transport.close()
@@ -238,9 +233,16 @@ class LeCroy:
         except UnicodeDecodeError as exc:
             raise VICPProtocolError("VICP response was not valid ASCII") from exc
 
-    def query(self, message: str) -> str:
-        """Send ``message`` and atomically return the trimmed response text."""
-        return self._transport.query(message)
+    def query(self, message: str, *, timeout: float | None = None) -> str:
+        """Send ``message`` and atomically return the trimmed response text.
+
+        ``timeout`` overrides the I/O timeout for this exchange only.
+        """
+        return self._transport.query(message, timeout=timeout)
+
+    def idn(self, *, timeout: float | None = None) -> str:
+        """Return the scope's ``*IDN?`` identification string."""
+        return self.query("*IDN?", timeout=timeout)
 
     # ------------------------------------------------------------------
     # Channel (vertical) control

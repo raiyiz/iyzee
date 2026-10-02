@@ -20,15 +20,12 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
 from rich.markup import escape
 
-# A sibling of experiment.io.DATA_ROOT, not inside it: log files are
-# operational/debugging material, not measurement data, and mixing them
-# into data/ would make TracesScreen's **/*.npz glob — and a human
-# skimming that folder for actual runs — work harder for no reason.
-LOG_ROOT = Path(__file__).resolve().parents[3] / "logs"
+from iyzee.experiment.io import DATA_ROOT
+
+LOG_ROOT = DATA_ROOT / "logs"
 
 # The shared parent of every logger this application actually uses today
 # ("iyzee.tui", "iyzee.experiment") — attaching here, once, catches both

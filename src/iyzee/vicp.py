@@ -42,10 +42,59 @@ class VICPFrame:
 
 
 def _close_socket(sock: object) -> None:
-    """Close a socket-like object; fakes without ``close()`` are tolerated."""
+    """Close a socket-like object; fakes without ``close()``/``shutdown()`` are tolerated.
+
+    ``shutdown()`` first so the peer gets a FIN right away (a bare ``close()``
+    can leave the connection half-open while another thread still holds the
+    descriptor), which is what lets an instrument that serves one client at a
+    time free its session.
+    """
+    shutdown = getattr(sock, "shutdown", None)
+    if shutdown is not None:
+        try:
+            shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass  # already closed or never fully connected
     close = getattr(sock, "close", None)
     if close is not None:
         close()
+
+
+def _local_port(sock: object) -> object:
+    """The local TCP port, for matching against ``ss``/the instrument's session list."""
+    getsockname = getattr(sock, "getsockname", None)
+    try:
+        return getsockname()[1] if getsockname is not None else "?"
+    except OSError, IndexError, TypeError:
+        return "?"
+
+
+def _enable_keepalive(sock: object, idle: int, interval: int, count: int) -> None:
+    """Have the OS probe an idle connection so a dead peer is noticed in ~``idle + interval * count`` s.
+
+    Without this a cable pull, a VPN drop or a sleeping laptop leaves the
+    socket looking healthy until the next command times out. Options differ by
+    platform, so each is applied only where it exists; failures are not fatal.
+    """
+    setsockopt = getattr(sock, "setsockopt", None)
+    if setsockopt is None:
+        return
+    options = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
+    # Linux names; macOS spells the idle option TCP_KEEPALIVE.
+    for name, value in (
+        ("TCP_KEEPIDLE", idle),
+        ("TCP_KEEPALIVE", idle),
+        ("TCP_KEEPINTVL", interval),
+        ("TCP_KEEPCNT", count),
+    ):
+        option = getattr(socket, name, None)
+        if option is not None:
+            options.append((socket.IPPROTO_TCP, option, value))
+    for level, option, value in options:
+        try:
+            setsockopt(level, option, value)
+        except OSError:
+            log.debug("could not set socket option %s on VICP socket", option, exc_info=True)
 
 
 def recv_exact(
@@ -128,6 +177,10 @@ class VICPTransport:
     DEFAULT_CONNECT_TIMEOUT = 5.0
     DEFAULT_IO_TIMEOUT = 3.0
     MAX_MESSAGE_FRAMES = 65_536
+    # TCP keepalive: probe after 10 s idle, every 5 s, give up after 3 misses.
+    KEEPALIVE_IDLE_S = 10
+    KEEPALIVE_INTERVAL_S = 5
+    KEEPALIVE_COUNT = 3
 
     def __init__(
         self,
@@ -184,6 +237,29 @@ class VICPTransport:
             pass
 
     @contextmanager
+    def _io_timeout(self, timeout: float | None) -> Iterator[None]:
+        """Apply ``timeout`` to the live socket for one transaction, then restore it.
+
+        The first reply after connecting can be much slower than steady state,
+        and a timeout is fatal to the stream (see the class docstring), so the
+        caller that knows it is waiting on a slow answer widens the bound
+        instead of failing and reconnecting.
+        """
+        sock = self._socket
+        settimeout = getattr(sock, "settimeout", None)
+        if timeout is None or settimeout is None:
+            yield
+            return
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        settimeout(timeout)
+        try:
+            yield
+        finally:
+            if self._socket is sock:  # not invalidated meanwhile
+                settimeout(self.io_timeout)
+
+    @contextmanager
     def _message(self) -> Iterator[_MessageState]:
         """Guard one response: invalidate if it fails before EOI was consumed."""
         state = _MessageState()
@@ -226,6 +302,9 @@ class VICPTransport:
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 except OSError:
                     log.debug("could not set TCP_NODELAY on VICP socket", exc_info=True)
+                _enable_keepalive(
+                    sock, self.KEEPALIVE_IDLE_S, self.KEEPALIVE_INTERVAL_S, self.KEEPALIVE_COUNT
+                )
             except TimeoutError as exc:
                 sock.close()
                 raise self._timeout_error(
@@ -239,6 +318,8 @@ class VICPTransport:
             self._address = address
             self.connect_timeout = connect_timeout
             self.io_timeout = io_timeout
+            local = _local_port(sock)
+            log.info("VICP connected to %s:%d (local port %s)", address, self.port, local)
 
     def close(self) -> None:
         """Close the connection and clear all observable connection state."""
@@ -251,12 +332,55 @@ class VICPTransport:
             _close_socket(sock)
 
     def attach_socket(self, sock: object) -> None:
-        """Attach a socket-like object for tests and legacy LeCroy.s use."""
+        """Attach an already-connected socket-like object (used by tests)."""
         with self._lock:
             if self._socket is not None:
                 raise RuntimeError("Already connected")
             self._socket = sock
             self._address = None
+
+    def check_link(self) -> bool:
+        """Is the connection still usable? Sends nothing; never blocks.
+
+        Catches a link that died while idle: the peer closed it, or keepalive
+        gave up on it. A dead link is invalidated exactly as if a command had
+        failed, so ``connected`` turns ``False`` and callers see one state.
+
+        If a transaction is in flight the answer is "yes": that transaction
+        owns the stream and will report its own failure.
+        """
+        sock = self._socket
+        if sock is None:
+            return False
+        if not self._lock.acquire(blocking=False):
+            return True
+        try:
+            if self._socket is not sock:
+                return self._socket is not None
+            settimeout = getattr(sock, "settimeout", None)
+            recv = getattr(sock, "recv", None)
+            if settimeout is None or recv is None:
+                return True  # a test double: nothing to probe
+            settimeout(0)
+            try:
+                peeked = recv(1, socket.MSG_PEEK)
+            except BlockingIOError, InterruptedError:
+                return True  # nothing waiting: healthy and idle
+            except TypeError:
+                return True  # a test double whose recv() takes no flags
+            except OSError as exc:
+                self._invalidate(exc)
+                return False
+            else:
+                if peeked == b"":
+                    self._invalidate("peer closed the connection")
+                    return False
+                return True  # unexpected bytes: leave judging them to the next read
+            finally:
+                if self._socket is sock:
+                    settimeout(self.io_timeout)
+        finally:
+            self._lock.release()
 
     def _write_frame(self, payload: bytes) -> None:
         sock = self._require_socket()
@@ -393,14 +517,17 @@ class VICPTransport:
                 f"binary response exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
             )
 
-    def query(self, message: str) -> str:
-        """Send one command and atomically read its complete ASCII response."""
+    def query(self, message: str, *, timeout: float | None = None) -> str:
+        """Send one command and atomically read its complete ASCII response.
+
+        ``timeout`` replaces the I/O timeout for this exchange only.
+        """
         payload = message.encode("ascii")
         if len(payload) > self.max_command_length:
             raise ValueError(
                 f"command is {len(payload)} bytes; maximum is {self.max_command_length}"
             )
-        with self._lock:
+        with self._lock, self._io_timeout(timeout):
             self._write_frame(payload)
             _flag, response = self.read_message()
             try:

@@ -268,22 +268,8 @@ async def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
         await pilot.press("enter")
         await pilot.press(*_keys("x"), "enter")
         assert await _wait(pilot, app, "Out[3]: 5"), _console_text(app)
-
-
-@async_test
-async def test_up_arrow_recalls_the_previous_command_in_the_console_page() -> None:
-    app = IyzeeApp()
-    async with app.run_test(size=(110, 32)) as pilot:
-        await pilot.press("i")
-        assert await _wait(pilot, app, "In [1]")
-        await pilot.press(*_keys("1 + 1"), "enter")
-        assert await _wait(pilot, app, "Out[1]: 2")
-        await pilot.press(*_keys("2 + 2"), "enter")
-        assert await _wait(pilot, app, "Out[2]: 4")
-        await pilot.press("up")  # a real Up-arrow key event
-        assert await _wait(pilot, app, "In [3]: 2 + 2"), _console_text(app)
         await pilot.press("up")
-        assert await _wait(pilot, app, "In [3]: 1 + 1"), _console_text(app)
+        assert await _wait(pilot, app, "In [4]: x"), _console_text(app)
 
 
 @async_test

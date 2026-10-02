@@ -6,18 +6,15 @@ touch the real ``data/`` directory.
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 
 import pytest
 from helpers import async_test, make_result, plain, save_run, wait_until
 from textual.pilot import Pilot
-from textual.widgets import Label, ListView, Static
+from textual.widgets import DataTable, ListView, Select, Static
 
-from iyzee.experiment import save_step_results
 from iyzee.tui import app as app_mod
 from iyzee.tui.screens import traces as traces_mod
 from iyzee.tui.screens.traces import TracesScreen
@@ -102,7 +99,8 @@ async def test_a_slow_load_does_not_clobber_a_newer_ones_result(
     real_draw_series = traces_mod.draw_series
 
     def spying_draw_series(plot, series, **kwargs):  # type: ignore[no-untyped-def]
-        drawn.append(kwargs.get("title", ""))
+        if plot.id == "traces-plot":
+            drawn.append(kwargs.get("title", ""))
         return real_draw_series(plot, series, **kwargs)
 
     monkeypatch.setattr(traces_mod, "draw_series", spying_draw_series)
@@ -229,14 +227,47 @@ async def test_an_empty_folder_explains_itself_and_names_the_folder(
 
 
 @async_test
-async def test_the_list_shows_the_run_name_and_save_time_not_the_raw_filename(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    run = tmp_path / "2026-09"
-    run.mkdir()
-    saved = save_step_results([make_result()], run, name="bandwidth")
-    when = datetime(2026, 9, 18, 14, 10, 5).timestamp()
-    os.utime(saved, (when, when))
-    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        item = screen.query_one("#traces-list", ListView).children[0]
-        assert item.query_one(Label).render().plain == "bandwidth  2026-09-18 14:10:05"  # type: ignore[union-attr]
+async def test_frequency_run_is_navigable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from iyzee.experiment.core import StepResult
+
+    results = [
+        StepResult(
+            label="pt0",
+            x_value=377.100000,
+            x_unit="THz",
+            traces={"squeezing": [1.0, 3.0], "shot_noise": [0.0, 0.0]},
+            meta={"wavemeter_channel": 4, "measured_frequency_thz": 377.100001},
+        ),
+        StepResult(
+            label="pt1",
+            x_value=377.100010,
+            x_unit="THz",
+            traces={"squeezing": [2.0, 4.0], "shot_noise": [0.0, 0.0]},
+            meta={"wavemeter_channel": 4, "measured_frequency_thz": 377.100011},
+        ),
+    ]
+    save_run(tmp_path, "2026-10", *results)
+
+    async with _open_traces_screen(monkeypatch, tmp_path) as (screen, pilot):
+        await wait_until(pilot, lambda: "2 point(s)" in _summary(screen))
+
+        table = screen.query_one("#traces-points", DataTable)
+        assert len(table.rows) == 2
+        point_summary = plain(screen.query_one("#traces-point-summary", Static))
+        assert "Requested: 377.100000000 THz" in point_summary
+        assert "Measured: 377.100001000 THz" in point_summary
+        assert "Mean delta: 2.000" in point_summary
+
+        table.focus()
+        await pilot.press("down")
+        await wait_until(
+            pilot, lambda: "Point 1" in plain(screen.query_one("#traces-point-summary", Static))
+        )
+        point_summary = plain(screen.query_one("#traces-point-summary", Static))
+        assert "Measured: 377.100011000 THz" in point_summary
+
+        selector = screen.query_one("#traces-statistic", Select)
+        selector.value = "minimum"
+        await pilot.pause()
+        point_summary = plain(screen.query_one("#traces-point-summary", Static))
+        assert "Minimum delta: 2.000" in point_summary

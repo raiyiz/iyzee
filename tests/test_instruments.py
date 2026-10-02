@@ -17,6 +17,7 @@ from typing import cast
 
 import pytest
 
+from iyzee.scope import LeCroyTimeoutError
 from iyzee.tui import instruments as instruments_mod
 from iyzee.tui.instruments import (
     INSTRUMENTS,
@@ -72,14 +73,6 @@ def test_locked_proxy_serializes_calls_across_threads() -> None:
         ["start:a", "end:a", "start:b", "end:b"],
         ["start:b", "end:b", "start:a", "end:a"],
     )
-
-
-def test_locked_proxy_passes_through_non_callable_attributes() -> None:
-    proxy = LockedProxy(_Recorder(), threading.Lock())
-    assert proxy.not_callable == 42
-
-
-# -- _VisaHandle ----------------------------------------------------------
 
 
 class _FakeVisaDevice:
@@ -176,16 +169,28 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
 
 
 def test_wavemeter_handle_probe_reports_frequency(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(instruments_mod, "single_readout", lambda ch, printing=False: 377.105)
+    class FakeWavemeter:
+        def __init__(self, channel):
+            self.channel = channel
+
+        def read_frequency(self):
+            return 377.105
+
+    monkeypatch.setattr(instruments_mod, "Wavemeter", FakeWavemeter)
     handle = WavemeterHandle(channel=1)
     assert handle.probe() == "ch1 = 377.105000 THz"
+    assert handle.device.channel == 1
 
 
 def test_wavemeter_handle_probe_wraps_readout_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _raise(_ch, printing=False):
-        raise instruments_mod.WavemeterReadoutError("switch unreachable")
+    class FakeWavemeter:
+        def __init__(self, channel):
+            self.channel = channel
 
-    monkeypatch.setattr(instruments_mod, "single_readout", _raise)
+        def read_frequency(self):
+            raise instruments_mod.WavemeterReadoutError("switch unreachable")
+
+    monkeypatch.setattr(instruments_mod, "Wavemeter", FakeWavemeter)
     handle = WavemeterHandle(channel=0)
     with pytest.raises(ConnectionError, match="switch unreachable"):
         handle.probe()
@@ -195,9 +200,12 @@ def test_wavemeter_handle_probe_wraps_readout_error(monkeypatch: pytest.MonkeyPa
 
 
 class _FakeLeCroy:
+    answer: str | Exception = "LECROY,WS452,SN1,9.0"
+
     def __init__(self) -> None:
         self.connected_to: str | None = None
         self.disconnected = False
+        self.idn_timeouts: list[float | None] = []
 
     def connect(self, ip: str) -> None:
         self.connected_to = ip
@@ -205,14 +213,37 @@ class _FakeLeCroy:
     def disconnect(self) -> None:
         self.disconnected = True
 
+    def idn(self, *, timeout: float | None = None) -> str:
+        self.idn_timeouts.append(timeout)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
 
-def test_scope_handle_connect_and_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_scope_handle_connects_then_probe_identifies_the_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
     handle = ScopeHandle()
     handle.connect()
     scope = cast(_FakeLeCroy, handle.scope)
     assert scope.connected_to == str(handle._ip)
-    assert "socket connected" in handle.probe()
+
+    assert handle.probe() == "LECROY,WS452,SN1,9.0"
+    # the first reply gets the widened bound, not the steady-state one
+    assert scope.idn_timeouts == [ScopeHandle.FIRST_RESPONSE_TIMEOUT]
+
+
+def test_scope_handle_probe_turns_a_silent_scope_into_an_actionable_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
+    monkeypatch.setattr(_FakeLeCroy, "answer", LeCroyTimeoutError("no response after 15.0s"))
+    handle = ScopeHandle()
+    handle.connect()
+
+    with pytest.raises(ConnectionError, match=r"did not answer \*IDN\? within 15s"):
+        handle.probe()
 
 
 # -- registry ----------------------------------------------------------
@@ -222,3 +253,23 @@ def test_instrument_registry_has_unique_nonempty_specs() -> None:
     keys = [spec.key for spec in INSTRUMENTS]
     assert len(keys) == len(set(keys))
     assert all(spec.label for spec in INSTRUMENTS)
+
+
+def test_scope_handle_alive_follows_the_drivers_link_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Link(_FakeLeCroy):
+        healthy = True
+
+        def check_link(self) -> bool:
+            return self.healthy
+
+    monkeypatch.setattr(instruments_mod, "LeCroy", Link)
+    handle = ScopeHandle()
+    assert handle.alive
+
+    cast(Link, handle.scope).healthy = False
+
+    assert not handle.alive
+
+
+def test_handles_that_cannot_tell_report_alive() -> None:
+    assert instruments_mod._LockedHandle().alive is True

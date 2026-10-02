@@ -36,7 +36,7 @@ src/iyzee/
     ├── terminal_view.py    # widget that shows the virtual terminal and types into it
     ├── plotting.py         # plotext drawing shared by the Sweep, Scope, Traces and Console pages
     ├── text.py             # showing externally produced text safely (markup-safe)
-    ├── workers.py          # cross-thread message types (LastRun, StepProgress, ...)
+    ├── workers.py          # LastRun: the sweep result handed to the console
     └── screens/            # the six pages
         ├── page.py         # shared page base, form helpers/validation, readiness hook, and worker→UI plumbing
         ├── connect.py      # ConnectScreen
@@ -318,7 +318,7 @@ with nothing app-specific to maintain there.
 form, the buttons, the plot, and reporting a result — not the operation
 itself. `scope_workflows.py` is the template: `ScopeScreen`'s buttons read
 and validate the form, then call a plain function (`apply_channel_settings`,
-`apply_trigger_settings`, `acquire_waveforms`) that takes the driver
+`apply_trigger_settings`, `acquire_scope_recording`) that takes the driver
 directly and has no Textual import. The same call works from a script with
 its own `LeCroy` instance, or from the console as
 `apply_channel_settings(lab.scope, [...])` — not just from the button that

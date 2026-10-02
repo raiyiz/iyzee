@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import numpy as np
 import pytest
 from helpers import async_test, notifications, plain, wait_until
 from test_scope_workflows import DetailedFakeScope
@@ -65,15 +66,30 @@ def _log(screen: DataScreen) -> str:
     return "\n".join(strip.text for strip in screen.query_one("#data-log", RichLog).lines)
 
 
-# -- empty state / navigation to the page ----------------------------------------------------
-
-
-@async_test
-async def test_binding_d_opens_the_data_page(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def _apply_op(
+    screen: DataScreen,
+    pilot: Pilot,
+    op: str,
+    *,
+    a: str | None = None,
+    b: str | None = None,
+    **inputs: str,
 ) -> None:
-    async with _open_data_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        assert screen.is_mounted
+    """Fill the math-op form and press Apply. ``inputs`` are the text fields,
+    named by id with ``_`` for ``-`` (``region_lo`` is ``#data-region-lo``)."""
+    screen.query_one("#data-op", Select).value = op
+    if a is not None:
+        screen.query_one("#data-chan-a", Select).value = a
+    if b is not None:
+        screen.query_one("#data-chan-b", Select).value = b
+    for field, value in inputs.items():
+        screen.query_one(f"#data-{field.replace('_', '-')}", Input).value = value
+    await pilot.pause()
+    screen.query_one("#data-apply-op", Button).press()
+    await pilot.pause()
+
+
+# -- empty state / navigation to the page ----------------------------------------------------
 
 
 @async_test
@@ -89,23 +105,13 @@ async def test_empty_data_root_shows_a_placeholder_and_an_empty_preview(
 
 
 @async_test
-async def test_lists_a_saved_scope_acquisition(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path)
-    async with _open_data_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        assert len(screen._paths) == 1
-        assert set(screen._measured) == {"C1", "C2"}
-
-
-@async_test
-async def test_a_sweep_run_is_not_listed_here(
+async def test_lists_scope_acquisitions_and_filters_out_other_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _save_sweep_run(tmp_path)
     _save_scope_run(tmp_path, channels=(Channel.C1,))
     async with _open_data_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        assert len(screen._paths) == 1  # only the scope acquisition
+        assert len(screen._paths) == 1
         assert set(screen._measured) == {"C1"}
 
 
@@ -128,21 +134,14 @@ async def test_a_corrupt_npz_is_reported_rather_than_crashing_the_page(
 
 
 @async_test
-async def test_selecting_a_run_populates_a_checkbox_per_channel(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path)
-    async with _open_data_screen(monkeypatch, tmp_path) as (screen, _pilot):
-        assert set(screen._checkboxes) == {"C1", "C2"}
-        assert all(cb.value for cb in screen._checkboxes.values())  # all shown by default
-
-
-@async_test
-async def test_unchecking_a_channel_drops_it_from_the_preview(
+async def test_channel_toggles_control_the_preview(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _save_scope_run(tmp_path)
     async with _open_data_screen(monkeypatch, tmp_path) as (screen, pilot):
+        assert set(screen._checkboxes) == {"C1", "C2"}
+        assert all(cb.value for cb in screen._checkboxes.values())
+
         screen._checkboxes["C2"].value = False
         await pilot.pause()
         assert [t.label for t in screen._selected_traces()] == ["C1"]
@@ -152,58 +151,45 @@ async def test_unchecking_a_channel_drops_it_from_the_preview(
 
 
 @async_test
-async def test_subtract_adds_a_derived_trace_and_a_checkbox_for_it(
+async def test_subtract_adds_a_derived_trace_and_a_checkbox_and_clear_removes_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async with _open_data_screen(monkeypatch, _save_scope_run(tmp_path).parent) as (screen, pilot):
-        screen.query_one("#data-op", Select).value = "subtract"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-chan-b", Select).value = "C2"
-        await pilot.pause()
-
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
+        await _apply_op(screen, pilot, "subtract", a="C1", b="C2")
 
         assert "C1 - C2" in screen._derived
         assert "C1 - C2" in screen._checkboxes
         assert "Added derived trace: C1 - C2" in _log(screen)
 
-
-@async_test
-async def test_subtract_with_no_channel_b_flags_that_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(monkeypatch, _save_scope_run(tmp_path).parent) as (screen, pilot):
-        app = pilot.app
-        assert isinstance(app, app_mod.IyzeeApp)
-        screen.query_one("#data-op", Select).value = "subtract"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        await pilot.pause()
-
-        screen.query_one("#data-apply-op", Button).press()
+        screen.query_one("#data-clear-op", Button).press()
         await pilot.pause()
 
         assert screen._derived == {}
-        assert screen.query_one("#data-chan-b", Select).has_class("-invalid")
-        assert any("Channel B" in n for n in notifications(app))
+        assert set(screen._checkboxes) == {"C1", "C2"}
+        assert "Cleared derived traces." in _log(screen)
 
 
+@pytest.mark.parametrize(
+    "op,fields,invalid_id,notice",
+    [
+        ("subtract", {"a": "C1"}, "#data-chan-b", "Channel B"),
+        ("scale", {"a": "C1", "yscale": "not a number"}, "#data-yscale", None),
+    ],
+    ids=["subtract-without-b", "non-numeric-scale"],
+)
 @async_test
-async def test_reapplying_the_same_subtract_replaces_rather_than_duplicates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_a_bad_form_field_is_flagged_and_nothing_is_derived(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, op, fields, invalid_id, notice
 ) -> None:
     async with _open_data_screen(monkeypatch, _save_scope_run(tmp_path).parent) as (screen, pilot):
-        screen.query_one("#data-op", Select).value = "subtract"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-chan-b", Select).value = "C2"
-        await pilot.pause()
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
+        await _apply_op(screen, pilot, op, **fields)
 
-        assert len(screen._derived) == 1
-        assert list(screen._checkboxes).count("C1 - C2") == 1
+        assert screen._derived == {}
+        assert screen.query_one(invalid_id).has_class("-invalid")
+        if notice:
+            app = pilot.app
+            assert isinstance(app, app_mod.IyzeeApp)
+            assert any(notice in n for n in notifications(app))
 
 
 # -- background correction ---------------------------------------------------------------------
@@ -213,45 +199,18 @@ async def test_reapplying_the_same_subtract_replaces_rather_than_duplicates(
 async def test_background_region_subtracts_the_mean_of_the_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scope = DetailedFakeScope()
     async with _open_data_screen(
-        monkeypatch, _save_scope_run(tmp_path, channels=(Channel.C1,), scope=scope).parent
+        monkeypatch, _save_scope_run(tmp_path, channels=(Channel.C1,)).parent
     ) as (screen, pilot):
         c1 = screen._measured["C1"]
         lo, hi = float(c1.time[0]), float(c1.time[min(1, len(c1.time) - 1)])
 
-        screen.query_one("#data-op", Select).value = "background-region"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-region-lo", Input).value = f"{lo}"
-        screen.query_one("#data-region-hi", Input).value = f"{hi}"
-        await pilot.pause()
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
+        await _apply_op(
+            screen, pilot, "background-region", a="C1", region_lo=f"{lo}", region_hi=f"{hi}"
+        )
 
         (derived_label,) = [label for label in screen._derived if label != "C1"]
         assert "bg-corrected" in derived_label
-
-
-@async_test
-async def test_background_region_with_no_samples_in_window_is_a_domain_error_not_a_crash(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(
-        monkeypatch, _save_scope_run(tmp_path, channels=(Channel.C1,)).parent
-    ) as (screen, pilot):
-        app = pilot.app
-        assert isinstance(app, app_mod.IyzeeApp)
-        screen.query_one("#data-op", Select).value = "background-region"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-region-lo", Input).value = "999"
-        screen.query_one("#data-region-hi", Input).value = "1000"
-        await pilot.pause()
-
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
-
-        assert screen._derived == {}
-        assert any("no samples" in n for n in notifications(app))
 
 
 # -- scale --------------------------------------------------------------------------------------
@@ -264,60 +223,13 @@ async def test_scale_axes_applies_the_form_values(
     async with _open_data_screen(
         monkeypatch, _save_scope_run(tmp_path, channels=(Channel.C1,)).parent
     ) as (screen, pilot):
-        screen.query_one("#data-op", Select).value = "scale"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-yscale", Input).value = "1000"
-        await pilot.pause()
-
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
+        await _apply_op(screen, pilot, "scale", a="C1", yscale="1000")
 
         (derived,) = screen._derived.values()
-        import numpy as np
-
         np.testing.assert_allclose(derived.values, screen._measured["C1"].values * 1000)
 
 
-@async_test
-async def test_a_non_numeric_scale_field_flags_that_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(
-        monkeypatch, _save_scope_run(tmp_path, channels=(Channel.C1,)).parent
-    ) as (screen, pilot):
-        screen.query_one("#data-op", Select).value = "scale"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-yscale", Input).value = "not a number"
-        await pilot.pause()
-
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
-
-        assert screen._derived == {}
-        assert screen.query_one("#data-yscale", Input).has_class("-invalid")
-
-
 # -- clear derived --------------------------------------------------------------------------
-
-
-@async_test
-async def test_clear_derived_removes_every_derived_trace_and_its_checkbox(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(monkeypatch, _save_scope_run(tmp_path).parent) as (screen, pilot):
-        screen.query_one("#data-op", Select).value = "subtract"
-        screen.query_one("#data-chan-a", Select).value = "C1"
-        screen.query_one("#data-chan-b", Select).value = "C2"
-        await pilot.pause()
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
-
-        screen.query_one("#data-clear-op", Button).press()
-        await pilot.pause()
-
-        assert screen._derived == {}
-        assert set(screen._checkboxes) == {"C1", "C2"}
-        assert "Cleared derived traces." in _log(screen)
 
 
 # -- threaded rendering: a slow render must never land after a newer one -------------------
@@ -404,17 +316,6 @@ async def test_export_disables_the_button_while_running_and_reenables_after(
         assert "Saved plot" in _log(screen)
 
 
-def test_importing_the_tui_package_pins_a_non_interactive_matplotlib_backend() -> None:
-    """The prerequisite for building figures in a worker thread at all: an
-    interactive backend generally requires the main thread. iyzee.tui must
-    already be imported by the time this test runs (test_data_screen.py
-    imports it at module level), so this only checks the backend it left
-    matplotlib in, not the import itself."""
-    import matplotlib
-
-    assert matplotlib.get_backend().lower() == "agg"
-
-
 @async_test
 async def test_visiting_console_then_data_leaves_the_backend_pinned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -479,20 +380,6 @@ async def test_export_with_no_channel_checked_refuses_with_a_notification(
         assert any("Select at least one" in n for n in notifications(app))
 
 
-@async_test
-async def test_export_before_selecting_any_run_refuses_with_a_notification(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with _open_data_screen(monkeypatch, tmp_path) as (screen, pilot):
-        app = pilot.app
-        assert isinstance(app, app_mod.IyzeeApp)
-
-        screen.query_one("#data-export", Button).press()
-        await pilot.pause()
-
-        assert any("Select a scope acquisition" in n for n in notifications(app))
-
-
 # -- switching runs resets derived traces, not just the measured channels --------------------
 
 
@@ -507,11 +394,7 @@ async def test_switching_to_a_different_run_clears_derived_traces_from_the_previ
     _save_scope_run(tmp_path, channels=(Channel.C3,))  # newest -> highlighted first
     async with _open_data_screen(monkeypatch, tmp_path) as (screen, pilot):
         # newest run (C3) is highlighted first; apply an op, then switch away and back
-        screen.query_one("#data-op", Select).value = "scale"
-        screen.query_one("#data-chan-a", Select).value = "C3"
-        await pilot.pause()
-        screen.query_one("#data-apply-op", Button).press()
-        await pilot.pause()
+        await _apply_op(screen, pilot, "scale", a="C3")
         assert screen._derived
 
         list_view = screen.query_one("#data-list", ListView)

@@ -74,11 +74,9 @@ async def test_every_sweep_control_can_be_scrolled_into_view(
             )
 
 
-@pytest.mark.parametrize("size", [(80, 16)])
 @async_test
-async def test_the_console_terminal_stays_reachable_on_short_terminals(
-    size: tuple[int, int],
-) -> None:
+async def test_the_console_terminal_stays_reachable_on_short_terminals() -> None:
+    size = (80, 16)
     app = IyzeeApp()
     async with app.run_test(size=size) as pilot:
         await pilot.press("i")

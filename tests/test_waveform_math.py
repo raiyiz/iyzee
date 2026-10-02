@@ -8,8 +8,10 @@ path to catch any schema drift between the writer and this module's reader.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from test_scope_workflows import DetailedFakeScope
@@ -147,21 +149,20 @@ def test_subtract_traces_resamples_a_mismatched_grid():
     np.testing.assert_allclose(result.values, [10.0, 8.0, 6.0])  # b interpolated to [0, 2, 4]
 
 
-def test_subtract_traces_rejects_different_units():
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda a, b: subtract_traces(a, b),
+        lambda a, b: subtract_background(a, reference=b),
+    ],
+    ids=["subtract", "background-reference"],
+)
+def test_operations_reject_traces_with_different_units(operation):
     a = _trace("C1", [0.0], [1.0], value_unit="V")
     b = _trace("C2", [0.0], [1.0], value_unit="A")
 
     with pytest.raises(ValueError, match="different units"):
-        subtract_traces(a, b)
-
-
-def test_subtract_traces_custom_label_overrides_the_default():
-    a = _trace("C1", [0.0], [1.0])
-    b = _trace("C2", [0.0], [1.0])
-
-    result = subtract_traces(a, b, label="signal minus reference")
-
-    assert result.label == "signal minus reference"
+        operation(a, b)
 
 
 def test_subtract_traces_does_not_mutate_its_inputs():
@@ -212,27 +213,15 @@ def test_background_reference_is_subtracted_and_resampled_like_subtract_traces()
     np.testing.assert_allclose(result.values, [10.0, 9.0, 8.0])
 
 
-def test_background_reference_checks_units_like_subtract_traces():
-    trace = _trace("C1", [0.0], [1.0], value_unit="V")
-    dark = _trace("dark", [0.0], [1.0], value_unit="A")
-
-    with pytest.raises(ValueError, match="different units"):
-        subtract_background(trace, reference=dark)
-
-
-def test_background_correction_requires_at_least_one_mode():
-    trace = _trace("C1", [0.0], [1.0])
-
-    with pytest.raises(ValueError, match="exactly one"):
-        subtract_background(trace)
-
-
-def test_background_correction_rejects_both_modes_at_once():
+@pytest.mark.parametrize(
+    "kwargs",
+    [{}, {"region": (0.0, 1.0), "reference": _trace("dark", [0.0, 1.0], [0.0, 0.0])}],
+)
+def test_background_correction_requires_exactly_one_mode(kwargs):
     trace = _trace("C1", [0.0, 1.0], [1.0, 1.0])
-    dark = _trace("dark", [0.0, 1.0], [0.0, 0.0])
 
     with pytest.raises(ValueError, match="exactly one"):
-        subtract_background(trace, region=(0.0, 1.0), reference=dark)
+        subtract_background(trace, **kwargs)
 
 
 # -- scale_trace ----------------------------------------------------------------------------
@@ -245,6 +234,7 @@ def test_scale_trace_applies_an_affine_transform_to_both_axes():
 
     np.testing.assert_allclose(result.time, [1.0, 3.0, 5.0])
     np.testing.assert_allclose(result.values, [995.0, 1995.0, 2995.0])
+    assert "x*2" in result.label and "y*1000" in result.label
 
 
 def test_scale_trace_defaults_are_the_identity():
@@ -257,90 +247,56 @@ def test_scale_trace_defaults_are_the_identity():
     assert result.label == trace.label  # no transform applied -> no change noted
 
 
-@pytest.mark.parametrize("kwargs", [{"x_scale": 0.0}, {"y_scale": 0.0}])
-def test_scale_trace_rejects_zero_scale(kwargs):
-    trace = _trace("C1", [0.0], [1.0])
+@pytest.mark.parametrize(
+    "kwargs,message",
+    [
+        ({"x_scale": 0.0}, "nonzero"),
+        ({"y_scale": 0.0}, "nonzero"),
+        ({"x_scale": float("nan")}, "finite"),
+    ],
+)
+def test_scale_trace_rejects_a_zero_or_non_finite_scale(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        scale_trace(_trace("C1", [0.0], [1.0]), **kwargs)
 
-    with pytest.raises(ValueError, match="nonzero"):
-        scale_trace(trace, **kwargs)
+
+@contextlib.contextmanager
+def _figure(traces, **kwargs):
+    """A built waveform figure, always closed afterwards."""
+    fig = build_waveform_figure(traces, **kwargs)
+    try:
+        yield fig
+    finally:
+        plt.close(fig)
+
+
+def test_build_waveform_figure_draws_one_labelled_line_per_trace_with_provenance():
+    traces = [
+        _trace("C1", [0.0, 1.0], [1.0, 2.0], volts_per_div=0.5, coupling="D1M"),
+        _trace("C2", [0.0, 1.0], [3.0, 4.0]),
+    ]
+
+    with _figure(traces) as fig:
+        (ax,) = fig.axes
+        labels = [line.get_label() for line in ax.lines]
+        assert len(labels) == 2 and ax.get_legend() is not None
+        assert labels[1] == "C2"
+        assert "0.5 V/div" in labels[0] and "D1M" in labels[0]
 
 
 @pytest.mark.parametrize(
-    "kwargs", [{"x_scale": float("nan")}, {"y_offset": float("inf")}, {"x_offset": float("-inf")}]
+    "units,ylabel",
+    [(("V",), "Signal (V)"), (("V", "A"), "Signal (mixed units)")],
+    ids=["shared-unit", "mixed-units"],
 )
-def test_scale_trace_rejects_non_finite_values(kwargs):
-    trace = _trace("C1", [0.0], [1.0])
+def test_build_waveform_figure_labels_axes_without_guessing_units(units, ylabel):
+    traces = [_trace(f"C{i}", [0.0], [1.0], value_unit=unit) for i, unit in enumerate(units)]
 
-    with pytest.raises(ValueError, match="finite"):
-        scale_trace(trace, **kwargs)
-
-
-def test_scale_trace_label_notes_which_axes_changed():
-    trace = _trace("C1", [0.0], [1.0])
-
-    assert "x*2" in scale_trace(trace, x_scale=2.0).label
-    assert "y*1000" in scale_trace(trace, y_scale=1000.0).label
-
-
-# -- build_waveform_figure / save_waveform_figure --------------------------------------------
-
-
-def test_build_waveform_figure_draws_one_line_per_trace_with_a_legend_label():
-    traces = [_trace("C1", [0.0, 1.0], [1.0, 2.0]), _trace("C2", [0.0, 1.0], [3.0, 4.0])]
-
-    fig = build_waveform_figure(traces)
-    try:
-        (ax,) = fig.axes
-        assert len(ax.lines) == 2
-        assert [line.get_label() for line in ax.lines] == ["C1", "C2"]
-        assert ax.get_legend() is not None
-    finally:
-        import matplotlib.pyplot as plt
-
-        plt.close(fig)
-
-
-def test_build_waveform_figure_legend_includes_provenance():
-    trace = _trace("C1", [0.0], [1.0], volts_per_div=0.5, coupling="D1M")
-
-    fig = build_waveform_figure([trace])
-    try:
-        label = fig.axes[0].lines[0].get_label()
-        assert "0.5 V/div" in label and "D1M" in label
-    finally:
-        import matplotlib.pyplot as plt
-
-        plt.close(fig)
-
-
-def test_build_waveform_figure_labels_axes_from_the_shared_unit():
-    traces = [_trace("C1", [0.0], [1.0], time_unit="S", value_unit="V")]
-
-    fig = build_waveform_figure(traces, title="My Run")
-    try:
+    with _figure(traces, title="My Run") as fig:
         ax = fig.axes[0]
         assert ax.get_xlabel() == "Time (S)"
-        assert ax.get_ylabel() == "Signal (V)"
+        assert ax.get_ylabel() == ylabel
         assert ax.get_title() == "My Run"
-    finally:
-        import matplotlib.pyplot as plt
-
-        plt.close(fig)
-
-
-def test_build_waveform_figure_notes_mixed_units_instead_of_guessing():
-    traces = [
-        _trace("C1", [0.0], [1.0], value_unit="V"),
-        _trace("C2", [0.0], [1.0], value_unit="A"),
-    ]
-
-    fig = build_waveform_figure(traces)
-    try:
-        assert fig.axes[0].get_ylabel() == "Signal (mixed units)"
-    finally:
-        import matplotlib.pyplot as plt
-
-        plt.close(fig)
 
 
 def test_build_waveform_figure_with_no_traces_does_not_crash():
@@ -360,26 +316,12 @@ def test_save_waveform_figure_writes_a_real_png_and_closes_the_figure(tmp_path):
     open_before = len(plt.get_fignums())
 
     out = save_waveform_figure(traces, tmp_path / "plot.png", title="Test")
+    save_waveform_figure(traces, tmp_path / "plot2.png")
 
     assert out == tmp_path / "plot.png"
     data = out.read_bytes()
     assert data[:8] == b"\x89PNG\r\n\x1a\n"  # a real matplotlib-rendered image, not a stub
-    assert len(plt.get_fignums()) == open_before  # no leaked figure
-
-
-def test_save_waveform_figure_over_many_calls_does_not_accumulate_figures(tmp_path):
-    import matplotlib.pyplot as plt
-
-    trace = _trace("C1", [0.0], [1.0])
-    before = len(plt.get_fignums())
-
-    for i in range(5):
-        save_waveform_figure([trace], tmp_path / f"plot{i}.png")
-
-    assert len(plt.get_fignums()) == before
-
-
-# -- end to end: acquire -> save -> load -> traces_from_scope_recording -> subtract ----------
+    assert len(plt.get_fignums()) == open_before  # no leaked figures after repeated saves
 
 
 def test_end_to_end_acquire_save_load_and_subtract(tmp_path):

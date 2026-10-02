@@ -158,18 +158,21 @@ def test_two_saves_in_the_same_second_do_not_collide(tmp_path):
 # -- multiplot / difference_series -------------------------------------------------------
 
 
-def test_multiplot_handles_empty_data(monkeypatch):
-    shown = False
+def test_difference_statistic_mean_and_minimum():
+    assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "mean") == pytest.approx(2.5)
+    assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "minimum") == pytest.approx(2.0)
+    assert io.difference_statistic([np.nan, 4.0], [1.0, 1.0], "mean") == pytest.approx(3.0)
+    assert io.difference_statistic([np.nan], [1.0], "mean") is None
+    assert io.difference_values_many(
+        [[3.0, 4.0], [5.0, 6.0]],
+        [[1.0, 1.0], [2.0, 2.0]],
+        "minimum",
+    ) == [2.0, 3.0]
 
-    def fake_show():
-        nonlocal shown
-        shown = True
 
-    monkeypatch.setattr("iyzee.experiment.io.plt.show", fake_show)
-
-    multiplot([])
-
-    assert shown
+def test_difference_statistic_rejects_unknown_statistic():
+    with pytest.raises(ValueError, match="unknown statistic"):
+        io.difference_statistic([1.0], [0.0], "median")
 
 
 def test_multiplot_plots_each_result(monkeypatch):

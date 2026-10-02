@@ -92,18 +92,21 @@ def test_lab_attribute_reflects_current_handles_live() -> None:
     assert "not connected" in output.stdout
 
 
-def test_lab_mx_is_wrapped_in_locked_proxy() -> None:
+def test_lab_exposes_connected_devices_and_always_lists_the_full_set() -> None:
     device = object()
-    app = FakeApp(handles={"mxa": FakeHandle(device=device)})
+    app = FakeApp(
+        handles={
+            "mxa": FakeHandle(device=device),
+            "scope": FakeHandle(device="scope-device"),
+        }
+    )
     lab = LabProxy(app)
-    assert isinstance(lab.mx, LockedProxy)
-    assert repr(lab.mx) == repr(device)
 
-
-def test_lab_scope_uses_the_handle_device() -> None:
-    app = FakeApp(handles={"scope": FakeHandle(device="scope-device")})
-    lab = LabProxy(app)
+    assert isinstance(lab.mx, LockedProxy) and repr(lab.mx) == repr(device)
     assert repr(lab.scope) == repr("scope-device")
+    assert set(lab.connected) == {"mx", "scope"}
+    # dir() lists everything possible, connected or not
+    assert {"mx", "shutter", "scope", "results", "last_run"} <= set(dir(lab))
 
 
 def test_lab_results_and_last_run_reflect_the_latest_sweep() -> None:
@@ -129,14 +132,6 @@ def test_lab_is_read_only() -> None:
         raise AssertionError("expected AttributeError")
 
 
-def test_lab_connected_and_dir_reflect_current_state() -> None:
-    app = FakeApp(handles={"mxa": FakeHandle(device=object())})
-    lab = LabProxy(app)
-    assert lab.connected == ("mx",)
-    # dir() always lists the full possible set, connected or not
-    assert {"mx", "shutter", "scope", "results", "last_run"} <= set(dir(lab))
-
-
 def test_a_users_own_mx_variable_never_collides_with_lab() -> None:
     """The whole point of `lab.mx` over a bare `mx`: shadowing it is a
     completely ordinary variable, with zero interaction with app state."""
@@ -148,14 +143,20 @@ def test_a_users_own_mx_variable_never_collides_with_lab() -> None:
     assert isinstance(shell.shell.user_ns["lab"], LabProxy)
 
 
-def test_lab_device_tab_completion_works() -> None:
+def test_lab_tab_completion_lists_lab_attributes_and_device_methods() -> None:
+    """Jedi (IPython's default completer) does static analysis and can't see
+    through LabProxy's dynamic __getattr__; without use_jedi=False this silently
+    returns zero completions, which would make ``lab`` undiscoverable in practice."""
+
     class Device:
         def configure(self) -> None: ...
 
         def single_sweep_wait(self) -> None: ...
 
-    app = FakeApp(handles={"mxa": FakeHandle(device=Device())})
-    shell = IyzeeIPython(app)
+    shell = IyzeeIPython(FakeApp(handles={"mxa": FakeHandle(device=Device())}))
+
+    _text, matches = shell.complete("lab.", len("lab."))
+    assert {".mx", ".results", ".last_run", ".connected"} <= set(matches)
 
     _prefix, matches = shell.complete("lab.mx.", len("lab.mx."))
     assert {".configure", ".single_sweep_wait"} <= set(matches)
@@ -164,16 +165,7 @@ def test_lab_device_tab_completion_works() -> None:
     assert ".single_sweep_wait" in matches
 
 
-def test_lab_tab_completion_actually_works() -> None:
-    """Jedi (IPython's default completer) does static analysis and can't
-    see through LabProxy's dynamic __getattr__ -- without use_jedi=False
-    this silently returns zero completions for `lab.<Tab>`, which would
-    make `lab`'s whole attribute set undiscoverable in practice."""
-    app = FakeApp(handles={"mxa": FakeHandle(device=object())})
-    shell = IyzeeIPython(app)
-    _text, matches = shell.complete("lab.", 4)
-    assert {".mx", ".results", ".last_run", ".connected"} <= set(matches)
-
+def test_history_skips_repeated_commands() -> None:
     shell = IyzeeIPython(FakeApp())
     for src in ["x = 1", "y = 2", "y = 2", "z = x + y"]:
         shell.execute(src)

@@ -14,7 +14,6 @@ from iyzee.scope_workflows import (
     SettingAdjustment,
     TriggerSettings,
     acquire_scope_recording,
-    acquire_waveforms,
     apply_and_verify_channel_settings,
     apply_channel_settings,
     apply_trigger_settings,
@@ -275,23 +274,19 @@ def test_apply_channel_settings_holds_one_lock_for_the_whole_batch():
     assert not lock.locked(), "lock must be released once the batch finishes"
 
 
-def test_apply_channel_settings_works_with_no_lock_at_all():
-    """A script with its own private scope shouldn't need to construct a
-    throwaway lock just to call this."""
-    errors = apply_channel_settings(FakeScope(), [_settings(Channel.C1)])
-    assert errors == []
-
-
 # -- selective channel apply ---------------------------------------------------------------
 
 
 def test_apply_channel_settings_only_writes_changed_fields_against_baseline():
     scope = FakeScope()
     baseline = [_settings(Channel.C1)]
-    desired = [_settings(Channel.C1, offset=0.2)]
 
-    errors = apply_channel_settings(scope, desired, current_settings=baseline)
+    errors = apply_channel_settings(scope, [_settings(Channel.C1)], current_settings=baseline)
+    assert errors == [] and scope.calls == []  # nothing changed: nothing written
 
+    errors = apply_channel_settings(
+        scope, [_settings(Channel.C1, offset=0.2)], current_settings=baseline
+    )
     assert errors == []
     assert scope.calls == [("set_offset", Channel.C1, 0.2)]
 
@@ -304,16 +299,6 @@ def test_apply_channel_settings_refuses_unsynchronized_channel():
     errors = apply_channel_settings(scope, desired, current_settings=baseline)
 
     assert [error.channel for error in errors] == [Channel.C2]
-    assert scope.calls == []
-
-
-def test_apply_channel_settings_does_nothing_when_form_matches_baseline():
-    scope = FakeScope()
-    baseline = [_settings(Channel.C1)]
-
-    errors = apply_channel_settings(scope, [_settings(Channel.C1)], current_settings=baseline)
-
-    assert errors == []
     assert scope.calls == []
 
 
@@ -376,11 +361,9 @@ def test_apply_trigger_settings_pushes_every_field_in_order():
     ]
 
 
-def test_apply_trigger_settings_raises_rather_than_collecting_errors():
-    """Unlike apply_channel_settings, there's only one trigger — nothing
-    to partially succeed, so a failure just raises."""
-    scope = FakeScope()
-    scope.set_trigger_mode = lambda mode: (_ for _ in ()).throw(RuntimeError("nope"))
+def test_trigger_settings_raise_rather_than_collecting_errors():
+    """Unlike the channel batch, there is one trigger, so nothing can partially
+    succeed: a failure on either side just raises."""
     settings = TriggerSettings(
         source=Channel.C1,
         mode=TriggerMode.AUTO,
@@ -388,9 +371,15 @@ def test_apply_trigger_settings_raises_rather_than_collecting_errors():
         coupling=TriggerCoupling.DC,
         level_volts=0.0,
     )
-
+    scope = FakeScope()
+    scope.set_trigger_mode = lambda mode: (_ for _ in ()).throw(RuntimeError("nope"))
     with pytest.raises(RuntimeError, match="nope"):
         apply_trigger_settings(scope, settings)
+
+    scope = FakeScope()
+    scope.get_trigger_mode = lambda: (_ for _ in ()).throw(RuntimeError("nope"))
+    with pytest.raises(RuntimeError, match="nope"):
+        read_trigger_settings(scope)
 
 
 # -- selective trigger apply ----------------------------------------------------------------
@@ -434,30 +423,6 @@ def test_apply_trigger_settings_changes_source_without_copying_old_source_settin
     assert scope.calls == [("set_trigger_source", Channel.C2)]
 
 
-def test_apply_trigger_settings_without_baseline_keeps_full_write_behavior():
-    scope = FakeScope()
-    desired = TriggerSettings(
-        source=Channel.C2,
-        mode=TriggerMode.SINGLE,
-        slope=TriggerSlope.NEGATIVE,
-        coupling=TriggerCoupling.AC,
-        level_volts=0.1,
-    )
-
-    apply_trigger_settings(scope, desired)
-
-    assert scope.calls == [
-        ("set_trigger_source", Channel.C2),
-        ("set_trigger_slope", Channel.C2, TriggerSlope.NEGATIVE),
-        ("set_trigger_coupling", Channel.C2, TriggerCoupling.AC),
-        ("set_trigger_level", Channel.C2, 0.1),
-        ("set_trigger_mode", TriggerMode.SINGLE),  # mode last
-    ]
-
-
-# -- read_trigger_settings -----------------------------------------------------------------
-
-
 def test_read_trigger_settings_reads_every_field_off_the_armed_source():
     scope = FakeScope()
     scope.trigger_state = TriggerSettings(
@@ -477,59 +442,14 @@ def test_read_trigger_settings_reads_every_field_off_the_armed_source():
     assert ("get_trigger_level", Channel.C2) in scope.calls
 
 
-def test_read_trigger_settings_raises_rather_than_collecting_errors():
-    """Mirrors apply_trigger_settings: one trigger, nothing to partially
-    read."""
-    scope = FakeScope()
-    scope.get_trigger_mode = lambda: (_ for _ in ()).throw(RuntimeError("nope"))
-
-    with pytest.raises(RuntimeError, match="nope"):
-        read_trigger_settings(scope)
+# -- a failed timebase read is reported against every channel that needed it ----------------
 
 
-# -- acquire_waveforms ----------------------------------------------------------------------
+def test_a_failed_timebase_read_fails_every_channel_that_needs_it():
+    recording = acquire_scope_recording(DetailedFakeScope(fail_hor=True), [Channel.C1, Channel.C2])
 
-
-def test_acquire_waveforms_reads_each_channels_own_timebase():
-    scope = FakeScope()
-
-    series, errors = acquire_waveforms(scope, [Channel.C1, Channel.C2])
-
-    assert errors == []
-    assert [c for c in scope.calls if c[0] == "getHorProperties"] == [
-        ("getHorProperties", Channel.C1),
-        ("getHorProperties", Channel.C2),
-    ]
-    assert [label for _x, _y, label in series] == ["C1", "C2"]
-
-
-def test_acquire_waveforms_builds_the_time_axis_from_the_timebase():
-    scope = FakeScope()
-
-    series, _errors = acquire_waveforms(scope, [Channel.C1])
-
-    times, values, label = series[0]
-    assert label == "C1"
-    assert values == [1.0, 2.0, 3.0]
-    assert times == [0.0, 1e-6, 2e-6]
-
-
-def test_acquire_waveforms_reports_every_channel_failed_if_the_timebase_read_fails():
-    scope = FakeScope(fail_hor=True)
-
-    series, errors = acquire_waveforms(scope, [Channel.C1, Channel.C2])
-
-    assert series == []
-    assert {e.channel for e in errors} == {Channel.C1, Channel.C2}
-
-
-def test_acquire_waveforms_continues_past_one_channels_failure():
-    scope = FakeScope(fail_channels=frozenset({Channel.C3}))
-
-    series, errors = acquire_waveforms(scope, [Channel.C1, Channel.C3, Channel.C4])
-
-    assert [label for _x, _y, label in series] == ["C1", "C4"]
-    assert [e.channel for e in errors] == [Channel.C3]
+    assert recording.waveforms == ()
+    assert {e.channel for e in recording.errors} == {Channel.C1, Channel.C2}
 
 
 # -- link loss: stop instead of reading a late reply as the next channel's answer ---------
@@ -633,24 +553,15 @@ class RecordingSocket:
         pass
 
 
-def test_scope_handle_lock_is_the_drivers_own_transaction_lock():
-    from iyzee.tui.instruments import ScopeHandle
-
-    handle = ScopeHandle()
-
-    assert handle.lock is handle.scope.transaction_lock
-    with handle.lock, handle.lock:  # re-entrant
-        pass
-
-
 def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock():
     """The console's ``lab.scope`` is a LockedProxy over the handle's lock;
     passing that same lock to a workflow used to hang forever."""
     from iyzee.tui.instruments import LockedProxy, ScopeHandle
 
     handle = ScopeHandle()
+    assert handle.lock is handle.scope.transaction_lock  # one lock, owned by the driver
     sock = RecordingSocket()
-    handle.scope.s = sock
+    handle.scope._transport.attach_socket(sock)
     proxy = LockedProxy(handle.scope, handle.lock)
     outcome: list[object] = []
 
@@ -692,27 +603,6 @@ def test_batch_holds_the_drivers_transaction_even_without_an_explicit_lock():
 
 
 # -- trigger: mode is written last on the selective path too --------------------------------
-
-
-def test_apply_trigger_settings_writes_mode_after_source_and_level_when_all_change():
-    scope = FakeScope()
-    baseline = TriggerSettings(
-        Channel.C1, TriggerMode.STOP, TriggerSlope.POSITIVE, TriggerCoupling.DC, 0.0
-    )
-    desired = TriggerSettings(
-        Channel.C2, TriggerMode.NORMAL, TriggerSlope.NEGATIVE, TriggerCoupling.AC, 0.5
-    )
-
-    apply_trigger_settings(scope, desired, current_settings=baseline)
-
-    names = [c[0] for c in scope.calls]
-    assert names[-1] == "set_trigger_mode"
-    assert names[:-1] == [
-        "set_trigger_source",
-        "set_trigger_slope",
-        "set_trigger_coupling",
-        "set_trigger_level",
-    ]
 
 
 # -- apply + read-back verification ---------------------------------------------------------

@@ -108,6 +108,9 @@ class IyzeeApp(App):
 
     TITLE = "iyzee"
     SUB_TITLE = "lab instrument control"
+
+    # Seconds between idle-link checks (see ``_check_links``).
+    LINK_CHECK_INTERVAL = 2.0
     CSS_PATH = "app.tcss"
 
     # Width breakpoints. Textual adds exactly one of these class names to
@@ -247,6 +250,56 @@ class IyzeeApp(App):
         self.console_editing_mode = console_editing_mode
         # Set by ConsoleScreen; closed on exit (see on_unmount).
         self.console_session: IPythonSession | None = None
+        # Instruments whose link died while connected: key -> why. A lost link
+        # is removed from ``handles`` (so "in handles" keeps meaning "usable"
+        # for the nav rail, readiness banners and the console alike) and
+        # remembered here so the Connect page can say what happened.
+        self.lost_links: dict[str, str] = {}
+
+    def on_mount(self) -> None:
+        self.set_interval(self.LINK_CHECK_INTERVAL, self._check_links)
+
+    def _check_links(self) -> None:
+        """Notice links that died while nobody was talking to them.
+
+        Cheap: ``alive`` does no instrument I/O. Handles without the
+        attribute (test doubles, adapters that cannot tell) count as alive.
+        """
+        for key, handle in list(self.handles.items()):
+            if not getattr(handle, "alive", True):
+                self._link_lost(key, handle)
+
+    def _link_lost(self, key: str, handle: InstrumentHandle) -> None:
+        if self.handles.get(key) is not handle:
+            return  # already disconnected or replaced
+        del self.handles[key]
+        spec = next((s for s in INSTRUMENTS if s.key == key), None)
+        label = spec.label if spec is not None else key
+        reason = "link lost - press Enter to reconnect"
+        self.lost_links[key] = reason
+        log.warning("%s: connection lost; dropped it so it can be reconnected", key)
+        # Release whatever is left of the dead link off the UI thread: the
+        # driver's disconnect takes the instrument lock.
+        threading.Thread(
+            target=self._release_dead_link, args=(key, handle), name=f"release-{key}", daemon=True
+        ).start()
+        for screen in self.query(ConnectScreen):
+            screen.show_lost(key, reason)
+        self.instruments_changed()
+        self.notify(
+            f"{label}: connection lost. Reconnect it on the Connect page.",
+            severity="error",
+            timeout=10,
+            markup=False,
+        )
+
+    @staticmethod
+    def _release_dead_link(key: str, handle: InstrumentHandle) -> None:
+        try:
+            with handle.lock:
+                handle.disconnect()
+        except Exception:  # noqa: BLE001 - the link is already dead; just don't leak
+            log.debug("releasing dead link %s failed", key, exc_info=True)
 
     def compose(self) -> ComposeResult:
         yield Header()

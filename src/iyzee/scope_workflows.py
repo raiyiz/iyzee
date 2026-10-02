@@ -59,12 +59,12 @@ import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import numpy as np
 
+from .experiment.core import utc_now
 from .experiment.io import save_numeric_recording
 from .scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 
@@ -179,10 +179,6 @@ class ChannelApplyResult:
     verified: tuple[ChannelSettings, ...]
     errors: tuple[ChannelError, ...]
     adjustments: tuple[SettingAdjustment, ...]
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def _stats(time: np.ndarray, values: np.ndarray) -> dict[str, float | int | None]:
@@ -595,7 +591,7 @@ def acquire_scope_recording(
     """
     if not channels:
         raise ValueError("at least one channel is required")
-    started = _utc_now()
+    started = utc_now()
     measurement_id = uuid.uuid4().hex
     errors: list[ChannelError] = []
     waveforms: list[ScopeWaveform] = []
@@ -685,7 +681,7 @@ def acquire_scope_recording(
     return ScopeAcquisition(
         measurement_id=measurement_id,
         started_at_utc=started,
-        completed_at_utc=_utc_now(),
+        completed_at_utc=utc_now(),
         instrument_address=getattr(scope, "address", None),
         socket_timeout_s=getattr(scope, "SOCK_TIMEOUT", None),
         requested_channel_settings=tuple(channel_settings),
@@ -701,27 +697,6 @@ def acquire_scope_recording(
         prior_trigger_mode=prior_mode,
         warnings=tuple(warnings),
     )
-
-
-def acquire_waveforms(
-    scope: LeCroy,
-    channels: Sequence[Channel],
-    *,
-    lock: LockLike | None = None,
-    freeze: bool = True,
-) -> tuple[list[tuple[list[float], list[float], str]], list[ChannelError]]:
-    """Return the legacy plot-series shape without adding persistence.
-
-    New callers that need a durable scientific record should use
-    :func:`acquire_scope_recording` followed by :func:`save_scope_acquisition`.
-    This wrapper remains for existing presentation/script callers that only
-    need ``(x, y, label)`` series."""
-    recording = acquire_scope_recording(scope, channels, lock=lock, freeze=freeze)
-    series = [
-        (waveform.time.tolist(), waveform.values.tolist(), str(waveform.channel))
-        for waveform in recording.waveforms
-    ]
-    return series, list(recording.errors)
 
 
 def save_scope_acquisition(

@@ -19,7 +19,73 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+import numpy as np
 from textual_plotext import PlotextPlot
+
+MAX_DISPLAY_POINTS = 2000
+
+Samples = Sequence[float] | np.ndarray
+
+
+def prepare_series(
+    x: Samples,
+    y: Samples,
+    label: str | None = None,
+    *,
+    max_points: int = MAX_DISPLAY_POINTS,
+) -> tuple[list[float], list[float], str | None]:
+    """Reduce one series to a terminal-sized representation.
+
+    The saved recording is never changed: this only prepares data for a
+    Plotext preview. Each bucket keeps its local minimum and maximum so
+    narrow waveform features survive the reduction better than uniform
+    slicing does. Non-finite samples are ignored while choosing extrema.
+    """
+    if max_points < 2:
+        raise ValueError("max_points must be at least 2")
+    length = min(len(x), len(y))
+    if length == 0:
+        return [], [], label
+
+    x_values = np.asarray(x, dtype=np.float64)[:length]
+    y_values = np.asarray(y, dtype=np.float64)[:length]
+    if length <= max_points:
+        return x_values.tolist(), y_values.tolist(), label
+    if max_points == 2:
+        indices = [0, length - 1]
+        return x_values[indices].tolist(), y_values[indices].tolist(), label
+    if max_points == 3:
+        interior = y_values[1:-1]
+        if len(interior) == 0:
+            indices = [0, length - 1]
+        else:
+            finite = np.isfinite(interior)
+            candidates = np.flatnonzero(finite)
+            if len(candidates):
+                local = candidates[np.argmax(np.abs(interior[finite]))]
+            else:
+                local = 0
+            indices = [0, int(local) + 1, length - 1]
+        return x_values[indices].tolist(), y_values[indices].tolist(), label
+
+    bucket_count = max(1, (max_points - 2) // 2)
+    edges = np.linspace(1, length - 1, bucket_count + 1, dtype=np.intp)
+    indices = [0]
+    for start, end in zip(edges[:-1], edges[1:]):
+        if end <= start:
+            continue
+        bucket = y_values[start:end]
+        finite = np.isfinite(bucket)
+        if not np.any(finite):
+            continue
+        finite_indices = np.flatnonzero(finite)
+        local_min = int(finite_indices[np.argmin(bucket[finite])]) + int(start)
+        local_max = int(finite_indices[np.argmax(bucket[finite])]) + int(start)
+        indices.extend(sorted({local_min, local_max}))
+    indices.append(length - 1)
+
+    indices = list(dict.fromkeys(indices))
+    return x_values[indices].tolist(), y_values[indices].tolist(), label
 
 
 def draw_series(

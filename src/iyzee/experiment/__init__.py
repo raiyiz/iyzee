@@ -8,13 +8,23 @@ concrete procedures in ``procedures.py`` are configuration over that
 machinery rather than hand-written loops.
 """
 
-from .core import ExperimentContext, Step, StepCallback, StepResult, run_sequence
+from .core import (
+    ExperimentContext,
+    RunRecord,
+    Step,
+    StepCallback,
+    StepFailure,
+    StepResult,
+    run_sequence,
+)
 from .io import (
     Recording,
     build_figure,
     create_dirs,
     difference_series,
     difference_series_many,
+    difference_statistic,
+    difference_values_many,
     load_recording,
     multiplot,
     save_step_results,
@@ -41,8 +51,10 @@ __all__ = [
     "ExperimentContext",
     "FrequencyStep",
     "Recording",
+    "RunRecord",
     "Step",
     "StepCallback",
+    "StepFailure",
     "StepResult",
     "TRACE_SHOT",
     "TRACE_SQZ",
@@ -53,6 +65,8 @@ __all__ = [
     "create_dirs",
     "difference_series",
     "difference_series_many",
+    "difference_statistic",
+    "difference_values_many",
     "build_frequency_sweep",
     "frequency_sweep_steps",
     "load_recording",

@@ -36,9 +36,11 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
@@ -47,8 +49,6 @@ from textual.widgets import (
     Button,
     Checkbox,
     Input,
-    Label,
-    ListItem,
     ListView,
     RichLog,
     Select,
@@ -56,7 +56,7 @@ from textual.widgets import (
 )
 from textual_plotext import PlotextPlot
 
-from ...experiment.io import DATA_ROOT, load_recording
+from ...experiment.io import DATA_ROOT, Recording, load_recording
 from ...waveform_math import (
     Trace,
     build_waveform_figure,
@@ -66,9 +66,9 @@ from ...waveform_math import (
     subtract_traces,
     traces_from_scope_recording,
 )
-from ..plotting import draw_series, figure_series
-from .page import FieldError, Page, _field, _finite_float
-from .traces import _run_label
+from ..plotting import draw_series, figure_series, prepare_series
+from .page import FieldError, _field, _finite_float
+from .runlist import RunListPage
 
 log = logging.getLogger("iyzee.tui")
 
@@ -110,7 +110,7 @@ def _peek_kind(path: Path) -> str | None:
         return None
 
 
-class DataScreen(Page):
+class DataScreen(RunListPage):
     """List scope acquisitions on the left; combine/adjust and preview on the right."""
 
     def compose(self) -> ComposeResult:
@@ -164,17 +164,16 @@ class DataScreen(Page):
             id="data-body",
         )
 
+    LIST_ID = "data-list"
+    HINT_ID = "data-hint"
+
     def on_mount(self) -> None:
-        self._paths: list[Path] = []
-        self._path: Path | None = None
+        self._init_run_list()
         self._measured: dict[str, Trace] = {}
         self._derived: dict[str, Trace] = {}
         self._checkboxes: dict[str, Checkbox] = {}
-        self._suppress_events = False
+        self._load_generation = 0
         self._render_generation = 0
-        self.refresh_runs()
-
-    def on_show(self) -> None:
         self.refresh_runs()
 
     def _all_traces(self) -> dict[str, Trace]:
@@ -188,56 +187,14 @@ class DataScreen(Page):
 
     # -- run list --------------------------------------------------------------------------
 
-    def refresh_runs(self) -> None:
-        """Re-scan the data directory for scope acquisitions.
+    def _scan_runs(self) -> list[Path]:
+        # Scope acquisitions only (see ``_peek_kind``): a sweep checkpoint has
+        # no per-channel waveforms for the math operations here to act on, so
+        # listing it would be a dead end. Traces lists every recording.
+        return [p for p in _DATA_ROOT.glob("**/*.npz") if _peek_kind(p) == "scope-acquisition"]
 
-        Filtered to scope acquisitions (see ``_peek_kind``): a sweep
-        checkpoint has no per-channel waveforms for the math operations here
-        to act on, so listing it would only be a dead end for this screen —
-        Traces already lists every recording, sweep and scope alike, for
-        browsing.
-
-        ``ListView`` posts its own ``Highlighted`` message on every change to
-        ``.index`` — including the implicit ``None -> 0`` it makes itself the
-        moment the first item is mounted into a previously-empty list, not
-        just the explicit assignment below — so rebuilding the list here
-        would otherwise drive ``on_list_view_highlighted`` (and everything it
-        triggers: a file load, a worker-threaded render) two or three times
-        over for what is, to the person looking at the screen, one visit to
-        this page. ``_suppress_events`` turns those off for the rebuild, and
-        this function makes the one call that actually matters — to
-        ``_select``/``_show_empty`` — itself, once, explicitly, rather than
-        leaving it to however many of ``ListView``'s own events happen to
-        fire along the way.
-        """
-        list_view = self.query_one("#data-list", ListView)
-        index = list_view.index
-        previous = (
-            self._paths[index] if index is not None and 0 <= index < len(self._paths) else None
-        )
-
-        self._paths = sorted(
-            (p for p in _DATA_ROOT.glob("**/*.npz") if _peek_kind(p) == "scope-acquisition"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        self.query_one("#data-hint", Static).update(
-            f"Scope acquisitions are read from {escape(str(_DATA_ROOT))}"
-        )
-        self._suppress_events = True
-        try:
-            list_view.clear()
-            for path in self._paths:
-                list_view.append(ListItem(Label(_run_label(path, path.stat().st_mtime))))
-            if self._paths:
-                list_view.index = self._paths.index(previous) if previous in self._paths else 0
-        finally:
-            self._suppress_events = False
-
-        if self._paths:
-            self._select(self._paths[list_view.index or 0])
-        else:
-            self._show_empty()
+    def _hint_text(self) -> str:
+        return f"Scope acquisitions are read from {escape(str(_DATA_ROOT))}"
 
     def _show_empty(self) -> None:
         self._path = None
@@ -251,35 +208,57 @@ class DataScreen(Page):
         self._refresh_operand_choices()
         self._redraw()
 
-    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
-        if self._suppress_events or event.list_view.id != "data-list":
-            return
-        index = event.list_view.index
-        if index is not None and 0 <= index < len(self._paths):
-            self._select(self._paths[index])
-
     # -- selecting a run ---------------------------------------------------------------------
 
     def _select(self, path: Path) -> None:
         if path == self._path:
-            # Reached again for the run already showing — most often ListView
-            # re-posting Highlighted for an index that didn't actually change
-            # (it fires on the implicit None -> 0 a freshly-populated list
-            # makes for itself, not just on a real explicit change), or
-            # on_mount and on_show both scanning at once. Filenames are
-            # timestamped and never rewritten under the same name, so "same
-            # path" reliably means "nothing to redo" — skip re-reading the
-            # file and re-rendering rather than trusting how many times
-            # Textual happens to have called this for one visible selection.
+            # Reached again for the run already showing, or while its worker
+            # is still loading. Timestamped files are immutable, so there is
+            # nothing useful to do until a different path is selected.
             return
-        summary = self.query_one("#data-summary", Static)
+        self._path = path
+        self._load_generation += 1
+        generation = self._load_generation
+        self._measured = {}
+        self._derived = {}
+        self._render_generation += 1  # supersede any render for the old run
+
+        self.query_one("#data-summary", Static).update(f"[b]{escape(path.name)}[/b]\n\nLoading…")
+        self._rebuild_channel_checkboxes()
+        self._refresh_operand_choices()
+        plot = self.query_one("#data-plot", PlotextPlot)
+        plot.plt.clear_data()
+        plot.refresh()
+        self._load_selected(generation, path)
+
+    @work(thread=True, exclusive=True, group="data-load", exit_on_error=False)
+    def _load_selected(self, generation: int, path: Path) -> None:
         try:
             recording = load_recording(path)
             measured = traces_from_scope_recording(recording)
         except Exception as exc:  # noqa: BLE001 - shown to the user, not raised
-            summary.update(
-                f"[b]{escape(path.name)}[/b]\n\n[red]Could not read file: {escape(str(exc))}[/red]"
+            self._ui(self._apply_selected, generation, path, None, [], str(exc))
+            return
+        self._ui(self._apply_selected, generation, path, recording, measured, None)
+
+    def _apply_selected(
+        self,
+        generation: int,
+        path: Path,
+        recording: Recording | None,
+        measured: list[Trace],
+        error: str | None,
+    ) -> None:
+        if generation != self._load_generation or path != self._path:
+            return
+        summary = self.query_one("#data-summary", Static)
+        if error is not None or recording is None:
+            message = (
+                f"[b]{escape(path.name)}[/b]\n\n"
+                f"[red]Could not read file: "
+                f"{escape(error or 'unknown error')}[/red]"
             )
+            summary.update(message)
             self._path = None
             self._measured = {}
             self._derived = {}
@@ -288,7 +267,6 @@ class DataScreen(Page):
             self._redraw()
             return
 
-        self._path = path
         self._measured = {trace.label: trace for trace in measured}
         self._derived = {}
 
@@ -369,7 +347,11 @@ class DataScreen(Page):
 
     @work(thread=True, exclusive=True, group="data-render", exit_on_error=False)
     def _render_waveforms(self, generation: int, traces: list[Trace], title: str | None) -> None:
-        fig = build_waveform_figure(traces, title=title)
+        display_traces: list[Trace] = []
+        for trace in traces:
+            x, y, _ = prepare_series(trace.time, trace.values, trace.label)
+            display_traces.append(replace(trace, time=np.asarray(x), values=np.asarray(y)))
+        fig = build_waveform_figure(display_traces, title=title)
         try:
             lines, labels = figure_series(fig)
         finally:
