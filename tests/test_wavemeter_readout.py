@@ -1,61 +1,94 @@
-from email.message import Message
-
 import pytest
 import requests
 
 import iyzee.wavemeter_readout as wavemeter_readout
 
 
-class FakeResponse:
-    def __init__(self, value: str):
-        self.value = value
-
-    def read(self):
-        return self.value.encode("ascii")
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
+def response(body: str, status: int = 200) -> requests.Response:
+    result = requests.Response()
+    result.status_code = status
+    result._content = body.encode("ascii")
+    result.encoding = "ascii"
+    return result
 
 
-def test_single_readout_returns_measured_frequency(monkeypatch):
-    monkeypatch.setattr(
-        wavemeter_readout.requests,
-        "get",
-        lambda *args, **kwargs: FakeResponse("377.123456"),
-    )
+def test_read_frequency_reads_selected_channel_and_timeout(monkeypatch):
+    seen = {}
 
-    assert wavemeter_readout.single_readout(1, reference_f=377.0, printing=False) == pytest.approx(
-        0.123456
-    )
+    def get(url, **kwargs):
+        seen.update(url=url, **kwargs)
+        return response("377.123456")
+
+    monkeypatch.setattr(wavemeter_readout.requests, "get", get)
+
+    assert wavemeter_readout.read_frequency(4) == pytest.approx(377.123456)
+    assert seen == {
+        "url": f"http://{wavemeter_readout.IP.WAVEMETER}:{wavemeter_readout.WAVEMETER_PORT}/api/4/",
+        "timeout": wavemeter_readout.READ_TIMEOUT_S,
+    }
 
 
-def test_single_readout_raises_on_communication_failure(monkeypatch):
+def test_read_frequency_uses_the_default_channel(monkeypatch):
+    seen = {}
+
+    def get(url, **kwargs):
+        seen.update(url=url, **kwargs)
+        return response("377.123456")
+
+    monkeypatch.setattr(wavemeter_readout.requests, "get", get)
+
+    assert wavemeter_readout.read_frequency() == pytest.approx(377.123456)
+    assert seen["url"].endswith(f"/api/{wavemeter_readout.DEFAULT_CHANNEL}/")
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        OSError("connection refused"),
+        requests.ConnectionError("connection reset"),
+    ],
+)
+def test_read_frequency_translates_transport_failures(monkeypatch, failure):
     def fail(*args, **kwargs):
-        raise OSError("connection refused")
+        raise failure
 
     monkeypatch.setattr(wavemeter_readout.requests, "get", fail)
 
     with pytest.raises(wavemeter_readout.WavemeterReadoutError, match="channel 1"):
-        wavemeter_readout.single_readout(1, printing=False)
+        wavemeter_readout.read_frequency(1)
 
 
-def test_single_readout_raises_on_invalid_measurement(monkeypatch):
+def test_read_frequency_translates_http_failure(monkeypatch):
     monkeypatch.setattr(
         wavemeter_readout.requests,
         "get",
-        lambda *args, **kwargs: FakeResponse("not-a-frequency"),
+        lambda *args, **kwargs: response("server error", status=500),
     )
 
-    with pytest.raises(wavemeter_readout.WavemeterReadoutError):
-        wavemeter_readout.single_readout(1, printing=False)
+    with pytest.raises(wavemeter_readout.WavemeterReadoutError, match="channel 1"):
+        wavemeter_readout.read_frequency(1)
+
+
+def test_read_frequency_rejects_invalid_measurement(monkeypatch):
+    monkeypatch.setattr(
+        wavemeter_readout.requests,
+        "get",
+        lambda *args, **kwargs: response("not-a-frequency"),
+    )
+
+    with pytest.raises(wavemeter_readout.WavemeterReadoutError, match="channel 1"):
+        wavemeter_readout.read_frequency(1)
+
+
+def test_single_readout_applies_reference_without_duplicating_http_logic(monkeypatch):
+    monkeypatch.setattr(wavemeter_readout, "read_frequency", lambda channel=0: 377.123456)
+
+    assert wavemeter_readout.single_readout(
+        1, reference_f=377.0, printing=False
+    ) == pytest.approx(0.123456)
 
 
 def test_monitoring_frequencies_matches_channels_by_position(monkeypatch, capsys):
-    # Non-contiguous, non-zero-based channel numbers: freqs[c] would previously
-    # index out of range / pick the wrong reading for channels like these.
     readings = {2: 377.107385690, 5: 384.230406373}
     monkeypatch.setattr(
         wavemeter_readout,
@@ -75,70 +108,65 @@ def test_set_pid_setpoint_posts_a_bounded_request_and_logs_instead_of_printing(
 ):
     seen = {}
 
-    def fake_urlopen(url, data=None, timeout=None):
+    def get(url, data=None, timeout=None):
         seen.update(url=url, data=data, timeout=timeout)
-        return FakeResponse("")
+        return response("")
 
-    monkeypatch.setattr(wavemeter_readout.requests, "get", fake_urlopen)
+    monkeypatch.setattr(wavemeter_readout.requests, "get", get)
 
     with caplog.at_level("INFO", logger="iyzee.wavemeter"):
         wavemeter_readout.set_pid_setpoint(377.1052, 4)
 
-    assert seen["url"].endswith(":8000/api/set_pid/")
+    assert seen["url"].endswith(f":{wavemeter_readout.WAVEMETER_PORT}/api/set_pid/")
     assert seen["data"] == b"freq_thz=377.1052&channel=4"
-    assert seen["timeout"] == wavemeter_readout.SETPOINT_TIMEOUT_S  # never unbounded
+    assert seen["timeout"] == wavemeter_readout.SETPOINT_TIMEOUT_S
     assert "channel 4" in caplog.text
     assert capsys.readouterr().out == ""
+
+
+def test_set_pid_setpoint_uses_the_default_channel(monkeypatch):
+    seen = {}
+
+    def get(url, data=None, timeout=None):
+        seen.update(url=url, data=data, timeout=timeout)
+        return response("")
+
+    monkeypatch.setattr(wavemeter_readout.requests, "get", get)
+
+    wavemeter_readout.set_pid_setpoint(377.1052)
+
+    assert seen["data"] == b"freq_thz=377.1052&channel=0"
 
 
 @pytest.mark.parametrize(
     "failure",
     [
         TimeoutError("timed out"),
-        # urllib.error.URLError("unreachable"),
-        # urllib.error.HTTPError("http://wm/api/set_pid/", 500, "boom", Message(), None),
-        requests.ConnectionError,
-        requests.HTTPError("http://wm/api/set_pid/", 500, "boom", Message(), None),
+        requests.ConnectionError("unreachable"),
     ],
 )
-def test_set_pid_setpoint_failure_is_a_wavemeter_error_naming_channel_and_value(
-    monkeypatch, failure
-):
+def test_set_pid_setpoint_translates_transport_failures(monkeypatch, failure):
     def fail(*args, **kwargs):
         raise failure
 
     monkeypatch.setattr(wavemeter_readout.requests, "get", fail)
 
-    with pytest.raises(wavemeter_readout.WavemeterReadoutError, match=r"channel 4 to 377\.1 THz"):
+    with pytest.raises(
+        wavemeter_readout.WavemeterReadoutError,
+        match=r"channel 4 to 377\.1 THz",
+    ):
         wavemeter_readout.set_pid_setpoint(377.1, 4)
 
 
-def test_wavemeter_client_reads_selected_channel(monkeypatch):
-    calls = []
+def test_set_pid_setpoint_translates_http_failure(monkeypatch):
+    monkeypatch.setattr(
+        wavemeter_readout.requests,
+        "get",
+        lambda *args, **kwargs: response("server error", status=500),
+    )
 
-    def fake_request(path, *, timeout, data=None):
-        calls.append((path, timeout, data))
-        return "377.123456"
-
-    monkeypatch.setattr(wavemeter_readout, "_request", fake_request)
-    wavemeter = wavemeter_readout.Wavemeter(channel=4)
-
-    assert wavemeter.read_frequency() == pytest.approx(377.123456)
-    assert calls == [("4/", wavemeter_readout.READ_TIMEOUT_S, None)]
-
-
-def test_wavemeter_client_sets_pid_setpoint(monkeypatch):
-    calls = []
-
-    def fake_request(path, *, timeout, data=None):
-        calls.append((path, timeout, data))
-        return ""
-
-    monkeypatch.setattr(wavemeter_readout, "_request", fake_request)
-    wavemeter = wavemeter_readout.Wavemeter(channel=4)
-
-    wavemeter.set_pid_setpoint(377.105, channel=5)
-
-    assert calls == [
-        ("set_pid/", wavemeter_readout.SETPOINT_TIMEOUT_S, b"freq_thz=377.105&channel=5")
-    ]
+    with pytest.raises(
+        wavemeter_readout.WavemeterReadoutError,
+        match=r"channel 4 to 377\.1 THz",
+    ):
+        wavemeter_readout.set_pid_setpoint(377.1, 4)
