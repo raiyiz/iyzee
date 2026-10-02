@@ -94,9 +94,9 @@ def test_single_readout_applies_reference_to_one_measurement(
         lambda channel=wavemeter_readout.DEFAULT_CHANNEL: 377.123456,
     )
 
-    assert wavemeter_readout.single_readout(
-        1, reference_f=377.0, printing=False
-    ) == pytest.approx(0.123456)
+    assert wavemeter_readout.single_readout(1, reference_f=377.0, printing=False) == pytest.approx(
+        0.123456
+    )
 
 
 def test_set_pid_setpoint_posts_a_form_request(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,8 +127,9 @@ def test_set_pid_setpoint_uses_default_channel(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(
         wavemeter_readout.requests,
         "post",
-        lambda url, data=None, timeout=None: seen.update(url=url, data=data, timeout=timeout)
-        or response(""),
+        lambda url, data=None, timeout=None: (
+            seen.update(url=url, data=data, timeout=timeout) or response("")
+        ),
     )
 
     wavemeter_readout.set_pid_setpoint(377.1052)
@@ -183,9 +184,7 @@ def test_compute_two_photon_detuning_uses_the_expected_references() -> None:
     assert detunings["Rb85_D5/2_F2,0-4 (MHz)"] == pytest.approx(
         -1.770843922 * wavemeter_readout.GHz
     )
-    assert detunings["Rb85_D5/2_F3,1-5 (MHz)"] == pytest.approx(
-        1.264888516 * wavemeter_readout.GHz
-    )
+    assert detunings["Rb85_D5/2_F3,1-5 (MHz)"] == pytest.approx(1.264888516 * wavemeter_readout.GHz)
 
 
 def test_monitoring_frequencies_renders_two_photon_rows(monkeypatch, capsys) -> None:
