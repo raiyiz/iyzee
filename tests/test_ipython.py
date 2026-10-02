@@ -18,8 +18,8 @@ from helpers import FakeApp, FakeHandle, history_manager
 from IPython.core.interactiveshell import InteractiveShell
 
 from iyzee.experiment import StepResult
-from iyzee.tui.instruments import LockedProxy
 from iyzee.tui import ipython as ipython_mod
+from iyzee.tui.instruments import LockedProxy
 from iyzee.tui.ipython import LabProxy, default_history_file, lab_namespace, shell_config
 from iyzee.tui.workers import LastRun
 
