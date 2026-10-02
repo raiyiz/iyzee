@@ -12,11 +12,14 @@ import io
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from helpers import FakeApp, FakeHandle, history_manager
 from IPython.core.interactiveshell import InteractiveShell
 
 from iyzee.experiment import StepResult
 from iyzee.tui.instruments import LockedProxy
+from iyzee.tui import ipython as ipython_mod
 from iyzee.tui.ipython import LabProxy, default_history_file, lab_namespace, shell_config
 from iyzee.tui.workers import LastRun
 
@@ -90,6 +93,15 @@ def test_lab_attribute_reflects_current_handles_live() -> None:
     output = shell.execute("lab.mx")
     assert not output.success
     assert "not connected" in output.stdout
+
+
+def test_lab_exposes_wavemeter_module_for_stateless_api(monkeypatch) -> None:
+    monkeypatch.setattr(ipython_mod.wavemeter_readout, "read_frequency", lambda channel=0: 377.105)
+
+    app = FakeApp(handles={"wavemeter": FakeHandle()})
+    lab = LabProxy(app)
+
+    assert lab.wavemeter.read_frequency(4) == pytest.approx(377.105)
 
 
 def test_lab_exposes_connected_devices_and_always_lists_the_full_set() -> None:
