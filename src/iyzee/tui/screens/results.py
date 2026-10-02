@@ -29,7 +29,6 @@ from ...experiment import difference_values_many
 from ...experiment.io import DATA_ROOT, Recording, load_recording
 from ...waveform_math import (
     Trace,
-    build_waveform_figure,
     save_waveform_figure,
     scale_trace,
     subtract_background,
@@ -82,9 +81,12 @@ def _scope_summary(path: Path, recording: Recording, traces: Sequence[Trace]) ->
     if isinstance(instrument, dict):
         lines.append("Instrument: " + escape(str(instrument.get("address") or "address unknown")))
 
+    waveforms = metadata.get("waveforms", [])
+    if not isinstance(waveforms, list):
+        waveforms = []
     stats_by_channel = {
         str(waveform.get("channel")): waveform.get("stats")
-        for waveform in metadata.get("waveforms", [])
+        for waveform in waveforms
         if isinstance(waveform, dict)
     }
     for trace in traces:

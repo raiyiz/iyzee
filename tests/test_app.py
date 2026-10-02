@@ -23,8 +23,8 @@ from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.ipython import LabProxy
 from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL, ConnectScreen
 from iyzee.tui.screens.console import ConsoleScreen, IyzeeConsole
-from iyzee.tui.screens.sweep import SweepScreen
 from iyzee.tui.screens.results import ResultsScreen
+from iyzee.tui.screens.sweep import SweepScreen
 
 
 @async_test

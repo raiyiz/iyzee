@@ -167,10 +167,10 @@ class IyzeeApp(App):
     # later) follows the same reasoning.
     BINDINGS = [
         Binding("c", "show_page('connect')", "Connect"),
-    Binding("s", "show_page('sweep')", "Sweep"),
-    Binding("o", "show_page('scope')", "Scope"),
-    Binding("t", "show_page('results')", "Results"),
-    Binding("i", "show_page('console')", "Console"),
+        Binding("s", "show_page('sweep')", "Sweep"),
+        Binding("o", "show_page('scope')", "Scope"),
+        Binding("t", "show_page('results')", "Results"),
+        Binding("i", "show_page('console')", "Console"),
         Binding("l", "show_page('log')", "Log"),
         Binding("f1", "show_page('connect')", "Connect", priority=True),
         Binding("f2", "show_page('sweep')", "Sweep", priority=True),
