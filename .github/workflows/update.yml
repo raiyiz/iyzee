@@ -30,7 +30,7 @@ jobs:
         run: python3 .github/scripts/update.py
 
       - name: Validate update
-        run: ./ci.sh all
+        run: scripts/ci.sh all
 
       - name: Create update pull request
         env:
@@ -58,4 +58,4 @@ jobs:
             --title "chore: update dependencies and CI images" \
             --body "Automated dependency and CI toolchain update.
 
-Validation passed with: ./ci.sh all"
+Validation passed with: scripts/ci.sh all"
