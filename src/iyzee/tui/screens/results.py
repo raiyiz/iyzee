@@ -395,9 +395,7 @@ class ResultsScreen(RunListPage):
         self._rebuild_channel_checkboxes()
         self._refresh_operand_choices()
         self._clear_preview()
-        self.query_one("#results-summary", Static).update(
-            f"[b]{escape(path.name)}[/b]\n\nLoading…"
-        )
+        self.query_one("#results-summary", Static).update(f"[b]{escape(path.name)}[/b]\n\nLoading…")
         self._load_selected(generation, path)
 
     @work(thread=True, exclusive=True, group="results-load", exit_on_error=False)

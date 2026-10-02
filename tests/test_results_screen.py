@@ -1,4 +1,5 @@
 """Behavioral tests for the unified Results screen."""
+
 from __future__ import annotations
 
 import os
@@ -69,7 +70,9 @@ async def _apply_op(
 
 
 @async_test
-async def test_empty_results_folder_explains_itself(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_empty_results_folder_explains_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     async with _open_results_screen(monkeypatch, tmp_path) as (screen, _pilot):
         assert "No recordings yet" in _summary(screen)
         assert str(tmp_path) in plain(screen.query_one("#results-hint", Static))
@@ -150,15 +153,15 @@ async def test_frequency_sweep_keeps_requested_and_measured_frequency_navigation
         table.move_cursor(row=1, column=0)
         await wait_until(
             pilot,
-            lambda: "Measured: 377.100011000 THz"
-            in plain(screen.query_one("#results-point-summary", Static)),
+            lambda: (
+                "Measured: 377.100011000 THz"
+                in plain(screen.query_one("#results-point-summary", Static))
+            ),
         )
 
         screen.query_one("#results-statistic", Select).value = "minimum"
         await pilot.pause()
-        assert "Minimum delta: 2.000" in plain(
-            screen.query_one("#results-point-summary", Static)
-        )
+        assert "Minimum delta: 2.000" in plain(screen.query_one("#results-point-summary", Static))
 
 
 @async_test
