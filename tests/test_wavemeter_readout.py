@@ -1,7 +1,7 @@
-import urllib.error
 from email.message import Message
 
 import pytest
+import requests
 
 import iyzee.wavemeter_readout as wavemeter_readout
 
@@ -22,8 +22,8 @@ class FakeResponse:
 
 def test_single_readout_returns_measured_frequency(monkeypatch):
     monkeypatch.setattr(
-        wavemeter_readout.urllib.request,
-        "urlopen",
+        wavemeter_readout.requests,
+        "get",
         lambda *args, **kwargs: FakeResponse("377.123456"),
     )
 
@@ -36,7 +36,7 @@ def test_single_readout_raises_on_communication_failure(monkeypatch):
     def fail(*args, **kwargs):
         raise OSError("connection refused")
 
-    monkeypatch.setattr(wavemeter_readout.urllib.request, "urlopen", fail)
+    monkeypatch.setattr(wavemeter_readout.requests, "get", fail)
 
     with pytest.raises(wavemeter_readout.WavemeterReadoutError, match="channel 1"):
         wavemeter_readout.single_readout(1, printing=False)
@@ -44,8 +44,8 @@ def test_single_readout_raises_on_communication_failure(monkeypatch):
 
 def test_single_readout_raises_on_invalid_measurement(monkeypatch):
     monkeypatch.setattr(
-        wavemeter_readout.urllib.request,
-        "urlopen",
+        wavemeter_readout.requests,
+        "get",
         lambda *args, **kwargs: FakeResponse("not-a-frequency"),
     )
 
@@ -79,7 +79,7 @@ def test_set_pid_setpoint_posts_a_bounded_request_and_logs_instead_of_printing(
         seen.update(url=url, data=data, timeout=timeout)
         return FakeResponse("")
 
-    monkeypatch.setattr(wavemeter_readout.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(wavemeter_readout.requests, "get", fake_urlopen)
 
     with caplog.at_level("INFO", logger="iyzee.wavemeter"):
         wavemeter_readout.set_pid_setpoint(377.1052, 4)
@@ -95,8 +95,10 @@ def test_set_pid_setpoint_posts_a_bounded_request_and_logs_instead_of_printing(
     "failure",
     [
         TimeoutError("timed out"),
-        urllib.error.URLError("unreachable"),
-        urllib.error.HTTPError("http://wm/api/set_pid/", 500, "boom", Message(), None),
+        # urllib.error.URLError("unreachable"),
+        # urllib.error.HTTPError("http://wm/api/set_pid/", 500, "boom", Message(), None),
+        requests.ConnectionError,
+        requests.HTTPError("http://wm/api/set_pid/", 500, "boom", Message(), None),
     ],
 )
 def test_set_pid_setpoint_failure_is_a_wavemeter_error_naming_channel_and_value(
@@ -105,7 +107,7 @@ def test_set_pid_setpoint_failure_is_a_wavemeter_error_naming_channel_and_value(
     def fail(*args, **kwargs):
         raise failure
 
-    monkeypatch.setattr(wavemeter_readout.urllib.request, "urlopen", fail)
+    monkeypatch.setattr(wavemeter_readout.requests, "get", fail)
 
     with pytest.raises(wavemeter_readout.WavemeterReadoutError, match=r"channel 4 to 377\.1 THz"):
         wavemeter_readout.set_pid_setpoint(377.1, 4)
