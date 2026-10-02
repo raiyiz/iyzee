@@ -1,8 +1,8 @@
 """Tests for the Sweep page: form parsing and validation, the "is everything
 connected" guards and banner, abort, Capture trace, and save-as-you-go.
 
-Actual measurement is faked at run_sequence (experiment/'s own suite
-covers the real thing); what is exercised here is everything the page adds
+Actual measurement is faked at the experiment runner boundary (its own suite
+covers the runner); what is exercised here is everything the page adds
 around it.
 """
 
@@ -18,6 +18,7 @@ from helpers import FakeHandle, async_test, make_result, notifications, plain, w
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, RichLog, Select, Static
 
+from iyzee.experiment import RunRecord
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens import sweep as sweep_mod
@@ -202,14 +203,26 @@ async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
 # -- running a (fake) sweep: abort, and saving as it goes ----------------------------------
 
 
-def _sweep_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_run_sequence: Any) -> IyzeeApp:
-    """An app wired so pressing Run drives fake_run_sequence instead of hardware."""
+def _sweep_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_run_sweep: Any) -> IyzeeApp:
+    """An app wired so pressing Run drives fake run_sweep instead of hardware."""
     monkeypatch.setattr(sweep_mod, "create_dirs", lambda: tmp_path)
-    monkeypatch.setattr(sweep_mod, "prepare_analyzer", lambda *a, **k: None)
-    monkeypatch.setattr(sweep_mod, "run_sequence", fake_run_sequence)
+    monkeypatch.setattr(sweep_mod, "run_sweep", fake_run_sweep)
     app = app_mod.IyzeeApp()
     app.handles["mxa"] = FakeHandle()
     return app
+
+
+def _emit_step(
+    record: RunRecord,
+    callback: Any,
+    index: int,
+    total: int,
+    step: Any,
+    result: Any,
+    error: BaseException | None,
+) -> None:
+    record.on_step(index, total, step, result, error)
+    callback(record, index, total, step, result, error)
 
 
 async def _press_run_and_wait(app: IyzeeApp) -> None:
@@ -240,12 +253,14 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
 ) -> None:
     started, release = threading.Event(), threading.Event()
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sweep(mx, steps, config, *, shutter=None, on_error, on_step):
         started.set()
         release.wait(5)
-        on_step(0, 3, object(), _result(0), None)
+        record = RunRecord(config={"res_bw_hz": config.res_bw_hz})
+        _emit_step(record, on_step, 0, 3, steps[0], _result(0), None)
+        return record, [_result(0)]
 
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sweep)
     async with app.run_test() as pilot:
         await pilot.press("s")
         await pilot.pause()
@@ -267,18 +282,65 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
         assert app.last_run is not None and len(app.last_run.results) == 1
 
 
+class RecordingLock:
+    def __init__(self) -> None:
+        self.held = False
+
+    def __enter__(self):
+        assert not self.held
+        self.held = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.held = False
+        return False
+
+
+@async_test
+async def test_sweep_holds_required_instrument_locks_while_running(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    mxa_lock = RecordingLock()
+    shutter_lock = RecordingLock()
+    seen = []
+
+    def fake_run_sweep(mx, steps, config, *, shutter=None, on_error, on_step):
+        seen.append((mxa_lock.held, shutter_lock.held, shutter is not None))
+        record = RunRecord(config={"res_bw_hz": config.res_bw_hz})
+        _emit_step(record, on_step, 0, 1, steps[0], _result(0), None)
+        return record, [_result(0)]
+
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sweep)
+    app.handles["mxa"].lock = mxa_lock
+    app.handles["shutter"] = FakeHandle()
+    app.handles["shutter"].lock = shutter_lock
+    app.handles["wavemeter"] = FakeHandle()
+
+    async with app.run_test() as pilot:
+        screen = await _open_sweep_screen(pilot)
+        screen.query_one("#sweep-type", Select).value = "frequency"
+        await pilot.pause()
+        await pilot.click("#run-sweep")
+        await wait_until(pilot, lambda: app.last_run is not None)
+
+    assert seen == [(True, True, True)]
+    assert not mxa_lock.held and not shutter_lock.held
+
+
 @async_test
 async def test_points_are_on_disk_while_the_sweep_is_still_running(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     on_disk_after_each_step: list[int] = []
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sweep(mx, steps, config, *, shutter=None, on_error, on_step):
+        record = RunRecord(config={"res_bw_hz": config.res_bw_hz})
         for index in range(3):
-            on_step(index, 3, object(), _result(index), None)
+            _emit_step(record, on_step, index, 3, steps[index], _result(index), None)
             on_disk_after_each_step.append(_points_on_disk(tmp_path))
+        return record, [_result(index) for index in range(3)]
 
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sweep)
     await _press_run_and_wait(app)
 
     assert on_disk_after_each_step == [1, 2, 3]
@@ -294,15 +356,17 @@ async def test_a_failing_save_is_reported_once_and_does_not_stop_the_run(
 ) -> None:
     steps_run: list[int] = []
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sweep(mx, steps, config, *, shutter=None, on_error, on_step):
+        record = RunRecord(config={"res_bw_hz": config.res_bw_hz})
         for index in range(3):
-            on_step(index, 3, object(), _result(index), None)
+            _emit_step(record, on_step, index, 3, steps[index], _result(index), None)
             steps_run.append(index)
+        return record, [_result(index) for index in range(3)]
 
     def broken_save(*args, **kwargs):
         raise OSError("No space left on device [/data]")
 
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sweep)
     monkeypatch.setattr(sweep_mod, "save_step_results", broken_save)
     await _press_run_and_wait(app)
     warnings = [m for m in notifications(app) if "Could not save" in m]
@@ -372,14 +436,16 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
     """Saved sweeps used to carry run_metadata=null: no run id, no analyzer settings."""
     seen: list[str] = []
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
-        seen.append(ctx.run_id)
-        on_step(0, 2, object(), _result(0), None)
+    def fake_run_sweep(mx, steps, config, *, shutter=None, on_error, on_step):
+        record = RunRecord(config={"res_bw_hz": config.res_bw_hz})
+        seen.append(record.run_id)
+        _emit_step(record, on_step, 0, 2, steps[0], _result(0), None)
         # while it is running the file must already say so
         seen.append(_saved_run_metadata(tmp_path)["status"])
-        on_step(1, 2, object(), None, TimeoutError("lock lagged"))
+        _emit_step(record, on_step, 1, 2, steps[1], None, TimeoutError("lock lagged"))
+        return record, [_result(0)]
 
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sweep)
     await _press_run_and_wait(app)
 
     meta = _saved_run_metadata(tmp_path)
@@ -395,12 +461,14 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
 async def test_an_aborted_sweep_is_marked_aborted_in_the_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sweep(mx, steps, config, *, shutter=None, on_error, on_step):
         screen = app.query_one(sweep_mod.SweepScreen)
         screen._abort_event.set()
-        on_step(0, 3, object(), _result(0), None)  # raises SweepAborted after the point is kept
+        record = RunRecord(config={"res_bw_hz": config.res_bw_hz})
+        _emit_step(record, on_step, 0, 3, steps[0], _result(0), None)
+        return record, [_result(0)]
 
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sweep)
     await _press_run_and_wait(app)
 
     assert _saved_run_metadata(tmp_path)["status"] == "aborted"
@@ -411,11 +479,12 @@ async def test_an_aborted_sweep_is_marked_aborted_in_the_file(
 async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
-        on_step(0, 3, object(), _result(0), None)
+    def fake_run_sweep(mx, steps, config, *, shutter=None, on_error, on_step):
+        record = RunRecord(config={"res_bw_hz": config.res_bw_hz})
+        _emit_step(record, on_step, 0, 3, steps[0], _result(0), None)
         raise RuntimeError("scheduler exploded")
 
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sweep)
     await _press_run_and_wait(app)
 
     assert _saved_run_metadata(tmp_path)["status"] == "failed"

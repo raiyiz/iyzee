@@ -1,14 +1,17 @@
 import pytest
 
-from iyzee.experiment.core import ExperimentContext
+from iyzee.experiment.core import ExperimentContext, StepResult
 from iyzee.experiment.procedures import (
+    AnalyzerConfig,
     BandwidthStep,
     FrequencyStep,
+    SweepSetupError,
     acquire_trace,
     bandwidth_sweep_steps,
     build_bandwidth_sweep,
     build_frequency_sweep,
     run_bandwidth_sweep,
+    run_sweep,
 )
 
 
@@ -166,6 +169,58 @@ def test_run_bandwidth_sweep_does_not_disconnect_on_failure(monkeypatch):
 
     with pytest.raises(RuntimeError, match="boom"):
         run_bandwidth_sweep(mx)
+
+
+def test_run_sweep_owns_setup_and_run_context_but_forwards_live_progress(monkeypatch):
+    mx = FakeMXA()
+    config = build_bandwidth_sweep([20e3, 40e3], sweep_duration_ms=10)[1]
+    steps = [BandwidthStep(20e3)]
+    prepared = []
+    seen = []
+
+    monkeypatch.setattr(
+        "iyzee.experiment.procedures.prepare_analyzer",
+        lambda analyzer, traces, cfg: prepared.append((analyzer, traces, cfg)),
+    )
+
+    result = StepResult(
+        label="rbw=20000Hz",
+        x_value=20e3,
+        x_unit="Hz",
+        traces={"squeezing": [1], "shot_noise": [2]},
+    )
+
+    def fake_run_sequence(run_steps, ctx, *, on_error, on_step):
+        seen.append((list(run_steps), ctx, on_error))
+        on_step(0, 1, run_steps[0], result, None)
+        return [result]
+
+    monkeypatch.setattr("iyzee.experiment.procedures.run_sequence", fake_run_sequence)
+
+    def on_step(record, index, total, step, step_result, error):
+        seen.append((record, index, total, step, step_result, error))
+
+    record, results = run_sweep(mx, steps, config, on_error="skip", on_step=on_step)
+
+    assert results == [result]
+    assert prepared == [(mx, (1, 2), config)]
+    assert seen[0][0] == steps
+    assert seen[0][1].mx is mx
+    assert seen[0][1].run_id == record.run_id
+    assert seen[0][1].config["res_bw_hz"] == config.res_bw_hz
+    assert seen[0][2] == "skip"
+    assert seen[1][0] is record
+    assert seen[1][1:] == (0, 1, steps[0], result, None)
+
+
+def test_run_sweep_distinguishes_analyzer_setup_failure(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise TimeoutError("analyzer did not respond")
+
+    monkeypatch.setattr("iyzee.experiment.procedures.prepare_analyzer", fail)
+
+    with pytest.raises(SweepSetupError, match="analyzer did not respond"):
+        run_sweep(FakeMXA(), [BandwidthStep(20e3)], AnalyzerConfig())
 
 
 class FakeMXAForTraceAcquisition:
