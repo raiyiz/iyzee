@@ -94,6 +94,26 @@ def test_lab_attribute_reflects_current_handles_live() -> None:
     assert "not connected" in output.stdout
 
 
+def test_lab_exposes_wavemeter_before_connect(monkeypatch) -> None:
+    client = Wavemeter()
+    monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
+
+    lab = LabProxy(FakeApp())
+
+    assert isinstance(lab.wavemeter, Wavemeter)
+    assert lab.wavemeter is not client
+    assert lab.wavemeter.read_frequency(4) == pytest.approx(377.105)
+
+
+def test_lab_tab_completion_reaches_wavemeter_before_connect() -> None:
+    shell = IyzeeIPython(FakeApp())
+
+    _prefix, matches = shell.complete("lab.wavemeter.", len("lab.wavemeter."))
+
+    assert ".read_frequency" in matches
+    assert ".set_pid_setpoint" in matches
+
+
 def test_lab_exposes_the_wavemeter_client_behind_the_handle_lock(monkeypatch) -> None:
     monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
 
