@@ -582,6 +582,7 @@ def test_batch_holds_the_driver_lock_without_an_explicit_lock():
 
     assert events == [True] and not lock.locked()
 
+
 # -- trigger: mode is written last on the selective path too --------------------------------
 
 

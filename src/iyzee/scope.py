@@ -133,7 +133,13 @@ class LeCroy:
     dialect used by WaveSurfer, WaveAce and X-Stream. Channel, trigger and
     math methods forward that dialect; model-dependent vocabularies stay plain
     strings rather than pretending to be universal enums.
+
+    Those commands follow Teledyne LeCroy's Remote Control manuals but have not
+    all been exercised on real hardware: verify against your instrument (most
+    accept a ``?`` query form to read back what was set) before relying on them
+    for anything safety-critical.
     """
+
     MAX_TCP_CONNECT = 5  # time in s. to get a conn
     MAC_TCP_READ = 3  # time in s. to wait for the DSO to respond
     LECROY_SERVER_PORT = 1861  # as defined by LeCroy
@@ -223,6 +229,7 @@ class LeCroy:
 
     # ------------------------------------------------------------------
     # Channel (vertical) control
+    # ------------------------------------------------------------------
     def set_volts_per_div(self, channel: Channel, volts_per_div: float) -> None:
         """Set the vertical scale for ``channel``, in volts/division."""
         self.send(f"{channel}:VOLT_DIV {_finite(volts_per_div, 'volts_per_div')}")
