@@ -103,7 +103,7 @@ comment on `IyzeeApp.COMMAND_PALETTE_BINDING`. While the console's terminal has
 focus it owns nearly every key: only `F1`–`F4`, `Ctrl+Q` and `Ctrl+\` reach the
 app (see the console section).
 
-## How a measurement runs
+## How a measurement flows
 
 A measurement is a sequence of `Step`s run against a shared, already-connected
 `ExperimentContext`. The important ownership boundary is explicit — this is
