@@ -151,18 +151,18 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
     handle.disconnect()  # disconnect before connect is a no-op
 
     handle.connect()
-    assert handle.shutter is not None
+    assert handle.device is not None
     assert "CH" in handle.probe()
 
     # The real attribute is typed as ShutterControl | None; the fake only changes
     # the runtime constructor, so narrow it explicitly for the test-only fake.
-    shutter = cast(_FakeShutterControl, handle.shutter)
+    shutter = cast(_FakeShutterControl, handle.device)
     psu = shutter.psu
     assert shutter.connected is True
     handle.disconnect()
     assert shutter.connected is False
     assert psu.closed is True
-    assert handle.shutter is None
+    assert handle.device is None
 
 
 # -- WavemeterHandle ----------------------------------------------------------
@@ -179,7 +179,7 @@ def test_wavemeter_handle_probe_reads_the_default_channel(monkeypatch: pytest.Mo
 
     handle = WavemeterHandle()
     assert handle.probe() == "ch4 = 377.105000 THz"
-    assert handle.channel == instruments_mod.DEFAULT_CHANNEL
+    assert handle.device.channel == instruments_mod.DEFAULT_CHANNEL
     assert isinstance(handle.device, instruments_mod.Wavemeter)
     assert seen_clients == [handle.device]
 
@@ -245,7 +245,7 @@ def test_scope_handle_connects_then_probe_identifies_the_scope(
     monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
     handle = ScopeHandle()
     handle.connect()
-    scope = cast(_FakeLeCroy, handle.scope)
+    scope = cast(_FakeLeCroy, handle.device)
     assert scope.connected_to == str(handle._ip)
 
     assert handle.probe() == "LECROY,WS452,SN1,9.0"
@@ -285,7 +285,7 @@ def test_scope_handle_alive_follows_the_drivers_link_check(monkeypatch: pytest.M
     handle = ScopeHandle()
     assert handle.alive
 
-    cast(Link, handle.scope).healthy = False
+    cast(Link, handle.device).healthy = False
 
     assert not handle.alive
 

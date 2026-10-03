@@ -545,10 +545,10 @@ def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock()
     from iyzee.tui.instruments import LockedProxy, ScopeHandle
 
     handle = ScopeHandle()
-    assert handle.lock is handle.scope.transaction_lock  # one lock, owned by the driver
+    assert handle.lock is handle.device.transaction_lock  # one lock, owned by the driver
     sock = FakeSocket()
-    handle.scope._transport.attach_socket(sock)
-    proxy = LockedProxy(handle.scope, handle.lock)
+    handle.device._transport.attach_socket(sock)
+    proxy = LockedProxy(handle.device, handle.lock)
     outcome: list[object] = []
 
     def run() -> None:

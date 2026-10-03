@@ -408,10 +408,6 @@ class ScopeScreen(Page):
             )
         return handle
 
-    def _scope(self) -> LeCroy | None:
-        """The live driver, or ``None`` (after notifying) if not connected."""
-        handle = self._scope_handle()
-        return None if handle is None else handle.device
 
     def _begin_settings_op(self, button_id: str, *, retrieve: bool = False) -> None:
         """Mark a settings operation as running and lock out its own button."""
@@ -781,9 +777,10 @@ class ScopeScreen(Page):
     # -- acquire: record enabled channels, persist the result, then plot ---
 
     def _start_acquire(self) -> None:
-        scope = self._scope()
-        if scope is None:
+        handle = self._scope_handle()
+        if handle is None:
             return
+        scope = handle.device
         if self._settings_busy or self._retrieve_in_flight or not self._settings_synced:
             self.notify(
                 "Scope settings are not synchronized yet; retrieve the current settings first.",

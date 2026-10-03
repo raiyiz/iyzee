@@ -169,10 +169,6 @@ class ShutterHandle(_LockedHandle):
         """The underlying live shutter controller, once connected."""
         return self._shutter
 
-    @property
-    def shutter(self) -> ShutterControl | None:
-        """The live :class:`ShutterControl`, once connected."""
-        return self.device
 
 
 class WavemeterHandle(_LockedHandle):
@@ -185,7 +181,6 @@ class WavemeterHandle(_LockedHandle):
 
     def __init__(self, channel: int = DEFAULT_CHANNEL) -> None:
         super().__init__()
-        self._channel = channel
         self._client = Wavemeter(channel)
 
     def connect(self) -> None:
@@ -195,20 +190,16 @@ class WavemeterHandle(_LockedHandle):
         return None
 
     @property
-    def channel(self) -> int:
-        return self._channel
-
-    @property
     def device(self) -> Wavemeter:
         """The HTTP client (no connection behind it, so always available)."""
         return self._client
 
     def probe(self) -> str:
         try:
-            freq = self._client.read_frequency(self._channel)
+            freq = self._client.read_frequency()
         except WavemeterReadoutError as exc:
             raise ConnectionError(str(exc)) from exc
-        return f"ch{self._channel} = {freq:.6f} THz"
+        return f"ch{self._client.channel} = {freq:.6f} THz"
 
 
 class ScopeHandle(_LockedHandle):
@@ -264,9 +255,6 @@ class ScopeHandle(_LockedHandle):
         """The underlying live LeCroy driver."""
         return self._scope
 
-    @property
-    def scope(self) -> LeCroy:
-        return self._scope
 
 
 @dataclass(frozen=True)
@@ -280,12 +268,6 @@ class InstrumentSpec:
     # strands the status dot on a line of its own. Defaults to ``label``.
     short: str = ""
 
-    @property
-    def short_label(self) -> str:
-        return self.short or self.label
-
-    def build(self) -> InstrumentHandle:
-        return self.make()
 
 
 class LockedProxy:
