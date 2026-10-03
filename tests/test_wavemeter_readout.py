@@ -176,6 +176,7 @@ def test_set_pid_setpoint_translates_http_failure(monkeypatch: pytest.MonkeyPatc
     ):
         wavemeter_readout.set_pid_setpoint(377.1, 4)
 
+
 def test_client_starts_without_a_last_seen_timestamp_and_records_successful_responses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
