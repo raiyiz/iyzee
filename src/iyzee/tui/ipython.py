@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Protocol
 from platformdirs import user_data_dir
 from traitlets.config import Config
 
+from ..wavemeter_readout import Wavemeter
 from .apidoc import describe_api
 from .instruments import LockedProxy
 
@@ -110,12 +111,19 @@ class LabProxy:
 
     def __init__(self, app: AppState) -> None:
         object.__setattr__(self, "_app", app)
+        # The wavemeter has no persistent connection, so the client is usable
+        # before the Connect screen has probed it as well as afterwards.
+        object.__setattr__(self, "_wavemeter", Wavemeter())
 
     def __getattr__(self, name: str) -> Any:
         app = object.__getattribute__(self, "_app")
         instrument_keys = object.__getattribute__(self, "_INSTRUMENT_KEYS")
         if name in instrument_keys:
             key = instrument_keys[name]
+            if name == "wavemeter":
+                # An HTTP client does not need a connected handle. An individual
+                # request determines whether the server is currently reachable.
+                return object.__getattribute__(self, "_wavemeter")
             handle = app.handles.get(key)
             if handle is None:
                 raise AttributeError(
