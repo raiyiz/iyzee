@@ -470,13 +470,18 @@ def test_non_ascii_reply_keeps_the_connection_usable():
     assert transport.query("*OPC?") == "OK"
 
 
-def test_bad_count_before_eoi_invalidates_because_frames_are_still_unread():
-    transport, _ = attached(frame(DATA, b"C1:WF DAT1,#9notanumber") + frame(DATA_EOI, b"more"))
+def test_bad_count_mid_message_keeps_the_connection_usable_because_the_message_is_fully_read():
+    transport, _ = attached(
+        frame(DATA, b"C1:WF DAT1,#9notanumber")
+        + frame(DATA_EOI, b"more")
+        + frame(DATA_EOI, b"OK\n")
+    )
 
     with pytest.raises(VICPProtocolError, match="invalid DEF9 byte count"):
         transport.read_definite_block()
 
-    assert transport.connected is False
+    assert transport.connected is True
+    assert transport.query("*OPC?") == "OK"
 
 
 def test_bad_count_in_the_final_frame_keeps_the_connection_usable():
