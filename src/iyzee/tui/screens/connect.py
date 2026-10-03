@@ -100,6 +100,50 @@ class ConnectScreen(Page):
         self._busy.discard(key)
         self._set_row(key, "lost", reason)
 
+    def command_connect(self, key: str) -> None:
+        """Connect an instrument without relying on the table cursor."""
+        spec = next((item for item in INSTRUMENTS if item.key == key), None)
+        if spec is None:
+            raise ValueError(f"unknown instrument: {key}")
+        if key in self._busy:
+            self.notify(f"{spec.label} is still busy — wait for it to finish.", severity="warning")
+            return
+        if key in self.iyzee_app.handles:
+            self.notify(f"{spec.label} is already connected.", severity="warning")
+            return
+        self._busy.add(key)
+        self._update_hint()
+        self._connect(spec)
+
+    def command_disconnect(self, key: str) -> str | None:
+        """Disconnect an instrument using the same confirmation rule as Enter."""
+        spec = next((item for item in INSTRUMENTS if item.key == key), None)
+        if spec is None:
+            raise ValueError(f"unknown instrument: {key}")
+        if key not in self.iyzee_app.handles:
+            self.notify(f"{spec.label} is not connected.", severity="warning")
+            return None
+        if key in self._busy:
+            self.notify(f"{spec.label} is still busy — wait for it to finish.", severity="warning")
+            return None
+        if self.iyzee_app.sweep_running:
+            self.notify(
+                f"A sweep is running — abort it before disconnecting {spec.label}.",
+                severity="warning",
+                timeout=5,
+                markup=False,
+            )
+            return None
+        now = time.monotonic()
+        if self._armed is None or self._armed[0] != key or now > self._armed[1]:
+            self._armed = (key, now + 4.0)
+            return f"Press :disconnect {key} again to confirm."
+        self._armed = None
+        self._busy.add(key)
+        self._update_hint()
+        self._disconnect(spec)
+        return None
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         # NOTE: this is the correct hook for "Enter pressed on a row" — a
         # Screen-level `BINDINGS = [("enter", ...)]` does *not* work here,

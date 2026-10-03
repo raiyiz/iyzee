@@ -27,6 +27,80 @@ from iyzee.tui.screens.results import ResultsScreen
 from iyzee.tui.screens.sweep import SweepScreen
 
 
+
+
+@async_test
+async def test_colon_opens_the_command_layer_from_the_console() -> None:
+    app = IyzeeApp()
+    async with app.run_test() as pilot:
+        await pilot.press("i")
+        await pilot.pause(0.2)
+        await pilot.press(":")
+        await pilot.pause()
+        assert app.query_one("#command-bar").has_class("-open")
+        assert app.query_one("#command-input").has_focus
+
+
+@async_test
+async def test_command_layer_completes_commands_with_tab() -> None:
+    app = IyzeeApp()
+    async with app.run_test() as pilot:
+        await pilot.press(":")
+        for key in "sc":
+            await pilot.press(key)
+        await pilot.press("tab")
+        command = app.query_one("#command-input")
+        assert command.value == "scope"
+
+        await pilot.press(" ")
+        await pilot.press("tab")
+        assert command.value == "scope sync"
+
+
+@async_test
+async def test_command_layer_can_navigate_and_dispatch_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = IyzeeApp()
+    async with app.run_test() as pilot:
+        await pilot.press(":")
+        for key in "scope":
+            await pilot.press(key)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.query_one(ContentSwitcher).current == "scope"
+
+        called: list[str] = []
+        screen = app.query_one(SweepScreen)
+        monkeypatch.setattr(screen, "command_abort", lambda: called.append("abort"))
+
+        await pilot.press(":")
+        for key in "sweep abort":
+            await pilot.press(key)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert called == ["abort"]
+
+
+@async_test
+async def test_command_layer_keeps_errors_open_and_suggests_instruments() -> None:
+    app = IyzeeApp()
+    async with app.run_test() as pilot:
+        await pilot.press(":")
+        for key in "connect ":
+            await pilot.press(key)
+        await pilot.pause()
+        hint = str(app.query_one("#command-hint").render())
+        assert ":connect mxa" in hint
+        assert ":connect scope" in hint
+
+        for key in "wat":
+            await pilot.press(key)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.query_one("#command-bar").has_class("-open")
+        assert "unknown instrument" in str(app.query_one("#command-hint").render())
+
 @async_test
 async def test_page_navigation_uses_a_shared_content_switcher() -> None:
     """Pages used to be independent Screens swapped via App.MODES; they're

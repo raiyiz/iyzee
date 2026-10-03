@@ -185,6 +185,18 @@ class SweepScreen(Page):
             )
         status.display = bool(missing)
 
+    def command_run(self) -> None:
+        """Run the sweep through the normal validation and worker path."""
+        self._start_sweep()
+
+    def command_abort(self) -> None:
+        """Request the normal cooperative abort."""
+        self._request_abort()
+
+    def command_capture(self) -> None:
+        """Capture a trace through the normal worker path."""
+        self._start_capture()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run-sweep":
             self._start_sweep()
