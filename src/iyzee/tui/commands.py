@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Input, Static
 
@@ -96,16 +97,36 @@ def help_text() -> str:
     return "  ".join(f":{item.name} — {item.description}" for item in _COMMANDS)
 
 
+class CommandInput(Input):
+    """Input field that reserves Tab for command completion."""
+
+    BINDINGS = [Binding("tab", "complete_command", "Complete", show=False)]
+
+    def action_complete_command(self) -> None:
+        parent = self.parent
+        command_bar = parent.parent if parent is not None else None
+        if isinstance(command_bar, CommandBar):
+            command_bar.complete(self)
+
+
 class CommandBar(Vertical):
     """A small command surface layered over whichever page is active."""
 
     can_focus = False
 
+    def complete(self, command: Input) -> None:
+        """Accept the first completion for the current command line."""
+        choices = suggestions(command.value)
+        if not choices:
+            return
+        command.value = choices[0].lstrip(":")
+        command.cursor_position = len(command.value)
+
     def compose(self) -> ComposeResult:
         yield Static("", id="command-hint")
         with Horizontal(id="command-entry"):
             yield Static(":", id="command-prefix")
-            yield Input(placeholder="command", id="command-input")
+            yield CommandInput(placeholder="command", id="command-input")
 
     def open(self, page_id: str) -> None:
         self.add_class("-open")
@@ -129,6 +150,7 @@ class CommandBar(Vertical):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "command-input":
             return
+        self.remove_class("-error")
         choices = suggestions(event.value)
         self.query_one("#command-hint", Static).update(
             "  ".join(choices[:6]) or "Enter to run · Escape to cancel"
