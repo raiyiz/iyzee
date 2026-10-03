@@ -18,6 +18,7 @@ live driver expose that driver as ``.device``; stateless adapters may return ``N
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 import time
@@ -30,7 +31,7 @@ from ..base import CH, IP
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
 from ..scope import LeCroy, LeCroyTimeoutError
-from ..wavemeter_readout import DEFAULT_CHANNEL, WavemeterReadoutError, read_frequency
+from ..wavemeter_readout import DEFAULT_CHANNEL, Wavemeter, WavemeterReadoutError, read_frequency
 
 log = logging.getLogger("iyzee.instruments")
 
@@ -176,13 +177,15 @@ class ShutterHandle(_LockedHandle):
 class WavemeterHandle(_LockedHandle):
     """Adapter for the wavemeter's stateless HTTP API.
 
-    There is no persistent connection to open. The handle only provides the
-    shared instrument lock and performs one real readout when probing.
+    There is no persistent connection to open. The handle provides the shared
+    instrument lock, performs one real readout when probing, and hands the
+    console a stateless :class:`~iyzee.wavemeter_readout.Wavemeter` client.
     """
 
     def __init__(self, channel: int = DEFAULT_CHANNEL) -> None:
         super().__init__()
         self._channel = channel
+        self._client = Wavemeter(channel)
 
     def connect(self) -> None:
         return None
@@ -195,9 +198,9 @@ class WavemeterHandle(_LockedHandle):
         return self._channel
 
     @property
-    def device(self) -> None:
-        """The wavemeter has no persistent device object."""
-        return None
+    def device(self) -> Wavemeter:
+        """The HTTP client (no connection behind it, so always available)."""
+        return self._client
 
     def probe(self) -> str:
         try:
@@ -321,6 +324,7 @@ class LockedProxy:
             return value
         lock = object.__getattribute__(self, "_lock")
 
+        @functools.wraps(value)  # keep name/signature/docstring: `lab.mx.method?` must still help
         def _locked_call(*args: Any, **kwargs: Any) -> Any:
             with lock:
                 return value(*args, **kwargs)

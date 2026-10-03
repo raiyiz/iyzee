@@ -135,7 +135,7 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
 
 == Wavemeter
 
-`wavemeter_readout.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close:
+`wavemeter_readout.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close. `Wavemeter` is a thin client with one method per endpoint (the module-level `read_frequency()` / `set_pid_setpoint()` are the same calls on a default client), so `lab.wavemeter.<Tab>` in the console completes the API and `lab.api("wavemeter")` prints it with the HTTP routes; `get(path)` / `post(path, **form)` reach routes it doesn't wrap yet:
 
 #table(
   columns: (1.4fr, 2.4fr),

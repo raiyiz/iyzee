@@ -19,7 +19,7 @@ src/iyzee/
 ├── scope_workflows.py     # scope operations + durable waveform recordings — plain
 │                           # functions/dataclasses on top of scope.py, no Textual; see
 │                           # "Design direction" below
-├── wavemeter_readout.py  # wavemeter / laser setpoint control
+├── wavemeter_readout.py  # wavemeter HTTP client: readout, PID setpoint
 ├── experiment/            # composable measurement procedures
 │   ├── core.py             # Step protocol, ExperimentContext, StepResult, run_sequence()
 │   ├── procedures.py      # AnalyzerConfig, prepare_analyzer(), acquire_trace(), BandwidthStep, FrequencyStep, run_*_sweep()
@@ -162,9 +162,9 @@ already just picks a `Step` list and runs it.
   yet unified with `BaseDevice`'s connection lifecycle; treat as a standalone
   legacy driver. `scope_workflows.py` holds the operations built on top
   (channel/trigger settings, waveform acquisition) — see "Design direction".
-- **`wavemeter_readout.py`** — wavemeter readout and PID setpoint control over
-  HTTP, plus Rubidium transition-frequency reference tables used for
-  reporting laser detuning.
+- **`wavemeter_readout.py`** — `Wavemeter`, a thin HTTP client (frequency
+  readout, PID setpoint), with module-level `read_frequency()` /
+  `set_pid_setpoint()` for scripts.
 - **`base.py`** — shared infrastructure: `BaseDevice` (VISA connect/close/
   context-manager lifecycle), `IP` (instrument addresses), `CH` (PSU channel
   IDs). `KeysightMXA` and `PSU` both build on `BaseDevice`.
@@ -187,7 +187,17 @@ apply_channel_settings(lab.scope, [ChannelSettings(Channel.C1, True, 0.5, 0.0, C
 
 lab.results[-1].traces["squeezing"]  # last completed sweep
 lab.connected  # e.g. ("mx", "shutter")
+
+lab.wavemeter.read_frequency(4)  # THz; the wavemeter is an HTTP client, no connection to open
+lab.api()  # what is connected and available
+lab.api("scope", "trig")  # the scope's methods that mention "trig", with signatures
+lab.api("wavemeter")  # method list, with the HTTP route each one calls
 ```
+
+`Tab` completes methods on every instrument (`lab.scope.<Tab>`), and `?` shows a
+method's signature and docstring (`lab.scope.set_time_per_div?`). `lab.api` is the
+same information as one searchable listing, built by introspection so it is
+never out of date.
 
 `lab` does a fresh lookup against the app's actual state on every attribute
 access — nothing is copied into the console when an instrument connects, and

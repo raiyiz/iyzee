@@ -174,7 +174,7 @@ def test_wavemeter_handle_probe_reads_the_default_channel(monkeypatch: pytest.Mo
     handle = WavemeterHandle()
     assert handle.probe() == "ch4 = 377.105000 THz"
     assert handle.channel == instruments_mod.DEFAULT_CHANNEL
-    assert handle.device is None
+    assert isinstance(handle.device, instruments_mod.Wavemeter)
 
 
 def test_wavemeter_handle_probe_uses_its_configured_channel(
