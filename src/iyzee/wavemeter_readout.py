@@ -9,11 +9,11 @@ and experiment procedures.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import TypeVar
 from urllib.parse import urlencode
-import time
 
 import numpy as np
 import requests
