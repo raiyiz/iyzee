@@ -57,5 +57,3 @@ jobs:
             --head "$UPDATE_BRANCH" \
             --title "chore: update dependencies and CI images" \
             --body "Automated dependency and CI toolchain update.
-
-Validation passed with: scripts/ci.sh all"
