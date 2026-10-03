@@ -190,7 +190,7 @@ def test_wavemeter_handle_probe_uses_its_configured_channel(
     seen: list[int] = []
 
     def read(self, channel=None):
-        seen.append(channel)
+        seen.append(self.channel if channel is None else channel)
         return 377.105
 
     monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
