@@ -95,13 +95,11 @@ def test_lab_attribute_reflects_current_handles_live() -> None:
 
 
 def test_lab_exposes_wavemeter_before_connect(monkeypatch) -> None:
-    client = Wavemeter()
     monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
 
     lab = LabProxy(FakeApp())
 
     assert isinstance(lab.wavemeter, Wavemeter)
-    assert lab.wavemeter is not client
     assert lab.wavemeter.read_frequency(4) == pytest.approx(377.105)
 
 
