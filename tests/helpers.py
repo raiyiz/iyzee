@@ -23,7 +23,7 @@ import pytest
 from textual.pilot import Pilot
 from textual.widgets import DataTable, Static
 
-from iyzee.experiment import StepResult, save_step_results
+from iyzee.experiment import StepResult
 from iyzee.tui import app as app_mod
 from iyzee.tui.instruments import InstrumentSpec
 from iyzee.tui.screens import connect as connect_mod
@@ -180,23 +180,6 @@ def make_result(label: str = "pt0", x: float = 1.0, **meta: Any) -> StepResult:
         meta=dict(meta),
     )
 
-
-def save_run(
-    root: Path, folder: str, *results: StepResult, mtime: float | None = None, **run_metadata: Any
-) -> Path:
-    """Write one run archive under ``root/folder`` and return its path.
-
-    ``mtime`` pins the file's modification time (the Results page orders runs
-    by it, and filesystem timestamps are too coarse to rely on).
-    """
-    directory = root / folder
-    directory.mkdir(parents=True, exist_ok=True)
-    path = save_step_results(
-        list(results) or [make_result()], directory, run_metadata=run_metadata or None
-    )
-    if mtime is not None:
-        os.utime(path, (mtime, mtime))
-    return path
 
 
 class FakeSocket:

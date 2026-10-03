@@ -135,9 +135,6 @@ class _Sink(io.TextIOBase):
         if text:
             self._deliver(text)
 
-    def flush(self) -> None:
-        pass
-
     def isatty(self) -> bool:
         return True
 
