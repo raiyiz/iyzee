@@ -94,7 +94,7 @@ class NavRail(Static):
         app = cast("IyzeeApp", self.app)
         lines = ["[b]Instruments[/b]"]
         for spec in INSTRUMENTS:
-            name = escape(spec.short || spec.label)
+            name = escape(spec.short or spec.label)
             if spec.key in app.handles:
                 lines.append(f"[green]●[/green] {name}")
             else:

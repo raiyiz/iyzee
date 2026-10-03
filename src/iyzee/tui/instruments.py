@@ -170,7 +170,6 @@ class ShutterHandle(_LockedHandle):
         return self._shutter
 
 
-
 class WavemeterHandle(_LockedHandle):
     """Adapter for the wavemeter's stateless HTTP API.
 
@@ -256,7 +255,6 @@ class ScopeHandle(_LockedHandle):
         return self._scope
 
 
-
 @dataclass(frozen=True)
 class InstrumentSpec:
     """One row in the Connect screen: a name plus how to build its handle."""
@@ -267,7 +265,6 @@ class InstrumentSpec:
     # Compact name for the narrow nav rail, where the full label wraps and
     # strands the status dot on a line of its own. Defaults to ``label``.
     short: str = ""
-
 
 
 class LockedProxy:
