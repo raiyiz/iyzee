@@ -4,9 +4,8 @@ import logging
 import socket
 import struct
 import threading
-from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
 
 log = logging.getLogger("iyzee.vicp")
 
@@ -189,27 +188,6 @@ class VICPTransport:
         except OSError:
             pass
 
-    @contextmanager
-    def _io_timeout(self, timeout: float | None) -> Iterator[None]:
-        """Apply ``timeout`` to the live socket for one transaction, then restore it.
-
-        The first reply after connecting can be much slower than steady state,
-        and a timeout is fatal to the stream (see the class docstring), so the
-        caller that knows it is waiting on a slow answer widens the bound
-        instead of failing and reconnecting.
-        """
-        if timeout is not None and timeout <= 0:
-            raise ValueError("timeout must be positive")
-        sock = self._socket
-        if timeout is None or sock is None:
-            yield
-            return
-        sock.settimeout(timeout)
-        try:
-            yield
-        finally:
-            if self._socket is sock:  # not invalidated meanwhile
-                sock.settimeout(self.io_timeout)
 
     def _require_socket(self) -> socket.socket:
         sock = self._socket
@@ -420,11 +398,20 @@ class VICPTransport:
         ``timeout`` replaces the I/O timeout for this exchange only.
         """
         payload = self._encode(message)
-        with self._lock, self._io_timeout(timeout):
-            self._write_frame(payload)
-            _flag, response = self.read_message()
+        with self._lock:
+            if timeout is not None and timeout <= 0:
+                raise ValueError("timeout must be positive")
+            sock = self._require_socket()
+            if timeout is not None:
+                sock.settimeout(timeout)
             try:
-                return response.decode("ascii").strip()
-            except UnicodeDecodeError as exc:
-                # The whole response was consumed, so the stream is still aligned.
-                raise VICPProtocolError("VICP text response was not valid ASCII") from exc
+                self._write_frame(payload)
+                _flag, response = self.read_message()
+                try:
+                    return response.decode("ascii").strip()
+                except UnicodeDecodeError as exc:
+                    # The whole response was consumed, so the stream is still aligned.
+                    raise VICPProtocolError("VICP text response was not valid ASCII") from exc
+            finally:
+                if timeout is not None and self._socket is sock:
+                    sock.settimeout(self.io_timeout)

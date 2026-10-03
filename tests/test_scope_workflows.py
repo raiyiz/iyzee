@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import threading
-from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any
 
@@ -568,26 +567,20 @@ def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock()
     assert b"C1:VOLT_DIV 1.0" in bytes(sock.sent)
 
 
-def test_batch_holds_the_drivers_transaction_even_without_an_explicit_lock():
-    events: list[str] = []
+def test_batch_holds_the_driver_lock_without_an_explicit_lock():
+    events: list[bool] = []
+    lock = threading.Lock()
 
-    class TransactionalScope(FakeScope):
-        @contextmanager
-        def transaction(self):
-            events.append("enter")
-            try:
-                yield
-            finally:
-                events.append("exit")
+    class LockedScope(FakeScope):
+        transaction_lock = lock
 
         def set_offset(self, channel, value):
-            events.append("set_offset")
+            events.append(lock.locked())
 
-    apply_channel_settings(TransactionalScope(), [_settings(Channel.C1)])
+    scope = LockedScope()
+    apply_channel_settings(scope, [_settings(Channel.C1)])
 
-    assert events[0] == "enter" and events[-1] == "exit"
-    assert "set_offset" in events[1:-1]
-
+    assert events == [True] and not lock.locked()
 
 # -- trigger: mode is written last on the selective path too --------------------------------
 
