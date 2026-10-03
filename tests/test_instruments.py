@@ -189,11 +189,11 @@ def test_wavemeter_handle_probe_uses_its_configured_channel(
 ) -> None:
     seen: list[int] = []
 
-    def read(channel=0):
+    def read(self, channel=None):
         seen.append(channel)
         return 377.105
 
-    monkeypatch.setattr(instruments_mod, "read_frequency", read)
+    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
 
     handle = WavemeterHandle(channel=4)
 
@@ -204,10 +204,10 @@ def test_wavemeter_handle_probe_uses_its_configured_channel(
 def test_wavemeter_handle_probe_wraps_readout_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail(channel=0):
+    def fail(self, channel=None):
         raise instruments_mod.WavemeterReadoutError("switch unreachable")
 
-    monkeypatch.setattr(instruments_mod, "read_frequency", fail)
+    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", fail)
 
     handle = WavemeterHandle()
 
