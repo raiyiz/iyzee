@@ -17,10 +17,10 @@ from helpers import FakeApp, FakeHandle, history_manager
 from IPython.core.interactiveshell import InteractiveShell
 
 from iyzee.experiment import StepResult
-from iyzee.tui import ipython as ipython_mod
 from iyzee.tui.instruments import LockedProxy
 from iyzee.tui.ipython import LabProxy, default_history_file, lab_namespace, shell_config
 from iyzee.tui.workers import LastRun
+from iyzee.wavemeter_readout import Wavemeter
 
 
 @dataclass
@@ -94,13 +94,30 @@ def test_lab_attribute_reflects_current_handles_live() -> None:
     assert "not connected" in output.stdout
 
 
-def test_lab_exposes_wavemeter_module_for_stateless_api(monkeypatch) -> None:
-    monkeypatch.setattr(ipython_mod.wavemeter_readout, "read_frequency", lambda channel=0: 377.105)
+def test_lab_exposes_the_wavemeter_client_behind_the_handle_lock(monkeypatch) -> None:
+    monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
 
-    app = FakeApp(handles={"wavemeter": FakeHandle()})
+    app = FakeApp(handles={"wavemeter": FakeHandle(device=Wavemeter())})
     lab = LabProxy(app)
 
     assert lab.wavemeter.read_frequency(4) == pytest.approx(377.105)
+
+
+def test_lab_api_lists_connected_instruments_and_their_methods(capsys) -> None:
+    app = FakeApp(handles={"wavemeter": FakeHandle(device=Wavemeter())})
+    lab = LabProxy(app)
+
+    lab.api()
+    overview = capsys.readouterr().out
+    assert "Connected: wavemeter" in overview and "scope" in overview
+
+    lab.api("wavemeter")
+    listing = capsys.readouterr().out
+    assert "read_frequency(channel: 'int | None' = None)" in listing
+    assert "[GET /api/{channel}/]" in listing and "[POST /api/set_pid/]" in listing
+
+    lab.api("wavemeter", "setpoint")
+    assert "read_frequency" not in capsys.readouterr().out
 
 
 def test_lab_exposes_connected_devices_and_always_lists_the_full_set() -> None:

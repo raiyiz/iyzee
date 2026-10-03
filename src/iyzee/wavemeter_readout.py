@@ -1,4 +1,17 @@
+"""Client for the WS-7 wavemeter server's small HTTP API.
+
+:class:`Wavemeter` has one method per endpoint (so Tab completion in the console
+is the endpoint list; `lab.api("wavemeter")` prints it with the HTTP routes).
+The module-level functions are the same calls on a default client, for scripts
+and experiment procedures.
+"""
+
+from __future__ import annotations
+
 import logging
+from collections.abc import Callable
+from typing import TypeVar
+from urllib.parse import urlencode
 import time
 
 import numpy as np
@@ -15,6 +28,12 @@ READ_TIMEOUT_S = 1.0
 SETPOINT_TIMEOUT_S = 3.0
 DEFAULT_CHANNEL = 4
 WAVEMETER_PORT = 8000
+
+# Routes under /api/. One definition each, shared by the call and its listing.
+READ_PATH = "{channel}/"
+SET_PID_PATH = "set_pid/"
+
+_F = TypeVar("_F", bound=Callable[..., object])
 
 
 # Scaling is a bit tricky here, since we span several orders of magnitude, but
@@ -66,23 +85,92 @@ class WavemeterReadoutError(RuntimeError):
     """Raised when a wavemeter measurement cannot be obtained or parsed."""
 
 
-def _request(path: str, *, timeout: float, data: bytes | None = None) -> str:
-    """One bounded HTTP request to the wavemeter server; returns the decoded body.
+def endpoint(verb: str, path: str) -> Callable[[_F], _F]:
+    """Mark a method as the client for `verb /api/<path>` (`lab.api` shows it)."""
 
-    Raises ``OSError`` (including ``HTTPError`` and timeouts), ``UnicodeError``.
+    def mark(method: _F) -> _F:
+        method.rest = f"{verb} /api/{path}"  # type: ignore[attr-defined]
+        return method
+
+    return mark
+
+
+class Wavemeter:
+    """HTTP client for the wavemeter server. Stateless: nothing to open or close.
+
+    `channel` is the default for every call that takes one. `host` defaults
+    to `IP.WAVEMETER`, looked up at call time.
     """
-    url = f"http://{IP.WAVEMETER}:{WAVEMETER_PORT}/api/{path}"
-    if data is None:
-        response = requests.get(url, timeout=timeout)
-    else:
-        response = requests.post(url, data=data, timeout=timeout)
 
-    if not response:
-        raise requests.ConnectionError
+    def __init__(
+        self,
+        channel: int = DEFAULT_CHANNEL,
+        *,
+        host: str | None = None,
+        port: int = WAVEMETER_PORT,
+    ) -> None:
+        self.channel = channel
+        self.host = host
+        self.port = port
 
-    with response:
-        response.raise_for_status()
-        return response.content.decode("ascii")
+    @property
+    def base_url(self) -> str:
+        return f"http://{self.host or IP.WAVEMETER}:{self.port}/api/"
+
+    def __repr__(self) -> str:
+        return f"<Wavemeter {self.base_url} default channel {self.channel}>"
+
+    def _request(self, path: str, *, timeout: float, data: bytes | None = None) -> str:
+        """One bounded HTTP request; returns the decoded body.
+
+        Raises `OSError` (including `HTTPError` and timeouts), `UnicodeError`.
+        """
+        url = self.base_url + path
+        if data is None:
+            response = requests.get(url, timeout=timeout)
+        else:
+            response = requests.post(url, data=data, timeout=timeout)
+
+        if not response:
+            raise requests.ConnectionError
+
+        with response:
+            response.raise_for_status()
+            return response.content.decode("ascii")
+
+    @endpoint("GET", READ_PATH)
+    def read_frequency(self, channel: int | None = None) -> float:
+        """Frequency of one channel in THz (default: this client's channel)."""
+        channel = self.channel if channel is None else channel
+        try:
+            return float(self._request(READ_PATH.format(channel=channel), timeout=READ_TIMEOUT_S))
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise WavemeterReadoutError(f"Failed to read wavemeter channel {channel}") from exc
+
+    @endpoint("POST", SET_PID_PATH)
+    def set_pid_setpoint(self, freq: float, channel: int | None = None) -> None:
+        """Set the PID lock setpoint of one channel, in THz (regulation stays off)."""
+        channel = self.channel if channel is None else channel
+        try:
+            self._request(
+                SET_PID_PATH,
+                data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
+                timeout=SETPOINT_TIMEOUT_S,
+            )
+        except (OSError, UnicodeError) as exc:
+            raise WavemeterReadoutError(
+                f"Failed to set the setpoint of wavemeter channel {channel} to {freq} THz"
+            ) from exc
+        log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
+
+    def get(self, path: str, *, timeout: float = READ_TIMEOUT_S) -> str:
+        """Raw `GET /api/<path>`, body as text. For exploring routes not wrapped above;
+        errors are the plain `requests` ones, not `WavemeterReadoutError`."""
+        return self._request(path, timeout=timeout)
+
+    def post(self, path: str, *, timeout: float = SETPOINT_TIMEOUT_S, **form: object) -> str:
+        """Raw `POST /api/<path>` with `form` as the urlencoded body. Same caveats as :meth:`get`."""
+        return self._request(path, timeout=timeout, data=urlencode(form).encode("ascii"))
 
 
 def single_readout(
@@ -103,25 +191,12 @@ def single_readout(
 
 def read_frequency(channel: int = DEFAULT_CHANNEL) -> float:
     """Read one frequency from the wavemeter server."""
-    try:
-        return float(_request(f"{channel}/", timeout=READ_TIMEOUT_S))
-    except (OSError, ValueError, UnicodeError) as exc:
-        raise WavemeterReadoutError(f"Failed to read wavemeter channel {channel}") from exc
+    return Wavemeter().read_frequency(channel)
 
 
 def set_pid_setpoint(freq: float, channel: int = DEFAULT_CHANNEL) -> None:
     """Set the PID setpoint on one wavemeter channel."""
-    try:
-        _request(
-            "set_pid/",
-            data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
-            timeout=SETPOINT_TIMEOUT_S,
-        )
-    except (OSError, UnicodeError) as exc:
-        raise WavemeterReadoutError(
-            f"Failed to set the setpoint of wavemeter channel {channel} to {freq} THz"
-        ) from exc
-    log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
+    Wavemeter().set_pid_setpoint(freq, channel)
 
 
 def track_frequency(

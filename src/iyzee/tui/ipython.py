@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Protocol
 from platformdirs import user_data_dir
 from traitlets.config import Config
 
-from .. import wavemeter_readout
+from .apidoc import describe_api
 from .instruments import LockedProxy
 
 if TYPE_CHECKING:
@@ -121,8 +121,6 @@ class LabProxy:
                 raise AttributeError(
                     f"lab.{name} is not connected — connect it on the Connect screen first"
                 )
-            if name == "wavemeter":
-                return wavemeter_readout
             device = getattr(handle, "device", None)
             if device is None:
                 raise AttributeError(f"lab.{name} is connected but exposes no live device")
@@ -143,7 +141,26 @@ class LabProxy:
         # now, so `lab.<Tab>` in the console shows what's *possible*
         # (mx/shutter/scope), not just what happens to be connected at
         # this exact moment.
-        return sorted({*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected"})
+        return sorted(
+            {*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected", "api"}
+        )
+
+    def api(self, target: Any = None, pattern: str | None = None) -> None:
+        """Print what an instrument offers.
+
+        `lab.api()` shows what is connected; `lab.api("scope")` lists that
+        instrument's methods; `lab.api("scope", "trig")` keeps those matching
+        "trig" (in the name or summary). Any object works too: `lab.api(lab.mx)`.
+        """
+        if target is None:
+            connected = ", ".join(self.connected) or "nothing"
+            print(f"Connected: {connected}")
+            print(f"Available: {', '.join(self._INSTRUMENT_KEYS)}")
+            print('Methods:   lab.api("<name>")   filter: lab.api("<name>", "<text>")')
+            return
+        if isinstance(target, str):
+            target = getattr(self, target)
+        print(describe_api(target, pattern))
 
     @property
     def connected(self) -> tuple[str, ...]:
