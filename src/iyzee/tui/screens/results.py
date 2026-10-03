@@ -404,8 +404,12 @@ class ResultsScreen(Page):
         previous = (
             self._paths[index] if index is not None and 0 <= index < len(self._paths) else None
         )
-        self._paths = sorted(self._scan_runs(), key=lambda p: p.stat().st_mtime, reverse=True)
-        self.query_one(f"#{self.HINT_ID}", Static).update(self._hint_text())
+        self._paths = sorted(
+            _DATA_ROOT.glob("**/*.npz"), key=lambda p: p.stat().st_mtime, reverse=True
+        )
+        self.query_one(f"#{self.HINT_ID}", Static).update(
+            f"Saved recordings are read from {escape(str(_DATA_ROOT))}"
+        )
         self._suppress_events = True
         try:
             list_view.clear()
@@ -450,11 +454,6 @@ class ResultsScreen(Page):
     def action_list_wider(self) -> None:
         self._resize_list(+1)
 
-    def _scan_runs(self) -> list[Path]:
-        return list(_DATA_ROOT.glob("**/*.npz"))
-
-    def _hint_text(self) -> str:
-        return f"Saved recordings are read from {escape(str(_DATA_ROOT))}"
 
     def _set_sweep_visible(self, visible: bool) -> None:
         for widget_id in (

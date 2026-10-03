@@ -160,7 +160,7 @@ class ConnectScreen(Page):
     def _connect(self, spec: InstrumentSpec) -> None:
         try:
             self._ui(self._set_row, spec.key, "connecting...", "-")
-            handle = spec.build()
+            handle = spec.make()
             try:
                 with handle.lock:
                     try:
