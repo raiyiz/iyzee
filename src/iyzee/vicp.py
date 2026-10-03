@@ -188,7 +188,6 @@ class VICPTransport:
         except OSError:
             pass
 
-
     def _require_socket(self) -> socket.socket:
         sock = self._socket
         if sock is None:
