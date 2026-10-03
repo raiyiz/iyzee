@@ -30,7 +30,7 @@ update() {
     branch="automation/dependency-update-$(date -u +%Y%m%d-%H%M%S)"
     git switch -c "$branch"
 
-    python3 scripts/update.py
+    uv run scripts/update.py
 
     echo
     echo "Dependency update result:"
