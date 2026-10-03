@@ -133,6 +133,43 @@ async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(
 
 
 @async_test
+async def test_q_asks_first_and_quits_on_the_second_press() -> None:
+    app = IyzeeApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("q")
+        await pilot.pause()
+        assert app.is_running, "one stray q must not quit"
+        assert any("Press q again" in message for message in notifications(app))
+        await pilot.press("q")
+        await pilot.pause(0.5)
+    assert not app.is_running
+
+
+@async_test
+async def test_a_late_second_q_only_asks_again() -> None:
+    app = IyzeeApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("q")
+        app._quit_armed_until = 0.0  # the confirmation window has passed
+        await pilot.press("q")
+        await pilot.pause()
+        assert app.is_running
+
+
+@async_test
+async def test_the_connect_page_focuses_its_instrument_list_when_shown() -> None:
+    app = IyzeeApp()
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await pilot.pause()
+        await pilot.press("c")
+        await pilot.pause()
+        assert app.focused is app.query_one("#instrument-table")
+
+
+@async_test
 async def test_exiting_the_app_disconnects_every_connected_instrument() -> None:
     one, two = FakeHandle(), FakeHandle()
     app = IyzeeApp()

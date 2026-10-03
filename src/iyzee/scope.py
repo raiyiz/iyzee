@@ -355,6 +355,17 @@ class LeCroy:
         """
         self.send(f"TRIG_DELAY {_finite(delay_seconds, 'delay_seconds')}")
 
+    def set_time_per_div(self, seconds_per_div: float) -> None:
+        """Set the horizontal scale (timebase), in seconds/division."""
+        if _finite(seconds_per_div, "seconds_per_div") <= 0:
+            raise ValueError(f"seconds_per_div must be positive, got {seconds_per_div!r}")
+        self.send(f"TIME_DIV {seconds_per_div}")
+
+    def get_time_per_div(self) -> str:
+        """Return the device's raw response to a time/div query (see
+        :meth:`query` for why this isn't parsed further)."""
+        return self.query("TIME_DIV?")
+
     def get_trigger_mode(self) -> str:
         return self.query("TRIG_MODE?")
 

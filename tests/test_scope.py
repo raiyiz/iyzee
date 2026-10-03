@@ -413,3 +413,16 @@ def test_numeric_setters_reject_non_finite_values():
             call()
 
     assert not sock.sent
+
+
+def test_set_time_per_div_sends_time_div_and_rejects_non_positive_values(monkeypatch):
+    fake = FragmentingFakeSocket()
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: fake)
+    scope = LeCroy()
+    scope.connect("10.0.0.1")
+
+    scope.set_time_per_div(2e-6)
+    assert b"TIME_DIV 2e-06" in bytes(fake.sent)
+    for bad in (0, -1e-6, float("nan")):
+        with pytest.raises(ValueError):
+            scope.set_time_per_div(bad)

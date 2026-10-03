@@ -83,6 +83,8 @@ class ConnectScreen(Page):
         # (there's currently no other way to (dis)connect, but this keeps
         # the table honest if that changes later).
         self._refresh_from_app_state()
+        # Enter connects/disconnects the highlighted row, so start there.
+        self.query_one(DataTable).focus()
 
     def _refresh_from_app_state(self) -> None:
         table = self.query_one(DataTable)
