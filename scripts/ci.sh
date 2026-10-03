@@ -17,6 +17,15 @@ docs() {
     done
 }
 
+all() {
+    sync
+    uv run --locked pytest
+    uv run --locked ruff check .
+    uv run --locked ruff format --check .
+    uv run --locked mypy src tests
+    docs
+}
+
 update() {
     if [ "$(git branch --show-current)" != main ]; then
         echo "dependency updates must be started from main" >&2
@@ -42,7 +51,7 @@ update() {
 
     echo
     echo "Running full validation..."
-    "$0" all
+    all
 
     echo
     echo "Dependency update validation passed."
@@ -55,12 +64,7 @@ case "${1:-}" in
     lint)      sync; uv run --locked ruff check .; uv run --locked ruff format --check . ;;
     typecheck) sync; uv run --locked mypy src tests ;;
     docs)      docs ;;
-    all)       sync
-               uv run --locked pytest
-               uv run --locked ruff check .
-               uv run --locked ruff format --check .
-               uv run --locked mypy src tests
-               docs ;;
+    all)       all ;;
     update)    update ;;
     *)         echo "usage: $0 {test|lint|typecheck|docs|all|update}" >&2; exit 2 ;;
 esac
