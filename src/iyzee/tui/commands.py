@@ -100,7 +100,7 @@ def help_text() -> str:
 class CommandInput(Input):
     """Input field that reserves Tab for command completion."""
 
-    BINDINGS = [Binding("tab", "complete_command", "Complete", show=False)]
+    BINDINGS = [*Input.BINDINGS, Binding("tab", "complete_command", "Complete", show=False)]
 
     def action_complete_command(self) -> None:
         parent = self.parent
