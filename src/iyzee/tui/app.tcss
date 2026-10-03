@@ -536,7 +536,7 @@ Screen {
 }
 
 #command-entry {
-    height: 1;
+    height: 3;
     width: 1fr;
 }
 
@@ -549,6 +549,7 @@ Screen {
 
 #command-input {
     width: 1fr;
+    height: 3;
 }
 
 #command-hint {
