@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Update Python dependencies and versioned CI references.
 
-The script only mutates the working tree. Validation, commits and pushes belong
-to the workflow that calls it.
+The script only mutates the working tree. Validation and committing the
+result belong to the developer invoking the update command.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -16,7 +15,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = ROOT / ".github" / "workflows"
 GITHUB_API = "https://api.github.com"
 USER_AGENT = "iyzee-dependency-updater"
@@ -29,9 +28,6 @@ def get_json(url: str) -> object:
     headers = {"User-Agent": USER_AGENT}
     if url.startswith(GITHUB_API):
         headers["Accept"] = "application/vnd.github+json"
-        token = os.environ.get("GITHUB_TOKEN")
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
 
     request = Request(url, headers=headers)
     try:
