@@ -58,8 +58,8 @@ Six pages cover the common tasks (the classes keep their `*Screen` names, but
 they are plain container widgets inside one `ContentSwitcher`, not Textual
 `Screen`s). Switch between them with `c` / `s` / `o` / `t` / `i` / `l`,
 `F1`–`F4` (Connect/Sweep/Results/Console only — see below), or by clicking the
-nav rail; `Ctrl+Q` quits (a running cell is interrupted and connected
-instruments are disconnected on the way out):
+nav rail; `Ctrl+Q` quits at once, `q` quits after a second press (a running cell is
+interrupted and connected instruments are disconnected on the way out):
 
 - **Connect** (`c`) — one row per instrument (MXA, shutter/PSU, wavemeter,
   scope). Enter connects the selected row; on a connected row it asks for a

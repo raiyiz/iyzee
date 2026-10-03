@@ -21,6 +21,7 @@ from typing import Any, NamedTuple
 import numpy as np
 from textual import work
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
 from textual.widgets import (
@@ -47,7 +48,7 @@ from ...waveform_math import (
     subtract_traces,
     traces_from_scope_recording,
 )
-from ..plotting import draw_series, prepare_series
+from ..plotting import describe_timebase, draw_series, format_si, prepare_series, time_series
 from .page import FieldError, Page, _field, _finite_float
 
 _DATA_ROOT = DATA_ROOT
@@ -81,6 +82,42 @@ class _PreparedView:
     scope_traces: tuple[Trace, ...] = ()
 
 
+def _timebase_lines(metadata: dict[str, Any], waveforms: list[Any]) -> list[str]:
+    """Horizontal setup of a recorded scope run: time/div, window, sample interval and rate."""
+    lines: list[str] = []
+    config = metadata.get("configuration")
+    trigger = None
+    if isinstance(config, dict):
+        trigger = config.get("applied_trigger_settings") or config.get("requested_trigger_settings")
+    tdiv = trigger.get("time_per_div") if isinstance(trigger, dict) else None
+    if isinstance(tdiv, int | float):
+        lines.append(f"Time/div: {format_si(tdiv, 's')}")
+
+    groups: dict[tuple[Any, Any, Any, Any], list[str]] = {}
+    for waveform in waveforms:
+        if not isinstance(waveform, dict):
+            continue
+        stats = waveform.get("stats")
+        count = stats.get("sample_count") if isinstance(stats, dict) else None
+        key = (
+            waveform.get("time_offset"),
+            waveform.get("time_interval"),
+            count,
+            waveform.get("time_unit", "S"),
+        )
+        groups.setdefault(key, []).append(str(waveform.get("channel")))
+    for (offset, interval, count, unit), channels in groups.items():
+        if not (isinstance(offset, int | float) and isinstance(interval, int | float)):
+            continue
+        if not (isinstance(count, int) and count > 0 and interval > 0):
+            continue
+        prefix = f"{', '.join(channels)}: " if len(groups) > 1 else ""
+        first, *rest = describe_timebase(offset, interval, count, str(unit))
+        lines.append(escape(prefix + first))
+        lines.extend(escape(line) for line in rest)
+    return lines
+
+
 def _scope_summary(path: Path, recording: Recording, traces: Sequence[Trace]) -> str:
     metadata = recording.metadata
     lines = [f"[b]{escape(path.name)}[/b]", "Scope acquisition"]
@@ -110,6 +147,7 @@ def _scope_summary(path: Path, recording: Recording, traces: Sequence[Trace]) ->
                 f"p-p={stats.get('peak_to_peak', '?')} {escape(trace.value_unit)}, "
                 f"rms={stats.get('rms', '?')} {escape(trace.value_unit)}"
             )
+    lines.extend(_timebase_lines(metadata, waveforms))
     errors = metadata.get("errors")
     if errors:
         lines.append(f"Errors: {escape(str(errors))}")
@@ -208,6 +246,11 @@ def _sweep_data(recording: Recording, statistic: str) -> _SweepData:
         for index, measured_x in enumerate(measured)
     ]
     return _SweepData(frequency, plot_x, requested, measured, labels, values)
+
+
+# Width of the run list as a percent of the page; the detail pane takes the rest.
+LIST_WIDTHS = (20, 25, 30, 35, 40, 45, 50, 55, 60)
+DEFAULT_LIST_WIDTH = 35
 
 
 def run_label(path: Path, mtime: float) -> str:
@@ -314,7 +357,14 @@ class ResultsScreen(Page):
             id="results-body",
         )
 
+    BINDINGS = [
+        Binding("left_square_bracket", "list_narrower", "List narrower"),
+        Binding("right_square_bracket", "list_wider", "List wider"),
+    ]
+
     def on_mount(self) -> None:
+        self._list_width = self.iyzee_app.prefs.get("results_list_width", DEFAULT_LIST_WIDTH)
+        self._set_list_width(self._list_width)
         self._paths: list[Path] = []
         self._path: Path | None = None
         self._suppress_events = False
@@ -332,6 +382,8 @@ class ResultsScreen(Page):
 
     def on_show(self) -> None:
         self.refresh_runs()
+        # Focus inside the page, so its keys (list resize, list navigation) work at once.
+        self.query_one("#results-list").focus()
 
     def refresh_runs(self) -> None:
         """Re-scan the data directory (newest first), keeping the selection.
@@ -376,6 +428,27 @@ class ResultsScreen(Page):
         index = event.list_view.index
         if index is not None and 0 <= index < len(self._paths):
             self._select(self._paths[index])
+
+    def _set_list_width(self, percent: int) -> None:
+        if percent not in LIST_WIDTHS:
+            percent = DEFAULT_LIST_WIDTH
+        self._list_width = percent
+        run_list = self.query_one("#results-list")
+        for width in LIST_WIDTHS:
+            run_list.set_class(width == percent, f"w-{width}")
+
+    def _resize_list(self, step: int) -> None:
+        index = LIST_WIDTHS.index(self._list_width) + step
+        percent = LIST_WIDTHS[max(0, min(index, len(LIST_WIDTHS) - 1))]
+        if percent != self._list_width:
+            self._set_list_width(percent)
+            self.iyzee_app.prefs.set("results_list_width", percent)
+
+    def action_list_narrower(self) -> None:
+        self._resize_list(-1)
+
+    def action_list_wider(self) -> None:
+        self._resize_list(+1)
 
     def _scan_runs(self) -> list[Path]:
         return list(_DATA_ROOT.glob("**/*.npz"))
@@ -701,8 +774,11 @@ class ResultsScreen(Page):
 
     @work(thread=True, exclusive=True, group="results-render", exit_on_error=False)
     def _render_scope(self, generation: int, traces: list[Trace], title: str | None) -> None:
-        series = [prepare_series(trace.time, trace.values, trace.label) for trace in traces]
-        xlabel = f"Time ({traces[0].time_unit})" if traces else None
+        series, xlabel = (
+            time_series([(t.time, t.values, t.label) for t in traces], traces[0].time_unit)
+            if traces
+            else ([], None)
+        )
         ylabel = f"Signal ({traces[0].value_unit})" if traces else None
         self._ui(self._apply_scope_preview, generation, series, title, xlabel, ylabel)
 

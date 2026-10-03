@@ -91,6 +91,9 @@ class TriggerSettings:
     slope: TriggerSlope
     coupling: TriggerCoupling
     level_volts: float
+    time_per_div: float | None = None
+    """Horizontal scale in seconds/division. Lives here because the timebase
+    is acquisition-wide, like the trigger; ``None`` leaves it untouched."""
 
 
 @dataclass(frozen=True)
@@ -318,6 +321,21 @@ def _parse_volts(raw: str) -> float:
     return float(match.group("number")) * scale[unit]
 
 
+_SECONDS_RE = re.compile(
+    r"(?P<number>[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?)[ \t]*(?P<unit>[pnumk]?[Ss])?\s*$"
+)
+_SECONDS_SCALE = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "m": 1e-3, "": 1.0, "k": 1e3}
+
+
+def _parse_seconds(raw: str) -> float:
+    """Parse a LeCroy time reply (``TDIV 5.00E-06 S``, ``5E-6S``, ``2 ns``) into seconds."""
+    match = _SECONDS_RE.search(raw.strip())
+    if match is None:
+        raise ValueError(f"could not parse time from scope response: {raw!r}")
+    prefix = (match.group("unit") or "S")[:-1]
+    return float(match.group("number")) * _SECONDS_SCALE[prefix]
+
+
 def _trigger_source(raw: str) -> str:
     """Pull the source channel out of a ``TRIG_SELECT?`` reply.
 
@@ -522,6 +540,8 @@ def apply_trigger_settings(
             scope.set_trigger_slope(settings.source, settings.slope)
             scope.set_trigger_coupling(settings.source, settings.coupling)
             scope.set_trigger_level(settings.source, settings.level_volts)
+            if settings.time_per_div is not None:
+                scope.set_time_per_div(settings.time_per_div)
             scope.set_trigger_mode(settings.mode)
             return
 
@@ -533,6 +553,11 @@ def apply_trigger_settings(
             scope.set_trigger_coupling(settings.source, settings.coupling)
         if settings.level_volts != current_settings.level_volts:
             scope.set_trigger_level(settings.source, settings.level_volts)
+        if (
+            settings.time_per_div is not None
+            and settings.time_per_div != current_settings.time_per_div
+        ):
+            scope.set_time_per_div(settings.time_per_div)
         # Mode last: switching to NORMAL/SINGLE/AUTO arms an acquisition, and it
         # should arm against the new source/level, not a half-written config.
         if settings.mode != current_settings.mode:
@@ -553,7 +578,8 @@ def read_trigger_settings(scope: LeCroy, *, lock: LockLike | None = None) -> Tri
         slope = TriggerSlope(_value(scope.get_trigger_slope(source)))
         coupling = TriggerCoupling(_value(scope.get_trigger_coupling(source)))
         level_volts = _parse_volts(scope.get_trigger_level(source))
-    return TriggerSettings(source, mode, slope, coupling, level_volts)
+        time_per_div = _parse_seconds(scope.get_time_per_div())
+    return TriggerSettings(source, mode, slope, coupling, level_volts, time_per_div)
 
 
 def _download_waveform(scope: LeCroy, channel: Channel) -> ScopeWaveform:
@@ -749,6 +775,7 @@ def save_scope_acquisition(
             "slope": s.slope.value,
             "coupling": s.coupling.value,
             "level_volts": s.level_volts,
+            "time_per_div": s.time_per_div,
         }
 
     metadata = {

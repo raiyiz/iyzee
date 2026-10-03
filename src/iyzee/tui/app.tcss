@@ -336,11 +336,25 @@ Screen {
     min-height: 20;
 }
 
+/* Width steps for the list pane; ResultsScreen switches the `w-N` class with
+   `[` / `]` and remembers it in the user prefs. Must stay above the -narrow
+   rules below, which win by coming later at equal specificity. */
 #results-list {
-    width: 40%;
+    width: 35%;
+    min-width: 20;
     margin: 1 2;
     overflow-x: auto;
 }
+
+#results-list.w-20 { width: 20%; }
+#results-list.w-25 { width: 25%; }
+#results-list.w-30 { width: 30%; }
+#results-list.w-35 { width: 35%; }
+#results-list.w-40 { width: 40%; }
+#results-list.w-45 { width: 45%; }
+#results-list.w-50 { width: 50%; }
+#results-list.w-55 { width: 55%; }
+#results-list.w-60 { width: 60%; }
 
 #results-list > ListItem {
     width: auto;

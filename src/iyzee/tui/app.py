@@ -22,6 +22,7 @@ from .ipython import default_history_file
 from .ipython_session import IPythonSession
 from .logging_support import LogEntry
 from .logging_support import install as install_logging
+from .prefs import Prefs, default_prefs_file
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.log import LogScreen
@@ -176,11 +177,13 @@ class IyzeeApp(App):
         Binding("f2", "show_page('sweep')", "Sweep", priority=True),
         Binding("f3", "show_page('results')", "Results", priority=True),
         Binding("f4", "show_page('console')", "Console", priority=True),
-        # Quit is Ctrl+Q only, deliberately not a bare "q": one stray
-        # keystroke shouldn't be able to shut down an app that is holding
-        # live instruments. Textual already binds Ctrl+Q, but hidden; this
-        # re-declares it so the footer actually tells people how to leave.
+        # Ctrl+Q quits at once (Textual already binds it, but hidden; this
+        # re-declares it so the footer tells people how to leave). A bare "q"
+        # also quits, but only on a second press: one stray keystroke
+        # shouldn't shut down an app that is holding live instruments. Hidden
+        # from the footer, which is already crowded; the first press says so.
         Binding("ctrl+q", "quit", "Quit", priority=True),
+        Binding("q", "request_quit", "Quit", show=False),
         Binding("escape", "blur_focused", "Leave field", show=False),
         Binding("j", "focus_next", "Focus next", show=False),
         Binding("k", "focus_previous", "Focus previous", show=False),
@@ -202,8 +205,12 @@ class IyzeeApp(App):
         *,
         console_history_file: str | Path | None = None,
         console_editing_mode: str = "vi",
+        prefs_file: str | Path | None = None,
     ) -> None:
         super().__init__()
+        # Like the console history, persistent only for real runs (see ``run()``).
+        self.prefs = Prefs(Path(prefs_file) if prefs_file else None)
+        self._quit_armed_until = 0.0  # monotonic deadline for the second "q"
         # Installed first, before anything else in this constructor can
         # fail: this is the sink for every log.exception/log.warning/
         # log.info call anywhere in the app (see logging_support's module
@@ -412,6 +419,24 @@ class IyzeeApp(App):
         for thread in threads:
             thread.join(max(0.0, deadline - time.monotonic()))
 
+    QUIT_CONFIRM_S = 4.0
+
+    def action_request_quit(self) -> None:
+        """``q``: the first press asks, a second one within a few seconds quits."""
+        now = time.monotonic()
+        if now <= self._quit_armed_until:
+            self.exit()
+            return
+        self._quit_armed_until = now + self.QUIT_CONFIRM_S
+        connected = len(self.handles)
+        extra = f" {connected} connected instrument(s) will be disconnected." if connected else ""
+        self.notify(
+            f"Press q again to quit.{extra}",
+            severity="warning",
+            timeout=self.QUIT_CONFIRM_S,
+            markup=False,
+        )
+
     def action_blur_focused(self) -> None:
         """Leave the currently focused field, if any.
 
@@ -435,6 +460,7 @@ def run() -> None:
     IyzeeApp(
         console_history_file=default_history_file(),
         console_editing_mode=os.environ.get("IYZEE_EDITING_MODE", "vi"),
+        prefs_file=default_prefs_file(),
     ).run()
 
 

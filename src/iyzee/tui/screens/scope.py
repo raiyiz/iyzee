@@ -50,7 +50,7 @@ from ...scope_workflows import (
     read_trigger_settings,
     save_scope_acquisition,
 )
-from ..plotting import draw_series, prepare_series
+from ..plotting import describe_timebase, draw_series, format_si, time_series
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
 
@@ -63,7 +63,14 @@ CHANNELS: tuple[Channel, ...] = (Channel.C1, Channel.C2, Channel.C3, Channel.C4)
 
 # The form fields whose edits are tracked against what the scope last reported.
 _CHANNEL_FIELD_NAMES = ("enable", "vdiv", "offset", "coupling")
-TRIGGER_FIELDS = ("trig-source", "trig-mode", "trig-slope", "trig-coupling", "trig-level")
+TRIGGER_FIELDS = (
+    "trig-source",
+    "trig-mode",
+    "trig-slope",
+    "trig-coupling",
+    "trig-level",
+    "trig-tdiv",
+)
 
 
 def channel_fields(channel: Channel) -> tuple[str, ...]:
@@ -163,7 +170,7 @@ class ScopeScreen(Page):
                 yield _channel_panel(channel)
         yield Button("Apply channel changes", id="apply-channels")
         with Vertical(id="scope-trigger"):
-            yield Static("Trigger", classes="panel-title")
+            yield Static("Trigger & timebase", classes="panel-title")
             with Grid(id="trigger-fields", classes="field-grid"):
                 yield _field(
                     "Source",
@@ -202,6 +209,7 @@ class ScopeScreen(Page):
                     ),
                 )
                 yield _field("Level (V)", Input(value="0.0", id="trig-level"))
+                yield _field("Time/div (s)", Input(value="1e-6", id="trig-tdiv"))
             yield Button("Apply trigger changes", id="apply-trigger")
         with Grid(id="scope-controls"):
             yield Button("Acquire & save", id="acquire-waveforms", variant="success")
@@ -237,6 +245,7 @@ class ScopeScreen(Page):
             "trig-slope": "trigger slope",
             "trig-coupling": "trigger coupling",
             "trig-level": "trigger level",
+            "trig-tdiv": "time/div",
         }.get(field_id, field_id)
 
     def _channel_baseline(self, channel: Channel) -> ChannelSettings | None:
@@ -278,6 +287,10 @@ class ScopeScreen(Page):
             return False
         if field_id == "trig-level":
             return self._float_differs(field_id, _finite_float, "Trigger level", trig.level_volts)
+        if field_id == "trig-tdiv":
+            return trig.time_per_div is not None and self._float_differs(
+                field_id, _positive_float, "Time/div", trig.time_per_div
+            )
         selects = {
             "trig-source": trig.source,
             "trig-mode": trig.mode,
@@ -479,6 +492,9 @@ class ScopeScreen(Page):
         self.query_one("#trig-coupling", Select).value = settings.coupling.value
         self.query_one("#trig-level", Input).value = str(settings.level_volts)
         self.query_one("#trig-level", Input).remove_class("-invalid")
+        if settings.time_per_div is not None:
+            self.query_one("#trig-tdiv", Input).value = str(settings.time_per_div)
+            self.query_one("#trig-tdiv", Input).remove_class("-invalid")
 
     def _finish_retrieve(
         self,
@@ -650,11 +666,12 @@ class ScopeScreen(Page):
 
     def _read_trigger_settings(self) -> TriggerSettings:
         level = self._read("trig-level", _finite_float, "Trigger level")
+        time_per_div = self._read("trig-tdiv", _positive_float, "Time/div")
         source = Channel(self._selected("trig-source", "Trigger source"))
         mode = TriggerMode(self._selected("trig-mode", "Trigger mode"))
         slope = TriggerSlope(self._selected("trig-slope", "Trigger slope"))
         coupling = TriggerCoupling(self._selected("trig-coupling", "Trigger coupling"))
-        return TriggerSettings(source, mode, slope, coupling, level)
+        return TriggerSettings(source, mode, slope, coupling, level, time_per_div)
 
     def _start_apply_trigger(self) -> None:
         handle = self._scope_handle()
@@ -755,6 +772,11 @@ class ScopeScreen(Page):
         self._mark_clean(TRIGGER_FIELDS)
         self._refresh_scope_ui()
         log_widget.write("Trigger settings applied and verified.")
+        wanted, actual = settings.time_per_div, verified.time_per_div
+        if wanted is not None and actual is not None and abs(wanted - actual) > 1e-3 * wanted:
+            log_widget.write(
+                f"Time/div: requested {format_si(wanted, 's')}, scope uses {format_si(actual, 's')}."
+            )
 
     # -- acquire: record enabled channels, persist the result, then plot ---
 
@@ -838,11 +860,11 @@ class ScopeScreen(Page):
         # Reduce to terminal-sized data before crossing back to the UI thread.
         # The full-resolution recording remains untouched for later analysis;
         # only the disposable preview is reduced.
-        series = [
-            prepare_series(waveform.time, waveform.values, str(waveform.channel))
-            for waveform in recording.waveforms
-        ]
-        self._ui(self._finish_acquire, recording, series, path, save_error)
+        series, xlabel = time_series(
+            [(w.time, w.values, str(w.channel)) for w in recording.waveforms],
+            recording.waveforms[0].time_unit if recording.waveforms else "S",
+        )
+        self._ui(self._finish_acquire, recording, series, xlabel, path, save_error)
 
     def _acquire_failed(self, reason: str) -> None:
         self.query_one("#acquire-waveforms", Button).disabled = False
@@ -855,6 +877,7 @@ class ScopeScreen(Page):
         self,
         recording: ScopeAcquisition,
         series: list[tuple[list[float], list[float], str | None]],
+        xlabel: str,
         path: Path | None,
         save_error: Exception | None,
     ) -> None:
@@ -875,10 +898,14 @@ class ScopeScreen(Page):
                 plot,
                 series,
                 title="Scope waveforms",
-                xlabel=f"Time ({first.time_unit})",
+                xlabel=xlabel,
                 ylabel=f"Signal ({first.value_unit})",
             )
             log_widget.write(f"Acquired {len(recording.waveforms)} channel(s).")
+            for line in describe_timebase(
+                first.time_offset, first.time_interval, len(first.time), first.time_unit
+            ):
+                log_widget.write(line)
         if path is not None:
             log_widget.write(f"Saved acquisition: {escape(str(path))}")
         if save_error is not None:

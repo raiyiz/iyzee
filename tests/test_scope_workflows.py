@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -130,6 +131,14 @@ class FakeScope:
     def get_trigger_coupling(self, source):
         self.calls.append(("get_trigger_coupling", source))
         return f"{source}:TRIG_COUPLING {self.trigger_state.coupling.value}"
+
+    def set_time_per_div(self, seconds):
+        self.calls.append(("set_time_per_div", seconds))
+        self.trigger_state = replace(self.trigger_state, time_per_div=seconds)
+
+    def get_time_per_div(self):
+        self.calls.append(("get_time_per_div",))
+        return f"TDIV {self.trigger_state.time_per_div or 1e-6:.2E} S"
 
     def get_trigger_level(self, source):
         self.calls.append(("get_trigger_level", source))
@@ -426,6 +435,7 @@ def test_read_trigger_settings_reads_every_field_off_the_armed_source():
         slope=TriggerSlope.NEGATIVE,
         coupling=TriggerCoupling.AC,
         level_volts=-0.3,
+        time_per_div=2e-6,
     )
 
     settings = read_trigger_settings(scope)
@@ -893,3 +903,40 @@ def test_manifest_records_provenance_and_the_error_type(tmp_path):
     assert manifest["errors"] == [
         {"channel": "C2", "type": "RuntimeError", "error": "C2 refused to send data"}
     ]
+
+
+@pytest.mark.parametrize(
+    ("raw", "seconds"),
+    [
+        ("TDIV 5.00E-06 S", 5e-6),
+        ("TIME_DIV 2.00E-09S", 2e-9),
+        ("TDIV 10 NS".replace("NS", "ns"), 10e-9),
+        ("1E-3", 1e-3),
+    ],
+)
+def test_parse_seconds_accepts_the_reply_shapes_the_scope_uses(raw, seconds):
+    from iyzee.scope_workflows import _parse_seconds
+
+    assert _parse_seconds(raw) == pytest.approx(seconds)
+
+
+def test_parse_seconds_rejects_garbage():
+    from iyzee.scope_workflows import _parse_seconds
+
+    with pytest.raises(ValueError, match="could not parse time"):
+        _parse_seconds("TDIV ???")
+
+
+def test_apply_trigger_settings_writes_time_per_div_only_when_it_changed():
+    scope = FakeScope()
+    baseline = read_trigger_settings(scope)
+    scope.calls.clear()
+
+    apply_trigger_settings(
+        scope, replace(baseline, time_per_div=baseline.time_per_div), current_settings=baseline
+    )
+    assert not any(call[0] == "set_time_per_div" for call in scope.calls)
+
+    apply_trigger_settings(scope, replace(baseline, time_per_div=5e-6), current_settings=baseline)
+    assert ("set_time_per_div", 5e-6) in scope.calls
+    assert read_trigger_settings(scope).time_per_div == 5e-6

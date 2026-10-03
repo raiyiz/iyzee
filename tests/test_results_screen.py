@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 from collections.abc import AsyncIterator
@@ -19,6 +20,7 @@ from textual.widgets import Button, DataTable, Input, ListView, Select, Static
 from iyzee.scope import Channel, LeCroy
 from iyzee.scope_workflows import acquire_scope_recording, save_scope_acquisition
 from iyzee.tui import app as app_mod
+from iyzee.tui import plotting as plotting_mod
 from iyzee.tui.screens import results as results_mod
 from iyzee.tui.screens.results import ResultsScreen
 from iyzee.waveform_math import scale_trace, subtract_background, subtract_traces
@@ -35,10 +37,10 @@ def _save_scope_run(
 
 @asynccontextmanager
 async def _open_results_screen(
-    monkeypatch: pytest.MonkeyPatch, data_root: Path
+    monkeypatch: pytest.MonkeyPatch, data_root: Path, prefs_file: Path | None = None
 ) -> AsyncIterator[tuple[ResultsScreen, Pilot]]:
     monkeypatch.setattr(results_mod, "_DATA_ROOT", data_root)
-    app = app_mod.IyzeeApp()
+    app = app_mod.IyzeeApp(prefs_file=prefs_file)
     async with app.run_test() as pilot:
         await pilot.press("t")
         await pilot.pause(0.3)
@@ -334,7 +336,7 @@ async def test_slow_scope_preview_cannot_overwrite_a_newer_selection(
     _save_scope_run(tmp_path)
     entered = threading.Event()
     release = threading.Event()
-    real_prepare = results_mod.prepare_series
+    real_prepare = plotting_mod.prepare_series
     call_count = 0
 
     def gated_prepare(x, y, label, *args, **kwargs):  # type: ignore[no-untyped-def]
@@ -345,7 +347,7 @@ async def test_slow_scope_preview_cannot_overwrite_a_newer_selection(
             release.wait(timeout=5)
         return real_prepare(x, y, label, *args, **kwargs)
 
-    monkeypatch.setattr(results_mod, "prepare_series", gated_prepare)
+    monkeypatch.setattr(plotting_mod, "prepare_series", gated_prepare)
     drawn: list[list[str | None]] = []
     real_draw = results_mod.draw_series
 
@@ -391,3 +393,33 @@ async def test_export_writes_a_real_png_and_runs_off_the_ui_thread(
         out = npz_path.with_name(f"{npz_path.stem}-plot.png")
         assert out.exists()
         assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+@async_test
+async def test_list_width_keys_resize_clamp_and_persist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prefs_file = tmp_path / "config" / "tui.json"
+    async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, pilot):
+        run_list = screen.query_one("#results-list")
+        assert run_list.has_class(f"w-{results_mod.DEFAULT_LIST_WIDTH}")
+
+        await pilot.press("]")
+        assert run_list.has_class("w-40") and not run_list.has_class("w-35")
+        for _ in range(20):  # far past the end: clamped, not an error
+            await pilot.press("[")
+        assert run_list.has_class("w-20")
+
+    assert json.loads(prefs_file.read_text())["results_list_width"] == 20
+    async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, _pilot):
+        assert screen.query_one("#results-list").has_class("w-20")  # remembered
+
+
+@async_test
+async def test_unusable_saved_list_width_falls_back_to_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prefs_file = tmp_path / "tui.json"
+    prefs_file.write_text('{"results_list_width": 7}')
+    async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, _pilot):
+        assert screen.query_one("#results-list").has_class(f"w-{results_mod.DEFAULT_LIST_WIDTH}")

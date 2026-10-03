@@ -16,6 +16,7 @@ and belongs with the rest of the TUI instead.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -131,3 +132,70 @@ def figure_series(
         "ylabel": fig.axes[0].get_ylabel() if fig.axes else "",
     }
     return lines, labels
+
+
+_SI_PREFIXES = (
+    (1e12, "T"),
+    (1e9, "G"),
+    (1e6, "M"),
+    (1e3, "k"),
+    (1.0, ""),
+    (1e-3, "m"),
+    (1e-6, "µ"),
+    (1e-9, "n"),
+    (1e-12, "p"),
+    (1e-15, "f"),
+)
+
+
+def format_si(value: float, unit: str) -> str:
+    """``2.5e-6, "s"`` -> ``"2.5 µs"``; values outside the prefix range fall back to ``%g``."""
+    if value == 0 or not math.isfinite(value):
+        return f"{value:g} {unit}"
+    for scale, prefix in _SI_PREFIXES:
+        if abs(value) >= scale * (1 - 1e-9):
+            return f"{value / scale:.4g} {prefix}{unit}"
+    return f"{value:g} {unit}"
+
+
+def describe_timebase(offset: float, interval: float, samples: int, unit: str = "S") -> list[str]:
+    """Two readable lines for a recorded trace's horizontal setup.
+
+    ``offset`` is the time of the first sample relative to the trigger, so a
+    negative offset is pre-trigger data and the trigger sits inside the window.
+    """
+    is_seconds = unit.strip().lower() in ("s", "sec")
+    fmt = (lambda v: format_si(v, "s")) if is_seconds else (lambda v: f"{v:g} {unit}")
+    end = offset + (samples - 1) * interval
+    lines = [f"Window: {fmt(offset)} to {fmt(end)} ({fmt(samples * interval)}, {samples} samples)"]
+    rate = f", {format_si(1 / interval, 'S/s')}" if is_seconds and interval > 0 else ""
+    lines.append(f"Sample interval: {fmt(interval)}{rate}")
+    return lines
+
+
+def time_axis(unit: str, span: float) -> tuple[float, str]:
+    """Pick a readable unit for a time axis spanning ``span``.
+
+    Returns ``(factor to multiply the samples by, unit label)``. Anything that
+    isn't plain seconds is left alone.
+    """
+    if unit.strip().lower() not in ("s", "sec") or not math.isfinite(span) or span <= 0:
+        return 1.0, unit
+    for scale, prefix in _SI_PREFIXES[4:9]:  # s, ms, µs, ns, ps
+        if span >= scale:
+            return 1.0 / scale, f"{prefix}s"
+    return 1e12, "ps"
+
+
+def time_series(
+    items: Sequence[tuple[Samples, Samples, str]], unit: str
+) -> tuple[list[tuple[list[float], list[float], str | None]], str]:
+    """Terminal-sized ``(x, y, label)`` series on a shared, readable time axis.
+
+    ``items`` is ``(time, values, label)`` per trace; returns the series plus
+    the matching ``"Time (µs)"``-style axis label.
+    """
+    span = max((float(np.max(np.abs(t))) for t, _, _ in items if len(t)), default=0.0)
+    factor, label = time_axis(unit, span)
+    series = [prepare_series(np.asarray(t, dtype=float) * factor, v, name) for t, v, name in items]
+    return series, f"Time ({label})"
