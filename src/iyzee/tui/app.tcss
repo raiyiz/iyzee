@@ -17,6 +17,81 @@
 
 Screen {
     background: $surface;
+    color: $text;
+}
+
+Header {
+    background: $panel;
+    border-bottom: solid $primary-darken-1;
+}
+
+Footer {
+    background: $panel;
+    border-top: solid $primary-darken-1;
+    color: $text-muted;
+}
+
+/* Common interaction language: focused controls use the accent, normal
+   controls stay quiet, and disabled controls visibly recede. */
+Button {
+    background: $panel;
+    border: round $primary-darken-1;
+    color: $text;
+}
+
+Button:hover {
+    background: $primary 12%;
+    border: round $primary;
+}
+
+Button:focus {
+    background: $accent 12%;
+    border: round $accent;
+    color: $text;
+}
+
+Button:disabled {
+    background: $surface;
+    border: round $primary-darken-2;
+    color: $text-muted;
+}
+
+Button.-success {
+    background: $success 18%;
+    border: round $success;
+}
+
+Button.-success:hover,
+Button.-success:focus {
+    background: $success 30%;
+    border: round $success;
+}
+
+Input,
+Select {
+    background: $surface;
+    border: round $primary-darken-1;
+}
+
+Input:focus,
+Select:focus {
+    background: $panel;
+    border: round $accent;
+}
+
+Checkbox:focus {
+    color: $accent;
+}
+
+/* Page validation marks live on the control itself, so the error is still
+   obvious after focus moves elsewhere. */
+.-invalid {
+    background: $error 8%;
+    border: round $error;
+}
+
+DataTable:focus {
+    border: round $accent;
 }
 
 #app-body {
@@ -27,6 +102,7 @@ Screen {
     width: 18;
     height: 1fr;
     padding: 1 1;
+    background: $panel 35%;
     border-right: round $primary-darken-1;
     /* The rail is taller than a short terminal (title + four pages +
        instrument list), so let it scroll rather than clip. */
@@ -41,11 +117,18 @@ Screen {
 
 .nav-item {
     padding: 0 1;
-    margin-bottom: 1;
+    margin-bottom: 0;
+    color: $text-muted;
+}
+
+.nav-item:hover {
+    background: $panel 70%;
     color: $text;
 }
 
 .nav-item.-active {
+    background: $accent 12%;
+    border-left: thick $accent;
     color: $accent;
     text-style: bold;
 }
@@ -54,6 +137,7 @@ Screen {
     margin-top: 1;
     padding: 1 1 0 1;
     border-top: round $primary-darken-1;
+    background: $panel 25%;
     color: $text-muted;
 }
 
@@ -79,14 +163,23 @@ Screen {
 }
 
 .panel-title {
+    height: auto;
+    margin-bottom: 1;
     padding: 1 2 0 2;
+    border-bottom: solid $primary-darken-2;
     text-style: bold;
     color: $accent;
 }
 
 .hint {
+    height: auto;
     padding: 0 2 1 2;
     color: $text-muted;
+}
+
+.field Label {
+    color: $text-muted;
+    text-style: bold;
 }
 
 /* -- Sweep -------------------------------------------------------------- */
@@ -251,6 +344,7 @@ Screen {
 
 .channel-panel {
     height: auto;
+    background: $panel 25%;
     border: round $primary-darken-1;
     padding: 0 1 1 1;
 }
@@ -282,6 +376,7 @@ Screen {
 #scope-trigger {
     height: auto;
     margin: 1 2 0 2;
+    background: $panel 25%;
     border: round $primary-darken-1;
     padding: 0 1 1 1;
 }
@@ -350,6 +445,7 @@ Screen {
 #results-detail {
     width: 1fr;
     margin: 1 2 1 0;
+    background: $panel 18%;
     border: round $primary;
     padding: 1 2;
 }
@@ -493,5 +589,6 @@ Screen {
     height: 1fr;
     min-height: 12;
     margin: 1 2;
+    background: $surface;
     border: round $primary;
 }
