@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import TypeVar
 from urllib.parse import urlencode
 import time
@@ -112,6 +113,7 @@ class Wavemeter:
         self.channel = channel
         self.host = host
         self.port = port
+        self.last_seen: datetime | None = None
 
     @property
     def base_url(self) -> str:
@@ -124,6 +126,8 @@ class Wavemeter:
         """One bounded HTTP request; returns the decoded body.
 
         Raises `OSError` (including `HTTPError` and timeouts), `UnicodeError`.
+        A successful HTTP response updates :attr:`last_seen` to its reception
+        time in UTC.
         """
         url = self.base_url + path
         if data is None:
@@ -136,7 +140,10 @@ class Wavemeter:
 
         with response:
             response.raise_for_status()
-            return response.content.decode("ascii")
+            body = response.content.decode("ascii")
+
+        self.last_seen = datetime.now(timezone.utc)
+        return body
 
     @endpoint("GET", READ_PATH)
     def read_frequency(self, channel: int | None = None) -> float:
