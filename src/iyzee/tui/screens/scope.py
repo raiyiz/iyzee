@@ -408,7 +408,6 @@ class ScopeScreen(Page):
             )
         return handle
 
-
     def _begin_settings_op(self, button_id: str, *, retrieve: bool = False) -> None:
         """Mark a settings operation as running and lock out its own button."""
         self._settings_busy = True

@@ -454,7 +454,6 @@ class ResultsScreen(Page):
     def action_list_wider(self) -> None:
         self._resize_list(+1)
 
-
     def _set_sweep_visible(self, visible: bool) -> None:
         for widget_id in (
             "#results-statistic",
