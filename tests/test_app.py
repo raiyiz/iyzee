@@ -42,6 +42,22 @@ async def test_colon_opens_the_command_layer_from_the_console() -> None:
 
 
 @async_test
+async def test_command_layer_completes_commands_with_tab() -> None:
+    app = IyzeeApp()
+    async with app.run_test() as pilot:
+        await pilot.press(":")
+        for key in "sc":
+            await pilot.press(key)
+        await pilot.press("tab")
+        command = app.query_one("#command-input")
+        assert command.value == "scope"
+
+        await pilot.press(" ")
+        await pilot.press("tab")
+        assert command.value == "scope sync"
+
+
+@async_test
 async def test_command_layer_can_navigate_and_dispatch_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
