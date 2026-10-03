@@ -425,6 +425,14 @@ class ScopeScreen(Page):
             self._dirty_fields.discard(field_id)
             self.query_one(f"#{field_id}").remove_class("scope-dirty")
 
+    def command_sync(self) -> None:
+        """Retrieve the current scope settings through the normal worker path."""
+        self._start_retrieve()
+
+    def command_acquire(self) -> None:
+        """Acquire using the same guarded path as the button."""
+        self._start_acquire()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "retrieve-settings":
             self._start_retrieve()

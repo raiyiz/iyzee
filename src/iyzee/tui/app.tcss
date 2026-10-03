@@ -39,6 +39,12 @@ Screen {
     padding: 0 1 1 1;
 }
 
+.nav-section {
+    color: $text-muted;
+    text-style: bold;
+    padding: 1 1 0 1;
+}
+
 .nav-item {
     padding: 0 1;
     margin-bottom: 1;
@@ -509,3 +515,49 @@ Screen {
     margin: 1 2;
     border: round $primary;
 }
+
+/* -- Command layer ----------------------------------------------------- */
+
+#command-bar {
+    display: none;
+    dock: bottom;
+    width: 1fr;
+    height: auto;
+    min-height: 5;
+    max-height: 8;
+    margin: 0 1 1 1;
+    padding: 1;
+    border: round $accent;
+    background: $surface;
+}
+
+#command-bar.-open {
+    display: block;
+}
+
+#command-entry {
+    height: 1;
+    width: 1fr;
+}
+
+#command-prefix {
+    width: 2;
+    color: $accent;
+    text-style: bold;
+    content-align: left middle;
+}
+
+#command-input {
+    width: 1fr;
+}
+
+#command-hint {
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#command-bar.-error #command-hint {
+    color: $error;
+}
+

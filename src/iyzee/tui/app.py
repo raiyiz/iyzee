@@ -17,6 +17,7 @@ from textual.containers import Horizontal
 from textual.markup import escape
 from textual.widgets import ContentSwitcher, Footer, Header, Static
 
+from .commands import CommandBar, CommandError, help_text, parse_command
 from .instruments import INSTRUMENTS, InstrumentHandle
 from .ipython import default_history_file
 from .ipython_session import IPythonSession
@@ -30,6 +31,7 @@ from .screens.page import Page
 from .screens.results import ResultsScreen
 from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
+from .commands import CommandBar, CommandError, parse_command
 from .workers import LastRun
 
 log = logging.getLogger("iyzee.tui")
@@ -41,30 +43,37 @@ PAGE_SPECS = (
     ("scope", "Scope", ScopeScreen),
     ("results", "Results", ResultsScreen),
     ("console", "Console", ConsoleScreen),
-    ("log", "Log", LogScreen),
+    ("log", "Activity", LogScreen),
 )
 
 
 class NavRail(Static):
-    """Persistent left-hand page list + a per-instrument connection dot.
+    """Persistent navigation grouped by the user's current task.
 
-    This is a visual complement to the existing c/s/t/i (or F1-F4)
-    shortcuts, not a replacement for them — clicking a row calls the same
-    ``IyzeeApp.action_show_page`` those bindings do, but the rail itself
-    isn't in the tab/focus chain, keeping the escape/j/k navigation added
-    earlier untouched. The instrument dots are live: ConnectScreen calls
-    ``IyzeeApp.instruments_changed`` whenever a connection is made or
-    dropped, and they are also refreshed on every page switch.
+    The rail describes work rather than implementation: hardware, acquisition,
+    analysis, and tools. Instrument state remains here as ambient lab context.
     """
 
-    # Page ids, labels, and widget classes share one registry so adding a
-    # page cannot leave the nav rail and ContentSwitcher out of sync.
+    SECTIONS = (
+        ("LAB", ("connect",)),
+        ("ACQUIRE", ("sweep", "scope")),
+        ("ANALYZE", ("results",)),
+        ("TOOLS", ("console", "log")),
+    )
+
     PAGES = tuple((page_id, label) for page_id, label, _screen in PAGE_SPECS)
+    LABELS = dict(PAGES)
 
     def compose(self) -> ComposeResult:
         yield Static("iyzee", id="nav-title")
-        for page_id, label in self.PAGES:
-            yield Static(label, id=f"nav-{page_id}", classes="nav-item")
+        for section, page_ids in self.SECTIONS:
+            yield Static(section, classes="nav-section")
+            for page_id in page_ids:
+                yield Static(
+                    self.LABELS[page_id],
+                    id=f"nav-{page_id}",
+                    classes="nav-item",
+                )
         yield Static("", id="nav-instruments")
 
     def on_mount(self) -> None:
@@ -75,30 +84,21 @@ class NavRail(Static):
         widget = event.widget
         if widget is None or not widget.has_class("nav-item") or widget.id is None:
             return
-        page_id = widget.id.removeprefix("nav-")
-        cast("IyzeeApp", self.app).action_show_page(page_id)
+        cast("IyzeeApp", self.app).action_show_page(widget.id.removeprefix("nav-"))
 
     def set_active(self, page_id: str) -> None:
         for pid, _ in self.PAGES:
             self.query_one(f"#nav-{pid}", Static).set_class(pid == page_id, "-active")
 
     def refresh_instruments(self) -> None:
-        """Redraw the "Instruments" block: a status dot *before* a short name.
-
-        The dot leads the line so it can never be stranded on a wrapped
-        second line away from the name it describes; short names keep each
-        entry to a single line in the 18-column rail. The dot differs in
-        shape (filled/hollow) as well as colour, so it doesn't rely on
-        colour vision.
-        """
+        """Update the ambient instrument status block."""
         app = cast("IyzeeApp", self.app)
         lines = ["[b]Instruments[/b]"]
         for spec in INSTRUMENTS:
             name = escape(spec.short or spec.label)
-            if spec.key in app.handles:
-                lines.append(f"[green]●[/green] {name}")
-            else:
-                lines.append(f"○ {name}")
+            lines.append(
+                f"[green]●[/green] {name}" if spec.key in app.handles else f"○ {name}"
+            )
         self.query_one("#nav-instruments", Static).update("\n".join(lines))
 
 
@@ -127,16 +127,10 @@ class IyzeeApp(App):
         (116, "-wide"),
     ]
 
-    # Textual's command palette defaults to Ctrl+P with a *priority*
-    # binding — priority bindings are checked before a focused widget ever
-    # gets a look at the key, regardless of the DOM/focus chain — which
-    # silently ate every Ctrl+P the console's own "previous history entry"
-    # binding was supposed to get (Ctrl+N happens not to collide with
-    # anything else Textual claims by default, so only this half of the
-    # history pair needed moving). The console's binding is the one
-    # documented and depended on elsewhere in this app, so the palette
-    # moves instead of it.
-    COMMAND_PALETTE_BINDING = "ctrl+backslash"
+    # Keep Textual's built-in palette away from IPython's Ctrl+P history key.
+    # The application command layer is opened with ":" or Ctrl+\.
+    COMMAND_PALETTE_BINDING = "ctrl+shift+space"
+
 
     # Keep navigation in Textual itself rather than interpreting keys in
     # ``on_key``. This means editable widgets retain their normal key
@@ -163,7 +157,7 @@ class IyzeeApp(App):
     # reach the app at all from inside the terminal (F5+ are CSI-tilde
     # sequences, a different wire format _APP_KEYS/termkeys.py don't
     # handle — see termkeys.py's own comment on this split). So Scope is
-    # reachable everywhere via "o", the nav rail, and the command palette,
+    # reachable everywhere via "o", the nav rail, and the command line,
     # just without a dedicated function key. "l" for the Log page (added
     # later) follows the same reasoning.
     BINDINGS = [
@@ -172,7 +166,7 @@ class IyzeeApp(App):
         Binding("o", "show_page('scope')", "Scope"),
         Binding("t", "show_page('results')", "Results"),
         Binding("i", "show_page('console')", "Console"),
-        Binding("l", "show_page('log')", "Log"),
+        Binding("l", "show_page('log')", "Activity"),
         Binding("f1", "show_page('connect')", "Connect", priority=True),
         Binding("f2", "show_page('sweep')", "Sweep", priority=True),
         Binding("f3", "show_page('results')", "Results", priority=True),
@@ -182,6 +176,8 @@ class IyzeeApp(App):
         # also quits, but only on a second press: one stray keystroke
         # shouldn't shut down an app that is holding live instruments. Hidden
         # from the footer, which is already crowded; the first press says so.
+        Binding("ctrl+backslash", "open_command", "Command", show=False, priority=True),
+        Binding(":", "open_command", "Command", show=False),
         Binding("ctrl+q", "quit", "Quit", priority=True),
         Binding("q", "request_quit", "Quit", show=False),
         Binding("escape", "blur_focused", "Leave field", show=False),
@@ -313,6 +309,101 @@ class IyzeeApp(App):
                 for page_id, page_cls in self.PAGES.items():
                     yield page_cls(id=page_id)
         yield Footer(compact=True)
+        yield CommandBar(id="command-bar")
+
+    # -- command line ------------------------------------------------------
+
+    def action_open_command(self) -> None:
+        switcher = self.query_one(ContentSwitcher)
+        self.query_one(CommandBar).open(switcher.current or self.DEFAULT_PAGE)
+
+    def action_close_command(self) -> None:
+        self.query_one(CommandBar).close()
+
+    def execute_command(self, value: str) -> str | None:
+        """Execute one parsed command, using the existing screen action paths."""
+        tokens = parse_command(value)
+        if not tokens:
+            return None
+
+        command, *args = tokens
+        command = command.lower()
+        instrument_keys = {spec.key for spec in INSTRUMENTS}
+
+        if command in {"connect", "c"}:
+            if not args:
+                self.action_show_page("connect")
+                return None
+            if len(args) != 1 or args[0].lower() not in instrument_keys:
+                raise CommandError(
+                    f"unknown instrument {args[0]!r}; choose from {', '.join(sorted(instrument_keys))}"
+                )
+            self.query_one(ConnectScreen).command_connect(args[0].lower())
+            return None
+
+        if command in {"disconnect", "dc"}:
+            if len(args) != 1 or args[0].lower() not in instrument_keys:
+                raise CommandError("usage: :disconnect <instrument>")
+            return self.query_one(ConnectScreen).command_disconnect(args[0].lower())
+
+        if command in {"sweep", "s"}:
+            if not args:
+                self.action_show_page("sweep")
+                return None
+            if len(args) != 1 or args[0].lower() not in {"run", "abort", "capture"}:
+                raise CommandError("usage: :sweep [run|abort|capture]")
+            sweep = self.query_one(SweepScreen)
+            action = args[0].lower()
+            if action == "run":
+                sweep.command_run()
+            elif action == "abort":
+                sweep.command_abort()
+            else:
+                sweep.command_capture()
+            return None
+
+        if command in {"scope", "o"}:
+            if not args:
+                self.action_show_page("scope")
+                return None
+            if len(args) != 1 or args[0].lower() not in {"sync", "acquire"}:
+                raise CommandError("usage: :scope [sync|acquire]")
+            scope = self.query_one(ScopeScreen)
+            if args[0].lower() == "sync":
+                scope.command_sync()
+            else:
+                scope.command_acquire()
+            return None
+
+        if command in {"results", "result", "t"}:
+            if args:
+                raise CommandError("usage: :results")
+            self.action_show_page("results")
+            return None
+
+        if command in {"console", "i"}:
+            if args:
+                raise CommandError("usage: :console")
+            self.action_show_page("console")
+            return None
+
+        if command in {"activity", "log", "l"}:
+            if args:
+                raise CommandError("usage: :activity")
+            self.action_show_page("log")
+            return None
+
+        if command in {"help", "?"}:
+            return help_text()
+
+        if command in {"quit", "q", "exit"}:
+            if args:
+                raise CommandError("usage: :quit")
+            self.action_request_quit()
+            return None
+
+        raise CommandError(f"unknown command: :{command} — try :help")
+
 
     def action_show_page(self, page_id: str) -> None:
         self.query_one(ContentSwitcher).current = page_id

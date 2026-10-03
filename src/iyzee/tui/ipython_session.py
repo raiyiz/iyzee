@@ -300,7 +300,7 @@ class IPythonSession:
         self._sink.write(
             f"{_BOLD}iyzee console{_RESET}{_DIM} · IPython {IPython.__version__} · "
             f"{mode} mode{_RESET}\n"
-            f"{_DIM}lab.mx / lab.shutter / lab.scope · F1-F4 switch pages · "
+            f"{_DIM}lab.mx / lab.shutter / lab.scope · : opens commands · F1-F4 switch pages · "
             f"Ctrl+Q quits iyzee{_RESET}\n\n"
         )
 

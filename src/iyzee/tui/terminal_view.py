@@ -20,10 +20,10 @@ from .termkeys import key_to_bytes
 from .vterm import VTermScreen
 
 # Keys the *app* owns, so they are never sent to the terminal: page switching
-# (F1-F4), quit, and the command palette. Everything else is the terminal's.
+# (F1-F4), quit, and the ":" command layer. Everything else is the terminal's.
 # That includes Tab, Escape and Ctrl+P/N/R — IPython's completion, vi mode and
 # history — which is why leaving the terminal is done with the F-keys.
-_APP_KEYS = frozenset({"f1", "f2", "f3", "f4", "ctrl+q", "ctrl+backslash"})
+_APP_KEYS = frozenset({"f1", "f2", "f3", "f4", "ctrl+q", "ctrl+backslash", ":"})
 
 # Lines moved per mouse-wheel notch, and per Shift+PageUp/PageDown press
 # (a page being the visible height).
