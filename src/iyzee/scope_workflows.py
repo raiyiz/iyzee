@@ -559,18 +559,12 @@ def read_trigger_settings(scope: LeCroy, *, lock: LockLike | None = None) -> Tri
 def _download_waveform(scope: LeCroy, channel: Channel) -> ScopeWaveform:
     """Download one channel's ``DAT1`` block with its own timebase (caller holds the lock)."""
     time_unit, time_offset, time_interval = scope.getHorProperties(channel=channel)
-    detailed = getattr(scope, "getDataFloatsDetailed", None)
-    raw_codes = vertical_gain = vertical_offset = None
-    if callable(detailed):
-        data = detailed(channel=channel, block="DAT1")
-        value_unit = str(data["unit"])
-        values = np.asarray(data["values"], dtype=np.float64)
-        raw_codes = np.asarray(data["raw_codes"], dtype=np.int16)
-        vertical_gain = float(data["vertical_gain"])
-        vertical_offset = float(data["vertical_offset"])
-    else:
-        value_unit, values_raw = scope.getDataFloats(channel=channel, block="DAT1")
-        values = np.asarray(values_raw, dtype=np.float64)
+    data = scope.getDataFloatsDetailed(channel=channel, block="DAT1")
+    value_unit = str(data["unit"])
+    values = np.asarray(data["values"], dtype=np.float64)
+    raw_codes = np.asarray(data["raw_codes"], dtype=np.int16)
+    vertical_gain = float(data["vertical_gain"])
+    vertical_offset = float(data["vertical_offset"])
     if values.size == 0:
         raise ValueError(f"{channel} returned an empty waveform")
     time_values = time_offset + np.arange(values.size, dtype=np.float64) * time_interval

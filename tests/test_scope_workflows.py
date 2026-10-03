@@ -140,11 +140,18 @@ class FakeScope:
             raise RuntimeError("scope did not respond")
         return ("S", 0.0, 1e-6)
 
-    def getDataFloats(self, channel, block="DAT1"):
-        self.calls.append(("getDataFloats", channel))
+    def getDataFloatsDetailed(self, channel, block="DAT1"):
+        self.calls.append(("getDataFloatsDetailed", channel))
         if channel in self._fail_channels:
             raise RuntimeError(f"{channel} refused to send data")
-        return ("V", self._data[channel])
+        values = self._data[channel]
+        return {
+            "unit": "V",
+            "values": np.asarray(values, dtype=np.float64),
+            "raw_codes": np.asarray([10 + i for i in range(len(values))], dtype=np.int16),
+            "vertical_gain": 0.25,
+            "vertical_offset": 0.5,
+        }
 
 
 def _settings(channel: Channel, **overrides) -> ChannelSettings:
@@ -155,21 +162,8 @@ def _settings(channel: Channel, **overrides) -> ChannelSettings:
     return ChannelSettings(**defaults)
 
 
-class DetailedFakeScope(FakeScope):
-    def getDataFloatsDetailed(self, channel, block):
-        unit, values = self.getDataFloats(channel)
-        raw = np.asarray([10 + i for i in range(len(values))], dtype=np.int16)
-        return {
-            "unit": unit,
-            "values": np.asarray(values, dtype=np.float64),
-            "raw_codes": raw,
-            "vertical_gain": 0.25,
-            "vertical_offset": 0.5,
-        }
-
-
 def test_acquire_scope_recording_retains_calibration_and_statistics():
-    scope = DetailedFakeScope()
+    scope = FakeScope()
     settings = (_settings(Channel.C1), _settings(Channel.C2))
     trigger = TriggerSettings(
         source=Channel.C1,
@@ -206,7 +200,7 @@ def test_acquire_scope_recording_retains_calibration_and_statistics():
 
 
 def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path):
-    scope = DetailedFakeScope()
+    scope = FakeScope()
     recording = acquire_scope_recording(
         scope, [Channel.C1], channel_settings=(_settings(Channel.C1),)
     )
@@ -446,7 +440,7 @@ def test_read_trigger_settings_reads_every_field_off_the_armed_source():
 
 
 def test_a_failed_timebase_read_fails_every_channel_that_needs_it():
-    recording = acquire_scope_recording(DetailedFakeScope(fail_hor=True), [Channel.C1, Channel.C2])
+    recording = acquire_scope_recording(FakeScope(fail_hor=True), [Channel.C1, Channel.C2])
 
     assert recording.waveforms == ()
     assert {e.channel for e in recording.errors} == {Channel.C1, Channel.C2}
@@ -455,7 +449,7 @@ def test_a_failed_timebase_read_fails_every_channel_that_needs_it():
 # -- link loss: stop instead of reading a late reply as the next channel's answer ---------
 
 
-class DroppingScope(DetailedFakeScope):
+class DroppingScope(FakeScope):
     """Behaves like the real driver: a failure on ``fail_on`` invalidates the
     connection, after which ``connected`` is False."""
 
@@ -478,7 +472,7 @@ class DroppingScope(DetailedFakeScope):
         if channel in self._fail_channels:
             self._drop(f"{channel} timed out")
 
-    def getDataFloatsDetailed(self, channel, block):
+    def getDataFloatsDetailed(self, channel, block="DAT1"):
         if channel in self._fail_channels:
             self.calls.append(("getDataFloatsDetailed", channel))
             self._drop(f"{channel} timed out")
@@ -519,7 +513,7 @@ def test_acquire_scope_recording_stops_once_the_connection_is_lost():
 
     assert [w.channel for w in recording.waveforms] == [Channel.C1]
     assert [e.channel for e in recording.errors] == [Channel.C2, Channel.C3]
-    assert not any(c == ("getDataFloats", Channel.C3) for c in scope.calls)
+    assert not any(c == ("getDataFloatsDetailed", Channel.C3) for c in scope.calls)
 
 
 def test_a_parse_error_on_a_healthy_link_does_not_stop_the_batch():
@@ -733,7 +727,7 @@ def test_apply_and_verify_holds_the_lock_across_write_and_read_back():
 # -- acquisition: consistency and provenance -----------------------------------------------
 
 
-class TimebaseScope(DetailedFakeScope):
+class TimebaseScope(FakeScope):
     INTERVALS = {Channel.C1: 1e-6, Channel.C2: 5e-6}
 
     def getHorProperties(self, channel):
@@ -752,7 +746,7 @@ def test_each_channel_gets_a_time_axis_from_its_own_timebase():
 
 
 def test_one_channels_timebase_failure_no_longer_discards_the_others():
-    class FlakyTimebase(DetailedFakeScope):
+    class FlakyTimebase(FakeScope):
         def getHorProperties(self, channel):
             if channel == Channel.C2:
                 raise RuntimeError("no timebase for C2")
@@ -765,10 +759,16 @@ def test_one_channels_timebase_failure_no_longer_discards_the_others():
 
 
 def test_empty_waveform_is_an_error_not_a_silent_success():
-    class Empty(DetailedFakeScope):
-        def getDataFloats(self, channel, block="DAT1"):
-            self.calls.append(("getDataFloats", channel))
-            return ("V", [])
+    class Empty(FakeScope):
+        def getDataFloatsDetailed(self, channel, block="DAT1"):
+            self.calls.append(("getDataFloatsDetailed", channel))
+            return {
+                "unit": "V",
+                "values": [],
+                "raw_codes": [],
+                "vertical_gain": 1.0,
+                "vertical_offset": 0.0,
+            }
 
     recording = acquire_scope_recording(Empty(), [Channel.C1])
 
@@ -782,7 +782,7 @@ def _mode_calls(scope):
 
 @pytest.mark.parametrize("mode", [TriggerMode.AUTO, TriggerMode.NORMAL])
 def test_a_running_acquisition_is_stopped_for_the_download_and_restored(mode):
-    scope = DetailedFakeScope()
+    scope = FakeScope()
     scope.trigger_state = TriggerSettings(
         Channel.C1, mode, TriggerSlope.POSITIVE, TriggerCoupling.DC, 0.0
     )
@@ -794,9 +794,9 @@ def test_a_running_acquisition_is_stopped_for_the_download_and_restored(mode):
         ("set_trigger_mode", mode),
     ]
     names = [c[0] for c in scope.calls]
-    assert names.index("set_trigger_mode") < names.index("getDataFloats")
+    assert names.index("set_trigger_mode") < names.index("getDataFloatsDetailed")
     assert names[::-1].index("set_trigger_mode") < names[::-1].index(
-        "getDataFloats"
+        "getDataFloatsDetailed"
     )  # restore is last
     assert recording.frozen is True and recording.prior_trigger_mode == mode
     assert recording.warnings == ()
@@ -804,7 +804,7 @@ def test_a_running_acquisition_is_stopped_for_the_download_and_restored(mode):
 
 @pytest.mark.parametrize("mode", [TriggerMode.SINGLE, TriggerMode.STOP])
 def test_a_held_acquisition_is_left_alone(mode):
-    scope = DetailedFakeScope()
+    scope = FakeScope()
     scope.trigger_state = TriggerSettings(
         Channel.C1, mode, TriggerSlope.POSITIVE, TriggerCoupling.DC, 0.0
     )
@@ -816,7 +816,7 @@ def test_a_held_acquisition_is_left_alone(mode):
 
 
 def test_freeze_can_be_disabled():
-    scope = DetailedFakeScope()
+    scope = FakeScope()
 
     recording = acquire_scope_recording(scope, [Channel.C1], freeze=False)
 
@@ -825,7 +825,7 @@ def test_freeze_can_be_disabled():
 
 
 def test_trigger_mode_is_restored_even_if_a_channel_fails():
-    scope = DetailedFakeScope(fail_channels=frozenset({Channel.C1}))
+    scope = FakeScope(fail_channels=frozenset({Channel.C1}))
 
     recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
 
@@ -835,7 +835,7 @@ def test_trigger_mode_is_restored_even_if_a_channel_fails():
 
 
 def test_failure_to_freeze_is_a_warning_and_the_download_still_happens():
-    scope = DetailedFakeScope()
+    scope = FakeScope()
 
     def boom(mode):
         raise RuntimeError("refused")
@@ -850,7 +850,7 @@ def test_failure_to_freeze_is_a_warning_and_the_download_still_happens():
 
 
 def test_failure_to_restore_is_reported_as_a_warning():
-    scope = DetailedFakeScope()
+    scope = FakeScope()
     calls = []
 
     def flaky(mode):
@@ -880,7 +880,7 @@ def test_a_lost_link_while_frozen_is_reported_not_papered_over():
 
 
 def test_identity_is_recorded_and_failure_to_read_it_is_a_warning():
-    scope = DetailedFakeScope()
+    scope = FakeScope()
     scope.query = lambda command: "LECROY,WS452,LCRY1234,9.0.0"
 
     recording = acquire_scope_recording(scope, [Channel.C1])
@@ -897,7 +897,7 @@ def test_identity_is_recorded_and_failure_to_read_it_is_a_warning():
 
 
 def test_manifest_records_provenance_and_the_error_type(tmp_path):
-    scope = DetailedFakeScope(fail_channels=frozenset({Channel.C2}))
+    scope = FakeScope(fail_channels=frozenset({Channel.C2}))
     scope.query = lambda command: "LECROY,WS452,LCRY1234,9.0.0"
 
     recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])

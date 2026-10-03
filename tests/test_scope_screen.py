@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 from helpers import FakeHandle, async_test, notifications, wait_until
-from test_scope_workflows import DetailedFakeScope, StatefulScope
+from test_scope_workflows import FakeScope, StatefulScope
 from textual.pilot import Pilot
 from textual.widgets import Button, Checkbox, Input, RichLog, Select
 
@@ -24,7 +24,7 @@ from iyzee.tui.screens import scope as scope_screen_mod
 from iyzee.tui.screens.scope import ScopeScreen
 
 
-class ScreenScope(StatefulScope, DetailedFakeScope):
+class ScreenScope(StatefulScope, FakeScope):
     """Stateful (remembers writes, can round/ignore them) and able to acquire."""
 
 

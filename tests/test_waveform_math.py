@@ -14,7 +14,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-from test_scope_workflows import DetailedFakeScope
+from test_scope_workflows import FakeScope
 
 from iyzee.experiment.io import Recording, load_recording
 from iyzee.scope import Channel
@@ -325,7 +325,7 @@ def test_save_waveform_figure_writes_a_real_png_and_closes_the_figure(tmp_path):
 
 
 def test_end_to_end_acquire_save_load_and_subtract(tmp_path):
-    scope = DetailedFakeScope()
+    scope = FakeScope()
 
     recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
     stem = save_scope_acquisition(recording, tmp_path)

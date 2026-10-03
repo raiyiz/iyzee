@@ -12,7 +12,7 @@ from typing import cast
 import numpy as np
 import pytest
 from helpers import async_test, notifications, plain, save_run, wait_until
-from test_scope_workflows import DetailedFakeScope
+from test_scope_workflows import FakeScope
 from textual.pilot import Pilot
 from textual.widgets import Button, DataTable, Input, ListView, Select, Static
 
@@ -29,7 +29,7 @@ def _save_scope_run(
     *,
     channels: tuple[Channel, ...] = (Channel.C1, Channel.C2),
 ) -> Path:
-    recording = acquire_scope_recording(cast(LeCroy, DetailedFakeScope()), list(channels))
+    recording = acquire_scope_recording(cast(LeCroy, FakeScope()), list(channels))
     return save_scope_acquisition(recording, data_root).with_suffix(".npz")
 
 
