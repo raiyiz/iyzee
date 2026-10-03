@@ -31,7 +31,7 @@ TUI's ``ScopeScreen`` does exactly this, and it's what makes calling these
 same functions safe from the IPython console at the same time a screen is
 mid-acquisition, or from two screens/scripts sharing one connected handle.
 The lock is re-entrant and, for a ``ScopeHandle``, is the driver's own
-transaction lock; every batch here also enters ``scope.transaction()`` itself.
+transaction lock; every batch here also enters the driver's ``transaction_lock`` itself.
 
 Two behaviours worth knowing before relying on a recording:
 
@@ -243,21 +243,19 @@ LockLike = AbstractContextManager[object]
 
 @contextlib.contextmanager
 def _guarded(scope: object, lock: LockLike | None) -> Iterator[None]:
-    """Hold ``lock`` (if given) and the driver's own transaction for a batch.
+    """Hold the caller's lock and the driver's lock for a complete batch.
 
-    Entering ``scope.transaction()`` means a batch is atomic against any other
-    thread using the driver, even one that never heard of ``lock``. For a
-    ``ScopeHandle`` both are the same re-entrant lock, so passing the handle's
-    lock is redundant but harmless (and cannot deadlock through a
-    ``LockedProxy``). Scopes without ``transaction()`` (test fakes) just use
-    ``lock``.
+    ``ScopeHandle.lock`` is the same re-entrant lock exposed by the driver as
+    ``transaction_lock``; when they are the same object, entering it twice is
+    unnecessary. Test doubles without a driver lock still use the explicit
+    ``lock=`` argument.
     """
     with contextlib.ExitStack() as stack:
+        driver_lock = getattr(scope, "transaction_lock", None)
         if lock is not None:
             stack.enter_context(lock)
-        transaction = getattr(scope, "transaction", None)
-        if callable(transaction):
-            stack.enter_context(transaction())
+        if driver_lock is not None and driver_lock is not lock:
+            stack.enter_context(driver_lock)
         yield
 
 
