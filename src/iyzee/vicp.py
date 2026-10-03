@@ -6,7 +6,7 @@ import struct
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Any, Iterator
 
 log = logging.getLogger("iyzee.vicp")
 
@@ -15,6 +15,7 @@ VICP_DATA_FLAG = 0x80
 
 # A DEF9 block is followed by a line terminator that is never sample data.
 _TERMINATORS = (b"\n", b"\r\n")
+_HEADER = struct.Struct("!4BI")  # flags, version, 2 reserved bytes, payload length
 
 
 class VICPTimeoutError(TimeoutError):
@@ -41,46 +42,33 @@ class VICPFrame:
         return bool(self.flags & VICP_EOI_FLAG)
 
 
-def _close_socket(sock: object) -> None:
-    """Close a socket-like object; fakes without ``close()``/``shutdown()`` are tolerated.
+def _close_socket(sock: socket.socket) -> None:
+    """Shut down, then close.
 
     ``shutdown()`` first so the peer gets a FIN right away (a bare ``close()``
     can leave the connection half-open while another thread still holds the
     descriptor), which is what lets an instrument that serves one client at a
     time free its session.
     """
-    shutdown = getattr(sock, "shutdown", None)
-    if shutdown is not None:
-        try:
-            shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass  # already closed or never fully connected
-    close = getattr(sock, "close", None)
-    if close is not None:
-        close()
-
-
-def _local_port(sock: object) -> object:
-    """The local TCP port, for matching against ``ss``/the instrument's session list."""
-    getsockname = getattr(sock, "getsockname", None)
     try:
-        return getsockname()[1] if getsockname is not None else "?"
-    except OSError, IndexError, TypeError:
-        return "?"
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass  # already closed or never fully connected
+    sock.close()
 
 
-def _enable_keepalive(sock: object, idle: int, interval: int, count: int) -> None:
-    """Have the OS probe an idle connection so a dead peer is noticed in ~``idle + interval * count`` s.
+def _tune_socket(sock: socket.socket, idle: int, interval: int, count: int) -> None:
+    """Disable Nagle and have the OS probe an idle link (dead peer noticed in ~``idle + interval * count`` s).
 
-    Without this a cable pull, a VPN drop or a sleeping laptop leaves the
-    socket looking healthy until the next command times out. Options differ by
-    platform, so each is applied only where it exists; failures are not fatal.
+    Without keepalive a cable pull, a VPN drop or a sleeping laptop leaves the
+    socket looking healthy until the next command times out. Option names differ
+    by platform (macOS spells the idle option ``TCP_KEEPALIVE``), so each is
+    applied only where it exists; failures are logged, not fatal.
     """
-    setsockopt = getattr(sock, "setsockopt", None)
-    if setsockopt is None:
-        return
-    options = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
-    # Linux names; macOS spells the idle option TCP_KEEPALIVE.
+    options = [
+        (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1),
+        (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+    ]
     for name, value in (
         ("TCP_KEEPIDLE", idle),
         ("TCP_KEEPALIVE", idle),
@@ -92,33 +80,22 @@ def _enable_keepalive(sock: object, idle: int, interval: int, count: int) -> Non
             options.append((socket.IPPROTO_TCP, option, value))
     for level, option, value in options:
         try:
-            setsockopt(level, option, value)
+            sock.setsockopt(level, option, value)
         except OSError:
             log.debug("could not set socket option %s on VICP socket", option, exc_info=True)
 
 
-def recv_exact(
-    sock: object,
-    num_bytes: int,
-    *,
-    timeout_error: type[TimeoutError] = VICPTimeoutError,
+def _recv_exact(
+    sock: Any, num_bytes: int, timeout_error: type[TimeoutError] = VICPTimeoutError
 ) -> bytes:
-    """Read exactly the requested number of bytes from a socket-like object."""
-    if num_bytes < 0:
-        raise ValueError(f"num_bytes must be non-negative, got {num_bytes}")
-
-    recv = getattr(sock, "recv", None)
-    if recv is None:
-        raise TypeError("socket-like object must provide recv()")
-
+    """Read exactly ``num_bytes`` from ``sock``."""
     chunks = bytearray()
-    gettimeout = getattr(sock, "gettimeout", lambda: None)
     while len(chunks) < num_bytes:
         try:
-            chunk = recv(num_bytes - len(chunks))
+            chunk = sock.recv(num_bytes - len(chunks))
         except TimeoutError as exc:
             raise timeout_error(
-                f"no response after {gettimeout()}s ({len(chunks)}/{num_bytes} bytes received)"
+                f"no response after {sock.gettimeout()}s ({len(chunks)}/{num_bytes} bytes received)"
             ) from exc
         if not chunk:
             raise ConnectionError(f"Socket closed after {len(chunks)}/{num_bytes} bytes")
@@ -126,32 +103,19 @@ def recv_exact(
     return bytes(chunks)
 
 
-def send_all(sock: object, data: bytes, *, timeout_error: type[TimeoutError]) -> None:
-    """Write all bytes, tolerating partial socket.send() results."""
-    send = getattr(sock, "send", None)
-    if send is None:
-        raise TypeError("socket-like object must provide send()")
-
-    gettimeout = getattr(sock, "gettimeout", lambda: None)
+def _send_all(sock: Any, data: bytes, timeout_error: type[TimeoutError]) -> None:
+    """Write all of ``data``, tolerating partial ``send()`` results."""
     sent = 0
     while sent < len(data):
         try:
-            count = send(data[sent:])
+            count = sock.send(data[sent:])
         except TimeoutError as exc:
             raise timeout_error(
-                f"no response after {gettimeout()}s ({sent}/{len(data)} bytes sent)"
+                f"no response after {sock.gettimeout()}s ({sent}/{len(data)} bytes sent)"
             ) from exc
-        if count is None:
-            raise ConnectionError("socket send() returned None")
-        if count <= 0:
+        if not count or count <= 0:
             raise ConnectionError(f"socket send() made no progress ({sent}/{len(data)} bytes sent)")
         sent += count
-
-
-class _MessageState:
-    """Tracks whether the current response has been consumed through EOI."""
-
-    complete = False
 
 
 class VICPTransport:
@@ -171,7 +135,6 @@ class VICPTransport:
     so the connection stays usable.
     """
 
-    HEADER_SIZE = 8
     HEADER_VERSION = 1
     DEFAULT_PORT = 1861
     DEFAULT_CONNECT_TIMEOUT = 5.0
@@ -196,7 +159,7 @@ class VICPTransport:
         self.io_timeout = io_timeout
         self.max_command_length = max_command_length
         self._timeout_error = timeout_error
-        self._socket: object | None = None
+        self._socket: socket.socket | None = None
         self._address: str | None = None
         self._lock = threading.RLock()
 
@@ -209,18 +172,8 @@ class VICPTransport:
         return self._address
 
     @property
-    def socket(self) -> object | None:
-        return self._socket
-
-    @property
     def transaction_lock(self) -> threading.RLock:
         return self._lock
-
-    @contextmanager
-    def transaction(self) -> Iterator[None]:
-        """Serialize one complete logical operation on the connection."""
-        with self._lock:
-            yield
 
     def _invalidate(self, reason: BaseException | str | None = None) -> None:
         """Drop the connection because the byte stream is no longer trustworthy."""
@@ -245,32 +198,20 @@ class VICPTransport:
         caller that knows it is waiting on a slow answer widens the bound
         instead of failing and reconnecting.
         """
+        if timeout is not None and timeout <= 0:
+            raise ValueError("timeout must be positive")
         sock = self._socket
-        settimeout = getattr(sock, "settimeout", None)
-        if timeout is None or settimeout is None:
+        if timeout is None or sock is None:
             yield
             return
-        if timeout <= 0:
-            raise ValueError("timeout must be positive")
-        settimeout(timeout)
+        sock.settimeout(timeout)
         try:
             yield
         finally:
             if self._socket is sock:  # not invalidated meanwhile
-                settimeout(self.io_timeout)
+                sock.settimeout(self.io_timeout)
 
-    @contextmanager
-    def _message(self) -> Iterator[_MessageState]:
-        """Guard one response: invalidate if it fails before EOI was consumed."""
-        state = _MessageState()
-        try:
-            yield state
-        except BaseException as exc:
-            if not state.complete:
-                self._invalidate(exc)
-            raise
-
-    def _require_socket(self) -> object:
+    def _require_socket(self) -> socket.socket:
         sock = self._socket
         if sock is None:
             raise ConnectionError("VICP transport is not connected")
@@ -298,28 +239,24 @@ class VICPTransport:
             try:
                 sock.connect((address, self.port))
                 sock.settimeout(io_timeout)
-                try:
-                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                except OSError:
-                    log.debug("could not set TCP_NODELAY on VICP socket", exc_info=True)
-                _enable_keepalive(
+                _tune_socket(
                     sock, self.KEEPALIVE_IDLE_S, self.KEEPALIVE_INTERVAL_S, self.KEEPALIVE_COUNT
                 )
-            except TimeoutError as exc:
+            except OSError as exc:
                 sock.close()
-                raise self._timeout_error(
-                    f"no response connecting to {address}:{self.port} within {connect_timeout}s"
-                ) from exc
-            except OSError:
-                sock.close()
+                if isinstance(exc, TimeoutError):
+                    raise self._timeout_error(
+                        f"no response connecting to {address}:{self.port} within {connect_timeout}s"
+                    ) from exc
                 raise
 
             self._socket = sock
             self._address = address
             self.connect_timeout = connect_timeout
             self.io_timeout = io_timeout
-            local = _local_port(sock)
-            log.info("VICP connected to %s:%d (local port %s)", address, self.port, local)
+            log.info(
+                "VICP connected to %s:%d (local port %s)", address, self.port, sock.getsockname()[1]
+            )
 
     def close(self) -> None:
         """Close the connection and clear all observable connection state."""
@@ -331,7 +268,7 @@ class VICPTransport:
                 return
             _close_socket(sock)
 
-    def attach_socket(self, sock: object) -> None:
+    def attach_socket(self, sock: Any) -> None:
         """Attach an already-connected socket-like object (used by tests)."""
         with self._lock:
             if self._socket is not None:
@@ -357,176 +294,132 @@ class VICPTransport:
         try:
             if self._socket is not sock:
                 return self._socket is not None
-            settimeout = getattr(sock, "settimeout", None)
-            recv = getattr(sock, "recv", None)
-            if settimeout is None or recv is None:
-                return True  # a test double: nothing to probe
-            settimeout(0)
+            sock.settimeout(0)
             try:
-                peeked = recv(1, socket.MSG_PEEK)
+                peeked = sock.recv(1, socket.MSG_PEEK)
             except BlockingIOError, InterruptedError:
                 return True  # nothing waiting: healthy and idle
-            except TypeError:
-                return True  # a test double whose recv() takes no flags
             except OSError as exc:
                 self._invalidate(exc)
                 return False
-            else:
-                if peeked == b"":
-                    self._invalidate("peer closed the connection")
-                    return False
-                return True  # unexpected bytes: leave judging them to the next read
-            finally:
-                if self._socket is sock:
-                    settimeout(self.io_timeout)
+            if peeked == b"":
+                self._invalidate("peer closed the connection")
+                return False
+            return True  # unexpected bytes: leave judging them to the next read
         finally:
+            if self._socket is sock:
+                sock.settimeout(self.io_timeout)
             self._lock.release()
 
     def _write_frame(self, payload: bytes) -> None:
         sock = self._require_socket()
-        header = struct.pack(
-            "!4BI",
-            VICP_DATA_FLAG | VICP_EOI_FLAG,
-            self.HEADER_VERSION,
-            0,
-            0,
-            len(payload),
+        header = _HEADER.pack(
+            VICP_DATA_FLAG | VICP_EOI_FLAG, self.HEADER_VERSION, 0, 0, len(payload)
         )
         try:
-            send_all(sock, header + payload, timeout_error=self._timeout_error)
+            _send_all(sock, header + payload, self._timeout_error)
         except BaseException as exc:
             self._invalidate(exc)
             raise
 
-    def send_command(self, message: str) -> None:
-        """Send one ASCII VICP command as one EOI-terminated frame."""
+    def _encode(self, message: str) -> bytes:
         payload = message.encode("ascii")
         if len(payload) > self.max_command_length:
             raise ValueError(
                 f"command is {len(payload)} bytes; maximum is {self.max_command_length}"
             )
+        return payload
+
+    def send_command(self, message: str) -> None:
+        """Send one ASCII VICP command as one EOI-terminated frame."""
+        payload = self._encode(message)
         with self._lock:
             self._write_frame(payload)
-
-    def read_frame(self) -> VICPFrame:
-        with self._lock:
-            return self._read_frame()
 
     def _read_frame(self) -> VICPFrame:
         sock = self._require_socket()
         try:
-            header = recv_exact(sock, self.HEADER_SIZE, timeout_error=self._timeout_error)
-            flags, version, _reserved_1, _reserved_2, length = struct.unpack("!4BI", header)
+            header = _recv_exact(sock, _HEADER.size, timeout_error=self._timeout_error)
+            flags, version, _reserved_1, _reserved_2, length = _HEADER.unpack(header)
             if version != self.HEADER_VERSION:
                 raise VICPProtocolError(
                     f"unsupported VICP header version {version}; expected {self.HEADER_VERSION}"
                 )
-            payload = recv_exact(sock, length, timeout_error=self._timeout_error)
+            payload = _recv_exact(sock, length, timeout_error=self._timeout_error)
         except BaseException as exc:
             # Mid-frame failure: the stream position is unknown.
             self._invalidate(exc)
             raise
         return VICPFrame(flags=flags, payload=payload)
 
+    def _read_frames(self) -> list[VICPFrame]:
+        """Read frames through EOI (the caller holds the lock).
+
+        Any failure here leaves the stream position unknown, so the connection
+        is dropped (``_read_frame`` already does that for I/O errors).
+        """
+        frames: list[VICPFrame] = []
+        for _ in range(self.MAX_MESSAGE_FRAMES):
+            frame = self._read_frame()
+            frames.append(frame)
+            if frame.is_eoi:
+                return frames
+        error = VICPProtocolError(
+            f"message exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
+        )
+        self._invalidate(error)
+        raise error
+
     def read_message(self) -> tuple[int, bytes]:
         """Read frames through EOI and return the final flags plus complete payload."""
-        with self._lock, self._message() as state:
-            chunks = bytearray()
-            for _ in range(self.MAX_MESSAGE_FRAMES):
-                frame = self._read_frame()
-                chunks.extend(frame.payload)
-                if frame.is_eoi:
-                    state.complete = True
-                    return frame.flags, bytes(chunks)
-            raise VICPProtocolError(
-                f"message exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
-            )
+        with self._lock:
+            frames = self._read_frames()
+        return frames[-1].flags, b"".join(f.payload for f in frames)
 
     def read_definite_block(self) -> bytes:
         """Read an IEEE 488.2 definite-length binary block through VICP EOI.
 
-        LeCroy DEF9 waveform responses place an ASCII #9 marker and a
-        nine-digit byte count before the binary payload. The marker and count
-        may span VICP frames, so parsing must not depend on a fixed prefix.
+        LeCroy DEF9 waveform responses place an ASCII ``#9`` marker and a
+        nine-digit byte count before the binary payload; both may span VICP
+        frames, so the whole message is read through EOI before it is parsed.
+        That keeps the stream aligned: every parse error below leaves the
+        connection usable (only a failure *before* EOI invalidates it; see the
+        class docstring).
 
-        The count is authoritative. A final EOI frame that holds only a line
-        terminator is never treated as sample data, so a truncated block cannot
-        be "completed" by its own terminator. Errors raised once EOI has been
-        consumed (wrong length, bad trailer) leave the connection usable; errors
-        before EOI invalidate it (see the class docstring).
+        The count is authoritative. A final EOI frame holding only a line
+        terminator is the trailer, never sample data, so a truncated block
+        cannot be "completed" by its own terminator.
         """
-        with self._lock, self._message() as state:
-            header = bytearray()
-            data = bytearray()
-            expected: int | None = None
-            trailing = bytearray()
+        with self._lock:
+            frames = self._read_frames()
+        payloads = [f.payload for f in frames if f.is_data]
+        trailer = payloads.pop() if payloads and payloads[-1] in _TERMINATORS else b""
+        raw = b"".join(payloads)
 
-            for _ in range(self.MAX_MESSAGE_FRAMES):
-                frame = self._read_frame()
-                state.complete = frame.is_eoi
-                payload = frame.payload if frame.is_data else b""
+        marker = raw.find(b"#9")
+        if marker < 0:
+            raise VICPProtocolError("VICP binary response reached EOI without a DEF9 block")
+        count_field = raw[marker + 2 : marker + 11]
+        if len(count_field) < 9:
+            raise VICPProtocolError("VICP definite-length block ended inside its length header")
+        if not count_field.isdigit():
+            raise VICPProtocolError(f"invalid DEF9 byte count {count_field!r}")
+        expected = int(count_field)
 
-                if expected is None:
-                    header.extend(payload)
-                    payload = b""
-                    marker_index = header.find(b"#9")
-                    if marker_index >= 0:
-                        count_start = marker_index + 2
-                        count_end = count_start + 9
-                        if len(header) < count_end:
-                            if frame.is_eoi:
-                                raise VICPProtocolError(
-                                    "VICP definite-length block ended inside its length header"
-                                )
-                            continue
-
-                        count_field = bytes(header[count_start:count_end])
-                        if not count_field.isdigit():
-                            raise VICPProtocolError(f"invalid DEF9 byte count {count_field!r}")
-                        expected = int(count_field)
-                        # Whatever followed the count in this frame is body, and
-                        # goes through the same length/terminator rules below.
-                        payload = bytes(header[count_end:])
-                        header.clear()
-
-                if expected is not None and payload:
-                    remaining = expected - len(data)
-                    if frame.is_eoi and remaining > 0 and payload in _TERMINATORS:
-                        trailing.extend(payload)
-                    elif remaining > 0:
-                        take = min(remaining, len(payload))
-                        data.extend(payload[:take])
-                        trailing.extend(payload[take:])
-                    else:
-                        trailing.extend(payload)
-
-                if frame.is_eoi:
-                    if expected is None:
-                        raise VICPProtocolError(
-                            "VICP binary response reached EOI without a DEF9 block"
-                        )
-                    if len(data) != expected:
-                        raise VICPProtocolError(f"Expected {expected} bytes, got {len(data)}")
-                    if bytes(trailing) not in (b"", *_TERMINATORS):
-                        raise VICPProtocolError(
-                            f"unexpected bytes after DEF9 block: {bytes(trailing)!r}"
-                        )
-                    return bytes(data)
-
-            raise VICPProtocolError(
-                f"binary response exceeded {self.MAX_MESSAGE_FRAMES} VICP frames without EOI"
-            )
+        body = raw[marker + 11 :]
+        if len(body) < expected:
+            raise VICPProtocolError(f"Expected {expected} bytes, got {len(body)}")
+        extra = body[expected:] + trailer
+        if extra not in (b"", *_TERMINATORS):
+            raise VICPProtocolError(f"unexpected bytes after DEF9 block: {extra!r}")
+        return body[:expected]
 
     def query(self, message: str, *, timeout: float | None = None) -> str:
         """Send one command and atomically read its complete ASCII response.
 
         ``timeout`` replaces the I/O timeout for this exchange only.
         """
-        payload = message.encode("ascii")
-        if len(payload) > self.max_command_length:
-            raise ValueError(
-                f"command is {len(payload)} bytes; maximum is {self.max_command_length}"
-            )
+        payload = self._encode(message)
         with self._lock, self._io_timeout(timeout):
             self._write_frame(payload)
             _flag, response = self.read_message()

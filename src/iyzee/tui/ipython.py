@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Protocol
 from platformdirs import user_data_dir
 from traitlets.config import Config
 
+from .. import wavemeter_readout
 from .instruments import LockedProxy
 
 if TYPE_CHECKING:
@@ -120,6 +121,8 @@ class LabProxy:
                 raise AttributeError(
                     f"lab.{name} is not connected — connect it on the Connect screen first"
                 )
+            if name == "wavemeter":
+                return wavemeter_readout
             device = getattr(handle, "device", None)
             if device is None:
                 raise AttributeError(f"lab.{name} is connected but exposes no live device")

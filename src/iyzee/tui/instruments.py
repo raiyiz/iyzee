@@ -30,7 +30,7 @@ from ..base import CH, IP
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
 from ..scope import LeCroy, LeCroyTimeoutError
-from ..wavemeter_readout import Wavemeter, WavemeterReadoutError
+from ..wavemeter_readout import DEFAULT_CHANNEL, WavemeterReadoutError, read_frequency
 
 log = logging.getLogger("iyzee.instruments")
 
@@ -176,34 +176,35 @@ class ShutterHandle(_LockedHandle):
 class WavemeterHandle(_LockedHandle):
     """Adapter for the wavemeter's stateless HTTP API.
 
-    There is no persistent connection to open — ``connect()`` is a no-op,
-    and ``probe()`` does one real HTTP readout to confirm the switch and
-    network path are actually reachable.
+    There is no persistent connection to open. The handle only provides the
+    shared instrument lock and performs one real readout when probing.
     """
 
-    def __init__(self, channel: int = 0) -> None:
+    def __init__(self, channel: int = DEFAULT_CHANNEL) -> None:
         super().__init__()
-        self._wavemeter = Wavemeter(channel=channel)
+        self._channel = channel
 
     def connect(self) -> None:
-        # HTTP has no persistent session to open; probe() below proves the
-        # endpoint is reachable before the handle is published.
         return None
 
     def disconnect(self) -> None:
         return None
 
     @property
-    def device(self) -> Wavemeter:
-        """The configured wavemeter HTTP client."""
-        return self._wavemeter
+    def channel(self) -> int:
+        return self._channel
+
+    @property
+    def device(self) -> None:
+        """The wavemeter has no persistent device object."""
+        return None
 
     def probe(self) -> str:
         try:
-            freq = self._wavemeter.read_frequency()
+            freq = read_frequency(self._channel)
         except WavemeterReadoutError as exc:
             raise ConnectionError(str(exc)) from exc
-        return f"ch{self._wavemeter.channel} = {freq:.6f} THz"
+        return f"ch{self._channel} = {freq:.6f} THz"
 
 
 class ScopeHandle(_LockedHandle):

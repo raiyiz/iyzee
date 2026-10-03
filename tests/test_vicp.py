@@ -14,6 +14,7 @@ import struct
 import threading
 
 import pytest
+from helpers import FakeSocket
 
 from iyzee.vicp import (
     VICP_DATA_FLAG,
@@ -22,7 +23,7 @@ from iyzee.vicp import (
     VICPProtocolError,
     VICPTimeoutError,
     VICPTransport,
-    recv_exact,
+    _recv_exact,
 )
 
 DATA = VICP_DATA_FLAG
@@ -38,43 +39,9 @@ def block_header(count: int, prefix: bytes = b"C1:WF DAT1,") -> bytes:
     return prefix + b"#9" + f"{count:09d}".encode()
 
 
-class ScriptedSocket:
-    """recv() serves ``data`` in ``chunk``-byte pieces, then times out."""
-
-    def __init__(self, data: bytes = b"", chunk: int = 4096, timeout: float = 3.0):
-        self.buf = bytearray(data)
-        self.chunk = chunk
-        self.sent = bytearray()
-        self.closed = False
-        self.timeouts: list[float] = []
-        self._timeout = timeout
-
-    def gettimeout(self) -> float:
-        return self._timeout
-
-    def settimeout(self, value: float) -> None:
-        self._timeout = value
-        self.timeouts.append(value)
-
-    def recv(self, n: int) -> bytes:
-        if not self.buf:
-            raise TimeoutError("timed out")
-        take = min(n, self.chunk, len(self.buf))
-        chunk = bytes(self.buf[:take])
-        del self.buf[:take]
-        return chunk
-
-    def send(self, data: bytes) -> int:
-        self.sent.extend(data)
-        return len(data)
-
-    def close(self) -> None:
-        self.closed = True
-
-
-def attached(data: bytes = b"", **kwargs) -> tuple[VICPTransport, ScriptedSocket]:
+def attached(data: bytes = b"", **kwargs) -> tuple[VICPTransport, FakeSocket]:
     transport = VICPTransport()
-    sock = ScriptedSocket(data, **kwargs)
+    sock = FakeSocket(data, **kwargs)
     transport.attach_socket(sock)
     return transport, sock
 
@@ -83,22 +50,22 @@ def attached(data: bytes = b"", **kwargs) -> tuple[VICPTransport, ScriptedSocket
 
 
 def test_recv_exact_reassembles_fragmented_reads():
-    assert recv_exact(ScriptedSocket(b"0123456789ABCDEF", chunk=3), 16) == b"0123456789ABCDEF"
+    assert _recv_exact(FakeSocket(b"0123456789ABCDEF", chunk=3), 16) == b"0123456789ABCDEF"
 
 
 def test_recv_exact_raises_on_closed_connection():
-    class Closed(ScriptedSocket):
-        def recv(self, n: int) -> bytes:
+    class Closed(FakeSocket):
+        def recv(self, n: int, flags: int = 0) -> bytes:
             return b""
 
     with pytest.raises(ConnectionError):
-        recv_exact(Closed(), 100)
+        _recv_exact(Closed(), 100)
 
 
 @pytest.mark.parametrize("got", [b"", b"abcd"])
 def test_recv_exact_timeout_reports_how_far_it_got(got):
     with pytest.raises(VICPTimeoutError, match=rf"3\.0s \({len(got)}/10 bytes received\)"):
-        recv_exact(ScriptedSocket(got, chunk=2), 10)
+        _recv_exact(FakeSocket(got, chunk=2), 10)
 
 
 # -- transactions ----------------------------------------------------------------------------
@@ -107,8 +74,8 @@ def test_recv_exact_timeout_reports_how_far_it_got(got):
 def test_transaction_is_reentrant():
     transport = VICPTransport()
 
-    with transport.transaction():
-        with transport.transaction():
+    with transport.transaction_lock:
+        with transport.transaction_lock:
             assert transport.connected is False
 
 
@@ -119,13 +86,13 @@ def test_transactions_are_serialized():
     second_entered = threading.Event()
 
     def first() -> None:
-        with transport.transaction():
+        with transport.transaction_lock:
             first_entered.set()
             assert release_first.wait(2.0)
 
     def second() -> None:
         assert first_entered.wait(2.0)
-        with transport.transaction():
+        with transport.transaction_lock:
             second_entered.set()
 
     threads = [threading.Thread(target=first), threading.Thread(target=second)]
@@ -153,7 +120,7 @@ def test_send_command_is_one_eoi_data_frame():
 
 
 def test_send_command_survives_partial_sends():
-    class Partial(ScriptedSocket):
+    class Partial(FakeSocket):
         def send(self, data: bytes) -> int:
             return super().send(data[:2])
 
@@ -167,7 +134,7 @@ def test_send_command_survives_partial_sends():
 
 
 def test_zero_progress_send_is_an_error_and_invalidates():
-    class Stalled(ScriptedSocket):
+    class Stalled(FakeSocket):
         def send(self, data: bytes) -> int:
             return 0
 
@@ -181,7 +148,7 @@ def test_zero_progress_send_is_an_error_and_invalidates():
 
 
 def test_stalled_write_times_out_and_invalidates():
-    class TimesOut(ScriptedSocket):
+    class TimesOut(FakeSocket):
         def send(self, data: bytes) -> int:
             raise TimeoutError("timed out")
 
@@ -222,8 +189,8 @@ def test_late_reply_is_never_returned_to_the_next_caller():
 
 
 def test_peer_close_invalidates_the_connection():
-    class Closed(ScriptedSocket):
-        def recv(self, n: int) -> bytes:
+    class Closed(FakeSocket):
+        def recv(self, n: int, flags: int = 0) -> bytes:
             return b""
 
     transport = VICPTransport()
@@ -291,8 +258,8 @@ def test_a_silent_first_query_reports_the_widened_bound_and_leaves_a_clean_slate
 
     assert transport.connected is False and sock.closed
 
-    fresh = ScriptedSocket(frame(DATA_EOI, b"LECROY,WS452\n"))
-    monkeypatch.setattr(socket, "socket", lambda *a, **k: _Connectable(fresh))
+    fresh = FakeSocket(frame(DATA_EOI, b"LECROY,WS452\n"))
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: fresh)
     transport.connect("10.0.0.9")  # the retry path the connect screen takes
 
     assert transport.query("*IDN?") == "LECROY,WS452"
@@ -311,34 +278,8 @@ def test_a_timeout_override_must_be_positive():
 # -- connect / close -------------------------------------------------------------------------
 
 
-class _Connectable:
-    """Connects instantly and then behaves like ``target``."""
-
-    def __init__(self, target: ScriptedSocket) -> None:
-        self._target = target
-
-    def setsockopt(self, *args) -> None:
-        pass
-
-    def connect(self, address) -> None:
-        pass
-
-    def __getattr__(self, name):
-        return getattr(self._target, name)
-
-
-class _ConnectTimeoutSocket(ScriptedSocket):
-    """A TCP handshake that never completes (scope off, or a firewall drop)."""
-
-    def connect(self, address) -> None:
-        raise TimeoutError("timed out")
-
-    def setsockopt(self, *args) -> None:
-        pass
-
-
 def test_failed_connect_is_bounded_closes_the_socket_and_publishes_nothing(monkeypatch):
-    half_open = _ConnectTimeoutSocket()
+    half_open = FakeSocket(fail_connect=True)
     monkeypatch.setattr(socket, "socket", lambda *a, **k: half_open)
     transport = VICPTransport()
 
@@ -361,7 +302,7 @@ def test_connect_while_connected_raises():
 def test_close_shuts_down_then_closes_clears_state_and_is_idempotent():
     events: list[str] = []
 
-    class Recording(ScriptedSocket):
+    class Recording(FakeSocket):
         def shutdown(self, how: int) -> None:
             events.append(f"shutdown:{how}")
 
@@ -393,7 +334,7 @@ def test_connect_sets_tcp_nodelay_so_back_to_back_commands_are_not_delayed():
         transport = VICPTransport(port=server.getsockname()[1])
         transport.connect("127.0.0.1")
         try:
-            sock = transport.socket
+            sock = transport._socket
             assert isinstance(sock, socket.socket)
             assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY) != 0
         finally:
@@ -432,7 +373,7 @@ def test_loopback_round_trip_and_reconnect_after_peer_disconnect():
 def test_read_frame_reassembles_a_fragmented_frame():
     transport, _ = attached(frame(DATA_EOI, b"hello"), chunk=2)
 
-    got = transport.read_frame()
+    got = transport._read_frame()
 
     assert isinstance(got, VICPFrame)
     assert got.is_data and got.is_eoi
@@ -470,13 +411,18 @@ def test_non_ascii_reply_keeps_the_connection_usable():
     assert transport.query("*OPC?") == "OK"
 
 
-def test_bad_count_before_eoi_invalidates_because_frames_are_still_unread():
-    transport, _ = attached(frame(DATA, b"C1:WF DAT1,#9notanumber") + frame(DATA_EOI, b"more"))
+def test_bad_count_mid_message_keeps_the_connection_usable_because_the_message_is_fully_read():
+    transport, _ = attached(
+        frame(DATA, b"C1:WF DAT1,#9notanumber")
+        + frame(DATA_EOI, b"more")
+        + frame(DATA_EOI, b"OK\n")
+    )
 
     with pytest.raises(VICPProtocolError, match="invalid DEF9 byte count"):
         transport.read_definite_block()
 
-    assert transport.connected is False
+    assert transport.connected is True
+    assert transport.query("*OPC?") == "OK"
 
 
 def test_bad_count_in_the_final_frame_keeps_the_connection_usable():
@@ -611,7 +557,7 @@ def test_check_link_never_blocks_behind_a_transaction_in_flight():
     holding, release = threading.Event(), threading.Event()
 
     def hold() -> None:
-        with transport.transaction():
+        with transport.transaction_lock:
             holding.set()
             release.wait(2.0)
 
@@ -628,20 +574,13 @@ def test_check_link_never_blocks_behind_a_transaction_in_flight():
         near.close()
 
 
-def test_check_link_tolerates_test_doubles_without_peek_support():
-    transport, _ = attached()  # ScriptedSocket.recv() takes no flags
-
-    assert transport.check_link() is True
-    assert transport.connected is True
-
-
 def test_connect_enables_keepalive_so_a_dead_peer_is_noticed():
     server = _listener()
     try:
         transport = VICPTransport(port=server.getsockname()[1])
         transport.connect("127.0.0.1")
         try:
-            sock = transport.socket
+            sock = transport._socket
             assert isinstance(sock, socket.socket)
             assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) != 0
             if hasattr(socket, "TCP_KEEPIDLE"):
@@ -656,7 +595,7 @@ def test_connect_enables_keepalive_so_a_dead_peer_is_noticed():
 
 
 def test_a_failed_shutdown_does_not_stop_the_close():
-    class Reset(ScriptedSocket):
+    class Reset(FakeSocket):
         def shutdown(self, how: int) -> None:
             raise OSError("not connected")
 

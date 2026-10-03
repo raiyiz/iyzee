@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 from helpers import FakeHandle, async_test, notifications, wait_until
-from test_scope_workflows import DetailedFakeScope, StatefulScope
+from test_scope_workflows import FakeScope, StatefulScope
 from textual.pilot import Pilot
 from textual.widgets import Button, Checkbox, Input, RichLog, Select
 
@@ -24,7 +24,7 @@ from iyzee.tui.screens import scope as scope_screen_mod
 from iyzee.tui.screens.scope import ScopeScreen
 
 
-class ScreenScope(StatefulScope, DetailedFakeScope):
+class ScreenScope(StatefulScope, FakeScope):
     """Stateful (remembers writes, can round/ignore them) and able to acquire."""
 
 
@@ -168,12 +168,11 @@ async def test_apply_after_the_scope_disconnects_releases_the_busy_flag_and_keep
 
         app.handles.pop("scope")  # disconnected between the click and the worker starting
         screen._settings_busy = True
-        screen._apply_channels(scope, [baseline[0]], baseline)
+        screen._apply_channels(scope, [baseline[0]], baseline, threading.Lock())
 
-        # Not stuck "busy"; nothing was written to the (gone) scope; baseline untouched.
+        # Not stuck "busy", and the stale result is discarded: baseline untouched.
         # (The Apply button itself is legitimately disabled again with no scope connected.)
         await wait_until(pilot, lambda: not screen._settings_busy)
-        assert scope.calls == []
         assert screen._last_applied_channel_settings == baseline
 
 

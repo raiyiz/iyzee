@@ -140,6 +140,18 @@ class ScopeScreen(Page):
     action that records the selected waveforms before plotting them.
     """
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Set here, not in on_mount: refresh_readiness() and the Changed handlers
+        # can run before the page is mounted.
+        self._last_applied_channel_settings: tuple[ChannelSettings, ...] | None = None
+        self._last_applied_trigger_settings: TriggerSettings | None = None
+        self._settings_synced = False
+        self._settings_busy = False
+        self._retrieve_in_flight = False
+        self._suppress_dirty_events = False
+        self._dirty_fields: set[str] = set()
+
     def compose(self) -> ComposeResult:
         yield Static("Scope", classes="panel-title")
         # Shown only while the scope isn't connected; see refresh_readiness().
@@ -201,13 +213,6 @@ class ScopeScreen(Page):
         plot.plt.title("Scope waveforms")
         plot.plt.xlabel("Time (s)")
         plot.plt.ylabel("Voltage (V)")
-        self._last_applied_channel_settings: tuple[ChannelSettings, ...] | None = None
-        self._last_applied_trigger_settings: TriggerSettings | None = None
-        self._settings_synced = False
-        self._settings_busy = False
-        self._retrieve_in_flight = False
-        self._suppress_dirty_events = False
-        self._dirty_fields: set[str] = set()
         self.refresh_readiness()
         self._refresh_scope_ui()
 
@@ -244,57 +249,49 @@ class ScopeScreen(Page):
             None,
         )
 
+    def _float_differs(self, field_id: str, parse, label: str, baseline: float) -> bool:
+        """True if the field differs from ``baseline`` (or doesn't parse at all)."""
+        try:
+            return self._read(field_id, parse, label) != baseline
+        except FieldError:
+            return True
+
     def _field_changed_from_baseline(self, field_id: str) -> bool:
         """Compare one form field with the known instrument-state baseline."""
         if field_id.startswith("C"):
-            channel_name, field = field_id.split("-", 1)
-            baseline = self._channel_baseline(Channel(channel_name))
-            if baseline is None:
+            name, field = field_id.split("-", 1)
+            base = self._channel_baseline(Channel(name))
+            if base is None:
                 return False
             if field == "enable":
-                return self.query_one(f"#{field_id}", Checkbox).value != baseline.enabled
+                return self.query_one(f"#{field_id}", Checkbox).value != base.enabled
             if field == "vdiv":
-                try:
-                    value = self._read(field_id, _positive_float, f"{channel_name} V/div")
-                except FieldError:
-                    return True
-                return value != baseline.volts_per_div
+                label = f"{name} V/div"
+                return self._float_differs(field_id, _positive_float, label, base.volts_per_div)
             if field == "offset":
-                try:
-                    value = self._read(field_id, _finite_float, f"{channel_name} offset")
-                except FieldError:
-                    return True
-                return value != baseline.offset
+                return self._float_differs(field_id, _finite_float, f"{name} offset", base.offset)
             if field == "coupling":
-                return self.query_one(f"#{field_id}", Select).value != baseline.coupling.value
-        trigger_baseline = self._last_applied_trigger_settings
-        if trigger_baseline is None:
+                return self.query_one(f"#{field_id}", Select).value != base.coupling.value
             return False
-        if field_id == "trig-source":
-            return self.query_one("#trig-source", Select).value != trigger_baseline.source.value
-        if field_id == "trig-mode":
-            return self.query_one("#trig-mode", Select).value != trigger_baseline.mode.value
-        if field_id == "trig-slope":
-            return self.query_one("#trig-slope", Select).value != trigger_baseline.slope.value
-        if field_id == "trig-coupling":
-            return self.query_one("#trig-coupling", Select).value != trigger_baseline.coupling.value
+        trig = self._last_applied_trigger_settings
+        if trig is None:
+            return False
         if field_id == "trig-level":
-            try:
-                value = self._read("trig-level", _finite_float, "Trigger level")
-            except FieldError:
-                return True
-            return value != trigger_baseline.level_volts
+            return self._float_differs(field_id, _finite_float, "Trigger level", trig.level_volts)
+        selects = {
+            "trig-source": trig.source,
+            "trig-mode": trig.mode,
+            "trig-slope": trig.slope,
+            "trig-coupling": trig.coupling,
+        }
+        if field_id in selects:
+            return self.query_one(f"#{field_id}", Select).value != selects[field_id].value
         return False
 
     def _refresh_field_dirty(self, field_id: str) -> None:
-        if self._field_changed_from_baseline(field_id):
-            self._dirty_fields.add(field_id)
-            widget = self.query_one(f"#{field_id}")
-            widget.add_class("scope-dirty")
-        else:
-            self._dirty_fields.discard(field_id)
-            widget = self.query_one(f"#{field_id}")
-            widget.remove_class("scope-dirty")
+        dirty = self._field_changed_from_baseline(field_id)
+        (self._dirty_fields.add if dirty else self._dirty_fields.discard)(field_id)
+        self.query_one(f"#{field_id}").set_class(dirty, "scope-dirty")
         self._refresh_scope_ui()
 
     def _set_channel_dirty_style(self, channel: Channel) -> None:
@@ -303,8 +300,6 @@ class ScopeScreen(Page):
 
     def _refresh_scope_ui(self) -> None:
         """Update dirty styling, status text, and which actions can run."""
-        if not hasattr(self, "_dirty_fields"):
-            return
         for channel in CHANNELS:
             self._set_channel_dirty_style(channel)
         trigger_dirty = any(field_id.startswith("trig-") for field_id in self._dirty_fields)
@@ -378,10 +373,9 @@ class ScopeScreen(Page):
             self._settings_synced = False
             self._settings_busy = False
             self._retrieve_in_flight = False
-            if hasattr(self, "_dirty_fields"):
-                self._dirty_fields.clear()
-                for widget in self.query(".scope-dirty"):
-                    widget.remove_class("scope-dirty")
+            self._dirty_fields.clear()
+            for widget in self.query(".scope-dirty"):
+                widget.remove_class("scope-dirty")
             status.update("Not ready: connect the Scope first — press F1 for the Connect page.")
         elif not self._settings_synced and not self._retrieve_in_flight:
             self._start_retrieve(silent=True)
@@ -542,8 +536,8 @@ class ScopeScreen(Page):
         return settings
 
     def _start_apply_channels(self) -> None:
-        scope = self._scope()
-        if scope is None:
+        handle = self._scope_handle()
+        if handle is None:
             return
         if self._settings_busy:
             self.notify("Another scope settings operation is already running.", severity="warning")
@@ -576,7 +570,7 @@ class ScopeScreen(Page):
             self._refresh_scope_ui()
             return
         self._begin_settings_op("apply-channels")
-        self._apply_channels(scope, changed, baseline)
+        self._apply_channels(handle.device, changed, baseline, handle.lock)
 
     @work(thread=True, exclusive=True, group="scope-apply-channels", exit_on_error=False)
     def _apply_channels(
@@ -584,21 +578,11 @@ class ScopeScreen(Page):
         scope: LeCroy,
         settings: Sequence[ChannelSettings],
         baseline: Sequence[ChannelSettings],
+        lock,
     ) -> None:
-        handle = self.iyzee_app.handles.get("scope")
-        if handle is None:
-            result = ChannelApplyResult(
-                (),
-                tuple(
-                    ChannelError(s.channel, RuntimeError("scope disconnected")) for s in settings
-                ),
-                (),
-            )
-            self._ui(self._finish_apply_channels, scope, settings, result, baseline)
-            return
         try:
             result = apply_and_verify_channel_settings(
-                scope, settings, current_settings=baseline, lock=handle.lock
+                scope, settings, current_settings=baseline, lock=lock
             )
         except Exception as exc:  # noqa: BLE001 - never leave the Apply button disabled
             log.exception("scope: applying channel settings failed")

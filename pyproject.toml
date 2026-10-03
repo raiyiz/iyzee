@@ -1,7 +1,7 @@
 [project]
 name = "iyzee"
 version = "0.1.0"
-description = "Add your description here"
+description = "Lab instrument control and noise-measurement TUI"
 readme = "README.md"
 authors = [
     { name = "ↄǝsƃ", email = "ʇǝu˙oǝʇsod@ınƃ" }
@@ -11,25 +11,17 @@ dependencies = [
     "ipython>=9.0",
     "matplotlib>=3.11.1",
     "numpy>=2.5.2",
-    "pandas>=3.0.5",
     "platformdirs>=4.0",
     "prompt-toolkit>=3.0.41",
     "pyte>=0.8.2",
     "pyvisa>=1.16.2",
     "pyvisa-py>=0.8.1",
+    "requests>=2.34.2",
     "tabulate>=0.10.0",
     "textual>=8.2.8",
     "textual-plotext>=1.0.1",
     "textual-vim-textarea==1.2.0",
     "traitlets>=5.14",
-]
-
-[project.optional-dependencies]
-test = [
-    "pytest>=9.1.1",
-]
-dev = [
-    "textual-dev>=1.7.0",
 ]
 
 [project.scripts]
@@ -57,4 +49,5 @@ dev = [
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "ruff>=0.13.0",
+    "textual-dev>=1.7.0",
 ]

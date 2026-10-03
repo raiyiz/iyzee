@@ -160,8 +160,7 @@ class SweepScreen(Page):
             shutter = handles.get("shutter")
             if shutter is None or shutter.device is None:
                 missing.append("shutter")
-            wavemeter = handles.get("wavemeter")
-            if wavemeter is None or wavemeter.device is None:
+            if "wavemeter" not in handles:
                 missing.append("wavemeter")
         return missing
 
@@ -226,17 +225,15 @@ class SweepScreen(Page):
             if kind == "bandwidth":
                 steps, config = self._build_bandwidth_run()
                 shutter = None
-                wavemeter = None
             else:
                 shutter_handle = self.iyzee_app.handles.get("shutter")
-                wavemeter_handle = self.iyzee_app.handles.get("wavemeter")
                 if shutter_handle is None or shutter_handle.device is None:
                     self.notify(
                         "Connect the shutter first — press F1 for the Connect page.",
                         severity="error",
                     )
                     return
-                if wavemeter_handle is None or wavemeter_handle.device is None:
+                if "wavemeter" not in self.iyzee_app.handles:
                     self.notify(
                         "Connect the wavemeter first — press F1 for the Connect page.",
                         severity="error",
@@ -244,7 +241,6 @@ class SweepScreen(Page):
                     return
                 steps, config = self._build_frequency_run()
                 shutter = shutter_handle.device
-                wavemeter = wavemeter_handle.device
         except FieldError as exc:
             self._flag_invalid(exc.field_id)
             self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
@@ -278,7 +274,7 @@ class SweepScreen(Page):
         self.query_one("#abort-sweep", Button).disabled = False
         self.query_one("#capture-trace", Button).disabled = True
         self.iyzee_app.sweep_running = True
-        self._run(mx_handle.device, shutter, wavemeter, steps, config, kind)
+        self._run(mx_handle.device, shutter, steps, config, kind)
 
     def _build_bandwidth_run(self):
         start = self._read("rbw-start", _positive_float, "RBW start")
@@ -304,9 +300,7 @@ class SweepScreen(Page):
     # -- the run itself, off the UI thread -----------------------------------
 
     @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
-    def _run(
-        self, mx, shutter, wavemeter, steps: Sequence[Step], config: AnalyzerConfig, kind: str
-    ) -> None:
+    def _run(self, mx, shutter, steps: Sequence[Step], config: AnalyzerConfig, kind: str) -> None:
         # Hold the MXA's lock (and the shutter's, for a frequency sweep) for
         # the whole run, not just individual calls — a sweep is one logical
         # operation, and interleaving a console cell's commands partway
@@ -318,8 +312,6 @@ class SweepScreen(Page):
         locks = [self.iyzee_app.handles["mxa"].lock]
         if shutter is not None:
             locks.append(self.iyzee_app.handles["shutter"].lock)
-        if wavemeter is not None:
-            locks.append(self.iyzee_app.handles["wavemeter"].lock)
 
         with contextlib.ExitStack() as stack:
             for lock in locks:
@@ -338,7 +330,6 @@ class SweepScreen(Page):
                 mx=mx,
                 run_id=record.run_id,
                 shutter=shutter,
-                wavemeter=wavemeter,
                 config=record.config,
             )
 

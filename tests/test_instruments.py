@@ -168,30 +168,42 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
 # -- WavemeterHandle ----------------------------------------------------------
 
 
-def test_wavemeter_handle_probe_reports_frequency(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeWavemeter:
-        def __init__(self, channel):
-            self.channel = channel
+def test_wavemeter_handle_probe_reads_the_default_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(instruments_mod, "read_frequency", lambda channel=0: 377.105)
 
-        def read_frequency(self):
-            return 377.105
-
-    monkeypatch.setattr(instruments_mod, "Wavemeter", FakeWavemeter)
-    handle = WavemeterHandle(channel=1)
-    assert handle.probe() == "ch1 = 377.105000 THz"
-    assert handle.device.channel == 1
+    handle = WavemeterHandle()
+    assert handle.probe() == "ch4 = 377.105000 THz"
+    assert handle.channel == instruments_mod.DEFAULT_CHANNEL
+    assert handle.device is None
 
 
-def test_wavemeter_handle_probe_wraps_readout_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeWavemeter:
-        def __init__(self, channel):
-            self.channel = channel
+def test_wavemeter_handle_probe_uses_its_configured_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[int] = []
 
-        def read_frequency(self):
-            raise instruments_mod.WavemeterReadoutError("switch unreachable")
+    def read(channel=0):
+        seen.append(channel)
+        return 377.105
 
-    monkeypatch.setattr(instruments_mod, "Wavemeter", FakeWavemeter)
-    handle = WavemeterHandle(channel=0)
+    monkeypatch.setattr(instruments_mod, "read_frequency", read)
+
+    handle = WavemeterHandle(channel=4)
+
+    assert handle.probe() == "ch4 = 377.105000 THz"
+    assert seen == [4]
+
+
+def test_wavemeter_handle_probe_wraps_readout_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(channel=0):
+        raise instruments_mod.WavemeterReadoutError("switch unreachable")
+
+    monkeypatch.setattr(instruments_mod, "read_frequency", fail)
+
+    handle = WavemeterHandle()
+
     with pytest.raises(ConnectionError, match="switch unreachable"):
         handle.probe()
 

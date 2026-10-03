@@ -2,7 +2,7 @@
 
 The single source of truth for the "clear, plot each series, set
 title/labels, refresh" boilerplate that used to be written out
-independently in ``SweepScreen._plot_result``, ``TracesScreen._show``,
+independently in ``SweepScreen._plot_result``, ``ResultsScreen``,
 and ``IyzeeConsole._draw_figure`` — those three differ in where their
 series data comes from (a live sweep, a saved ``.npz``, a matplotlib
 ``Figure``'s line data), not in how it ends up on screen.
@@ -101,7 +101,7 @@ def draw_series(
 
     ``clear=False`` appends to whatever's already drawn instead of
     replacing it — what a live sweep wants (one more line per completed
-    point, not a full redraw), as opposed to Traces/Console, which are
+    point, not a full redraw), as opposed to Results/Console, which are
     always redrawing from scratch for a newly selected run/figure.
     """
     if clear:

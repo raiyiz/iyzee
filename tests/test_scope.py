@@ -8,6 +8,7 @@ import struct
 
 import numpy as np
 import pytest
+from helpers import FakeSocket
 
 from iyzee.scope import (
     Channel,
@@ -21,29 +22,11 @@ from iyzee.scope import (
 )
 
 
-class FragmentingFakeSocket:
-    """A fake socket whose recv() returns data in small, arbitrary chunks."""
+class FragmentingFakeSocket(FakeSocket):
+    """recv() returns data in small chunks, then reports a closed peer."""
 
-    def __init__(self, data: bytes = b"", chunk_size: int = 3):
-        self._buf = data
-        self._chunk_size = chunk_size
-        self.sent = bytearray()
-        self.timeouts: list[float] = []
-
-    def recv(self, n: int) -> bytes:
-        take = min(n, self._chunk_size, len(self._buf))
-        chunk, self._buf = self._buf[:take], self._buf[take:]
-        return chunk
-
-    def send(self, data: bytes) -> int:
-        self.sent.extend(data)
-        return len(data)
-
-    def settimeout(self, value: float) -> None:
-        self.timeouts.append(value)
-
-    def gettimeout(self) -> float:
-        return self.timeouts[-1] if self.timeouts else 3.0
+    def __init__(self, data: bytes = b"", chunk_size: int = 3, **kwargs):
+        super().__init__(data, chunk_size, eof=True, **kwargs)
 
 
 def vicp_frame(flag: int, payload: bytes) -> bytes:
@@ -70,27 +53,6 @@ def sent_commands(sock: FragmentingFakeSocket) -> list[bytes]:
 # -- LeCroy wiring on top of the transport -----------------------------------------------------
 
 
-class _ConnectableSocket(FragmentingFakeSocket):
-    """Connects instantly (or times out), recording the timeouts applied."""
-
-    def __init__(self, *args, fail_connect: bool = False, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fail_connect = fail_connect
-        self.connected_to = None
-        self.closed = False
-
-    def setsockopt(self, *args) -> None:
-        pass
-
-    def connect(self, address) -> None:
-        if self.fail_connect:
-            raise TimeoutError("timed out")
-        self.connected_to = address
-
-    def close(self) -> None:
-        self.closed = True
-
-
 @pytest.mark.parametrize(
     "kwargs,expected",
     [
@@ -99,7 +61,7 @@ class _ConnectableSocket(FragmentingFakeSocket):
     ],
 )
 def test_connect_bounds_the_handshake_then_the_ongoing_io(monkeypatch, kwargs, expected):
-    fake = _ConnectableSocket()
+    fake = FragmentingFakeSocket()
     monkeypatch.setattr(socket, "socket", lambda *a, **k: fake)
 
     scope = LeCroy()
@@ -115,7 +77,7 @@ def test_connect_bounds_the_handshake_then_the_ongoing_io(monkeypatch, kwargs, e
 
 
 def test_connect_timeout_is_a_lecroy_timeout(monkeypatch):
-    fake = _ConnectableSocket(fail_connect=True)
+    fake = FragmentingFakeSocket(fail_connect=True)
     monkeypatch.setattr(socket, "socket", lambda *a, **k: fake)
 
     with pytest.raises(LeCroyTimeoutError, match=rf"within {LeCroy.MAX_TCP_CONNECT}s"):
@@ -124,7 +86,7 @@ def test_connect_timeout_is_a_lecroy_timeout(monkeypatch):
 
 def test_a_silent_scope_raises_lecroy_timeout_and_drops_the_connection():
     class Silent(FragmentingFakeSocket):
-        def recv(self, n: int) -> bytes:
+        def recv(self, n: int, flags: int = 0) -> bytes:
             raise TimeoutError("timed out")
 
     scope = LeCroy()

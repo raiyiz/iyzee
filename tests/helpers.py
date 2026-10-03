@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import os
+import socket
 import threading
 import time
 from collections.abc import Awaitable, Callable
@@ -185,7 +186,7 @@ def save_run(
 ) -> Path:
     """Write one run archive under ``root/folder`` and return its path.
 
-    ``mtime`` pins the file's modification time (the Traces page orders runs
+    ``mtime`` pins the file's modification time (the Results page orders runs
     by it, and filesystem timestamps are too coarse to rely on).
     """
     directory = root / folder
@@ -196,3 +197,77 @@ def save_run(
     if mtime is not None:
         os.utime(path, (mtime, mtime))
     return path
+
+
+class FakeSocket:
+    """A stand-in for a connected TCP socket, with the whole surface VICPTransport touches.
+
+    ``recv`` serves ``data`` in ``chunk``-byte pieces; once drained it times out,
+    or reports a closed peer (``b""``) with ``eof=True``. A peek on an empty
+    buffer looks like an idle, healthy link. ``connect`` succeeds instantly
+    unless ``fail_connect`` is set. Everything the transport does to it is
+    recorded: ``sent``, ``timeouts`` (every ``settimeout``), ``closed``.
+    """
+
+    def __init__(
+        self,
+        data: bytes = b"",
+        chunk: int = 4096,
+        timeout: float = 3.0,
+        *,
+        eof: bool = False,
+        fail_connect: bool = False,
+    ) -> None:
+        self.buf = bytearray(data)
+        self.chunk = chunk
+        self.eof = eof
+        self.fail_connect = fail_connect
+        self.sent = bytearray()
+        self.timeouts: list[float] = []
+        self.closed = False
+        self.connected_to: object = None
+        self._timeout = timeout
+
+    def gettimeout(self) -> float:
+        return self._timeout
+
+    def settimeout(self, value: float) -> None:
+        self._timeout = value
+        self.timeouts.append(value)
+
+    def recv(self, n: int, flags: int = 0) -> bytes:
+        if flags & socket.MSG_PEEK:
+            if self.buf:
+                return bytes(self.buf[:n])
+            if self.eof:
+                return b""
+            raise BlockingIOError
+        if not self.buf:
+            if self.eof:
+                return b""
+            raise TimeoutError("timed out")
+        take = min(n, self.chunk, len(self.buf))
+        data = bytes(self.buf[:take])
+        del self.buf[:take]
+        return data
+
+    def send(self, data: bytes) -> int:
+        self.sent.extend(data)
+        return len(data)
+
+    def connect(self, address: object) -> None:
+        if self.fail_connect:
+            raise TimeoutError("timed out")
+        self.connected_to = address
+
+    def setsockopt(self, *args: object) -> None:
+        pass
+
+    def getsockname(self) -> tuple[str, int]:
+        return ("127.0.0.1", 0)
+
+    def shutdown(self, how: int) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True

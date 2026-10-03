@@ -37,19 +37,6 @@ class BoomStep:
         raise RuntimeError("boom")
 
 
-class FakeWavemeter:
-    def __init__(self):
-        self.setpoints = []
-        self.read_channels = []
-
-    def set_pid_setpoint(self, freq, channel):
-        self.setpoints.append((freq, channel))
-
-    def read_frequency(self, channel):
-        self.read_channels.append(channel)
-        return 377.100001
-
-
 class FakeShutterControl:
     """Stand-in for power.ShutterControl as a context manager."""
 
@@ -123,13 +110,20 @@ def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
 
     mx = FakeMXA()
     shutter = FakeShutterControl()
-    wavemeter = FakeWavemeter()
-    ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter, wavemeter=wavemeter)
+    setpoints = []
+    monkeypatch.setattr(
+        "iyzee.experiment.procedures.set_pid_setpoint",
+        lambda freq, channel: setpoints.append((freq, channel)),
+    )
+    monkeypatch.setattr(
+        "iyzee.experiment.procedures.read_frequency",
+        lambda channel: 377.100001,
+    )
+    ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter)
 
     result = FrequencyStep(frequency_thz=377.1, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
-    assert wavemeter.setpoints == [(377.1, 1)]
-    assert wavemeter.read_channels == [1]
+    assert setpoints == [(377.1, 1)]
     assert shutter.events == ["open", "close"]
     assert mx.trace_calls == [1, 2]
     assert result.traces["squeezing"] == [1]
@@ -138,16 +132,9 @@ def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
 
 
 def test_frequency_step_requires_shutter():
-    ctx = ExperimentContext(mx=FakeMXA(), run_id="t", wavemeter=FakeWavemeter())
+    ctx = ExperimentContext(mx=FakeMXA(), run_id="t")
 
     with pytest.raises(ValueError, match="shutter"):
-        FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
-
-
-def test_frequency_step_requires_wavemeter():
-    ctx = ExperimentContext(mx=FakeMXA(), run_id="t", shutter=FakeShutterControl())
-
-    with pytest.raises(ValueError, match="wavemeter"):
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
 

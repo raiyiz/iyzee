@@ -1,1 +1,1 @@
-"""One screen per common task: connect, sweep, scope, traces, log."""
+"""One screen per common task: connect, sweep, scope, results, console, log."""

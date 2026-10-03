@@ -4,38 +4,22 @@ workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$CI_COMMIT_BRANCH == "moonshine"'
-
-stages:
-  - test
-  - lint
-  - typecheck
-  - docs
 
 test:
-  stage: test
-  script:
-    - ./ci.sh test
+  script: [scripts/ci.sh test]
 
 lint:
-  stage: lint
-  script:
-    - ./ci.sh lint
+  script: [scripts/ci.sh lint]
 
 typecheck:
-  stage: typecheck
-  script:
-    - ./ci.sh typecheck
+  script: [scripts/ci.sh typecheck]
 
 docs:
-  stage: docs
   image:
     name: ghcr.io/typst/typst:0.15.1
     entrypoint: [""]
-  script:
-    - ./ci.sh docs
+  script: [scripts/ci.sh docs]
   artifacts:
     name: iyzee-documentation
-    paths:
-      - build/docs/*.pdf
+    paths: [build/docs/*.pdf]
     expire_in: 30 days
