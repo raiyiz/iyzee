@@ -12,8 +12,9 @@ a short human-readable status string).
 Adding a new instrument to the Connect screen is: write one adapter class
 here, add one :class:`InstrumentSpec` to ``INSTRUMENTS`` below. No screen
 code changes required.
-All handles also expose ``.lock`` for shared serialization. Handles with a
-live driver expose that driver as ``.device``; stateless adapters may return ``None``.
+All handles also expose ``.lock`` for shared serialization. Handles expose their
+underlying device/client as ``.device``; stateless adapters such as the wavemeter
+still provide a reusable client there.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from ..base import CH, IP
 from ..mxa import KeysightMXA
 from ..power import ShutterControl
 from ..scope import LeCroy, LeCroyTimeoutError
-from ..wavemeter_readout import DEFAULT_CHANNEL, Wavemeter, WavemeterReadoutError, read_frequency
+from ..wavemeter_readout import DEFAULT_CHANNEL, Wavemeter, WavemeterReadoutError
 
 log = logging.getLogger("iyzee.instruments")
 
@@ -59,10 +60,10 @@ class InstrumentHandle(Protocol):
 
     @property
     def device(self) -> Any | None:
-        """The live underlying device, if this handle exposes one.
+        """The underlying device or client exposed by this handle.
 
-        Stateless adapters such as the wavemeter return ``None``; the
-        Connect/Sweep/Scope/console paths only use handles with a live device.
+        Stateless adapters such as the wavemeter still expose their client;
+        there is simply no persistent connection behind it.
         """
         ...
 
@@ -204,7 +205,7 @@ class WavemeterHandle(_LockedHandle):
 
     def probe(self) -> str:
         try:
-            freq = read_frequency(self._channel)
+            freq = self._client.read_frequency(self._channel)
         except WavemeterReadoutError as exc:
             raise ConnectionError(str(exc)) from exc
         return f"ch{self._channel} = {freq:.6f} THz"

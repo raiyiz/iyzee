@@ -169,12 +169,19 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
 
 
 def test_wavemeter_handle_probe_reads_the_default_channel(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(instruments_mod, "read_frequency", lambda channel=0: 377.105)
+    seen_clients = []
+
+    def read(self, channel=None):
+        seen_clients.append(self)
+        return 377.105
+
+    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
 
     handle = WavemeterHandle()
     assert handle.probe() == "ch4 = 377.105000 THz"
     assert handle.channel == instruments_mod.DEFAULT_CHANNEL
     assert isinstance(handle.device, instruments_mod.Wavemeter)
+    assert seen_clients == [handle.device]
 
 
 def test_wavemeter_handle_probe_uses_its_configured_channel(
