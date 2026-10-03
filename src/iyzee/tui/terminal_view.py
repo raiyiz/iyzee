@@ -132,6 +132,11 @@ class TerminalView(Widget, can_focus=True):
 
     def on_key(self, event: events.Key) -> None:
         key = event.key
+        if key == ":":
+            event.stop()
+            event.prevent_default()
+            self.app.action_open_command()  # type: ignore[attr-defined]
+            return
         if key in _APP_KEYS:
             return  # a real app binding; let it through
 
