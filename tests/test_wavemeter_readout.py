@@ -175,3 +175,32 @@ def test_set_pid_setpoint_translates_http_failure(monkeypatch: pytest.MonkeyPatc
         match=r"channel 4 to 377\.1 THz",
     ):
         wavemeter_readout.set_pid_setpoint(377.1, 4)
+
+def test_client_starts_without_a_last_seen_timestamp_and_records_successful_responses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = wavemeter_readout.Wavemeter()
+
+    assert client.last_seen is None
+
+    monkeypatch.setattr(
+        wavemeter_readout.requests,
+        "get",
+        lambda *args, **kwargs: response("377.123456"),
+    )
+
+    assert client.read_frequency(4) == pytest.approx(377.123456)
+    first_seen = client.last_seen
+
+    assert first_seen is not None
+    assert first_seen.tzinfo is wavemeter_readout.timezone.utc
+
+    def fail(*args, **kwargs):
+        raise requests.Timeout("timed out")
+
+    monkeypatch.setattr(wavemeter_readout.requests, "get", fail)
+
+    with pytest.raises(wavemeter_readout.WavemeterReadoutError):
+        client.read_frequency(4)
+
+    assert client.last_seen == first_seen

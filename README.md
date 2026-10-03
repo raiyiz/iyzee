@@ -188,7 +188,8 @@ apply_channel_settings(lab.scope, [ChannelSettings(Channel.C1, True, 0.5, 0.0, C
 lab.results[-1].traces["squeezing"]  # last completed sweep
 lab.connected  # e.g. ("mx", "shutter")
 
-lab.wavemeter.read_frequency(4)  # THz; the wavemeter is an HTTP client, no connection to open
+lab.wavemeter.read_frequency(4)  # THz; stateless HTTP client, no connection to open
+lab.wavemeter.last_seen  # UTC timestamp of the last successful HTTP response, or None
 lab.api()  # what is connected and available
 lab.api("scope", "trig")  # the scope's methods that mention "trig", with signatures
 lab.api("wavemeter")  # method list, with the HTTP route each one calls
