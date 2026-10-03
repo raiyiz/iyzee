@@ -2,9 +2,7 @@ import math
 import re
 import struct
 import threading
-from contextlib import contextmanager
 from enum import StrEnum
-from typing import Iterator
 
 import numpy as np
 
@@ -129,35 +127,13 @@ def _finite(value: float, what: str) -> float:
 
 
 class LeCroy:
+    """Remote control and waveform download for LeCroy scopes via VICP.
+
+    The driver targets the LeCroy/Teledyne LeCroy IEEE-488.2-style command
+    dialect used by WaveSurfer, WaveAce and X-Stream. Channel, trigger and
+    math methods forward that dialect; model-dependent vocabularies stay plain
+    strings rather than pretending to be universal enums.
     """
-    Class for remote control and download of LeCroy oscilloscope data
-    tested for WaveSurfer 452
-    Methods
-    ------------
-    connect(IP) : after initializing to connect (raises if already connected)
-    disconnect() : to end communication (safe to call when not connected)
-    send(message) : message to device (commands, etc.)
-    readAll() : read a full framed response from the device, returns ascii string
-    query(message) : send(message) + readAll(), returns the trimmed response text
-
-    getDataBytes(channel="C1", block="DAT1"): binary data download, 8-bit
-    getDataWords(channel="C1", block="DAT1"): binary data download, 16-bit
-    getDataFloats(channel="C1", block="DAT1"): unit, vertical data (downloads 16-bit binary)
-    getHorProperties(channel="C1") : returns (unit, offset, interval) in time dir.
-
-    Also provides channel (vertical), trigger, and math-function control —
-    see the "Channel", "Trigger", and "Math" sections below. Those commands
-    follow the classic LeCroy/Teledyne LeCroy IEEE-488.2-style command set
-    shared by the WaveSurfer, WaveAce, and X-Stream families (documented in
-    Teledyne LeCroy's Remote Control Command Reference manuals), the same
-    family this driver already targets for waveform download (its
-    ``INSPECT?``-based methods above use that exact dialect). They have not
-    been exercised against real hardware in this environment, only checked
-    against that documentation, so verify against your instrument (many
-    commands accept a ``?`` query form to read back what was just set) before
-    relying on them for anything safety-critical.
-    """
-
     MAX_TCP_CONNECT = 5  # time in s. to get a conn
     MAC_TCP_READ = 3  # time in s. to wait for the DSO to respond
     LECROY_SERVER_PORT = 1861  # as defined by LeCroy
@@ -192,12 +168,6 @@ class LeCroy:
     @property
     def SOCK_TIMEOUT(self) -> float:
         return self._transport.io_timeout
-
-    @contextmanager
-    def transaction(self) -> Iterator[None]:
-        """Serialize a complete logical operation on the Scope connection."""
-        with self._transport.transaction_lock:
-            yield
 
     def connect(self, IP, delayval=None, connect_timeout=None):
         """Connect to the IP with bounded handshake and I/O timeouts.
@@ -244,9 +214,15 @@ class LeCroy:
         """Return the scope's ``*IDN?`` identification string."""
         return self.query("*IDN?", timeout=timeout)
 
+    def _inspect(self, channel: Channel, field: str) -> str:
+        self.send(f'{_ident(channel, "channel")}:INSPECT? "{field}"')
+        return self.readAll()[1]
+
+    def _inspect_number(self, channel: Channel, field: str) -> float:
+        return float(self._inspect(channel, field).split(":")[-1].split('"\n')[0].strip())
+
     # ------------------------------------------------------------------
     # Channel (vertical) control
-    # ------------------------------------------------------------------
     def set_volts_per_div(self, channel: Channel, volts_per_div: float) -> None:
         """Set the vertical scale for ``channel``, in volts/division."""
         self.send(f"{channel}:VOLT_DIV {_finite(volts_per_div, 'volts_per_div')}")
@@ -434,7 +410,7 @@ class LeCroy:
 
     def getDataBytes(self, channel="C1", block="DAT1"):
         """Return waveform samples as signed 8-bit values."""
-        with self.transaction():
+        with self.transaction_lock:
             channel, block = _ident(channel, "channel"), _ident(block, "block")
             self.send("CFMT DEF9,BYTE,BIN")
             self.send(f"{channel}:WF? {block}")
@@ -444,7 +420,7 @@ class LeCroy:
     def _read_words(self, channel: str, block: str) -> np.ndarray:
         """Download one waveform as signed 16-bit codes (little-endian on the wire)."""
         channel, block = _ident(channel, "channel"), _ident(block, "block")
-        with self.transaction():
+        with self.transaction_lock:
             # Format and byte order must be in force *before* the waveform is
             # requested: the scope encodes the WF? reply when it executes it.
             self.send("CFMT DEF9,WORD,BIN")
@@ -461,17 +437,11 @@ class LeCroy:
 
     def getDataFloatsDetailed(self, channel="C1", block="DAT1"):
         """Return calibrated waveform data together with raw ADC codes."""
-        with self.transaction():
+        with self.transaction_lock:
             word_values = self._read_words(channel, block)
-            self.send(f'{channel}:INSPECT? "VERTICAL_OFFSET"')
-            _r1, r2 = self.readAll()
-            vertical_offset = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-            self.send(f'{channel}:INSPECT? "VERTICAL_GAIN"')
-            _r1, r2 = self.readAll()
-            vertical_gain = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-            self.send(f'{channel}:INSPECT? "VERTUNIT"')
-            _r1, r2 = self.readAll()
-            unit = r2.split("Unit Name = ")[-1].split('"\n')[0]
+            vertical_offset = self._inspect_number(channel, "VERTICAL_OFFSET")
+            vertical_gain = self._inspect_number(channel, "VERTICAL_GAIN")
+            unit = self._inspect(channel, "VERTUNIT").split("Unit Name = ")[-1].split('"\n')[0]
             values = vertical_gain * word_values.astype(np.float64) - vertical_offset
             return {
                 "unit": unit,
@@ -493,17 +463,8 @@ class LeCroy:
 
     def getHorProperties(self, channel="C1"):
         """Return the horizontal unit, offset, and sample interval."""
-        with self.transaction():
-            self.send(f'{channel}:INSPECT? "HORUNIT"')
-            _r1, r2 = self.readAll()
-            horunit = r2.split("Unit Name = ")[-1].split('"\n')[0]
-
-            self.send(f'{channel}:INSPECT? "HORIZ_OFFSET"')
-            _r1, r2 = self.readAll()
-            offset = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-
-            self.send(f'{channel}:INSPECT? "HORIZ_INTERVAL"')
-            _r1, r2 = self.readAll()
-            interval = float(r2.split(":")[-1].split('"\n')[0].strip(" "))
-
+        with self.transaction_lock:
+            horunit = self._inspect(channel, "HORUNIT").split("Unit Name = ")[-1].split('"\n')[0]
+            offset = self._inspect_number(channel, "HORIZ_OFFSET")
+            interval = self._inspect_number(channel, "HORIZ_INTERVAL")
             return horunit, offset, interval
