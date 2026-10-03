@@ -196,7 +196,7 @@ class LeCroy:
     @contextmanager
     def transaction(self) -> Iterator[None]:
         """Serialize a complete logical operation on the Scope connection."""
-        with self._transport.transaction():
+        with self._transport.transaction_lock:
             yield
 
     def connect(self, IP, delayval=None, connect_timeout=None):

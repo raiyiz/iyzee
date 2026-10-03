@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from helpers import FakeSocket
 
 from iyzee.scope import Channel, Coupling, TriggerCoupling, TriggerMode, TriggerSlope
 from iyzee.scope_workflows import (
@@ -529,24 +530,6 @@ def test_a_parse_error_on_a_healthy_link_does_not_stop_the_batch():
 # -- locking: one lock, no deadlock through the console proxy ------------------------------
 
 
-class RecordingSocket:
-    def __init__(self):
-        self.sent = bytearray()
-
-    def send(self, data):
-        self.sent.extend(data)
-        return len(data)
-
-    def recv(self, n):
-        raise TimeoutError
-
-    def gettimeout(self):
-        return 1.0
-
-    def close(self):
-        pass
-
-
 def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock():
     """The console's ``lab.scope`` is a LockedProxy over the handle's lock;
     passing that same lock to a workflow used to hang forever."""
@@ -554,7 +537,7 @@ def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock()
 
     handle = ScopeHandle()
     assert handle.lock is handle.scope.transaction_lock  # one lock, owned by the driver
-    sock = RecordingSocket()
+    sock = FakeSocket()
     handle.scope._transport.attach_socket(sock)
     proxy = LockedProxy(handle.scope, handle.lock)
     outcome: list[object] = []
