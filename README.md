@@ -322,8 +322,10 @@ in typical application code:
 
 ## Documentation
 
-Two technical guides, Typst source compiled to PDF in CI (GitHub Actions and
-GitLab publish them as pipeline artifacts):
+Three technical guides, written in Typst and compiled to PDF in CI (GitHub
+Actions and GitLab publish them as pipeline artifacts). The guides share a
+dark-blue visual language and use rendered Mermaid diagrams for architecture,
+measurement and experiment flow:
 
 - [MXA and measurement guide](docs/mxa-and-measurements.typ): the measurement
   physics tied to analyzer state, SCPI commands and the Python implementation
@@ -332,6 +334,10 @@ GitLab publish them as pipeline artifacts):
   and the `iyzee` script share the `experiment/` layer, per-instrument
   connection details and command references, and how the TUI is built
   (screens, instrument registry and locking, navigation, the console's `lab`).
+- [Rubidium physics guide](docs/rubidium-physics.typ): the atomic structure
+  behind the experiment, D1/D2 hyperfine transitions, warm-vapor spectroscopy,
+  polarization self-rotation, quantum noise and the squeezing/shot-noise
+  measurement chain.
 
 [`docs/adr_0001_tui_vs_devices_separation.md`](docs/adr_0001_tui_vs_devices_separation.md)
 records the architecture decision behind the layering below.
@@ -379,7 +385,8 @@ uv sync
 scripts/ci.sh test        # pytest
 scripts/ci.sh lint        # ruff check + format --check
 scripts/ci.sh typecheck   # mypy src tests
-scripts/ci.sh docs        # compile the Typst guides (needs typst)
+scripts/ci.sh doc-links   # validate README/docs source anchors
+scripts/ci.sh docs        # compile the Typst guides (needs typst + package access)
 scripts/ci.sh all         # everything, as the dependency-update workflow does
 ```
 
