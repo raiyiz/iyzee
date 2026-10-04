@@ -16,7 +16,7 @@ import threading
 import pytest
 from helpers import FakeSocket
 
-from iyzee.vicp import (
+from iyzee.devices.vicp import (
     VICP_DATA_FLAG,
     VICP_EOI_FLAG,
     VICPFrame,

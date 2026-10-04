@@ -36,7 +36,7 @@ from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 from textual_plotext import PlotextPlot
 
 from ...experiment import create_dirs
-from ...scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
+from ...devices.scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from ...scope_workflows import (
     ChannelApplyResult,
     ChannelError,

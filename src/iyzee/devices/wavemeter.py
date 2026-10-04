@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 import numpy as np
 import requests
 
-from iyzee import IP
+from ..config import IP, address
 
 log = logging.getLogger("iyzee.wavemeter")
 
@@ -100,7 +100,7 @@ class Wavemeter:
     """HTTP client for the wavemeter server. Stateless: nothing to open or close.
 
     `channel` is the default for every call that takes one. `host` defaults
-    to `IP.WAVEMETER`, looked up at call time.
+    to the configured wavemeter address, looked up at call time.
     """
 
     def __init__(
@@ -117,7 +117,7 @@ class Wavemeter:
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.host or IP.WAVEMETER}:{self.port}/api/"
+        return f"http://{self.host or address(IP.WAVEMETER)}:{self.port}/api/"
 
     def __repr__(self) -> str:
         return f"<Wavemeter {self.base_url} default channel {self.channel}>"

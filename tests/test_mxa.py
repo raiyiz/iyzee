@@ -1,4 +1,4 @@
-from iyzee.mxa import KeysightMXA
+from iyzee.devices.mxa import KeysightMXA
 
 
 class FakeInstrument:

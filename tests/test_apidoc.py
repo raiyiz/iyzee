@@ -3,8 +3,8 @@ from __future__ import annotations
 import threading
 
 from iyzee.tui.apidoc import describe_api
-from iyzee.tui.instruments import LockedProxy
-from iyzee.wavemeter_readout import endpoint
+from iyzee.devices.handles import LockedProxy
+from iyzee.devices.wavemeter import endpoint
 
 
 class _Device:

@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 import requests
 
-import iyzee.wavemeter_readout as wavemeter_readout
+import iyzee.devices.wavemeter as wavemeter_readout
 
 
 def response(body: str, status: int = 200) -> requests.Response:

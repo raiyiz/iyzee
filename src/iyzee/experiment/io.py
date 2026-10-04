@@ -25,6 +25,7 @@ from typing import Any, cast
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ..config import data_root
 from .core import StepResult
 
 # Where all measurement runs are written and (in the TUI) read back from —
@@ -33,15 +34,10 @@ from .core import StepResult
 # current working directory `iyzee`/`iyzee-tui` is launched from, and easy
 # to find, back up or point other tools at, without digging into src/iyzee/.
 #
-# Computed once, from this file's own location (`src/iyzee/experiment/io.py`
-# -> parents[3] is the checkout root), so it agrees with itself everywhere
-# it's used and callers never repeat the path arithmetic (see
-# `tui/screens/results.py`, which reads from exactly this constant). This
-# assumes a development checkout / editable install (this project's only
-# supported way to run it — see the README); a real wheel installed
-# elsewhere would resolve `parents[3]` to somewhere under site-packages, not
-# a sensible data location.
-DATA_ROOT = Path(__file__).resolve().parents[3] / "data"
+# Resolved once at import from ``iyzee.config.data_root()``: an
+# ``IYZEE_DATA_DIR`` environment variable or the config file wins, else
+# ``<checkout>/data``. Tests redirect this constant (see tests/conftest.py).
+DATA_ROOT = data_root()
 
 
 def create_dirs() -> Path:

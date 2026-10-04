@@ -17,16 +17,16 @@ from typing import cast
 
 import pytest
 
-from iyzee.scope import LeCroyTimeoutError
-from iyzee.tui import instruments as instruments_mod
-from iyzee.tui.instruments import (
-    INSTRUMENTS,
+from iyzee.devices.scope import LeCroyTimeoutError
+from iyzee.devices import handles as instruments_mod
+from iyzee.devices.handles import (
     LockedProxy,
     ScopeHandle,
     ShutterHandle,
     WavemeterHandle,
     _VisaHandle,
 )
+from iyzee.lab import INSTRUMENTS
 
 # -- LockedProxy --------------------------------------------------------
 

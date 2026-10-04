@@ -17,7 +17,8 @@ from textual.containers import Horizontal
 from textual.markup import escape
 from textual.widgets import ContentSwitcher, Footer, Header, Static
 
-from .instruments import INSTRUMENTS, InstrumentHandle
+from ..devices.handles import InstrumentHandle
+from ..lab import INSTRUMENTS, Lab
 from .ipython import default_history_file
 from .ipython_session import IPythonSession
 from .logging_support import LogEntry
@@ -220,7 +221,10 @@ class IyzeeApp(App):
         # own reference to a handler that (in tests) gets replaced every
         # time a new IyzeeApp() is constructed — see install()'s docstring.
         self.log_handler = install_logging(self._on_log_entry)
-        self.handles: dict[str, InstrumentHandle] = {}
+        # The session's instruments live in the core ``Lab`` (no Textual in it);
+        # ``handles`` is its connected-handles dict, shared rather than copied.
+        self.lab = Lab()
+        self.handles: dict[str, InstrumentHandle] = self.lab.handles
         # No per-app lock table anymore — each InstrumentHandle owns its
         # own threading.Lock (see instruments.InstrumentHandle.lock) so
         # that a page's background worker (Connect, Sweep), the IPython
@@ -264,29 +268,15 @@ class IyzeeApp(App):
         self.set_interval(self.LINK_CHECK_INTERVAL, self._check_links)
 
     def _check_links(self) -> None:
-        """Notice links that died while nobody was talking to them.
+        """Notice links that died while nobody was talking to them (no instrument I/O)."""
+        for key in self.lab.drop_dead_links():
+            self._link_lost(key)
 
-        Cheap: ``alive`` does no instrument I/O. Handles without the
-        attribute (test doubles, adapters that cannot tell) count as alive.
-        """
-        for key, handle in list(self.handles.items()):
-            if not getattr(handle, "alive", True):
-                self._link_lost(key, handle)
-
-    def _link_lost(self, key: str, handle: InstrumentHandle) -> None:
-        if self.handles.get(key) is not handle:
-            return  # already disconnected or replaced
-        del self.handles[key]
+    def _link_lost(self, key: str) -> None:
         spec = next((s for s in INSTRUMENTS if s.key == key), None)
         label = spec.label if spec is not None else key
         reason = "link lost - press Enter to reconnect"
         self.lost_links[key] = reason
-        log.warning("%s: connection lost; dropped it so it can be reconnected", key)
-        # Release whatever is left of the dead link off the UI thread: the
-        # driver's disconnect takes the instrument lock.
-        threading.Thread(
-            target=self._release_dead_link, args=(key, handle), name=f"release-{key}", daemon=True
-        ).start()
         for screen in self.query(ConnectScreen):
             screen.show_lost(key, reason)
         self.instruments_changed()
@@ -296,14 +286,6 @@ class IyzeeApp(App):
             timeout=10,
             markup=False,
         )
-
-    @staticmethod
-    def _release_dead_link(key: str, handle: InstrumentHandle) -> None:
-        try:
-            with handle.lock:
-                handle.disconnect()
-        except Exception:  # noqa: BLE001 - the link is already dead; just don't leak
-            log.debug("releasing dead link %s failed", key, exc_info=True)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -384,40 +366,8 @@ class IyzeeApp(App):
         self.close_instruments()
 
     def close_instruments(self, timeout: float = 5.0) -> None:
-        """Disconnect every connected instrument, in parallel, within ``timeout``.
-
-        Each disconnect takes that instrument's lock first, so it waits
-        for an in-flight sweep step or console call instead of tearing the
-        link down under it. An instrument that stays busy past the
-        deadline is skipped (and logged) rather than blocking the exit —
-        the OS reclaims its sockets when the process ends anyway.
-        """
-        handles = dict(self.handles)
-        self.handles.clear()
-        if not handles:
-            return
-        deadline = time.monotonic() + timeout
-
-        def close(key: str, handle: InstrumentHandle) -> None:
-            lock = handle.lock
-            if not lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
-                log.warning("shutdown: %s still busy after %.0fs, not disconnecting", key, timeout)
-                return
-            try:
-                handle.disconnect()
-            except Exception:  # noqa: BLE001 - one bad instrument mustn't stop the rest
-                log.exception("shutdown: error closing %s", key)
-            finally:
-                lock.release()
-
-        threads = [
-            threading.Thread(target=close, args=item, name=f"close-{item[0]}", daemon=True)
-            for item in handles.items()
-        ]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(max(0.0, deadline - time.monotonic()))
+        """Disconnect every connected instrument within ``timeout`` (see ``Lab.close_all``)."""
+        self.lab.close_all(timeout)
 
     QUIT_CONFIRM_S = 4.0
 

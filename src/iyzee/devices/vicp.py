@@ -7,7 +7,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
-log = logging.getLogger("iyzee.vicp")
+log = logging.getLogger("iyzee.devices.vicp")
 
 VICP_EOI_FLAG = 0x01
 VICP_DATA_FLAG = 0x80

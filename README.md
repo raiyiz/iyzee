@@ -10,16 +10,21 @@ terminal UI with a live console (`iyzee-tui`).
 ```text
 src/iyzee/
 ├── main.py               # CLI entry point: own resources, run a procedure, plot, save
-├── base.py                # shared VISA lifecycle, instrument IPs, PSU channels
-├── mxa.py                 # Keysight MXA SCPI/VISA driver
-├── power.py                # power supply + optical shutter control
-├── vicp.py                 # VICP framing over TCP: thread-safe transport that drops the connection
-│                           # after any mid-message failure (no request IDs, so a late reply would desync)
-├── scope.py                # LeCroy oscilloscope: waveform download + channel/trigger/math control
+├── config.py              # instrument addresses + data directory (env var / config.toml overrides)
+├── lab.py                 # Lab: the connected instruments of a session (connect, disconnect, dead
+│                          # links, close-all) + the INSTRUMENTS registry; no Textual, shared by TUI/console/scripts
+├── devices/               # everything that talks to hardware
+│   ├── base.py             # shared VISA lifecycle (BaseDevice), PSU channels
+│   ├── mxa.py              # Keysight MXA SCPI/VISA driver
+│   ├── power.py            # power supply + optical shutter control
+│   ├── vicp.py             # VICP framing over TCP: thread-safe transport that drops the connection
+│   │                       # after any mid-message failure (no request IDs, so a late reply would desync)
+│   ├── scope.py            # LeCroy oscilloscope: waveform download + channel/trigger/math control
+│   ├── wavemeter.py        # wavemeter HTTP client: readout, PID setpoint
+│   └── handles.py          # uniform connect/disconnect/probe/lock adapter per device, LockedProxy
 ├── scope_workflows.py     # scope operations + durable waveform recordings — plain
-│                           # functions/dataclasses on top of scope.py, no Textual; see
-│                           # "Design direction" below
-├── wavemeter_readout.py  # wavemeter HTTP client: readout, PID setpoint
+│                          # functions/dataclasses on top of devices/scope.py, no Textual; see
+│                          # "Design direction" below
 ├── experiment/            # composable measurement procedures
 │   ├── core.py             # Step protocol, ExperimentContext, StepResult, run_sequence()
 │   ├── procedures.py      # AnalyzerConfig, prepare_analyzer(), acquire_trace(), BandwidthStep, FrequencyStep, run_*_sweep()
@@ -27,7 +32,6 @@ src/iyzee/
 └── tui/                    # interactive terminal UI (`iyzee-tui`)
     ├── app.py              # IyzeeApp: nav rail, page switcher, key bindings, shared state, shutdown
     ├── app.tcss            # layout and responsive rules (width breakpoints)
-    ├── instruments.py      # InstrumentSpec registry, uniform InstrumentHandle (.device + lock), LockedProxy
     ├── ipython.py          # the `lab` namespace (LabProxy), shell configuration, history file location
     ├── ipython_session.py  # IPython's terminal shell, running in-process on a virtual terminal
     ├── logging_support.py  # captures the app's own logging: session buffer + rotating file history
@@ -151,23 +155,43 @@ already just picks a `Step` list and runs it.
 
 ## Instrument drivers
 
-- **`mxa.py`** — hardware abstraction for the Keysight MXA. New MXA
+- **`devices/mxa.py`** — hardware abstraction for the Keysight MXA. New MXA
   capabilities should be implemented here as reusable SCPI/VISA methods;
   code in `experiment/` should call those methods rather than contain raw
   SCPI strings.
-- **`power.py`** — PSU control plus `ShutterControl`, a thin wrapper that
+- **`devices/power.py`** — PSU control plus `ShutterControl`, a thin wrapper that
   drives the optical shutter through one PSU channel.
-- **`scope.py`** — LeCroy oscilloscope driver (VICP protocol over TCP, framing in
-  `vicp.py`, which drops the connection after any mid-message failure). Not
+- **`devices/scope.py`** — LeCroy oscilloscope driver (VICP protocol over TCP, framing in
+  `devices/vicp.py`, which drops the connection after any mid-message failure). Not
   yet unified with `BaseDevice`'s connection lifecycle; treat as a standalone
   legacy driver. `scope_workflows.py` holds the operations built on top
   (channel/trigger settings, waveform acquisition) — see "Design direction".
-- **`wavemeter_readout.py`** — `Wavemeter`, a thin HTTP client (frequency
+- **`devices/wavemeter.py`** — `Wavemeter`, a thin HTTP client (frequency
   readout, PID setpoint), with module-level `read_frequency()` /
   `set_pid_setpoint()` for scripts.
-- **`base.py`** — shared infrastructure: `BaseDevice` (VISA connect/close/
-  context-manager lifecycle), `IP` (instrument addresses), `CH` (PSU channel
-  IDs). `KeysightMXA` and `PSU` both build on `BaseDevice`.
+- **`devices/base.py`** — shared infrastructure: `BaseDevice` (VISA connect/close/
+  context-manager lifecycle) and `CH` (PSU channel IDs). `KeysightMXA` and
+  `PSU` both build on `BaseDevice`.
+- **`config.py`** — where things are: `IP` holds the default instrument
+  addresses and `address(IP.SCOPE)` resolves the one to use; `data_root()` is
+  where recordings and logs go. Override either without touching code: set
+  `IYZEE_SCOPE_IP` / `IYZEE_NOISE_ANALYZER_IP` / `IYZEE_POWER_SUPPLY_IP` /
+  `IYZEE_WAVEMETER_IP` / `IYZEE_DATA_DIR`, or write `config.toml` in the user
+  config directory (or wherever `IYZEE_CONFIG` points):
+
+  ```toml
+  [addresses]
+  scope = "10.140.1.221"
+
+  [paths]
+  data = "/srv/iyzee-data"
+  ```
+
+  A config file that exists but doesn't parse is an error, not a silent fallback.
+- **`lab.py`** — `Lab` owns the connected instruments of a session:
+  `lab.connect("scope")`, `lab.device("scope")`, `lab.disconnect(...)`,
+  `lab.close_all()`. The TUI (`app.lab`) and the console's `lab` use it, and so
+  can a script.
 
 ## Interactive IPython console
 
@@ -305,9 +329,8 @@ contain machinery a script could reasonably need.
    parameters, sequencing).
 3. **`experiment/{core,io}.py`**: the machinery procedures are built from
    (`Step` execution, saving, plotting).
-4. **`mxa.py` / `power.py` / `scope.py` / `wavemeter_readout.py`**: reusable,
-   hardware-specific instrument control.
-5. **`base.py`**: connection lifecycle, addresses, channel definitions.
+4. **`devices/*`**: reusable, hardware-specific instrument control.
+5. **`devices/base.py`, `config.py`, `lab.py`**: connection lifecycle, addresses, and the connected-instrument session.
 
 **Screens display and control; they don't implement.** `scope_workflows.py` is
 the template: `ScopeScreen` reads and validates the form, then calls a plain

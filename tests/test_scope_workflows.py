@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from helpers import FakeSocket
 
-from iyzee.scope import Channel, Coupling, TriggerCoupling, TriggerMode, TriggerSlope
+from iyzee.devices.scope import Channel, Coupling, TriggerCoupling, TriggerMode, TriggerSlope
 from iyzee.scope_workflows import (
     ChannelSettings,
     SettingAdjustment,
@@ -542,7 +542,7 @@ def test_a_parse_error_on_a_healthy_link_does_not_stop_the_batch():
 def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock():
     """The console's ``lab.scope`` is a LockedProxy over the handle's lock;
     passing that same lock to a workflow used to hang forever."""
-    from iyzee.tui.instruments import LockedProxy, ScopeHandle
+    from iyzee.devices.handles import LockedProxy, ScopeHandle
 
     handle = ScopeHandle()
     assert handle.lock is handle.device.transaction_lock  # one lock, owned by the driver

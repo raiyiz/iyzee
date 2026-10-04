@@ -13,9 +13,9 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
-from ..mxa import KeysightMXA
-from ..power import ShutterControl
-from ..wavemeter_readout import read_frequency, set_pid_setpoint
+from ..devices.mxa import KeysightMXA
+from ..devices.power import ShutterControl
+from ..devices.wavemeter import read_frequency, set_pid_setpoint
 from .core import ExperimentContext, Step, StepResult, run_sequence
 
 TRACE_SQZ = 1

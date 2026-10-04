@@ -1,6 +1,6 @@
 """Connect screen: open/close links to the lab instruments.
 
-One row per :class:`~iyzee.tui.instruments.InstrumentSpec`. Pressing Enter
+One row per :class:`~iyzee.lab.InstrumentSpec`. Pressing Enter
 on a row connects it if it's not connected, or disconnects it if it is.
 Connecting/probing happens in a background thread (``@work(thread=True)``)
 since every device call here is blocking I/O; the UI only ever gets
@@ -18,7 +18,7 @@ from textual import work
 from textual.app import ComposeResult
 from textual.widgets import DataTable, Static
 
-from ..instruments import INSTRUMENTS, InstrumentSpec
+from ...lab import INSTRUMENTS, InstrumentSpec
 from ..text import one_line
 from .page import Page
 
@@ -160,19 +160,8 @@ class ConnectScreen(Page):
     def _connect(self, spec: InstrumentSpec) -> None:
         try:
             self._ui(self._set_row, spec.key, "connecting...", "-")
-            handle = spec.make()
             try:
-                with handle.lock:
-                    try:
-                        handle.connect()
-                        detail = handle.probe()
-                    except Exception:
-                        # connect() may have half-succeeded (or probe() failed
-                        # after it did); close the link rather than leak it,
-                        # since nothing will ever hold a reference to it.
-                        with contextlib.suppress(Exception):
-                            handle.disconnect()
-                        raise
+                detail = self.iyzee_app.lab.connect(spec)
             except Exception as exc:  # noqa: BLE001 - surfacing to the UI, not swallowing
                 log.exception("failed to connect %s", spec.key)
                 self._ui(self._set_row, spec.key, "error", one_line(exc))
@@ -184,9 +173,7 @@ class ConnectScreen(Page):
                     markup=False,
                 )
                 return
-            self.iyzee_app.handles[spec.key] = handle
             self.iyzee_app.lost_links.pop(spec.key, None)
-            log.info("connected %s (%s)", spec.key, detail)
             self._ui(self._set_row, spec.key, "connected", detail)
         finally:
             self._ui(self._release, spec.key)
@@ -194,21 +181,17 @@ class ConnectScreen(Page):
     @work(thread=True, group="connect", exit_on_error=False)
     def _disconnect(self, spec: InstrumentSpec) -> None:
         try:
-            handle = self.iyzee_app.handles.pop(spec.key, None)
             self._ui(self._set_row, spec.key, "disconnecting...", "-")
-            if handle is not None:
-                try:
-                    with handle.lock:
-                        handle.disconnect()
-                except Exception as exc:  # noqa: BLE001
-                    log.exception("error closing %s", spec.key)
-                    self._ui(
-                        self.notify,
-                        f"{spec.label}: error closing ({one_line(exc)})",
-                        severity="warning",
-                        markup=False,
-                    )
-            log.info("disconnected %s", spec.key)
+            try:
+                self.iyzee_app.lab.disconnect(spec.key)
+            except Exception as exc:  # noqa: BLE001
+                log.exception("error closing %s", spec.key)
+                self._ui(
+                    self.notify,
+                    f"{spec.label}: error closing ({one_line(exc)})",
+                    severity="warning",
+                    markup=False,
+                )
             self._ui(self._set_row, spec.key, "disconnected", "-")
         finally:
             self._ui(self._release, spec.key)

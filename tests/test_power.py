@@ -1,5 +1,5 @@
 from iyzee import CH, IP
-from iyzee.power import PSU, ShutterControl
+from iyzee.devices.power import PSU, ShutterControl
 
 
 class FakeInstrument:

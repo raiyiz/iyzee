@@ -1,9 +1,11 @@
 """Shared device infrastructure for laboratory instruments."""
 
-from enum import IntEnum, StrEnum
+from enum import IntEnum
 from typing import Any
 
 import pyvisa
+
+from ..config import IP
 
 
 class CH(IntEnum):
@@ -15,22 +17,12 @@ class CH(IntEnum):
     FOUR = 4
 
 
-class IP(StrEnum):
-    """IP addresses of the laboratory instruments."""
-
-    POWER_SUPPLY = "10.140.1.15"
-    NOISE_ANALYZER = "10.140.1.40"
-    SCOPE = "10.140.1.220"
-    WAVEMETER = "10.140.1.215"
-    # WAVEMETER_NUC = "10.140.1.119"
-
-
 class BaseDevice:
     """Common VISA connection handling for laboratory instruments."""
 
     def __init__(
         self,
-        ip: IP | None = None,
+        ip: IP | str | None = None,
         resource_manager=None,
         timeout_ms: int = 10_000,
         read_termination: str | None = None,

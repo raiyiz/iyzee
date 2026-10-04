@@ -1,11 +1,11 @@
 """Scope workflow operations: configuration, acquisition, and persistence
-on top of the raw :class:`~iyzee.scope.LeCroy` driver.
+on top of the raw :class:`~iyzee.devices.scope.LeCroy` driver.
 
 Plain functions and dataclasses, no Textual import — the same operations
 ``ScopeScreen``'s buttons trigger are usable identically from a script or
 the IPython console::
 
-    from iyzee.scope import Channel, Coupling, LeCroy
+    from iyzee.devices.scope import Channel, Coupling, LeCroy
     from iyzee.scope_workflows import ChannelSettings, apply_channel_settings
 
     scope = LeCroy()
@@ -66,7 +66,7 @@ import numpy as np
 
 from .experiment.core import utc_now
 from .experiment.io import save_numeric_recording
-from .scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
+from .devices.scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 
 log = logging.getLogger("iyzee.scope_workflows")
 
@@ -340,7 +340,7 @@ def _trigger_source(raw: str) -> str:
     The reply is comma-separated — trigger type, a qualifier, then the
     source, then further qualifiers (e.g.
     ``"TRIG_SELECT EDGE,SR,C1,HT,OFF"``, matching the
-    ``"EDGE,SR,{source}"`` shape :meth:`~iyzee.scope.LeCroy.set_trigger_source`
+    ``"EDGE,SR,{source}"`` shape :meth:`~iyzee.devices.scope.LeCroy.set_trigger_source`
     itself writes) — so the source is the third comma field of the value.
     """
     fields = _value(raw).split(",")
@@ -788,7 +788,7 @@ def save_scope_acquisition(
             "python": platform.python_version(),
         },
         "instrument": {
-            "driver": "iyzee.scope.LeCroy",
+            "driver": "iyzee.devices.scope.LeCroy",
             "protocol": "LeCroy VICP",
             "address": recording.instrument_address,
             "identity": recording.instrument_id,

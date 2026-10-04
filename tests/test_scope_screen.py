@@ -18,7 +18,7 @@ from test_scope_workflows import FakeScope, StatefulScope
 from textual.pilot import Pilot
 from textual.widgets import Button, Checkbox, Input, RichLog, Select
 
-from iyzee.scope import Channel, Coupling, TriggerSlope
+from iyzee.devices.scope import Channel, Coupling, TriggerSlope
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens import scope as scope_screen_mod
 from iyzee.tui.screens.scope import ScopeScreen

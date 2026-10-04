@@ -1,4 +1,4 @@
-"""Driver-level tests for :class:`~iyzee.scope.LeCroy`: commands sent, replies parsed.
+"""Driver-level tests for :class:`~iyzee.devices.scope.LeCroy`: commands sent, replies parsed.
 
 Framing and the failure contract of the byte stream are in ``test_vicp.py``.
 """
@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from helpers import FakeSocket
 
-from iyzee.scope import (
+from iyzee.devices.scope import (
     Channel,
     Coupling,
     LeCroy,

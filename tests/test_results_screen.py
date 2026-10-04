@@ -17,7 +17,7 @@ from test_scope_workflows import FakeScope
 from textual.pilot import Pilot
 from textual.widgets import Button, DataTable, Input, ListView, Select, Static
 
-from iyzee.scope import Channel, LeCroy
+from iyzee.devices.scope import Channel, LeCroy
 from iyzee.scope_workflows import acquire_scope_recording, save_scope_acquisition
 from iyzee.tui import app as app_mod
 from iyzee.tui import plotting as plotting_mod

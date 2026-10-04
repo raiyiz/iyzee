@@ -1,7 +1,7 @@
 """What an instrument offers, as text: ``lab.api(...)`` in the console.
 
 Built by introspection, so it is never stale and works for every driver. A
-method carrying a ``rest`` attribute (see ``wavemeter_readout.endpoint``) also
+method carrying a ``rest`` attribute (see ``devices.wavemeter.endpoint``) also
 shows the HTTP route it calls.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from .instruments import LockedProxy
+from ..devices.handles import LockedProxy
 
 
 def _unwrap(target: Any) -> Any:

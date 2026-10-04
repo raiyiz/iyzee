@@ -135,7 +135,7 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
 
 == Wavemeter
 
-`wavemeter_readout.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close. `Wavemeter` is a thin client with one method per endpoint (the module-level `read_frequency()` / `set_pid_setpoint()` are the same calls on a default client), and `last_seen` records the UTC time of the last successful HTTP response (`None` before the first one). `lab.wavemeter.<Tab>` in the console completes the API and `lab.api("wavemeter")` prints it with the HTTP routes; `get(path)` / `post(path, **form)` reach routes it doesn't wrap yet:
+`devices/wavemeter.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close. `Wavemeter` is a thin client with one method per endpoint (the module-level `read_frequency()` / `set_pid_setpoint()` are the same calls on a default client), and `last_seen` records the UTC time of the last successful HTTP response (`None` before the first one). `lab.wavemeter.<Tab>` in the console completes the API and `lab.api("wavemeter")` prints it with the HTTP routes; `get(path)` / `post(path, **form)` reach routes it doesn't wrap yet:
 
 #table(
   columns: (1.4fr, 2.4fr),
@@ -166,7 +166,7 @@ The shared `tui/screens/page.py` base owns page mechanics that are not domain-sp
 
 == Instrument registry and locking <sec-locking>
 
-`tui/instruments.py` is the single place that knows how to build a uniform `InstrumentHandle` (`connect()` / `disconnect()` / `probe()` / `.device`) around each heterogeneous driver — VISA (`_VisaHandle`, wrapping `KeysightMXA`), the PSU-backed shutter (`ShutterHandle`), the scope's raw socket (`ScopeHandle`), and the wavemeter's stateless HTTP calls (`WavemeterHandle`). Adding a new instrument to the Connect screen means adding one `InstrumentSpec` here — no screen code changes.
+`devices/handles.py` is the single place that knows how to build a uniform `InstrumentHandle` (`connect()` / `disconnect()` / `probe()` / `.device`) around each heterogeneous driver — VISA (`_VisaHandle`, wrapping `KeysightMXA`), the PSU-backed shutter (`ShutterHandle`), the scope's raw socket (`ScopeHandle`), and the wavemeter's stateless HTTP calls (`WavemeterHandle`). `lab.py` holds the `InstrumentSpec` registry and `Lab`, which owns the connected handles (connect, disconnect, dead-link detection, close-all) for the TUI, the console and scripts alike; adding a new instrument means one handle and one `InstrumentSpec` — no screen code changes. Addresses and the data directory come from `config.py` (environment variables or a `config.toml`).
 
 Each handle inherits `_LockedHandle`, which owns one re-entrant `threading.RLock` exposed by the `InstrumentHandle` protocol (`ScopeHandle` overrides it to return the `LeCroy` driver's own transaction lock, so the handle, the console proxy, workflow batches and the driver's multi-command transfers all share a single lock). The lock therefore stays on the handle rather than `IyzeeApp` keeping a separate `dict[str, threading.Lock]` alongside `handles`. `LockedProxy`, in the same module, wraps a live device so that *every method call* acquires a given lock for its duration — `ConnectScreen` and `SweepScreen` pass `handle.lock` when they hold it around their own hardware calls, and the console's `LabProxy` passes the same one. This is what stops a console command and a running sweep from issuing overlapping commands to the same physical instrument from two different threads at once. It's a coarse, call-level lock, not a queue — a long-running call (e.g. a slow sweep step) will make a concurrent caller wait for the whole call, not just contend briefly.
 
@@ -228,7 +228,7 @@ The storage layer is shared with experiment sweeps through `experiment.io.save_n
 
 = References
 
-- Repository implementation: `src/iyzee/base.py`, `src/iyzee/power.py`, `src/iyzee/scope.py`, `src/iyzee/scope_workflows.py`, `src/iyzee/wavemeter_readout.py`, `src/iyzee/tui/`, and the associated tests.
+- Repository implementation: `src/iyzee/devices/base.py`, `src/iyzee/devices/power.py`, `src/iyzee/devices/scope.py`, `src/iyzee/scope_workflows.py`, `src/iyzee/devices/wavemeter.py`, `src/iyzee/tui/`, and the associated tests.
 - #link("mxa-and-measurements.typ")[MXA and measurement guide] — MXA SCPI reference, measurement physics, and the squeezing/shot-noise workflow.
 - Rohde & Schwarz, *HMP Series Power Supply User Manual*: `INST:NSEL`, `INST OUTn`, `OUTP:SEL`, `OUTP:GEN` selection and output semantics.
 - LeCroy, *Remote Control Manual*: VICP protocol framing, `WF?`/`INSPECT?` waveform transfer, and (for the channel/trigger/math control added on top of that) the `<channel>:VOLT_DIV`/`OFFSET`/`COUPLING`/`ATTENUATION`/`BANDWIDTH_LIMIT`/`TRACE`/`INVERT_SET`, `TRIG_SELECT`/`TRIG_LEVEL`/`TRIG_SLOPE`/`TRIG_COUPLING`/`TRIG_MODE`/`TRIG_DELAY`, and `DEFINE EQN` command families.
