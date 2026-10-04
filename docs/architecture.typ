@@ -26,7 +26,7 @@
 
 #let gh = "https://github.com/raiyiz/iyzee/blob/flirr/"
 
-#let source(path, label) = underline(link(gh + path)[label], stroke: luma(80))
+#let source(path, label) = underline(link(gh + path)[#label], stroke: luma(80))
 
 #let node(title, detail, width: 100%) = box(
   width: width,
