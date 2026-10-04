@@ -24,6 +24,27 @@
 #set heading(numbering: "1.")
 #set text(size: 10pt)
 
+#let gh = "https://github.com/raiyiz/iyzee/blob/flirr/"
+
+#let source(path, label) = link(gh + path)[label]
+
+#let node(title, detail, width: 100%) = box(
+  width: width,
+  fill: luma(248),
+  stroke: 0.8pt + luma(175),
+  radius: 5pt,
+  inset: 8pt,
+)[
+  #align(center)[#text(weight: "bold")[#title]]
+  #v(0.25em)
+  #align(center)[#text(size: 8.5pt, fill: luma(70))[#detail]]
+]
+
+#let arrow(dir: "→") = align(center)[
+  #text(size: 16pt, weight: "bold")[#dir]
+]
+
+
 #align(center)[
   #text(size: 24pt, weight: "bold")[iyzee architecture]
   #v(0.4em)
@@ -62,28 +83,24 @@ multiple incompatible copies of the control logic.
 There are therefore several different ways to *use* the program, but not
 several implementations of the underlying measurement machinery.
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-iyzee script        → reusable experiment / device code
-
-iyzee-tui           → TUI composition / interaction
-                        ↓
-                    shared live session
-                        ↓
-                    Lab + handles
-                        ↓
-             instrument drivers / clients
-                        ↓
-                VISA / VICP / HTTP
-                        ↓
-                    hardware```
-]
+#figure(
+  grid(
+    columns: (1fr, 18pt, 1fr, 18pt, 1fr),
+    gutter: 5pt,
+    align: center,
+    node("iyzee script", "reusable experiment and device code"),
+    arrow(),
+    node("shared machinery", "experiments and workflows"),
+    arrow(),
+    node("live session", "Lab and instrument handles"),
+    node("iyzee-tui", "interaction and presentation"),
+    arrow("↓"),
+    node("same implementation", "no second hardware-control path"),
+    arrow("↓"),
+    node("same resources", "console and TUI share live state"),
+  ),
+  caption: [Multiple entry points converge on one reusable machinery layer and one live session state.],
+)
 
 The important architectural distinction is between *composition* and
 *machinery*. The TUI decides what the user sees, what is enabled, and when an
@@ -126,42 +143,21 @@ synchronization boundary for those live resources.
 At the highest level, the system can be read as a dependency graph rather than
 as a pile of files.
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-                         ┌─────────────────────┐
-                         │       User          │
-                         └──────────┬──────────┘
-                                    │
-                    ┌───────────────┴──────────────┐
-                    │                              │
-               iyzee script                    iyzee-tui
-                    │                              │
-                    │                    ┌─────────┴─────────┐
-                    │                    │                   │
-                    └──────────────┐   TUI pages         IPython
-                                   │                       │
-                                   ▼                       ▼
-                           experiments / workflows     LabProxy
-                                   │                       │
-                                   └──────────┬────────────┘
-                                              │
-                                         Lab / handles
-                                              │
-                              ┌───────────────┼───────────────┐
-                              ▼               ▼               ▼
-                             MXA           LeCroy         Wavemeter
-                              │               │               │
-                            VISA            VICP            HTTP
-                              │               │               │
-                              ▼               ▼               ▼
-                           hardware        hardware        hardware```
-]
+#figure(
+  stack(
+    spacing: 5pt,
+    node("TUI / script / IPython", "user interaction and application composition"),
+    arrow("↓"),
+    node("workflows / experiment", "laboratory operations and measurement sequencing"),
+    arrow("↓"),
+    node("device drivers", "instrument-specific semantics"),
+    arrow("↓"),
+    node("transport / client", "VISA, VICP/TCP, HTTP"),
+    arrow("↓"),
+    node("hardware", "the physical instrument"),
+  ),
+  caption: [Normal responsibility direction: higher layers request work from lower layers; lower layers do not know which interface called them.],
+)
 
 A useful way to read this is from the bottom upward.
 
@@ -188,24 +184,35 @@ session also decides when that resource should be opened and closed.
 
 The application-level path is:
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-InstrumentSpec
-    ↓
-handle = spec.make()
-    ↓
-handle.connect()
-    ↓
-handle.probe()
-    ↓
-Lab.handles[key] = handle```
-]
+#source("src/iyzee/lab.py#L98-L120", [Lab.connect()]) is the concrete owner-side operation. In simplified form:
+
+```python
+lab = Lab()
+lab.connect("mxa")
+mx = lab.device("mxa")
+trace = mx.get_trace_data(1)
+```
+
+The important part is the ownership boundary: the application opens and closes
+resources; the measurement procedure uses resources that are already live.
+
+#figure(
+  grid(
+    columns: (1fr, 18pt, 1fr, 18pt, 1.1fr, 18pt, 1.25fr, 18pt, 1.35fr),
+    gutter: 3pt,
+    align: center,
+    node("InstrumentSpec", "name and factory"),
+    arrow(),
+    node("handle", "adapter and lock"),
+    arrow(),
+    node("connect", "open the resource"),
+    arrow(),
+    node("probe", "prove it answers"),
+    arrow(),
+    node("Lab.handles", "authoritative live inventory"),
+  ),
+  caption: [Connection becomes session state only after the resource has opened and passed an active probe.],
+)
 
 The insertion into `Lab.handles` happens only after connection and probing have
 succeeded. If opening or probing fails, the half-open resource is explicitly
@@ -313,24 +320,19 @@ the application would make synchronization a property of one caller. Putting
 it on the instrument handle makes synchronization a property of the resource
 itself.
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-                     ┌── Sweep worker ───┐
-                     │                   │
-Console ─────────────┼── LockedProxy ────┤
-                     │                   │
-                     └────────┬──────────┘
-                              │
-                             RLock
-                              │
-                       physical instrument```
-]
+#figure(
+  grid(
+    columns: (1fr, 18pt, 1fr, 18pt, 1fr),
+    gutter: 4pt,
+    align: center,
+    node("Sweep worker", "long-running hardware calls"),
+    arrow(),
+    node("shared RLock", "owned by the resource handle"),
+    arrow(),
+    node("MXA", "one physical device"),
+  ),
+  caption: [Synchronization follows the physical resource, allowing workers and the console to coordinate through the same lock.],
+)
 
 The re-entrant lock matters because a workflow may already hold the resource
 lock and then call through a proxy that acquires the same lock again. A plain
@@ -344,7 +346,7 @@ therefore protects both driver-level operations and higher-level callers.
 
 = Drivers and workflows are different layers
 
-The distinction between `devices/scope.py` and `scope_workflows.py` is a good
+The distinction between #source("src/iyzee/devices/scope.py", [devices/scope.py]) and #source("src/iyzee/scope_workflows.py", [scope_workflows.py]) is a good
 example of the architecture.
 
 The driver asks:
@@ -370,28 +372,21 @@ contains a value.
 The experiment layer uses one general execution pattern rather than a separate
 hand-written loop for every sweep.
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-AnalyzerConfig
-      ↓
-prepare_analyzer()
-      ↓
-Step[]
-      ↓
-run_sequence()
-      ↓
-StepResult[]
-      ↓
-save_step_results()
-      ↓
-NPZ + metadata```
-]
+#figure(
+  grid(
+    columns: (1fr, 18pt, 1fr, 18pt, 1fr, 18pt, 1fr),
+    gutter: 3pt,
+    align: center,
+    node("AnalyzerConfig", "experiment settings"),
+    arrow(),
+    node("prepare_analyzer", "configure hardware"),
+    arrow(),
+    node("Step array", "reproducible points"),
+    arrow(),
+    node("run_sequence", "ordered execution"),
+  ),
+  caption: [The TUI composes an existing sequence model rather than reimplementing measurement loops.],
+)
 
 `AnalyzerConfig` collects experiment-level analyzer state. `prepare_analyzer()`
 turns that into concrete instrument setup. A `Step` represents one reproducible
@@ -514,24 +509,21 @@ the instrument now holds exactly the requested value.
 A hardware setter can be normalized, quantized, rejected, or affected by
 instrument-side constraints. Therefore the apply path is conceptually:
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-known baseline
-      ↓
-compare with requested values
-      ↓
-write only changed fields
-      ↓
-read back instrument state
-      ↓
-verified state becomes new baseline```
-]
+#figure(
+  stack(
+    spacing: 4pt,
+    node("known baseline", "last verified instrument state"),
+    arrow("↓"),
+    node("compare", "identify changed fields"),
+    arrow("↓"),
+    node("write", "send only necessary changes"),
+    arrow("↓"),
+    node("read back", "observe what the scope accepted"),
+    arrow("↓"),
+    node("new baseline", "only verified state is trusted"),
+  ),
+  caption: [Scope configuration changes are verified state transitions, not blind assignments.],
+)
 
 Only the read-back result is promoted to the next trusted baseline. If readback
 fails, the application must not manufacture a clean state merely because the
@@ -613,22 +605,19 @@ There are no request IDs in the protocol that let a later response be matched
 back to an earlier request. Retrying on the same stream can therefore create a
 worse failure:
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-request A ─────────────►
-                         response A ──X── timeout
-
-request B ─────────────►
-                         late response A
-                              │
-                              └── could be mistaken for B```
-]
+#figure(
+  stack(
+    spacing: 4pt,
+    node("request A", "response expected"),
+    arrow("↓"),
+    node("timeout / partial frame", "stream position is unknown"),
+    arrow("↓"),
+    node("request B", "same socket would be reused"),
+    arrow("↓"),
+    node("late response A", "could be mistaken for response B"),
+  ),
+  caption: [Without request identifiers, a partially consumed VICP response cannot safely be followed by another request on the same stream.],
+)
 
 For this reason, a mid-frame I/O failure invalidates the VICP connection. A new
 connection starts from a clean stream state instead of trying to guess where
@@ -739,26 +728,19 @@ has responded.
 
 The project therefore treats the worker boundary as a concurrency boundary:
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-worker
-  │
-  ├── blocking hardware I/O
-  ├── expensive processing
-  └── persistence
-        │
-        ▼
-      _ui(...)
-        │
-        ▼
- Textual UI thread```
-]
+#figure(
+  grid(
+    columns: (1.2fr, 20pt, 1.2fr, 20pt, 1.2fr),
+    gutter: 4pt,
+    align: center,
+    node("worker", "hardware I/O and expensive processing"),
+    arrow(),
+    node("UI handoff", "explicit thread boundary"),
+    arrow(),
+    node("Textual", "widget mutation on the UI thread"),
+  ),
+  caption: [Blocking work stays out of the Textual event loop; only the UI-facing outcome crosses back.],
+)
 
 The `_ui` helper in `Page` exists to make the final hop explicit. Widgets are
 not casually mutated from worker threads; the worker computes a result and
@@ -790,32 +772,23 @@ process and looking at the same live instruments.
 
 The input path is:
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-User keyboard
-     ↓
-Textual terminal widget
-     ↓
-termkeys.py
-     ↓
-virtual input
-     ↓
-IPython / prompt_toolkit
-     ↓
-Python execution
-     ↓
-LabProxy
-     ↓
-LockedProxy
-     ↓
-live instrument```
-]
+#figure(
+  stack(
+    spacing: 4pt,
+    node("keyboard event", "Textual receives the physical key"),
+    arrow("↓"),
+    node("termkeys", "key event to terminal bytes"),
+    arrow("↓"),
+    node("IPython / prompt_toolkit", "real Python terminal UI"),
+    arrow("↓"),
+    node("LabProxy", "fresh session lookup"),
+    arrow("↓"),
+    node("LockedProxy", "shared resource lock"),
+    arrow("↓"),
+    node("live instrument", "same handle used by TUI workers"),
+  ),
+  caption: [The console is an in-process terminal frontend to the same live resource graph.],
+)
 
 The output path is the reverse integration problem:
 
@@ -933,24 +906,21 @@ have persistent history across runs.
 
 The persistence path is intentionally separated from display:
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-measurement
-    ↓
-in-memory result
-    ↓
-numeric arrays + metadata + configuration
-    ↓
-NPZ + JSON manifest
-    ↓
-ResultsScreen / offline analysis```
-]
+#figure(
+  stack(
+    spacing: 4pt,
+    node("measurement", "full acquisition"),
+    arrow("↓"),
+    node("in-memory result", "StepResult or ScopeAcquisition"),
+    arrow("↓"),
+    node("numeric payload + metadata", "scientific record"),
+    arrow("↓"),
+    node("NPZ + JSON manifest", "durable persistence"),
+    arrow("↓"),
+    node("ResultsScreen / analysis", "display and offline derivation"),
+  ),
+  caption: [Scientific data is persisted independently of the interactive display representation.],
+)
 
 A plot is an interpretation of the data, not the data itself. The screen may
 reduce, rescale, or otherwise transform an array for readable rendering. The
@@ -1059,26 +1029,21 @@ instrument's lock before disconnecting it and handles instruments independently.
 
 The essential behavior is:
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-shutdown request
-      ↓
-stop / interrupt console work
-      ↓
-collect connected handles
-      ↓
-parallel per-instrument cleanup
-      ↓
-respect each instrument lock
-      ↓
-one wedged device must not block all cleanup forever```
-]
+#figure(
+  stack(
+    spacing: 4pt,
+    node("shutdown request", "user or application"),
+    arrow("↓"),
+    node("close / interrupt console", "release console work"),
+    arrow("↓"),
+    node("Lab.close_all", "collect connected handles"),
+    arrow("↓"),
+    node("per-device cleanup", "respect resource locks"),
+    arrow("↓"),
+    node("deadline", "one wedged device cannot stall exit"),
+  ),
+  caption: [Shutdown is bounded resource cleanup, not an assumption that every physical link will respond promptly.],
+)
 
 A timeout is therefore an exit containment mechanism, not a claim that the
 hardware necessarily completed graceful shutdown.
