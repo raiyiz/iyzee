@@ -1,5 +1,5 @@
 #!/bin/sh
-# One entry point for CI and local checks: scripts/ci.sh {test|lint|typecheck|docs|all|update}
+# One entry point for CI and local checks: scripts/ci.sh {test|lint|typecheck|doc-links|docs|all|update}
 set -eu
 
 cd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/.."
@@ -17,12 +17,17 @@ docs() {
     done
 }
 
+doc_links() {
+    python3 scripts/check_doc_links.py
+}
+
 all() {
     sync
     uv run --locked pytest
     uv run --locked ruff check .
     uv run --locked ruff format --check .
     uv run --locked mypy src tests
+    doc_links
     docs
 }
 
@@ -63,8 +68,9 @@ case "${1:-}" in
     test)      sync; uv run --locked pytest ;;
     lint)      sync; uv run --locked ruff check .; uv run --locked ruff format --check . ;;
     typecheck) sync; uv run --locked mypy src tests ;;
+    doc-links) doc_links ;;
     docs)      docs ;;
     all)       all ;;
     update)    update ;;
-    *)         echo "usage: $0 {test|lint|typecheck|docs|all|update}" >&2; exit 2 ;;
+    *)         echo "usage: $0 {test|lint|typecheck|doc-links|docs|all|update}" >&2; exit 2 ;;
 esac
