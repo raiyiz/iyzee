@@ -218,7 +218,7 @@ async def _press_run_and_wait(app: IyzeeApp) -> None:
         await pilot.pause()
         await pilot.click("#run-sweep")
         await wait_until(pilot, lambda: app.last_run is not None)
-        await pilot.pause(0.2)
+        await pilot.pause(0.1)
 
 
 def _points_on_disk(directory: Path) -> int:
@@ -242,7 +242,7 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
 
     def fake_run_sequence(steps, ctx, *, on_error, on_step):
         started.set()
-        release.wait(5)
+        release.wait(2)
         on_step(0, 3, object(), _result(0), None)
 
     app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
