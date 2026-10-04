@@ -1,4 +1,5 @@
 #include "chapters/requirements.typ"
+#include "chapters/architecture.typ"
 #include "chapters/mxa-and-measurements.typ"
 #include "chapters/tui-and-devices.typ"
 #include "chapters/rubidium-physics.typ"
