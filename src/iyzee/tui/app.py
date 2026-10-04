@@ -31,6 +31,7 @@ from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.log import LogScreen
 from .screens.page import Page
+from .screens.rb import RbScreen
 from .screens.results import ResultsScreen
 from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
@@ -43,6 +44,7 @@ PAGE_SPECS = (
     ("connect", "Connect", ConnectScreen),
     ("sweep", "Sweep", SweepScreen),
     ("scope", "Scope", ScopeScreen),
+    ("rb", "Rb", RbScreen),
     ("results", "Results", ResultsScreen),
     ("console", "Console", ConsoleScreen),
     ("log", "Log", LogScreen),
@@ -174,6 +176,7 @@ class IyzeeApp(App):
         Binding("c", "show_page('connect')", "Connect"),
         Binding("s", "show_page('sweep')", "Sweep"),
         Binding("o", "show_page('scope')", "Scope"),
+        Binding("r", "show_page('rb')", "Rb"),
         Binding("t", "show_page('results')", "Results"),
         Binding("i", "show_page('console')", "Console"),
         Binding("l", "show_page('log')", "Log"),
@@ -468,6 +471,7 @@ class IyzeeApp(App):
         for page_id, label, key in (
             ("sweep", "Sweep", "s"),
             ("scope", "Scope", "o"),
+            ("rb", "Rb", "r"),
             ("results", "Results", "t"),
             ("console", "Console", "i"),
             ("log", "Log", "l"),
