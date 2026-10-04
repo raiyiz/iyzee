@@ -25,6 +25,8 @@ from rich.text import Text
 from textual.pilot import Pilot
 from textual.widgets import DataTable, Static
 
+from iyzee.devices.wavemeter import Rb_transitions
+
 from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL
 
 
@@ -159,3 +161,18 @@ async def test_disconnect_is_refused_while_a_sweep_is_running(
         await pilot.pause(0.2)
         assert handle.disconnect_calls == 0 and "fake" in app.handles
         assert any("sweep is running" in m for m in notifications(app))
+
+
+@async_test
+async def test_connect_screen_shows_the_rb_reference_spectrum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = connect_app(monkeypatch, FakeHandle())
+    async with app.run_test(size=(140, 40)):
+        spectrum = app.query_one("#rb-spectrum")
+        table = app.query_one("#rb-transitions", DataTable)
+
+        expected = [(label, frequency) for label, frequency in Rb_transitions if "_center" not in label]
+        assert table.row_count == len(expected)
+        assert spectrum.query_one("#rb-d1").plt.build() != ""
+        assert spectrum.query_one("#rb-d2").plt.build() != ""
