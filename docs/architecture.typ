@@ -26,7 +26,7 @@
 
 #let gh = "https://github.com/raiyiz/iyzee/blob/flirr/"
 
-#let source(path, label) = link(gh + path)[label]
+#let source(path, label) = underline(link(gh + path)[label], stroke: luma(80))
 
 #let node(title, detail, width: 100%) = box(
   width: width,
@@ -67,7 +67,7 @@
   tests, and prose disagree, the implementation and its verified behavior win.
 ]
 
-#align(center)[#outline(title: [Contents], indent: 1.2em)]
+#align(center)[#outline(title: [Contents], depth: 1, indent: 1.2em)]
 
 #pagebreak()
 
@@ -182,9 +182,8 @@ One of the most important invariants is simple:
 This makes ownership explicit. The caller that decides to use a resource for a
 session also decides when that resource should be opened and closed.
 
-The application-level path is:
-
-#source("src/iyzee/lab.py#L98-L120", [Lab.connect()]) is the concrete owner-side operation. In simplified form:
+The application-level operation is implemented by
+#source("src/iyzee/lab.py#L98-L120", [Lab.connect()]). In simplified form:
 
 ```python
 lab = Lab()
@@ -450,36 +449,21 @@ The scope is the best example of how the project's layers cooperate because it
 combines a real instrument protocol, editable state, verification, acquisition,
 persistence, and background work.
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-ScopeScreen
-    │ user edits
-    ▼
-UI state / dirty state
-    │ Apply
-    ▼
-scope_workflows
-    │
-    ├── read
-    ├── write
-    ├── verify
-    └── record
-    │
-    ▼
-LeCroy
-    │
-    ▼
-VICPTransport
-    │
-    ▼
-TCP socket```
-]
+#figure(
+  stack(
+    spacing: 4pt,
+    node("ScopeScreen", "form state, validation, interaction"),
+    arrow(dir: "↓"),
+    node("scope_workflows", "read, apply, verify, acquire, save"),
+    arrow(dir: "↓"),
+    node("LeCroy", "instrument commands and waveform semantics"),
+    arrow(dir: "↓"),
+    node("VICPTransport", "framing and socket state"),
+    arrow(dir: "↓"),
+    node("TCP socket", "bytes on the wire"),
+  ),
+  caption: [The scope path crosses clear responsibility boundaries; the page owns presentation state while the lower layers own hardware semantics and transport.],
+)
 
 The page owns the human-facing state. The workflow owns the semantics of
 reading, applying, verifying, acquiring, and saving. The driver owns LeCroy
@@ -1094,46 +1078,27 @@ layer.
 
 The following trace connects the conceptual layers to the implementation names.
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-user
- ↓
-SweepScreen
- ↓
-AnalyzerConfig
- ↓
-Step[]
- ↓
-Textual worker
- ↓
-run_sequence()
- ↓
-BandwidthStep / FrequencyStep
- ↓
-handle.lock / LockedProxy boundary
- ↓
-KeysightMXA
- ↓
-PyVISA
- ↓
-MXA
- ↓
-StepResult
- ↓
-save_step_results()
- ↓
-on_step()
- ↓
-reduced preview / progress update
- ↓
-Textual UI```
-]
+#figure(
+  stack(
+    spacing: 3pt,
+    node("user", "measurement intent"),
+    arrow(dir: "↓"),
+    node("SweepScreen", "compose settings and present progress"),
+    arrow(dir: "↓"),
+    node("Textual worker", "keep blocking I/O off the UI thread"),
+    arrow(dir: "↓"),
+    node("run_sequence", "ordered Step execution"),
+    arrow(dir: "↓"),
+    node("BandwidthStep / FrequencyStep", "instrument-level measurement point"),
+    arrow(dir: "↓"),
+    node("KeysightMXA → PyVISA → MXA", "hardware acquisition"),
+    arrow(dir: "↓"),
+    node("StepResult → persistence", "record data and metadata"),
+    arrow(dir: "↓"),
+    node("UI preview", "reduced interactive representation"),
+  ),
+  caption: [An interactive sweep adds orchestration around the same experiment primitives used by scripts; the measurement loop itself remains UI-agnostic.],
+)
 
 The crucial observation is that `SweepScreen` does not own the sweep algorithm.
 It composes existing experiment primitives, supplies a callback for live
@@ -1143,42 +1108,27 @@ feedback, and presents the result.
 
 The analogous scope path is:
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-user presses Acquire
- ↓
-ScopeScreen validates synchronized state
- ↓
-snapshot relevant configuration
- ↓
-worker
- ↓
-acquire_scope_recording()
- ↓
-LeCroy driver
- ↓
-VICPTransport
- ↓
-TCP socket
- ↓
-waveform frame(s)
- ↓
-decode + scale
- ↓
-ScopeAcquisition
- ↓
-save_scope_acquisition()
- ↓
-reduced preview
- ↓
-Textual UI / ResultsScreen```
-]
+#figure(
+  stack(
+    spacing: 3pt,
+    node("user presses Acquire", "requested recording"),
+    arrow(dir: "↓"),
+    node("ScopeScreen", "require synchronized, clean state"),
+    arrow(dir: "↓"),
+    node("scope worker", "blocking acquisition and persistence"),
+    arrow(dir: "↓"),
+    node("acquire_scope_recording", "freeze, download, decode, scale"),
+    arrow(dir: "↓"),
+    node("LeCroy → VICP → TCP", "instrument and transport"),
+    arrow(dir: "↓"),
+    node("ScopeAcquisition", "valid waveforms plus explicit errors"),
+    arrow(dir: "↓"),
+    node("save_scope_acquisition", "NPZ + JSON manifest"),
+    arrow(dir: "↓"),
+    node("ResultsScreen / preview", "render and analyze"),
+  ),
+  caption: [Scope acquisition is a measurement workflow first and a plotting operation second.],
+)
 
 This is why the scope code is larger than a single widget method might suggest.
 The operation spans UI preconditions, device semantics, protocol mechanics, data
@@ -1296,36 +1246,21 @@ operation, extend the TUI without moving the operation upward into the page.
 
 The practical decision tree is:
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-Does this describe bytes / framing?
-        │ yes → transport
-        │
-        no
-        ↓
-Does this describe one instrument's semantics?
-        │ yes → device driver
-        │
-        no
-        ↓
-Does this compose device calls into a lab operation?
-        │ yes → workflow / experiment
-        │
-        no
-        ↓
-Is it primarily interaction or presentation?
-        │ yes → TUI
-        │
-        no
-        ↓
-Re-evaluate the boundary before adding another abstraction.```
-]
+#figure(
+  stack(
+    spacing: 4pt,
+    node("Does this describe bytes or framing?", "yes → transport"),
+    arrow(dir: "↓"),
+    node("Does this describe one instrument's semantics?", "yes → device driver"),
+    arrow(dir: "↓"),
+    node("Does this compose device calls into a lab operation?", "yes → workflow / experiment"),
+    arrow(dir: "↓"),
+    node("Is it primarily interaction or presentation?", "yes → TUI"),
+    arrow(dir: "↓"),
+    node("None of the above", "re-check the boundary before adding an abstraction"),
+  ),
+  caption: [Put new behavior at the lowest layer that knows enough to implement it correctly.],
+)
 
 The last line is deliberate. The project benefits more from a small number of
 strong boundaries than from a large number of classes that merely rename the
