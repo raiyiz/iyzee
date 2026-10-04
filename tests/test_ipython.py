@@ -16,11 +16,11 @@ import pytest
 from helpers import FakeApp, FakeHandle, history_manager
 from IPython.core.interactiveshell import InteractiveShell
 
-from iyzee.experiment import StepResult
 from iyzee.devices.handles import LockedProxy
+from iyzee.devices.wavemeter import Wavemeter
+from iyzee.experiment import StepResult
 from iyzee.tui.ipython import LabProxy, default_history_file, lab_namespace, shell_config
 from iyzee.tui.workers import LastRun
-from iyzee.devices.wavemeter import Wavemeter
 
 
 @dataclass

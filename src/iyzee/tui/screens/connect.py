@@ -9,7 +9,6 @@ touched back on the main thread via ``call_from_thread``.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import time
 

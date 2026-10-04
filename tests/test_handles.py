@@ -17,7 +17,6 @@ from typing import cast
 
 import pytest
 
-from iyzee.devices.scope import LeCroyTimeoutError
 from iyzee.devices import handles as instruments_mod
 from iyzee.devices.handles import (
     LockedProxy,
@@ -26,6 +25,7 @@ from iyzee.devices.handles import (
     WavemeterHandle,
     _VisaHandle,
 )
+from iyzee.devices.scope import LeCroyTimeoutError
 from iyzee.lab import INSTRUMENTS
 
 # -- LockedProxy --------------------------------------------------------

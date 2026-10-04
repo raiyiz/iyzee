@@ -24,8 +24,8 @@ from textual.pilot import Pilot
 from textual.widgets import DataTable, Static
 
 from iyzee.experiment import StepResult, save_step_results
-from iyzee.tui import app as app_mod
 from iyzee.lab import InstrumentSpec
+from iyzee.tui import app as app_mod
 from iyzee.tui.screens import connect as connect_mod
 from iyzee.tui.screens.connect import ConnectScreen
 from iyzee.tui.workers import LastRun

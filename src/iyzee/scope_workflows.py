@@ -64,9 +64,9 @@ from pathlib import Path
 
 import numpy as np
 
+from .devices.scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from .experiment.core import utc_now
 from .experiment.io import save_numeric_recording
-from .devices.scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 
 log = logging.getLogger("iyzee.scope_workflows")
 

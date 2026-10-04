@@ -1,7 +1,7 @@
 """Application entry point and hardware resource boundary."""
 
-from .experiment import create_dirs, multiplot, run_bandwidth_sweep, save_step_results
 from .devices.mxa import KeysightMXA
+from .experiment import create_dirs, multiplot, run_bandwidth_sweep, save_step_results
 
 
 def main():

@@ -51,7 +51,11 @@ def test_drivers_pick_the_configured_address_at_construction(tmp_path: Path):
     from iyzee.devices.handles import ScopeHandle
     from iyzee.devices.mxa import KeysightMXA
 
-    (tmp_path / "config.toml").write_text('[addresses]\nscope = "192.0.2.7"\nnoise_analyzer = "192.0.2.8"\n')
+    (tmp_path / "config.toml").write_text(
+        '[addresses]\nscope = "192.0.2.7"\nnoise_analyzer = "192.0.2.8"\n'
+    )
     assert ScopeHandle()._ip == "192.0.2.7"
     assert KeysightMXA(resource_manager=object()).ip == "192.0.2.8"
-    assert KeysightMXA("203.0.113.1", resource_manager=object()).ip == "203.0.113.1"  # explicit wins
+    assert (
+        KeysightMXA("203.0.113.1", resource_manager=object()).ip == "203.0.113.1"
+    )  # explicit wins

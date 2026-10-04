@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import threading
 
-from iyzee.tui.apidoc import describe_api
 from iyzee.devices.handles import LockedProxy
 from iyzee.devices.wavemeter import endpoint
+from iyzee.tui.apidoc import describe_api
 
 
 class _Device:

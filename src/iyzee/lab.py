@@ -24,7 +24,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .devices.base import CH
 from .devices.handles import (
     InstrumentHandle,
     ScopeHandle,

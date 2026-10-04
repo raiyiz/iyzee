@@ -16,8 +16,8 @@ import numpy as np
 import pytest
 from test_scope_workflows import FakeScope
 
-from iyzee.experiment.io import Recording, load_recording
 from iyzee.devices.scope import Channel
+from iyzee.experiment.io import Recording, load_recording
 from iyzee.scope_workflows import acquire_scope_recording, save_scope_acquisition
 from iyzee.waveform_math import (
     Trace,

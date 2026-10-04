@@ -24,7 +24,6 @@ from typing import Any, Protocol
 
 from ..config import IP, address
 from .base import CH
-from .mxa import KeysightMXA
 from .power import ShutterControl
 from .scope import LeCroy, LeCroyTimeoutError
 from .wavemeter import DEFAULT_CHANNEL, Wavemeter, WavemeterReadoutError
