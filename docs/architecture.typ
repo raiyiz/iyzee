@@ -537,22 +537,19 @@ with success.
 
 The LeCroy stack is intentionally split into three layers.
 
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
-  inset: 8pt,
-  radius: 3pt,
-  width: 100%,
-)[
-```text
-LeCroy semantics
-      ↓
-LeCroy driver
-      ↓
-VICP transport
-      ↓
-TCP```
-]
+#figure(
+  stack(
+    spacing: 4pt,
+    node("LeCroy semantics", "waveform, trigger, channel and acquisition meaning"),
+    arrow(dir: "↓"),
+    node("LeCroy driver", "instrument commands and response decoding"),
+    arrow(dir: "↓"),
+    node("VICPTransport", "frame boundaries, timeouts and connection state"),
+    arrow(dir: "↓"),
+    node("TCP", "byte stream"),
+  ),
+  caption: [The VICP boundary isolates byte-stream mechanics from LeCroy-specific instrument semantics.],
+)
 
 The transport in `src/iyzee/devices/vicp.py` owns framing, socket lifetime,
 timeouts, partial send/receive handling, and transport invalidation. The
