@@ -1,5 +1,7 @@
 // iyzee MXA and measurement guide
 
+#import "requirements.typ": *
+
 #set document(
   title: "iyzee MXA control and measurement model",
   author: "iyzee",
@@ -72,13 +74,13 @@ The useful abstraction is not "send a command and get a trace" but a chain of
 state transformations:
 
 #diagram(
-  """flowchart LR
+  ```mermaidflowchart LR
   A["physical signal"] --> B["MXA input state"]
   B --> C["IF / RBW / detector"]
   C --> D["sweep + averaging"]
   D --> E["trace estimator"]
   E --> F["Python result"]
-  F --> G["analysis + archive"]""",
+  F --> G["analysis + archive"]```.text,
   caption: [The measured trace is the endpoint of a configured estimator, not a raw detector stream.],
   width: 96%,
 )
@@ -154,13 +156,13 @@ The software ordering is therefore explicit, but its scientific validity still d
 = Data transfer and persistence
 
 #diagram(
-  """flowchart TD
+  ```mermaidflowchart TD
   A["configure"] --> B["arm / start"]
   B --> C{"complete?"}
   C -->|no| C
   C -->|yes| D["read trace"]
   D --> E["attach metadata"]
-  E --> F["persist numeric data + manifest"]""",
+  E --> F["persist numeric data + manifest"]```.text,
   caption: [Acquisition is separated from persistence so the numerical result retains its measurement context.],
   width: 88%,
 )
@@ -187,12 +189,12 @@ setpoint, waits, reads the wavemeter, acquires the squeezing trace, closes the
 shutter, and then acquires the shot-noise reference.
 
 #diagram(
-  """flowchart LR
+  ```mermaidflowchart LR
   A["laser frequency"] --> B["Rb detuning"]
   B --> C["PSR / optical state"]
   C --> D["photodetection"]
   D --> E["RF spectrum"]
-  E --> F["MXA trace"]""",
+  E --> F["MXA trace"]```.text,
   caption: [The MXA is downstream of the atomic physics: it measures an electrical consequence of the optical state.],
   width: 94%,
 )

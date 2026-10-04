@@ -79,12 +79,12 @@ frequency as its primary optical coordinate because detunings are naturally
 expressed in MHz or GHz.
 
 #diagram(
-  """flowchart TD
+  ```mermaidflowchart TD
   A["Rb-85 / Rb-87"] --> B["5²S₁/₂ ground manifold"]
   B --> C["5²P₁/₂"]
   B --> D["5²P₃/₂"]
   C --> E["D1 ≈ 795 nm"]
-  D --> F["D2 ≈ 780 nm"]""",
+  D --> F["D2 ≈ 780 nm"]```.text,
   caption: [Fine structure: D1 and D2 connect the same ground manifold to the two 5²P manifolds.],
   width: 74%,
 )
@@ -187,12 +187,12 @@ and the isotope/hyperfine offsets embedded in
 #src-link("src/iyzee/devices/wavemeter.py", line: 99).
 
 #diagram(
-  """flowchart LR
+  ```mermaidflowchart LR
   A["Fine-structure centre"] --> B["isotope shift"]
   B --> C["ground-state HFS"]
   C --> D["excited-state HFS"]
   D --> E["transition frequency"]
-  E --> F["laser detuning"]""",
+  E --> F["laser detuning"]```.text,
   caption: [A transition frequency is a difference of two level energies; a fine-structure centre is not itself one hyperfine line.],
   width: 92%,
 )
@@ -297,13 +297,13 @@ the differential response itself depends on the optical field and the pumped
 atomic state.
 
 #diagram(
-  """flowchart LR
+  ```mermaidflowchart LR
   A["Strong linear field"] --> B["σ+ / σ− components"]
   B --> C["Multilevel Rb response"]
   C --> D["different complex susceptibilities"]
   D --> E["relative phase and amplitude"]
   E --> F["polarization self-rotation"]
-  F --> G["orthogonal field fluctuations"]""",
+  F --> G["orthogonal field fluctuations"]```.text,
   caption: [Classical PSR: differential complex response of the circular components generates an intensity-dependent polarization rotation.],
   width: 96%,
 )
@@ -330,13 +330,13 @@ can then have a variance below the vacuum value while the conjugate
 quadrature is anti-squeezed.
 
 #diagram(
-  """flowchart TD
+  ```mermaidflowchart TD
   A["Strong pump polarization"] --> B["Rb nonlinear interaction"]
   B --> C["+Ω sideband"]
   B --> D["−Ω sideband"]
   C --> E["correlated quadratures"]
   D --> E
-  E --> F["squeezed / anti-squeezed output"]""",
+  E --> F["squeezed / anti-squeezed output"]```.text,
   caption: [Quantum picture: the nonlinear medium couples opposite-frequency sidebands and can transform vacuum fluctuations into a squeezed state.],
   width: 84%,
 )
@@ -372,13 +372,13 @@ of the complete apparatus rather than choosing a point from a vacuum line table.
 The MXA observes an electrical signal, not the optical field directly.
 
 #diagram(
-  """flowchart LR
+  ```mermaidflowchart LR
   A["Rb vapor"] --> B["polarization analysis"]
   B --> C["photodetector(s)"]
   C --> D["RF / electrical chain"]
   D --> E["MXA"]
   E --> F["measured noise spectrum"]
-  G["reference state"] --> C""",
+  G["reference state"] --> C```.text,
   caption: [The detector and RF chain are part of the measurement, not transparent observers of the atomic state.],
 )
 
@@ -398,13 +398,13 @@ frequency, wait, read the wavemeter, acquire the squeezing trace with the
 shutter open, close the shutter, and acquire the shot-noise reference.
 
 #diagram(
-  """flowchart LR
+  ```mermaidflowchart LR
   A["Set laser setpoint"] --> B["wait"]
   B --> C["read wavemeter"]
   C --> D["open shutter"]
   D --> E["measure squeezing"]
   E --> F["close shutter"]
-  F --> G["measure shot noise"]""",
+  F --> G["measure shot noise"]```.text,
   caption: [Current frequency-step ordering in the experiment code.],
   width: 96%,
 )

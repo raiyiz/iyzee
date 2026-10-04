@@ -1,5 +1,7 @@
 // iyzee TUI and device interaction guide
 
+#import "requirements.typ": *
+
 #set document(
   title: "iyzee TUI and device interaction guide",
   author: "iyzee",
@@ -55,13 +57,13 @@
 The script and interactive application share the same lower layers:
 
 #diagram(
-  """flowchart LR
+  ```mermaidflowchart LR
   A["iyzee script"] --> C["experiment layer"]
   B["iyzee-tui"] --> C
   D["embedded IPython"] --> E["Lab / live handles"]
   E --> C
   C --> F["device drivers"]
-  F --> G["physical instruments"]""",
+  F --> G["physical instruments"]```.text,
   caption: [Interactive presentation sits above reusable experiment and device operations.],
   width: 94%,
 )
@@ -183,7 +185,7 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
 A failed or unparseable HTTP response raises `WavemeterReadoutError` rather than silently returning a plausible-looking frequency — deliberately, per the project's own safety rule (see the README's Safety notes): a communication failure must never masquerade as a measurement.
 
 #diagram(
-  """flowchart TD
+  ```mermaidflowchart TD
   A["user action"] --> B["page / command"]
   B --> C["validation + translation"]
   C --> D["plain Python workflow"]
@@ -192,7 +194,7 @@ A failed or unparseable HTTP response raises `WavemeterReadoutError` rather than
   F --> G["hardware"]
   G --> E
   E --> D
-  D --> B""",
+  D --> B```.text,
   caption: [A page translates interaction into reusable operations; it does not become the device driver.],
   width: 84%,
 )
