@@ -89,61 +89,34 @@ Screen {
     color: $text-muted;
 }
 
-/* -- Connect ------------------------------------------------------------ */
+/* -- Rb ----------------------------------------------------------------- */
 
-#connect-body {
-    layout: horizontal;
-    height: 1fr;
-    min-height: 20;
+/* The two D-line plots sit side by side, the transition table below them. */
+#rb-plots {
+    height: 18;
+    margin: 0 2;
 }
 
-#connect-instruments {
+.rb-plot {
     width: 1fr;
-    min-width: 35;
+    min-width: 36;
 }
 
-#rb-spectrum {
-    width: 48;
-    min-width: 42;
-    margin: 1 2 1 0;
-    border: round $primary;
-    padding: 0 1;
-}
-
-.spectrum-title {
-    padding: 0 0 1 0;
-    color: $accent;
-    text-style: bold;
-}
-
-#rb-spectrum PlotextPlot {
-    height: 11;
-    min-height: 9;
-}
-
-#rb-transitions {
+#rb-table {
     height: 1fr;
-    min-height: 8;
-    margin-top: 1;
+    min-height: 10;
+    margin: 1 2;
 }
 
-/* Keep the spectrum useful on narrow terminals: stack it below the
-   connection table instead of squeezing both into unreadable columns. */
-.-narrow #connect-body {
+/* Narrow terminals: stack the plots instead of squeezing both. */
+.-narrow #rb-plots {
     layout: vertical;
     height: auto;
 }
 
-.-narrow #connect-instruments {
+.-narrow .rb-plot {
     width: 1fr;
-    height: 18;
-    min-height: 14;
-}
-
-.-narrow #rb-spectrum {
-    width: 1fr;
-    height: 42;
-    margin: 1 2;
+    height: 16;
 }
 
 /* -- Sweep -------------------------------------------------------------- */

@@ -41,11 +41,12 @@ src/iyzee/
     ├── plotting.py         # plotext drawing shared by the Sweep, Scope, Results and Console pages
     ├── text.py             # showing externally produced text safely (markup-safe)
     ├── workers.py          # LastRun: the sweep result handed to the console
-    └── screens/            # the six pages
+    └── screens/            # the seven pages
         ├── page.py         # shared page base, form helpers/validation, readiness hook, and worker→UI plumbing
         ├── connect.py      # ConnectScreen
         ├── sweep.py        # SweepScreen
         ├── scope.py        # ScopeScreen — form/plot only; operations live in scope_workflows.py
+        ├── rb.py           # RbScreen: rubidium D1/D2 transitions (stick plots + table)
         ├── results.py      # ResultsScreen — browse saved Sweep/Scope runs, derive/export waveforms
         ├── console.py      # ConsoleScreen + IyzeeConsole: the page around IPython's terminal UI
         └── log.py          # LogScreen: the app's own logging, live and browsable
@@ -58,9 +59,9 @@ uv sync
 uv run iyzee-tui
 ```
 
-Six pages cover the common tasks (the classes keep their `*Screen` names, but
+Seven pages cover the common tasks (the classes keep their `*Screen` names, but
 they are plain container widgets inside one `ContentSwitcher`, not Textual
-`Screen`s). Switch between them with `c` / `s` / `o` / `t` / `i` / `l`,
+`Screen`s). Switch between them with `c` / `s` / `o` / `r` / `t` / `i` / `l`,
 `F1`–`F4` (Connect/Sweep/Results/Console only — see below), or by clicking the
 nav rail; `Ctrl+Q` quits at once, `q` quits after a second press (a running cell is
 interrupted and connected instruments are disconnected on the way out):
@@ -102,6 +103,11 @@ completion live in `tui/commands.py`, free of Textual.
   settings* re-syncs after a front-panel change. **Acquire & save** is available
   only for a synchronized, clean state and records enabled-channel waveforms
   under `data/YYYY-MM/` as a numeric `.npz` plus JSON manifest.
+- **Rb** (`r`) — the rubidium D1/D2 hyperfine transitions that
+  `devices.wavemeter.Rb_transitions` references the wavemeter to: one stick plot
+  per D line (both isotopes, on a shared GHz axis) over a table of absolute
+  frequencies. Highlighting a row marks that transition in the plots. Line
+  positions only — no strengths or broadening — and no instrument is needed.
 - **Results** (`t`) — browse previously recorded `.npz` runs on disk (sweeps
   and scope acquisitions); the preview follows the highlighted run, and scope
   runs add channel selection, waveform operations and PNG export.
@@ -112,8 +118,8 @@ completion live in `tui/commands.py`, free of Textual.
 
 `F1`–`F4` reach only Connect/Sweep/Results/Console — Textual's own key
 handling reserves those four specifically to escape the console's embedded
-terminal (see the comment on `IyzeeApp.BINDINGS`); Scope and Log are
-letter-only (`o`, `l`) to avoid extending that.
+terminal (see the comment on `IyzeeApp.BINDINGS`); Scope, Rb and Log are
+letter-only (`o`, `r`, `l`) to avoid extending that.
 
 **Keyboard.** Outside text-entry widgets, `j`/`k` move focus (Textual's own
 `focus_next()`/`focus_previous()`) and `Escape` leaves a text field. `Ctrl+\`

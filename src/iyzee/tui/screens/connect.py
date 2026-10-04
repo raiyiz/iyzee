@@ -15,13 +15,11 @@ import time
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Static
 
 from ...lab import INSTRUMENTS, InstrumentSpec
 from ..commands import CommandError
 from ..text import one_line
-from ..rb_spectrum import RbSpectrum
 from .page import Page
 
 log = logging.getLogger("iyzee.tui")
@@ -34,12 +32,9 @@ class ConnectScreen(Page):
     """Table of instruments with live connect/disconnect status."""
 
     def compose(self) -> ComposeResult:
-        with Horizontal(id="connect-body"):
-            with Vertical(id="connect-instruments"):
-                yield Static("Instruments", classes="panel-title")
-                yield Static("", id="connect-hint", classes="hint")
-                yield DataTable(id="instrument-table", cursor_type="row")
-            yield RbSpectrum(id="rb-spectrum")
+        yield Static("Instruments", classes="panel-title")
+        yield Static("", id="connect-hint", classes="hint")
+        yield DataTable(id="instrument-table", cursor_type="row")
 
     def on_mount(self) -> None:
         # Keys of instruments with a connect/disconnect in flight. Enter on
