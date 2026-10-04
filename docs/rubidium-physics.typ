@@ -140,7 +140,7 @@ already assembled from the chosen reference data.
 
 For electric-dipole excitation,
 
-$ Delta F = 0, pm 1 $
+$ Delta F = 0, "pm" 1 $
 
 with the F = 0 -> F' = 0 transition forbidden.
 
