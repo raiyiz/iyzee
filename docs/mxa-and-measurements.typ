@@ -24,11 +24,23 @@
 #set heading(numbering: "1.")
 #set text(size: 10pt)
 
-#align(center)[
-  #text(size: 22pt, weight: "bold")[MXA control and measurement model]
-  #v(0.4em)
-  #text(size: 11pt)[iyzee technical guide]
-]
+#hero(
+  "Scientific + software reference",
+  "MXA control and measurement",
+  "From analyzer state and SCPI to noise spectra, synchronization, and persisted measurement records."
+)
+
+#v(0.65em)
+
+#callout(
+  "Reading rule",
+  [
+    This guide describes the current iyzee measurement model. Each important
+    instrument setting is experimental state: it has a physical meaning, a
+    driver-level implementation, and a place in the saved record.
+  ],
+  tone: "result",
+)
 
 #v(0.6em)
 
@@ -53,6 +65,26 @@ $ "MXA" -> "SCPI response" -> "PyVISA" -> "KeysightMXA" -> "Python" $
 The driver deliberately keeps the SCPI boundary thin. For example, `set_center_freq(freq_hz)` writes `FREQ:CENT`, `set_rbw(rbw_hz)` writes `BWID`, and `get_trace_data()` selects ASCII or binary transfer before reading the trace. Units are explicit at the Python boundary: frequencies are in Hz, sweep duration in ms, RF reference and marker powers in dBm where applicable, and counts are dimensionless.
 
 The experiment layer builds measurements from `Step` objects. `BandwidthStep` scans RBW; `FrequencyStep` changes the laser setpoint, waits for a configured settling interval, and acquires squeezing and shot-noise traces with the shutter closed again before the reference acquisition. `main.py` runs a fixed bandwidth sweep as a script, plots it, and saves the resulting `StepResult` objects; the `iyzee-tui` application (see the top-level README) runs either sweep interactively, with live progress, from the same `Step`/`run_sequence()` building blocks.
+
+= Measurement architecture
+
+The useful abstraction is not "send a command and get a trace" but a chain of
+state transformations:
+
+#diagram(
+  """flowchart LR
+  A["physical signal"] --> B["MXA input state"]
+  B --> C["IF / RBW / detector"]
+  C --> D["sweep + averaging"]
+  D --> E["trace estimator"]
+  E --> F["Python result"]
+  F --> G["analysis + archive"]""",
+  caption: [The measured trace is the endpoint of a configured estimator, not a raw detector stream.],
+  width: 96%,
+)
+
+A reproducible analysis must therefore preserve the settings that can change
+the estimator or its calibration.
 
 = Measurement configuration
 
@@ -96,6 +128,15 @@ so doubling effective bandwidth predicts about `3.01 dB`, subject to filter shap
 
 The analyzer itself contributes noise. Any background subtraction must therefore be justified in linear power and under the same relevant instrument state. Subtracting two dBm values gives a logarithmic ratio, not a physical power difference. When a residual power is required, convert to linear power first, subtract there, and convert back only after the subtraction.
 
+#callout(
+  "Bandwidth is part of the physical observable",
+  [
+    In a white-noise region, integrated power scales approximately with
+    effective noise bandwidth. A bandwidth sweep therefore tests the complete
+    analyzer + detector + DUT chain; it is not merely a formatting operation.
+  ],
+)
+
 = Acquisition and synchronization
 
 The driver separates configuration, arming, acquisition, and readout. The normal single-sweep path is:
@@ -112,6 +153,18 @@ The software ordering is therefore explicit, but its scientific validity still d
 
 = Data transfer and persistence
 
+#diagram(
+  """flowchart TD
+  A["configure"] --> B["arm / start"]
+  B --> C{"complete?"}
+  C -->|no| C
+  C -->|yes| D["read trace"]
+  D --> E["attach metadata"]
+  E --> F["persist numeric data + manifest"]""",
+  caption: [Acquisition is separated from persistence so the numerical result retains its measurement context.],
+  width: 88%,
+)
+
 Trace data can be transferred as ASCII values or IEEE 488.2 binary floating-point data. The binary path explicitly selects 32-bit floats and big-endian decoding. Transport format does not define the physical units; interpretation still depends on the analyzer mode and measurement configuration.
 
 An exported `StepResult` contains an x value and unit, named traces, and metadata. `save_step_results()` writes those results to a compressed NumPy archive and stores per-point metadata together with optional run-level metadata. The saved data therefore retains the experimental context alongside the numerical arrays instead of relying on a filename or an undocumented convention.
@@ -119,6 +172,30 @@ An exported `StepResult` contains an x value and unit, named traces, and metadat
 The minimum useful record includes the frequency coordinate and unit, analyzer configuration, RBW/VBW, detector and averaging settings, sweep duration, trigger state, trace identity, attenuation/reference information when relevant, and physical scan state such as laser setpoint and shutter state.
 
 The scientific rule is simple: a trace is reproducible only when the settings that can change its numerical meaning are recorded with it.
+
+= Rubidium and the optical experiment
+
+The analyzer sees an electrical noise spectrum. The underlying optical
+experiment is governed by the Rubidium medium, laser detuning, polarization
+and detection chain. The dedicated
+#link("rubidium-physics.typ")[Rubidium physics guide] develops that connection,
+including D1/D2 hyperfine structure, warm-vapor broadening, polarization
+self-rotation and the squeezing/shot-noise reference.
+
+At the implementation boundary, the frequency-scan step changes the laser
+setpoint, waits, reads the wavemeter, acquires the squeezing trace, closes the
+shutter, and then acquires the shot-noise reference.
+
+#diagram(
+  """flowchart LR
+  A["laser frequency"] --> B["Rb detuning"]
+  B --> C["PSR / optical state"]
+  C --> D["photodetection"]
+  D --> E["RF spectrum"]
+  E --> F["MXA trace"]""",
+  caption: [The MXA is downstream of the atomic physics: it measures an electrical consequence of the optical state.],
+  width: 94%,
+)
 
 = Current experiment workflows
 
