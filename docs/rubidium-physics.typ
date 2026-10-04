@@ -222,7 +222,7 @@ individual hyperfine line is different again.
 The TUI stick plot is an ideal reference. A warm cell produces broadened and
 overlapping resonances.
 
-For longitudinal atomic velocity v_z,
+For longitudinal atomic velocity `v_z`, taken positive along the laser propagation direction,
 
 $ Delta nu_"D" approx nu_0 v_z / c. $
 
@@ -393,7 +393,7 @@ A simple variance model is
 
 $ V_"meas" = eta V_"field" + (1 - eta) V_"vac". $
 
-Optical loss, mode mismatch and detector inefficiency reduce the observable
+With the quadrature convention above, the vacuum reference has $V_"vac" = 1/2$. Optical loss, mode mismatch and detector inefficiency reduce the observable
 squeezing through this vacuum mixing. Electronics noise is an additional
 additive contribution and must be characterized separately.
 
