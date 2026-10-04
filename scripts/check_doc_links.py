@@ -41,8 +41,11 @@ def links(text: str, typst: bool):
         if typst:
             path, rest = match.groups()
             line = LINE.search(rest)
-            yield match, path, int(line.group(1)) if line else None, (
-                typst_name(text, match.start()) if line else None
+            yield (
+                match,
+                path,
+                int(line.group(1)) if line else None,
+                (typst_name(text, match.start()) if line else None),
             )
         else:
             label, path, line = match.groups()
@@ -68,7 +71,8 @@ def process(path: Path, typst: bool, fix: bool) -> list[str]:
             continue
 
         definitions = [
-            n for n, source_line in enumerate(lines, 1)
+            n
+            for n, source_line in enumerate(lines, 1)
             if (match_def := DEF.match(source_line))
             and symbol is not None
             and match_def.group(1) == symbol
@@ -103,9 +107,7 @@ def process(path: Path, typst: bool, fix: bool) -> list[str]:
 
 fix = "--fix" in sys.argv[1:]
 errors = [
-    error
-    for doc in sorted((ROOT / "docs").glob("*.typ"))
-    for error in process(doc, True, fix)
+    error for doc in sorted((ROOT / "docs").glob("*.typ")) for error in process(doc, True, fix)
 ]
 errors.extend(process(ROOT / "README.md", False, fix))
 
