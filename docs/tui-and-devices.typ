@@ -24,11 +24,23 @@
 #set heading(numbering: "1.")
 #set text(size: 10pt)
 
-#align(center)[
-  #text(size: 22pt, weight: "bold")[TUI and device interaction guide]
-  #v(0.4em)
-  #text(size: 11pt)[iyzee technical guide]
-]
+#hero(
+  "Software architecture + operator reference",
+  "TUI and device interaction",
+  "How iyzee connects real instruments, exposes them to the terminal UI and console, and keeps hardware operations reusable outside Textual."
+)
+
+#v(0.65em)
+
+#callout(
+  "Design invariant",
+  [
+    The TUI organizes, displays and controls. Device and experiment machinery
+    remains ordinary Python, callable from scripts and the embedded console.
+    This separation is the main architectural boundary of iyzee.
+  ],
+  tone: "result",
+)
 
 #v(0.6em)
 
@@ -37,6 +49,22 @@
 #align(center)[#outline(title: [Contents], indent: 1.2em)]
 
 #pagebreak()
+
+= One foundation, two entry points
+
+The script and interactive application share the same lower layers:
+
+#diagram(
+  """flowchart LR
+  A["iyzee script"] --> C["experiment layer"]
+  B["iyzee-tui"] --> C
+  D["embedded IPython"] --> E["Lab / live handles"]
+  E --> C
+  C --> F["device drivers"]
+  F --> G["physical instruments"]""",
+  caption: [Interactive presentation sits above reusable experiment and device operations.],
+  width: 94%,
+)
 
 = Two entry points, one foundation
 
@@ -58,6 +86,11 @@
 Both paths build a list of `Step` objects and hand them to `run_sequence()`; nothing about `experiment/` needed to change to support the TUI, and nothing about the TUI needed to know how a `BandwidthStep` or `FrequencyStep` actually talks to the MXA.
 
 = Device layer
+
+The device layer is where software semantics meet real protocols: VISA,
+raw SCPI sockets, LeCroy VICP, and the WS-7 HTTP interface. Each adapter keeps
+hardware-specific command syntax out of the experiment and TUI layers.
+
 
 == Connection lifecycle
 
@@ -149,6 +182,21 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
 
 A failed or unparseable HTTP response raises `WavemeterReadoutError` rather than silently returning a plausible-looking frequency — deliberately, per the project's own safety rule (see the README's Safety notes): a communication failure must never masquerade as a measurement.
 
+#diagram(
+  """flowchart TD
+  A["user action"] --> B["page / command"]
+  B --> C["validation + translation"]
+  C --> D["plain Python workflow"]
+  D --> E["instrument handle"]
+  E --> F["driver"]
+  F --> G["hardware"]
+  G --> E
+  E --> D
+  D --> B""",
+  caption: [A page translates interaction into reusable operations; it does not become the device driver.],
+  width: 84%,
+)
+
 = TUI architecture <sec-instruments>
 
 == Screens
@@ -181,6 +229,17 @@ A page's job is the form, the buttons, the plot, and reporting a result — not 
 == Navigation
 
 Key handling relies entirely on Textual's own focus and binding-priority system, with no app-specific policy layer on top: a focused widget's own bindings (an `Input`'s text-entry keys, the console terminal's own keys) are offered the key first, and it only falls through to `IyzeeApp.BINDINGS` if the widget doesn't handle it. Those are `c`/`s`/`o`/`r`/`t`/`i`/`l` (switch page; the page you are already on is not offered) and `F1`–`F4`, which reach only Connect/Sweep/Results/Console — Textual's own key handling reserves those four specifically to escape the console's embedded terminal, so Scope, Rb and Log are letter-only (`o`, `r`, `l`) rather than extending that set — plus `:` (vim-style command mode: page switching, `:connect scope`, and page-specific commands such as `:tdiv 2u`; see `tui/commands.py`), `Ctrl+Q` (quit at once) and `q` (quit on a second press within a few seconds, so a stray key can't close an app holding live instruments), `j`/`k` (move focus) and `Escape` (leave a text field). There is no hand-maintained "am I in insert mode" flag to keep in sync with what's actually focused — Textual's dispatch order is the single source of truth for that. `Ctrl+\` opens Textual's built-in Command Palette rather than a hand-rolled command bar or parser; it is a priority binding, checked before the focus chain, and is deliberately not `Ctrl+P`, which IPython's history recall uses.
+
+#callout(
+  "Concurrency invariant",
+  [
+    One physical instrument has one serialization boundary. Console calls,
+    screen workers and workflow batches therefore cannot interleave protocol
+    commands accidentally. Long-running hardware calls still occupy that
+    boundary for their full duration.
+  ],
+  tone: "result",
+)
 
 = The console in practice <sec-console>
 
