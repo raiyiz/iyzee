@@ -198,7 +198,7 @@ flowchart TD
   E --> D
   D --> B```.text,
   caption: [A page translates interaction into reusable operations; it does not become the device driver.],
-  width: 84%,
+  width: 94%,
 )
 
 = TUI architecture <sec-instruments>

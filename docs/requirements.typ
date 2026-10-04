@@ -47,10 +47,11 @@
   link("https://github.com/raiyiz/iyzee/blob/main/" + path + anchor)[source]
 }
 
-#let diagram(source, caption: none, width: 100%) = mermaid-figure(
+#let diagram(source, caption: none, width: 94%) = mermaid-figure(
   source,
   document-context: true,
   width: width,
+  typography: (size: 10pt),
   theme-name: "base",
   theme: (
     background: "#FFFFFF",

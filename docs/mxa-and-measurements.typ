@@ -83,7 +83,7 @@ flowchart LR
   E --> F["Python result"]
   F --> G["analysis + archive"]```.text,
   caption: [The measured trace is the endpoint of a configured estimator, not a raw detector stream.],
-  width: 96%,
+  width: 94%,
 )
 
 A reproducible analysis must therefore preserve the settings that can change
@@ -166,7 +166,7 @@ flowchart TD
   D --> E["attach metadata"]
   E --> F["persist numeric data + manifest"]```.text,
   caption: [Acquisition is separated from persistence so the numerical result retains its measurement context.],
-  width: 88%,
+  width: 94%,
 )
 
 Trace data can be transferred as ASCII values or IEEE 488.2 binary floating-point data. The binary path explicitly selects 32-bit floats and big-endian decoding. Transport format does not define the physical units; interpretation still depends on the analyzer mode and measurement configuration.
@@ -208,9 +208,9 @@ flowchart LR
 
 `run_frequency_sweep()` builds `FrequencyStep` objects around a laser-frequency center value. Its settling interval is currently estimated as
 
-$ t = t_s N_a $
+$ t_"settle" approx t_s N_a $
 
-from sweep duration `t_s` and average count `N_a`. This is an acquisition-workload estimate, not a demonstrated physical settling constant.
+from sweep duration `t_s` and average count `N_a`. This is an acquisition-workload heuristic, not a measured physical settling constant.
 
 The key comparison in that workflow is squeezing versus shot noise. A difference between two dBm traces is a power ratio. A residual power requires linear-domain subtraction. Documentation and downstream analysis should keep those quantities distinct.
 

@@ -87,16 +87,16 @@ flowchart TD
   C --> E["D1 ≈ 795 nm"]
   D --> F["D2 ≈ 780 nm"]```.text,
   caption: [Fine structure: D1 and D2 connect the same ground manifold to the two 5²P manifolds.],
-  width: 74%,
+  width: 94%,
 )
 
 = Angular momentum and hyperfine structure
 
-The electronic angular momentum is
+The electronic angular momentum couples orbital and spin angular momenta by vector addition, schematically written as
 
 $ J = L + S $
 
-and the nuclear spin couples to it as
+and the nuclear spin couples to the electronic angular momentum as
 
 $ F = I + J. $
 
@@ -108,7 +108,7 @@ Define
 
 $ K = F(F+1) - I(I+1) - J(J+1). $
 
-A standard first-order hyperfine energy shift is
+For states with an electric-quadrupole interaction, the standard first-order hyperfine energy shift is
 
 $ Delta E_"HFS" =
 A K / 2
@@ -122,9 +122,10 @@ B
 2 I (2I-1) J (2J-1)
 ). $
 
-For J = 1/2, the electric-quadrupole term vanishes. iyzee does not evaluate
-this Hamiltonian dynamically: the source table stores transition frequencies
-already assembled from the chosen reference data.
+For J = 1/2, the quadrupole interaction is absent, so the shift reduces to
+$ Delta E_"HFS" = A K / 2 $; the general B-term expression above is not evaluated
+for J = 1/2. iyzee does not evaluate this Hamiltonian dynamically: the source
+table stores transition frequencies already assembled from the chosen reference data.
 
 #callout(
   "Keep the angular-momentum layers separate",
@@ -140,7 +141,7 @@ already assembled from the chosen reference data.
 
 For electric-dipole excitation,
 
-$ Delta F = 0, "pm" 1 $
+$ Delta F = 0, plus.minus 1 $
 
 with the F = 0 -> F' = 0 transition forbidden.
 
@@ -196,7 +197,7 @@ flowchart LR
   D --> E["transition frequency"]
   E --> F["laser detuning"]```.text,
   caption: [A transition frequency is a difference of two level energies; a fine-structure centre is not itself one hyperfine line.],
-  width: 92%,
+  width: 94%,
 )
 
 For laser frequency nu and reference frequency nu_0,
@@ -292,7 +293,7 @@ If the atomic medium gives the two circular components different complex
 susceptibilities, they acquire different phase and amplitude changes. In the
 simplest birefringent picture,
 
-$ phi = k L (n_+ - n_-) / 2. $
+$ phi = k L / 2 "Re"(n_+ - n_-). $
 
 The polarization ellipse therefore rotates. The process is nonlinear because
 the differential response itself depends on the optical field and the pumped
@@ -308,7 +309,7 @@ flowchart LR
   E --> F["polarization self-rotation"]
   F --> G["orthogonal field fluctuations"]```.text,
   caption: [Classical PSR: differential complex response of the circular components generates an intensity-dependent polarization rotation.],
-  width: 96%,
+  width: 94%,
 )
 
 = PSR as a quantum interaction
@@ -318,11 +319,11 @@ classical pump and the orthogonal polarization as a weak quantum field. An
 ideal undepleted-pump description couples opposite-frequency sidebands:
 
 $ a_"out"(Omega) =
-mu a_"in"(Omega) + nu a_"in"^dagger(-Omega) $
+mu(Omega) a_"in"(Omega) + nu(Omega) a_"in"^dagger(-Omega) $
 
 with the lossless Bogoliubov constraint
 
-$ |mu|^2 - |nu|^2 = 1. $
+$ |mu(Omega)|^2 - |nu(Omega)|^2 = 1. $
 
 The quadrature
 
@@ -342,7 +343,7 @@ flowchart TD
   D --> E
   E --> F["squeezed / anti-squeezed output"]```.text,
   caption: [Quantum picture: the nonlinear medium couples opposite-frequency sidebands and can transform vacuum fluctuations into a squeezed state.],
-  width: 84%,
+  width: 94%,
 )
 
 This is a physical model, not a claim that the current code computes mu and nu.
@@ -390,11 +391,11 @@ flowchart LR
 For total detection efficiency eta, optical loss mixes the field with vacuum.
 A simple variance model is
 
-$ V_"meas" = eta V_"field" + (1-eta) V_"vac". $
+$ V_"meas" = eta V_"field" + (1 - eta) V_"vac". $
 
-Mode mismatch, detector inefficiency and electronics noise therefore reduce
-the observable squeezing even when the state leaving the cell is more strongly
-squeezed.
+Optical loss, mode mismatch and detector inefficiency reduce the observable
+squeezing through this vacuum mixing. Electronics noise is an additional
+additive contribution and must be characterized separately.
 
 = Squeezing versus shot noise
 
@@ -412,7 +413,7 @@ flowchart LR
   E --> F["close shutter"]
   F --> G["measure shot noise"]```.text,
   caption: [Current frequency-step ordering in the experiment code.],
-  width: 96%,
+  width: 94%,
 )
 
 The implementation is #src-link("src/iyzee/experiment/procedures.py", line: 98).
@@ -435,7 +436,7 @@ have been matched.
   "Logarithmic and linear operations are different",
   [
     A difference in dBm is a ratio:
-    $ P_"dB" - Q_"dB" = 10 log_10(P / Q). $
+    $ P_"dBm" - Q_"dBm" = 10 log_10(P / Q). $
     It is not a physical power subtraction. Convert dBm to linear power before
     subtracting backgrounds or references.
   ],
