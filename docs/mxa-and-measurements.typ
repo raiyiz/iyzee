@@ -74,7 +74,8 @@ The useful abstraction is not "send a command and get a trace" but a chain of
 state transformations:
 
 #diagram(
-  ```mermaidflowchart LR
+  ```mermaid
+flowchart LR
   A["physical signal"] --> B["MXA input state"]
   B --> C["IF / RBW / detector"]
   C --> D["sweep + averaging"]
@@ -156,7 +157,8 @@ The software ordering is therefore explicit, but its scientific validity still d
 = Data transfer and persistence
 
 #diagram(
-  ```mermaidflowchart TD
+  ```mermaid
+flowchart TD
   A["configure"] --> B["arm / start"]
   B --> C{"complete?"}
   C -->|no| C
@@ -189,7 +191,8 @@ setpoint, waits, reads the wavemeter, acquires the squeezing trace, closes the
 shutter, and then acquires the shot-noise reference.
 
 #diagram(
-  ```mermaidflowchart LR
+  ```mermaid
+flowchart LR
   A["laser frequency"] --> B["Rb detuning"]
   B --> C["PSR / optical state"]
   C --> D["photodetection"]

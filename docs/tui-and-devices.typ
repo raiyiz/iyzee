@@ -57,7 +57,8 @@
 The script and interactive application share the same lower layers:
 
 #diagram(
-  ```mermaidflowchart LR
+  ```mermaid
+flowchart LR
   A["iyzee script"] --> C["experiment layer"]
   B["iyzee-tui"] --> C
   D["embedded IPython"] --> E["Lab / live handles"]
@@ -185,7 +186,8 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
 A failed or unparseable HTTP response raises `WavemeterReadoutError` rather than silently returning a plausible-looking frequency — deliberately, per the project's own safety rule (see the README's Safety notes): a communication failure must never masquerade as a measurement.
 
 #diagram(
-  ```mermaidflowchart TD
+  ```mermaid
+flowchart TD
   A["user action"] --> B["page / command"]
   B --> C["validation + translation"]
   C --> D["plain Python workflow"]

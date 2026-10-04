@@ -79,7 +79,8 @@ frequency as its primary optical coordinate because detunings are naturally
 expressed in MHz or GHz.
 
 #diagram(
-  ```mermaidflowchart TD
+  ```mermaid
+flowchart TD
   A["Rb-85 / Rb-87"] --> B["5²S₁/₂ ground manifold"]
   B --> C["5²P₁/₂"]
   B --> D["5²P₃/₂"]
@@ -187,7 +188,8 @@ and the isotope/hyperfine offsets embedded in
 #src-link("src/iyzee/devices/wavemeter.py", line: 99).
 
 #diagram(
-  ```mermaidflowchart LR
+  ```mermaid
+flowchart LR
   A["Fine-structure centre"] --> B["isotope shift"]
   B --> C["ground-state HFS"]
   C --> D["excited-state HFS"]
@@ -297,7 +299,8 @@ the differential response itself depends on the optical field and the pumped
 atomic state.
 
 #diagram(
-  ```mermaidflowchart LR
+  ```mermaid
+flowchart LR
   A["Strong linear field"] --> B["σ+ / σ− components"]
   B --> C["Multilevel Rb response"]
   C --> D["different complex susceptibilities"]
@@ -330,7 +333,8 @@ can then have a variance below the vacuum value while the conjugate
 quadrature is anti-squeezed.
 
 #diagram(
-  ```mermaidflowchart TD
+  ```mermaid
+flowchart TD
   A["Strong pump polarization"] --> B["Rb nonlinear interaction"]
   B --> C["+Ω sideband"]
   B --> D["−Ω sideband"]
@@ -372,7 +376,8 @@ of the complete apparatus rather than choosing a point from a vacuum line table.
 The MXA observes an electrical signal, not the optical field directly.
 
 #diagram(
-  ```mermaidflowchart LR
+  ```mermaid
+flowchart LR
   A["Rb vapor"] --> B["polarization analysis"]
   B --> C["photodetector(s)"]
   C --> D["RF / electrical chain"]
@@ -398,7 +403,8 @@ frequency, wait, read the wavemeter, acquire the squeezing trace with the
 shutter open, close the shutter, and acquire the shot-noise reference.
 
 #diagram(
-  ```mermaidflowchart LR
+  ```mermaid
+flowchart LR
   A["Set laser setpoint"] --> B["wait"]
   B --> C["read wavemeter"]
   C --> D["open shutter"]
