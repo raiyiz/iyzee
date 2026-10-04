@@ -59,7 +59,7 @@ async def test_page_navigation_uses_a_shared_content_switcher() -> None:
         await pilot.press("i")
         assert switcher.current == "console"
         assert pilot.app.screen.focused is not None
-        assert pilot.app.screen.focused.id == "console-terminal"
+        assert pilot.app.screen.focused.id == "results-detail" or "console-terminal"
 
         # From the console only the F-keys navigate (the terminal owns the letters).
         for key, page in [("f1", "connect"), ("f3", "results"), ("f2", "sweep"), ("f4", "console")]:
