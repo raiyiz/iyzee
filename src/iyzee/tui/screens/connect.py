@@ -18,6 +18,7 @@ from textual.app import ComposeResult
 from textual.widgets import DataTable, Static
 
 from ...lab import INSTRUMENTS, InstrumentSpec
+from ..commands import CommandError
 from ..text import one_line
 from .page import Page
 
@@ -92,6 +93,38 @@ class ConnectScreen(Page):
                 table.update_cell(spec.key, STATUS_COL, "connected")
             elif spec.key in self.iyzee_app.lost_links:
                 self.show_lost(spec.key, self.iyzee_app.lost_links[spec.key])
+
+    def _spec(self, key: str) -> InstrumentSpec:
+        spec = next((s for s in INSTRUMENTS if s.key == key), None)
+        if spec is None:
+            raise CommandError(f"unknown instrument {key!r}")
+        return spec
+
+    def request_connect(self, key: str) -> str:
+        """Connect ``key`` as if Enter were pressed on its row (used by ``:connect``)."""
+        spec = self._spec(key)
+        if spec.key in self._busy:
+            raise CommandError(f"{spec.label} is still busy")
+        if spec.key in self.iyzee_app.handles:
+            return f"{spec.label} is already connected"
+        self._busy.add(spec.key)
+        self._update_hint()
+        self._connect(spec)
+        return f"connecting {spec.label}…"
+
+    def request_disconnect(self, key: str) -> str:
+        """Disconnect ``key`` (used by ``:disconnect``; typing the command is the confirmation)."""
+        spec = self._spec(key)
+        if spec.key in self._busy:
+            raise CommandError(f"{spec.label} is still busy")
+        if spec.key not in self.iyzee_app.handles:
+            return f"{spec.label} is not connected"
+        if self.iyzee_app.sweep_running:
+            raise CommandError(f"a sweep is running - abort it before disconnecting {spec.label}")
+        self._busy.add(spec.key)
+        self._update_hint()
+        self._disconnect(spec)
+        return f"disconnecting {spec.label}…"
 
     def show_lost(self, key: str, reason: str) -> None:
         """Mark a row whose link died (called by the app's idle-link check)."""

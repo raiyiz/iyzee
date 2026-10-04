@@ -509,3 +509,26 @@ Screen {
     margin: 1 2;
     border: round $primary;
 }
+
+
+/* ":" command line: replaces the footer while open */
+#command-bar {
+    dock: bottom;
+    display: none;
+    height: 1;
+    background: $panel;
+}
+#command-bar.-active {
+    display: block;
+}
+#command-bar > .cmd-prompt {
+    width: 1;
+    color: $accent;
+    text-style: bold;
+}
+#command-input {
+    height: 1;
+    border: none;
+    padding: 0;
+    background: $panel;
+}

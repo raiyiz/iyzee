@@ -50,6 +50,7 @@ from ...scope_workflows import (
     read_trigger_settings,
     save_scope_acquisition,
 )
+from ..commands import Command, CommandError, parse_si
 from ..plotting import describe_timebase, draw_series, format_si, time_series
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
@@ -424,6 +425,44 @@ class ScopeScreen(Page):
         for field_id in field_ids:
             self._dirty_fields.discard(field_id)
             self.query_one(f"#{field_id}").remove_class("scope-dirty")
+
+    def commands(self) -> list[Command]:
+        groups = {"channels": "apply-channels", "trigger": "apply-trigger"}
+
+        def apply(args: list[str]) -> str:
+            chosen = args or list(groups)
+            unknown = [a for a in chosen if a not in groups]
+            if unknown:
+                raise CommandError(f"usage: :apply [channels|trigger]  (not {unknown[0]!r})")
+            started = []
+            for name in chosen:
+                button = self.query_one(f"#{groups[name]}", Button)
+                if not button.disabled:
+                    button.press()
+                    started.append(name)
+            if not started:
+                raise CommandError("nothing to apply (no changes, or the scope is not connected)")
+            return f"applying {' and '.join(started)}…"
+
+        def tdiv(args: list[str]) -> str:
+            if len(args) != 1:
+                raise CommandError("usage: :tdiv <seconds/div>, e.g. :tdiv 2u")
+            seconds = parse_si(args[0])
+            if seconds <= 0:
+                raise CommandError("time/div must be positive")
+            self.query_one("#trig-tdiv", Input).value = repr(seconds)
+            self._refresh_field_dirty("trig-tdiv")  # so Apply is enabled before we press it
+            return self.press_button("apply-trigger", f"set time/div to {format_si(seconds, 's')}")
+
+        return [
+            Command("retrieve", lambda _: self.press_button("retrieve-settings", "retrieve settings"),
+                    "Read the scope's current settings into the form"),
+            Command("apply", apply, "Send changed channel/trigger settings to the scope",
+                    usage="[channels|trigger]", complete=lambda p: [g for g in groups if g.startswith(p)]),
+            Command("acquire", lambda _: self.press_button("acquire-waveforms", "acquire waveforms"),
+                    "Acquire waveforms from the enabled channels"),
+            Command("tdiv", tdiv, "Set time/div and apply it (2u, 500n, 1.5m, 1e-6)", usage="<seconds/div>"),
+        ]
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "retrieve-settings":

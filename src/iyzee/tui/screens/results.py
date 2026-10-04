@@ -48,6 +48,7 @@ from ...waveform_math import (
     subtract_traces,
     traces_from_scope_recording,
 )
+from ..commands import Command, CommandError
 from ..plotting import describe_timebase, draw_series, format_si, prepare_series, time_series
 from .page import FieldError, Page, _field, _finite_float
 
@@ -797,6 +798,28 @@ class ResultsScreen(Page):
             xlabel=xlabel,
             ylabel=ylabel,
         )
+
+    def commands(self) -> list[Command]:
+        def width(args: list[str]) -> str:
+            if len(args) != 1 or not args[0].isdigit():
+                raise CommandError(f"usage: :width {LIST_WIDTHS[0]}-{LIST_WIDTHS[-1]} (percent)")
+            percent = min(LIST_WIDTHS, key=lambda w: abs(w - int(args[0])))
+            self._set_list_width(percent)
+            self.iyzee_app.prefs.set("results_list_width", percent)
+            return f"list width {percent}%"
+
+        def latest(args: list[str]) -> str:
+            run_list = self.query_one("#results-list", ListView)
+            if not len(run_list):
+                raise CommandError("no recordings found")
+            run_list.index = 0
+            return "newest recording selected"
+
+        return [
+            Command("refresh", lambda _: self.refresh_runs(), "Re-scan the data directory"),
+            Command("latest", latest, "Select the newest recording"),
+            Command("width", width, "Set the run list width (percent)", usage="<20-60>"),
+        ]
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "results-apply-op":

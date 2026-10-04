@@ -65,6 +65,26 @@ they are plain container widgets inside one `ContentSwitcher`, not Textual
 nav rail; `Ctrl+Q` quits at once, `q` quits after a second press (a running cell is
 interrupted and connected instruments are disconnected on the way out):
 
+**Command mode.** `:` opens a vim-style command line over the footer (not in
+text fields or the console, where it is just a character); `Enter` runs,
+`Esc` cancels, `Up`/`Down` recall history, `Tab` completes. Commands match by
+unique prefix (`:conn` is `:connect`) and `:help` lists what the current page
+offers:
+
+| Command | Does |
+| --- | --- |
+| `:connect`, `:sweep`, `:scope`, `:results`, `:console`, `:log` | go to a page (`:c` `:s` `:o` `:t` `:i` `:l` for short) |
+| `:connect scope mxa` / `:connect all`, `:disconnect scope` | connect or disconnect instruments |
+| `:status`, `:help [cmd]`, `:quit` (`:q`) | connected instruments, command list, quit now |
+| Scope page: `:retrieve`, `:apply [channels\|trigger]`, `:acquire`, `:tdiv 2u` | what its buttons do; `:tdiv` sets time/div (`2u`, `500n`, `1.5m`, `1e-6`) and applies it |
+| Sweep page: `:run`, `:abort`, `:capture` | the sweep buttons |
+| Results page: `:refresh`, `:latest`, `:width 40` | re-scan, select the newest run, list width in percent |
+
+A command whose button is disabled (not connected, busy, nothing to apply) says
+so instead of doing nothing. New commands are one `Command(...)` in the page's
+`commands()` method (or `IyzeeApp._global_commands`); the parsing and
+completion live in `tui/commands.py`, free of Textual.
+
 - **Connect** (`c`) — one row per instrument (MXA, shutter/PSU, wavemeter,
   scope). Enter connects the selected row; on a connected row it asks for a
   second Enter to disconnect (and refuses while a sweep is running). The nav

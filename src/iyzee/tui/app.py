@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -19,6 +20,8 @@ from textual.widgets import ContentSwitcher, Footer, Header, Static
 
 from ..devices.handles import InstrumentHandle
 from ..lab import INSTRUMENTS, Lab
+from .command_bar import CommandBar
+from .commands import Command, CommandError, CommandRegistry
 from .ipython import default_history_file
 from .ipython_session import IPythonSession
 from .logging_support import LogEntry
@@ -185,6 +188,8 @@ class IyzeeApp(App):
         # from the footer, which is already crowded; the first press says so.
         Binding("ctrl+q", "quit", "Quit", priority=True),
         Binding("q", "request_quit", "Quit", show=False),
+        # Vim-style command line (``:help`` lists the commands available on this page).
+        Binding("colon", "command_mode", "Command", show=False),
         Binding("escape", "blur_focused", "Leave field", show=False),
         Binding("j", "focus_next", "Focus next", show=False),
         Binding("k", "focus_previous", "Focus previous", show=False),
@@ -295,6 +300,7 @@ class IyzeeApp(App):
                 for page_id, page_cls in self.PAGES.items():
                     yield page_cls(id=page_id)
         yield Footer(compact=True)
+        yield CommandBar(id="command-bar")  # docked over the footer while open
 
     def action_show_page(self, page_id: str) -> None:
         self.query_one(ContentSwitcher).current = page_id
@@ -368,6 +374,106 @@ class IyzeeApp(App):
     def close_instruments(self, timeout: float = 5.0) -> None:
         """Disconnect every connected instrument within ``timeout`` (see ``Lab.close_all``)."""
         self.lab.close_all(timeout)
+
+    # -- ":" command mode ---------------------------------------------------
+
+    def action_command_mode(self) -> None:
+        self.query_one(CommandBar).open()
+
+    def _current_page(self) -> Page | None:
+        current = self.query_one(ContentSwitcher).current
+        return self.query_one(f"#{current}", Page) if current else None
+
+    def command_registry(self) -> CommandRegistry:
+        """Global commands plus those of the page being shown (which may shadow them)."""
+        registry = CommandRegistry(self._global_commands())
+        page = self._current_page()
+        if page is not None:
+            registry.add(*page.commands())
+        return registry
+
+    def run_command(self, line: str) -> None:
+        try:
+            message = self.command_registry().execute(line)
+        except CommandError as exc:
+            self.notify(str(exc), severity="error", timeout=5, markup=False)
+            return
+        except Exception as exc:  # noqa: BLE001 - a bad command must never take the app down
+            log.exception("command failed: %s", line)
+            self.notify(f"command failed: {exc}", severity="error", timeout=6, markup=False)
+            return
+        if message:
+            self.notify(message, timeout=5, markup=False)
+
+    def _global_commands(self) -> list[Command]:
+        instrument_keys = [spec.key for spec in INSTRUMENTS]
+        keys_and_all = [*instrument_keys, "all"]
+
+        def complete_keys(prefix: str) -> list[str]:
+            return [k for k in keys_and_all if k.startswith(prefix)]
+
+        def targets(args: list[str]) -> list[str]:
+            chosen = instrument_keys if "all" in args else args
+            unknown = [a for a in chosen if a not in instrument_keys]
+            if unknown:
+                raise CommandError(f"unknown instrument {unknown[0]!r}; known: {', '.join(instrument_keys)}")
+            return chosen
+
+        def goto(page_id: str) -> Callable[[list[str]], str | None]:
+            def run(args: list[str]) -> str | None:
+                if args:
+                    raise CommandError(f":{page_id} takes no arguments")
+                self.action_show_page(page_id)
+                return None
+
+            return run
+
+        def connect(args: list[str]) -> str | None:
+            if not args:
+                self.action_show_page("connect")
+                return None
+            screen = self.query_one(ConnectScreen)
+            return "; ".join(screen.request_connect(key) for key in targets(args))
+
+        def disconnect(args: list[str]) -> str | None:
+            if not args:
+                raise CommandError("usage: :disconnect <instrument>... | all")
+            screen = self.query_one(ConnectScreen)
+            return "; ".join(screen.request_disconnect(key) for key in targets(args))
+
+        def status(args: list[str]) -> str:
+            lines = []
+            for spec in INSTRUMENTS:
+                state = "connected" if spec.key in self.handles else self.lost_links.get(spec.key, "-")
+                lines.append(f"{spec.key}: {state}")
+            return "\n".join(lines)
+
+        def help_(args: list[str]) -> str:
+            return self.command_registry().help_text(args[0] if args else None)
+
+        def quit_(args: list[str]) -> None:
+            self.exit()
+
+        commands = [
+            Command("connect", connect, "Connect page, or connect the named instruments",
+                    usage="[<instrument>... | all]", complete=complete_keys, aliases=("c",)),
+            Command("disconnect", disconnect, "Disconnect instruments",
+                    usage="<instrument>... | all", complete=complete_keys),
+            Command("status", status, "Which instruments are connected"),
+            Command("help", help_, "List the commands available on this page", usage="[command]",
+                    complete=lambda prefix: [n for n in self.command_registry().names if n.startswith(prefix)],
+                    aliases=("h",)),
+            Command("quit", quit_, "Quit now (q asks for confirmation instead)", aliases=("q",)),
+        ]
+        for page_id, label, key in (
+            ("sweep", "Sweep", "s"),
+            ("scope", "Scope", "o"),
+            ("results", "Results", "t"),
+            ("console", "Console", "i"),
+            ("log", "Log", "l"),
+        ):
+            commands.append(Command(page_id, goto(page_id), f"Go to the {label} page", aliases=(key,)))
+        return commands
 
     QUIT_CONFIRM_S = 4.0
 
