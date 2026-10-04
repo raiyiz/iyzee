@@ -138,6 +138,188 @@ laboratory. It is principally the authoritative inventory of the instruments
 currently participating in the session, together with the lifecycle and
 synchronization boundary for those live resources.
 
+
+= Architectural principles
+
+The architecture is easier to maintain when its rules are stated explicitly.
+These are not abstract software-engineering preferences; each one follows from
+a concrete property of laboratory control software: physical devices are slow,
+stateful, fallible, shared between callers, and expensive to reason about after
+the fact.
+
+#grid(
+  columns: (1fr, 1fr),
+  gutter: 8pt,
+  [
+    #box(
+      fill: luma(246),
+      stroke: 0.7pt + luma(185),
+      radius: 5pt,
+      inset: 9pt,
+    )[
+      *1. Explicit resource ownership*
+
+      Construction and connection are separate operations. The code that decides
+      to use a resource for a session owns its lifetime; creating a Python object
+      must not silently open a physical link.
+
+      #source("src/iyzee/devices/base.py#L17-L78", [BaseDevice lifecycle])
+      and #source("src/iyzee/lab.py#L98-L120", [Lab.connect()]) make that
+      boundary concrete.
+    ]
+  ],
+  [
+    #box(
+      fill: luma(246),
+      stroke: 0.7pt + luma(185),
+      radius: 5pt,
+      inset: 9pt,
+    )[
+      *2. The TUI is not the hardware API*
+
+      Screens compose and present operations. They should not become the only
+      place where a scope acquisition, analyzer operation, or persistence rule
+      can be executed.
+
+      #source("src/iyzee/tui/screens/scope.py#L412-L487", [ScopeScreen orchestration])
+      hands the actual work to reusable functions in
+      #source("src/iyzee/scope_workflows.py#L352-L457", [scope workflows]).
+    ]
+  ],
+  [
+    #box(
+      fill: luma(246),
+      stroke: 0.7pt + luma(185),
+      radius: 5pt,
+      inset: 9pt,
+    )[
+      *3. Drivers express instrument semantics*
+
+      Higher layers should ask for meaningful operations such as
+      `set_rbw()` or waveform acquisition. SCPI strings, VICP frames, socket
+      timeouts, and response decoding belong below that boundary.
+
+      See #source("src/iyzee/devices/mxa.py", [devices/mxa.py]) and
+      #source("src/iyzee/devices/scope.py", [devices/scope.py]).
+    ]
+  ],
+  [
+    #box(
+      fill: luma(246),
+      stroke: 0.7pt + luma(185),
+      radius: 5pt,
+      inset: 9pt,
+    )[
+      *4. Workflows express laboratory operations*
+
+      A workflow composes instrument capabilities into a useful laboratory
+      action. It can encode sequencing, verification, error policy, and
+      persistence without knowing anything about Textual widgets.
+
+      #source("src/iyzee/scope_workflows.py", [scope_workflows.py]) is the
+      clearest example.
+    ]
+  ],
+  [
+    #box(
+      fill: luma(246),
+      stroke: 0.7pt + luma(185),
+      radius: 5pt,
+      inset: 9pt,
+    )[
+      *5. Synchronization follows the resource*
+
+      A physical instrument can have several simultaneous callers: a TUI
+      worker, the embedded console, and ordinary Python code. The lock therefore
+      belongs to the handle or transport guarding that resource, not to one UI.
+
+      #source("src/iyzee/devices/handles.py#L252-L301", [LockedProxy]) is one
+      half of this boundary; the other is the handle's shared lock contract.
+    ]
+  ],
+  [
+    #box(
+      fill: luma(246),
+      stroke: 0.7pt + luma(185),
+      radius: 5pt,
+      inset: 9pt,
+    )[
+      *6. Persistence is part of the measurement model*
+
+      A useful measurement has to remain interpretable after the application
+      exits. Numerical arrays, configuration, identity, timing, and relevant
+      error state should therefore travel with the recording rather than being
+      reconstructed from a filename or a UI snapshot.
+
+      See #source("src/iyzee/experiment/io.py#L148-L218", [save_numeric_recording()
+      and save_step_results()]).
+    ]
+  ],
+)
+
+== Consequences of the principles
+
+These rules impose useful constraints on where new code can go.
+
+#figure(
+  stack(
+    spacing: 4pt,
+    node("User intent", "button press, script call, or console expression"),
+    arrow(dir: "↓"),
+    node("Application operation", "workflow or experiment-level composition"),
+    arrow(dir: "↓"),
+    node("Instrument semantics", "driver/client operation"),
+    arrow(dir: "↓"),
+    node("Resource mechanics", "VISA, VICP/TCP, HTTP"),
+    arrow(dir: "↓"),
+    node("Physical state", "the instrument actually responds or changes"),
+  ),
+  caption: [A feature should descend through the smallest number of boundaries necessary; each layer adds meaning, not merely indirection.],
+)
+
+A good new abstraction is one that introduces a real ownership, semantic, or
+concurrency boundary. A weak abstraction merely renames a lower-level function
+and forces contributors to navigate one more file.
+
+This gives a useful test for design proposals: *what invariant becomes easier to
+state or enforce because this new boundary exists?* If the answer is "none",
+the project probably does not need another layer.
+
+== One resource, one authoritative state
+
+A related principle is that connected hardware state should not be copied into
+multiple mutable registries.
+
+#figure(
+  grid(
+    columns: (1.2fr, 18pt, 1fr, 18pt, 1.2fr),
+    gutter: 4pt,
+    align: center,
+    node("physical device", "real instrument"),
+    arrow(),
+    node("driver + handle", "live object and lock"),
+    arrow(),
+    node("Lab.handles", "one session inventory"),
+  ),
+  caption: [User interfaces observe the session inventory; they do not create competing inventories of their own.],
+)
+
+The same idea appears in the console. `LabProxy` keeps one stable shell name but
+resolves its instrument attributes against current application state. That
+keeps connection changes authoritative instead of requiring every page or
+namespace to perform synchronization work.
+
+== What the principles deliberately leave open
+
+The architecture does *not* prescribe one universal driver base class, one
+universal transport, or one universal state container. The common handle
+contract is intentionally narrower than the devices themselves.
+
+A heterogeneous laboratory benefits from common lifecycle and concurrency rules
+while retaining device-specific semantics. The abstraction should therefore
+stop at the point where forcing more uniformity would hide meaningful differences
+between instruments.
+
 = The architectural shape
 
 At the highest level, the system can be read as a dependency graph rather than
