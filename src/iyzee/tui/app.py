@@ -419,7 +419,9 @@ class IyzeeApp(App):
             chosen = instrument_keys if "all" in args else args
             unknown = [a for a in chosen if a not in instrument_keys]
             if unknown:
-                raise CommandError(f"unknown instrument {unknown[0]!r}; known: {', '.join(instrument_keys)}")
+                raise CommandError(
+                    f"unknown instrument {unknown[0]!r}; known: {', '.join(instrument_keys)}"
+                )
             return chosen
 
         def goto(page_id: str) -> Callable[[list[str]], str | None]:
@@ -447,7 +449,9 @@ class IyzeeApp(App):
         def status(args: list[str]) -> str:
             lines = []
             for spec in INSTRUMENTS:
-                state = "connected" if spec.key in self.handles else self.lost_links.get(spec.key, "-")
+                state = (
+                    "connected" if spec.key in self.handles else self.lost_links.get(spec.key, "-")
+                )
                 lines.append(f"{spec.key}: {state}")
             return "\n".join(lines)
 
@@ -458,14 +462,32 @@ class IyzeeApp(App):
             self.exit()
 
         commands = [
-            Command("connect", connect, "Connect page, or connect the named instruments",
-                    usage="[<instrument>... | all]", complete=complete_keys, aliases=("c",)),
-            Command("disconnect", disconnect, "Disconnect instruments",
-                    usage="<instrument>... | all", complete=complete_keys),
+            Command(
+                "connect",
+                connect,
+                "Connect page, or connect the named instruments",
+                usage="[<instrument>... | all]",
+                complete=complete_keys,
+                aliases=("c",),
+            ),
+            Command(
+                "disconnect",
+                disconnect,
+                "Disconnect instruments",
+                usage="<instrument>... | all",
+                complete=complete_keys,
+            ),
             Command("status", status, "Which instruments are connected"),
-            Command("help", help_, "List the commands available on this page", usage="[command]",
-                    complete=lambda prefix: [n for n in self.command_registry().names if n.startswith(prefix)],
-                    aliases=("h",)),
+            Command(
+                "help",
+                help_,
+                "List the commands available on this page",
+                usage="[command]",
+                complete=lambda prefix: [
+                    n for n in self.command_registry().names if n.startswith(prefix)
+                ],
+                aliases=("h",),
+            ),
             Command("quit", quit_, "Quit now (q asks for confirmation instead)", aliases=("q",)),
         ]
         for page_id, label, key in (
@@ -476,7 +498,9 @@ class IyzeeApp(App):
             ("console", "Console", "i"),
             ("log", "Log", "l"),
         ):
-            commands.append(Command(page_id, goto(page_id), f"Go to the {label} page", aliases=(key,)))
+            commands.append(
+                Command(page_id, goto(page_id), f"Go to the {label} page", aliases=(key,))
+            )
         return commands
 
     QUIT_CONFIRM_S = 4.0

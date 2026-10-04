@@ -188,9 +188,19 @@ class SweepScreen(Page):
 
     def commands(self) -> list[Command]:
         return [
-            Command("run", lambda _: self.press_button("run-sweep", "start the sweep"), "Run the sweep"),
-            Command("abort", lambda _: self.press_button("abort-sweep", "abort the sweep"), "Abort the running sweep"),
-            Command("capture", lambda _: self.press_button("capture-trace", "capture a trace"), "Capture a single trace"),
+            Command(
+                "run", lambda _: self.press_button("run-sweep", "start the sweep"), "Run the sweep"
+            ),
+            Command(
+                "abort",
+                lambda _: self.press_button("abort-sweep", "abort the sweep"),
+                "Abort the running sweep",
+            ),
+            Command(
+                "capture",
+                lambda _: self.press_button("capture-trace", "capture a trace"),
+                "Capture a single trace",
+            ),
         ]
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

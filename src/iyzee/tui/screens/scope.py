@@ -455,13 +455,29 @@ class ScopeScreen(Page):
             return self.press_button("apply-trigger", f"set time/div to {format_si(seconds, 's')}")
 
         return [
-            Command("retrieve", lambda _: self.press_button("retrieve-settings", "retrieve settings"),
-                    "Read the scope's current settings into the form"),
-            Command("apply", apply, "Send changed channel/trigger settings to the scope",
-                    usage="[channels|trigger]", complete=lambda p: [g for g in groups if g.startswith(p)]),
-            Command("acquire", lambda _: self.press_button("acquire-waveforms", "acquire waveforms"),
-                    "Acquire waveforms from the enabled channels"),
-            Command("tdiv", tdiv, "Set time/div and apply it (2u, 500n, 1.5m, 1e-6)", usage="<seconds/div>"),
+            Command(
+                "retrieve",
+                lambda _: self.press_button("retrieve-settings", "retrieve settings"),
+                "Read the scope's current settings into the form",
+            ),
+            Command(
+                "apply",
+                apply,
+                "Send changed channel/trigger settings to the scope",
+                usage="[channels|trigger]",
+                complete=lambda p: [g for g in groups if g.startswith(p)],
+            ),
+            Command(
+                "acquire",
+                lambda _: self.press_button("acquire-waveforms", "acquire waveforms"),
+                "Acquire waveforms from the enabled channels",
+            ),
+            Command(
+                "tdiv",
+                tdiv,
+                "Set time/div and apply it (2u, 500n, 1.5m, 1e-6)",
+                usage="<seconds/div>",
+            ),
         ]
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
