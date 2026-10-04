@@ -283,7 +283,7 @@ the Connect page, another in the console namespace, and another in each worker.
 A physical laboratory setup is heterogeneous. `iyzee` embraces that fact while
 still giving higher layers a small common contract.
 
-The `InstrumentHandle` protocol supplies:
+The #source("src/iyzee/devices/handles.py#L34-L80", [InstrumentHandle protocol]) supplies:
 
 - `connect()` and `disconnect()` for lifecycle,
 - `probe()` for an active post-connect sanity check,
@@ -369,7 +369,7 @@ contains a value.
 
 = Measurement execution model
 
-The experiment layer uses one general execution pattern rather than a separate
+The experiment layer, centered on #source("src/iyzee/experiment/core.py#L152-L204", [run_sequence()]), uses one general execution pattern rather than a separate
 hand-written loop for every sweep.
 
 #figure(
@@ -400,7 +400,7 @@ resources.
 
 == `StepResult` is the measurement contract
 
-Every successful point becomes a `StepResult` containing:
+Every successful point becomes a #source("src/iyzee/experiment/core.py#L27-L44", [StepResult]) containing:
 
 - an `x_value` and `x_unit`,
 - named traces rather than a fixed set of two special arrays,
