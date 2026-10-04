@@ -62,7 +62,15 @@ multiple incompatible copies of the control logic.
 There are therefore several different ways to *use* the program, but not
 several implementations of the underlying measurement machinery.
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\niyzee script        → reusable experiment / device code
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+iyzee script        → reusable experiment / device code
 
 iyzee-tui           → TUI composition / interaction
                         ↓
@@ -74,7 +82,8 @@ iyzee-tui           → TUI composition / interaction
                         ↓
                 VISA / VICP / HTTP
                         ↓
-                    hardware```\n]
+                    hardware```
+]
 
 The important architectural distinction is between *composition* and
 *machinery*. The TUI decides what the user sees, what is enabled, and when an
@@ -117,7 +126,15 @@ synchronization boundary for those live resources.
 At the highest level, the system can be read as a dependency graph rather than
 as a pile of files.
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\n                         ┌─────────────────────┐
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+                         ┌─────────────────────┐
                          │       User          │
                          └──────────┬──────────┘
                                     │
@@ -143,7 +160,8 @@ as a pile of files.
                             VISA            VICP            HTTP
                               │               │               │
                               ▼               ▼               ▼
-                           hardware        hardware        hardware```\n]
+                           hardware        hardware        hardware```
+]
 
 A useful way to read this is from the bottom upward.
 
@@ -170,7 +188,15 @@ session also decides when that resource should be opened and closed.
 
 The application-level path is:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nInstrumentSpec
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+InstrumentSpec
     ↓
 handle = spec.make()
     ↓
@@ -178,7 +204,8 @@ handle.connect()
     ↓
 handle.probe()
     ↓
-Lab.handles[key] = handle```\n]
+Lab.handles[key] = handle```
+]
 
 The insertion into `Lab.handles` happens only after connection and probing have
 succeeded. If opening or probing fails, the half-open resource is explicitly
@@ -215,7 +242,15 @@ are actually connected right now?"
 
 The conceptual runtime object is therefore:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nIyzeeApp
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+IyzeeApp
 │
 ├── Lab
 │    ├── mx → InstrumentHandle
@@ -225,7 +260,8 @@ The conceptual runtime object is therefore:
 │
 ├── last_run
 │
-└── mounted TUI pages```\n]
+└── mounted TUI pages```
+]
 
 The TUI does not need its own shadow dictionary of connected devices, and the
 console does not need another shadow dictionary either. Both observe the same
@@ -277,7 +313,15 @@ the application would make synchronization a property of one caller. Putting
 it on the instrument handle makes synchronization a property of the resource
 itself.
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\n                     ┌── Sweep worker ───┐
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+                     ┌── Sweep worker ───┐
                      │                   │
 Console ─────────────┼── LockedProxy ────┤
                      │                   │
@@ -285,7 +329,8 @@ Console ─────────────┼── LockedProxy ───�
                               │
                              RLock
                               │
-                       physical instrument```\n]
+                       physical instrument```
+]
 
 The re-entrant lock matters because a workflow may already hold the resource
 lock and then call through a proxy that acquires the same lock again. A plain
@@ -325,7 +370,15 @@ contains a value.
 The experiment layer uses one general execution pattern rather than a separate
 hand-written loop for every sweep.
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nAnalyzerConfig
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+AnalyzerConfig
       ↓
 prepare_analyzer()
       ↓
@@ -337,7 +390,8 @@ StepResult[]
       ↓
 save_step_results()
       ↓
-NPZ + metadata```\n]
+NPZ + metadata```
+]
 
 `AnalyzerConfig` collects experiment-level analyzer state. `prepare_analyzer()`
 turns that into concrete instrument setup. A `Step` represents one reproducible
@@ -401,7 +455,15 @@ The scope is the best example of how the project's layers cooperate because it
 combines a real instrument protocol, editable state, verification, acquisition,
 persistence, and background work.
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nScopeScreen
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+ScopeScreen
     │ user edits
     ▼
 UI state / dirty state
@@ -421,7 +483,8 @@ LeCroy
 VICPTransport
     │
     ▼
-TCP socket```\n]
+TCP socket```
+]
 
 The page owns the human-facing state. The workflow owns the semantics of
 reading, applying, verifying, acquiring, and saving. The driver owns LeCroy
@@ -451,7 +514,15 @@ the instrument now holds exactly the requested value.
 A hardware setter can be normalized, quantized, rejected, or affected by
 instrument-side constraints. Therefore the apply path is conceptually:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nknown baseline
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+known baseline
       ↓
 compare with requested values
       ↓
@@ -459,7 +530,8 @@ write only changed fields
       ↓
 read back instrument state
       ↓
-verified state becomes new baseline```\n]
+verified state becomes new baseline```
+]
 
 Only the read-back result is promoted to the next trusted baseline. If readback
 fails, the application must not manufacture a clean state merely because the
@@ -489,13 +561,22 @@ with success.
 
 The LeCroy stack is intentionally split into three layers.
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nLeCroy semantics
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+LeCroy semantics
       ↓
 LeCroy driver
       ↓
 VICP transport
       ↓
-TCP```\n]
+TCP```
+]
 
 The transport in `src/iyzee/devices/vicp.py` owns framing, socket lifetime,
 timeouts, partial send/receive handling, and transport invalidation. The
@@ -532,13 +613,22 @@ There are no request IDs in the protocol that let a later response be matched
 back to an earlier request. Retrying on the same stream can therefore create a
 worse failure:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nrequest A ─────────────►
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+request A ─────────────►
                          response A ──X── timeout
 
 request B ─────────────►
                          late response A
                               │
-                              └── could be mistaken for B```\n]
+                              └── could be mistaken for B```
+]
 
 For this reason, a mid-frame I/O failure invalidates the VICP connection. A new
 connection starts from a clean stream state instead of trying to guess where
@@ -614,7 +704,15 @@ implementation details.
 With the current architecture, a page can instead do something conceptually
 like:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nread form state
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+read form state
       ↓
 check preconditions
       ↓
@@ -626,7 +724,8 @@ workflow talks to driver
       ↓
 worker prepares a UI-sized result
       ↓
-_ui(...) on the Textual thread```\n]
+_ui(...) on the Textual thread```
+]
 
 The UI remains thin enough that the same underlying operation can exist without
 Textual.
@@ -640,7 +739,15 @@ has responded.
 
 The project therefore treats the worker boundary as a concurrency boundary:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nworker
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+worker
   │
   ├── blocking hardware I/O
   ├── expensive processing
@@ -650,7 +757,8 @@ The project therefore treats the worker boundary as a concurrency boundary:
       _ui(...)
         │
         ▼
- Textual UI thread```\n]
+ Textual UI thread```
+]
 
 The `_ui` helper in `Page` exists to make the final hop explicit. Widgets are
 not casually mutated from worker threads; the worker computes a result and
@@ -682,7 +790,15 @@ process and looking at the same live instruments.
 
 The input path is:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nUser keyboard
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+User keyboard
      ↓
 Textual terminal widget
      ↓
@@ -698,11 +814,20 @@ LabProxy
      ↓
 LockedProxy
      ↓
-live instrument```\n]
+live instrument```
+]
 
 The output path is the reverse integration problem:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nIPython output
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+IPython output
      ↓
 virtual terminal
      ↓
@@ -712,7 +837,8 @@ Vterm
      ↓
 TerminalView
      ↓
-Textual rendering```\n]
+Textual rendering```
+]
 
 This arrangement is valuable because it allows IPython and prompt-toolkit to
 retain their own editing, completion, history, inspection, magics, and
@@ -727,9 +853,18 @@ introduce serialization, duplicated state, and another lifecycle boundary.
 
 Instead, the console can execute:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nlab.mx.set_rbw(24e3)
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+lab.mx.set_rbw(24e3)
 lab.mx.single_sweep_wait()
-trace = lab.mx.get_trace_data(1)```\n]
+trace = lab.mx.get_trace_data(1)```
+]
 
 against the same live MXA used by a screen worker. The handle's lock serializes
 these calls with the other users of the physical device.
@@ -746,13 +881,22 @@ into the IPython namespace.
 each access. Thus `lab.mx` means "the MXA that is connected *now*", not "the
 object that happened to be connected when the console was initialized".
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nConnect MXA
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+Connect MXA
     ↓
 lab.mx        → live MXA proxy
 
 Disconnect MXA
     ↓
-lab.mx        → immediate AttributeError```\n]
+lab.mx        → immediate AttributeError```
+]
 
 That design avoids a refresh problem. A namespace-copying implementation would
 have to notice every connection and disconnection and mutate several shell
@@ -789,7 +933,15 @@ have persistent history across runs.
 
 The persistence path is intentionally separated from display:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nmeasurement
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+measurement
     ↓
 in-memory result
     ↓
@@ -797,7 +949,8 @@ numeric arrays + metadata + configuration
     ↓
 NPZ + JSON manifest
     ↓
-ResultsScreen / offline analysis```\n]
+ResultsScreen / offline analysis```
+]
 
 A plot is an interpretation of the data, not the data itself. The screen may
 reduce, rescale, or otherwise transform an array for readable rendering. The
@@ -868,7 +1021,15 @@ not a runtime container that every component mutates.
 
 The flow is roughly:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nconfiguration sources
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+configuration sources
        ↓
    config.py
        ↓
@@ -876,7 +1037,8 @@ The flow is roughly:
        ↓
  handle construction
        ↓
- explicit connect + probe```\n]
+ explicit connect + probe```
+]
 
 This keeps construction reproducible and makes it possible to test most of the
 code without a live laboratory.
@@ -897,7 +1059,15 @@ instrument's lock before disconnecting it and handles instruments independently.
 
 The essential behavior is:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nshutdown request
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+shutdown request
       ↓
 stop / interrupt console work
       ↓
@@ -907,7 +1077,8 @@ parallel per-instrument cleanup
       ↓
 respect each instrument lock
       ↓
-one wedged device must not block all cleanup forever```\n]
+one wedged device must not block all cleanup forever```
+]
 
 A timeout is therefore an exit containment mechanism, not a claim that the
 hardware necessarily completed graceful shutdown.
@@ -958,7 +1129,15 @@ layer.
 
 The following trace connects the conceptual layers to the implementation names.
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nuser
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+user
  ↓
 SweepScreen
  ↓
@@ -988,7 +1167,8 @@ on_step()
  ↓
 reduced preview / progress update
  ↓
-Textual UI```\n]
+Textual UI```
+]
 
 The crucial observation is that `SweepScreen` does not own the sweep algorithm.
 It composes existing experiment primitives, supplies a callback for live
@@ -998,7 +1178,15 @@ feedback, and presents the result.
 
 The analogous scope path is:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nuser presses Acquire
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+user presses Acquire
  ↓
 ScopeScreen validates synchronized state
  ↓
@@ -1024,7 +1212,8 @@ save_scope_acquisition()
  ↓
 reduced preview
  ↓
-Textual UI / ResultsScreen```\n]
+Textual UI / ResultsScreen```
+]
 
 This is why the scope code is larger than a single widget method might suggest.
 The operation spans UI preconditions, device semantics, protocol mechanics, data
@@ -1142,7 +1331,15 @@ operation, extend the TUI without moving the operation upward into the page.
 
 The practical decision tree is:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nDoes this describe bytes / framing?
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+Does this describe bytes / framing?
         │ yes → transport
         │
         no
@@ -1162,7 +1359,8 @@ Is it primarily interaction or presentation?
         │
         no
         ↓
-Re-evaluate the boundary before adding another abstraction.```\n]
+Re-evaluate the boundary before adding another abstraction.```
+]
 
 The last line is deliberate. The project benefits more from a small number of
 strong boundaries than from a large number of classes that merely rename the
@@ -1190,7 +1388,15 @@ what the pages do, and where to find the deeper technical documents.
 
 A concise mental model for a contributor is:
 
-#block(\n  fill: luma(245),\n  stroke: 0.5pt + luma(205),\n  inset: 8pt,\n  radius: 3pt,\n  width: 100%,\n)[\n```text\nUser intent
+#block(
+  fill: luma(245),
+  stroke: 0.5pt + luma(205),
+  inset: 8pt,
+  radius: 3pt,
+  width: 100%,
+)[
+```text
+User intent
     ↓
 TUI / script / IPython
     ↓
@@ -1208,7 +1414,8 @@ verified result
     ↓
 persisted data + metadata
     ↓
-interactive or offline analysis```\n]
+interactive or offline analysis```
+]
 
 At every boundary, ask two questions:
 
