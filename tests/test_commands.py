@@ -11,8 +11,13 @@ def make_registry(calls: list) -> CommandRegistry:
 
     return CommandRegistry(
         [
-            Command("connect", record("connect"), "connect", aliases=("c",),
-                    complete=lambda p: [k for k in ("scope", "mxa", "wavemeter") if k.startswith(p)]),
+            Command(
+                "connect",
+                record("connect"),
+                "connect",
+                aliases=("c",),
+                complete=lambda p: [k for k in ("scope", "mxa", "wavemeter") if k.startswith(p)],
+            ),
             Command("console", record("console"), "console page"),
             Command("sweep", record("sweep"), "sweep page", aliases=("s",)),
             Command("quit", record("quit"), "quit", aliases=("q",)),
@@ -22,7 +27,16 @@ def make_registry(calls: list) -> CommandRegistry:
 
 @pytest.mark.parametrize(
     ("text", "value"),
-    [("2u", 2e-6), ("500ns", 500e-9), ("1.5m", 1.5e-3), ("1e-6", 1e-6), ("3", 3.0), ("2M", 2e6), ("10Hz", 10.0), ("5ms", 5e-3)],
+    [
+        ("2u", 2e-6),
+        ("500ns", 500e-9),
+        ("1.5m", 1.5e-3),
+        ("1e-6", 1e-6),
+        ("3", 3.0),
+        ("2M", 2e6),
+        ("10Hz", 10.0),
+        ("5ms", 5e-3),
+    ],
 )
 def test_parse_si(text, value):
     assert parse_si(text) == pytest.approx(value)
@@ -41,7 +55,12 @@ def test_exact_name_alias_and_unique_prefix_resolve_and_pass_arguments():
     registry.execute("c scope")  # alias
     registry.execute("swe")  # unique prefix
     registry.execute(":quit")
-    assert calls == [("connect", ["scope", "mxa"]), ("connect", ["scope"]), ("sweep", []), ("quit", [])]
+    assert calls == [
+        ("connect", ["scope", "mxa"]),
+        ("connect", ["scope"]),
+        ("sweep", []),
+        ("quit", []),
+    ]
 
 
 def test_an_exact_alias_beats_prefix_matching_and_blank_lines_do_nothing():
@@ -82,7 +101,10 @@ def test_tab_completion_of_command_words_and_arguments():
     assert registry.complete("connect sc") == ("connect scope ", ["scope"])
     line, candidates = registry.complete("connect ")
     assert candidates == ["scope", "mxa", "wavemeter"] and line == "connect "
-    assert registry.complete("connect scope ")[1] == ["mxa", "wavemeter"]  # already-given ones are skipped
+    assert registry.complete("connect scope ")[1] == [
+        "mxa",
+        "wavemeter",
+    ]  # already-given ones are skipped
     assert registry.complete("zzz") == ("zzz", [])
 
 

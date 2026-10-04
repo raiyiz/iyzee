@@ -33,7 +33,18 @@ class Command:
     aliases: tuple[str, ...] = ()
 
 
-_SI = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "m": 1e-3, "": 1.0, "k": 1e3, "K": 1e3, "M": 1e6, "G": 1e9}
+_SI = {
+    "p": 1e-12,
+    "n": 1e-9,
+    "u": 1e-6,
+    "µ": 1e-6,
+    "m": 1e-3,
+    "": 1.0,
+    "k": 1e3,
+    "K": 1e3,
+    "M": 1e6,
+    "G": 1e9,
+}
 _SI_RE = re.compile(
     r"^(?P<num>[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(?P<prefix>[pnuµmkKMG]?)(?:s|S|V|Hz)?$"
 )
