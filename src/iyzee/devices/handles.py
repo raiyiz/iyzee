@@ -26,7 +26,7 @@ from ..config import IP, address
 from .base import CH
 from .power import ShutterControl
 from .scope import LeCroy, LeCroyTimeoutError
-from .wavemeter import DEFAULT_CHANNEL, Wavemeter, WavemeterReadoutError
+from .wavemeter import DEFAULT_CHANNEL, Wavemeter
 
 log = logging.getLogger("iyzee.instruments")
 
@@ -188,10 +188,7 @@ class WavemeterHandle(_LockedHandle):
         return self._client
 
     def probe(self) -> str:
-        try:
-            freq = self._client.read_frequency()
-        except WavemeterReadoutError as exc:
-            raise ConnectionError(str(exc)) from exc
+        freq = self._client.read_frequency()
         return f"ch{self._client.channel} = {freq:.6f} THz"
 
 
