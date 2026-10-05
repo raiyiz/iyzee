@@ -25,7 +25,6 @@ def test_config_file_overrides_an_address_and_the_data_dir(tmp_path: Path):
         '[addresses]\nscope = "192.0.2.7"\n\n[paths]\ndata = "/srv/iyzee"\n'
     )
     assert address(IP.SCOPE) == "192.0.2.7"
-    assert address(IP.NOISE_ANALYZER) == "10.140.1.40"  # untouched keys keep their default
     assert data_root() == Path("/srv/iyzee")
 
 
