@@ -57,12 +57,10 @@ async def test_log_screen_can_browse_a_rotated_file(
     app = IyzeeApp()
     async with app.run_test() as pilot:
         await pilot.press("l")
-        await pilot.pause(0.3)
 
         screen = app.query_one(LogScreen)
+        view = screen.query_one("#log-view", RichLog)
+        await wait_until(pilot, lambda: any("an old record" in line.text for line in view.lines))
         source = screen.query_one("#log-source", Select)
         source.value = str(log_root / "iyzee.log.1")
-        await pilot.pause(0.3)
-
-        view = screen.query_one("#log-view", RichLog)
-        assert any("an old record" in line.text for line in view.lines)
+        await wait_until(pilot, lambda: any("an old record" in line.text for line in view.lines))
