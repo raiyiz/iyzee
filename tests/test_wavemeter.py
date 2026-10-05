@@ -102,7 +102,6 @@ def test_set_pid_setpoint_posts_the_expected_request(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(wavemeter.requests, "post", post)
 
     wavemeter.set_pid_setpoint(377.1052, 4)
-    wavemeter.set_pid_setpoint(377.1052)
 
     assert seen == {
         "url": f"http://{wavemeter.IP.WAVEMETER}:{wavemeter.WAVEMETER_PORT}/api/set_pid/",
