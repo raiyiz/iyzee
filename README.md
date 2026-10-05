@@ -322,22 +322,28 @@ in typical application code:
 
 ## Documentation
 
-Three technical guides, written in Typst and compiled to PDF in CI (GitHub
-Actions and GitLab publish them as pipeline artifacts). The guides share a
-dark-blue visual language and use rendered Mermaid diagrams for architecture,
-measurement and experiment flow:
+The technical guide is written in Typst and compiled to PDF in CI (GitHub Actions
+and GitLab publish it as a pipeline artifact). It is one book with four parts,
+compiled from `docs/main.typ` (chapters in `docs/chapters/`) and published as
+`iyzee-guide.pdf`. It shares a dark-blue visual
+language, renders Mermaid and native Typst figures, and draws its rubidium figures
+from the same `Rb_transitions` table the application uses:
 
-- [MXA and measurement guide](docs/mxa-and-measurements.typ): the measurement
-  physics tied to analyzer state, SCPI commands and the Python implementation
-  (RBW/VBW, detectors, ENBW, noise density, squeezing/shot-noise workflow).
-- [TUI and device interaction guide](docs/tui-and-devices.typ): how `iyzee-tui`
-  and the `iyzee` script share the `experiment/` layer, per-instrument
-  connection details and command references, and how the TUI is built
-  (screens, instrument registry and locking, navigation, the console's `lab`).
-- [Rubidium physics guide](docs/rubidium-physics.typ): the atomic structure
-  behind the experiment, D1/D2 hyperfine transitions, warm-vapor spectroscopy,
+- [Architecture](docs/chapters/architecture.typ): ownership, locking, layering and
+  the reasoning behind them.
+- [MXA control and measurement](docs/chapters/mxa-and-measurements.typ): the
+  measurement physics tied to analyzer state, SCPI commands and the Python
+  implementation (RBW/VBW, detectors, ENBW, noise density, squeezing/shot-noise
+  workflow).
+- [TUI and device interaction](docs/chapters/tui-and-devices.typ): how `iyzee-tui`
+  and the `iyzee` script share the `experiment/` layer, per-instrument connection
+  details and command references, and how the TUI is built (screens, instrument
+  registry and locking, navigation, the console's `lab`).
+- [Rubidium](docs/chapters/rubidium-physics.typ): the atomic structure behind the
+  experiment, D1/D2 hyperfine transitions with strengths, warm-vapor spectroscopy,
   polarization self-rotation, quantum noise and the squeezing/shot-noise
-  measurement chain.
+  measurement chain. Its figure data lives in `docs/data/rubidium.json`; after
+  editing `Rb_transitions`, run `uv run python scripts/export_rb_data.py`.
 
 [`docs/adr_0001_tui_vs_devices_separation.md`](docs/adr_0001_tui_vs_devices_separation.md)
 records the architecture decision behind the layering below.

@@ -1,75 +1,40 @@
 // iyzee architecture guide
+#import "requirements.typ": *
 
-#set document(
-  title: "iyzee architecture guide",
-  author: "iyzee",
-)
-
-#set page(
-  margin: (x: 2.2cm, y: 2cm),
-  header: context [
-    #set text(size: 8pt)
-    #smallcaps[iyzee]
-    #h(1fr)
-    Architecture
-  ],
-  footer: context [
-    #set text(size: 8pt)
-    #h(1fr)
-    #counter(page).display("1 / 1", both: true)
-  ],
-)
-
-#set par(justify: true, leading: 0.55em)
-#set heading(numbering: "1.")
-#set text(size: 10pt)
-
-#let gh = "https://github.com/raiyiz/iyzee/blob/flirr/"
-
-#let source(path, label) = underline(link(gh + path)[#label], stroke: luma(80))
+#let source(path, label) = underline(link(repo-url + repo-ref + "/" + path)[#label], stroke: hairline)
 
 #let node(title, detail, width: 100%) = box(
   width: width,
-  fill: luma(248),
-  stroke: 0.8pt + luma(175),
+  fill: blue-soft,
+  stroke: 0.8pt + navy,
   radius: 5pt,
   inset: 8pt,
 )[
-  #align(center)[#text(weight: "bold")[#title]]
+  #align(center)[#text(weight: "bold", fill: navy)[#title]]
   #v(0.25em)
-  #align(center)[#text(size: 8.5pt, fill: luma(70))[#detail]]
+  #align(center)[#text(size: 8.5pt, fill: blue-ink)[#detail]]
 ]
 
 #let arrow(dir: "→") = align(center)[
-  #text(size: 16pt, weight: "bold")[#dir]
+  #text(size: 16pt, weight: "bold", fill: navy)[#dir]
 ]
 
+#part(
+  "Architecture",
+  "Architecture",
+  "How the system operates, and why it is shaped this way.",
+  id: "part-architecture",
+)
 
-#align(center)[
-  #text(size: 24pt, weight: "bold")[iyzee architecture]
-  #v(0.4em)
-  #text(size: 12pt)[How the system operates, and why it is shaped this way]
-  #v(0.8em)
-  #text(size: 10pt)[Technical architecture guide for the `flirr` implementation]
-]
-
-#v(1em)
-
-#block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(200),
-  inset: 9pt,
-  radius: 3pt,
-)[
-  *Status.* This document describes the current `flirr` implementation. It is
-  an architecture guide, not a generic instrument-control tutorial and not a
-  complete API reference. The source code remains authoritative; when code,
-  tests, and prose disagree, the implementation and its verified behavior win.
-]
-
-#align(center)[#outline(title: [Contents], depth: 1, indent: 1.2em)]
-
-#pagebreak()
+#callout(
+  "Status",
+  [
+    This part describes the current implementation. It is an architecture
+    guide, not a generic instrument-control tutorial and not a complete API
+    reference. The source code remains authoritative; when code, tests, and
+    prose disagree, the implementation and its verified behavior win.
+  ],
+)
 
 = What `iyzee` is
 
@@ -152,8 +117,8 @@ the fact.
   gutter: 8pt,
   [
     #box(
-      fill: luma(246),
-      stroke: 0.7pt + luma(185),
+      fill: blue-pale,
+      stroke: 0.7pt + hairline,
       radius: 5pt,
       inset: 9pt,
     )[
@@ -163,15 +128,15 @@ the fact.
       to use a resource for a session owns its lifetime; creating a Python object
       must not silently open a physical link.
 
-      #source("src/iyzee/devices/base.py#L17-L78", [BaseDevice lifecycle])
+      #source("src/iyzee/devices/base.py#L20-L71", [BaseDevice lifecycle])
       and #source("src/iyzee/lab.py#L98-L120", [Lab.connect()]) make that
       boundary concrete.
     ]
   ],
   [
     #box(
-      fill: luma(246),
-      stroke: 0.7pt + luma(185),
+      fill: blue-pale,
+      stroke: 0.7pt + hairline,
       radius: 5pt,
       inset: 9pt,
     )[
@@ -188,8 +153,8 @@ the fact.
   ],
   [
     #box(
-      fill: luma(246),
-      stroke: 0.7pt + luma(185),
+      fill: blue-pale,
+      stroke: 0.7pt + hairline,
       radius: 5pt,
       inset: 9pt,
     )[
@@ -205,8 +170,8 @@ the fact.
   ],
   [
     #box(
-      fill: luma(246),
-      stroke: 0.7pt + luma(185),
+      fill: blue-pale,
+      stroke: 0.7pt + hairline,
       radius: 5pt,
       inset: 9pt,
     )[
@@ -222,8 +187,8 @@ the fact.
   ],
   [
     #box(
-      fill: luma(246),
-      stroke: 0.7pt + luma(185),
+      fill: blue-pale,
+      stroke: 0.7pt + hairline,
       radius: 5pt,
       inset: 9pt,
     )[
@@ -239,8 +204,8 @@ the fact.
   ],
   [
     #box(
-      fill: luma(246),
-      stroke: 0.7pt + luma(185),
+      fill: blue-pale,
+      stroke: 0.7pt + hairline,
       radius: 5pt,
       inset: 9pt,
     )[
@@ -359,7 +324,7 @@ field.
 
 One of the most important invariants is simple:
 
-> Constructing a device is not the same thing as connecting to it.
+#pull[Constructing a device is not the same thing as connecting to it.]
 
 This makes ownership explicit. The caller that decides to use a resource for a
 session also decides when that resource should be opened and closed.
@@ -431,8 +396,8 @@ are actually connected right now?"
 The conceptual runtime object is therefore:
 
 #block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
+  fill: blue-pale,
+  stroke: 0.5pt + hairline,
   inset: 8pt,
   radius: 3pt,
   width: 100%,
@@ -477,7 +442,7 @@ forcing every device into one command model.
 
 #table(
   columns: (1.35fr, 2fr, 2.3fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left, left),
   [*Instrument*], [*Client/driver*], [*Transport*],
@@ -532,13 +497,11 @@ example of the architecture.
 
 The driver asks:
 
-> How does this instrument expose channels, trigger settings, and waveform
-> data?
+#pull[How does this instrument expose channels, trigger settings, and waveform data?]
 
 The workflow asks:
 
-> What useful laboratory operation should the application perform using those
-> capabilities?
+#pull[What useful laboratory operation should the application perform using those capabilities?]
 
 A driver should therefore contain instrument semantics such as a command to
 set time-per-division or download a waveform block. A workflow can compose
@@ -802,8 +765,7 @@ connection can remain usable.
 
 That distinction is worth documenting because it is a general transport rule:
 
-> Lose the connection when stream alignment is uncertain; do not tear down a
-> healthy stream merely because a fully received payload contains bad content.
+#pull[Lose the connection when stream alignment is uncertain; do not tear down a healthy stream merely because a fully received payload contains bad content.]
 
 = Transport state and link monitoring
 
@@ -857,8 +819,8 @@ With the current architecture, a page can instead do something conceptually
 like:
 
 #block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
+  fill: blue-pale,
+  stroke: 0.5pt + hairline,
   inset: 8pt,
   radius: 3pt,
   width: 100%,
@@ -956,8 +918,8 @@ The input path is:
 The output path is the reverse integration problem:
 
 #block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
+  fill: blue-pale,
+  stroke: 0.5pt + hairline,
   inset: 8pt,
   radius: 3pt,
   width: 100%,
@@ -990,8 +952,8 @@ introduce serialization, duplicated state, and another lifecycle boundary.
 Instead, the console can execute:
 
 #block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
+  fill: blue-pale,
+  stroke: 0.5pt + hairline,
   inset: 8pt,
   radius: 3pt,
   width: 100%,
@@ -1018,8 +980,8 @@ each access. Thus `lab.mx` means "the MXA that is connected *now*", not "the
 object that happened to be connected when the console was initialized".
 
 #block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
+  fill: blue-pale,
+  stroke: 0.5pt + hairline,
   inset: 8pt,
   radius: 3pt,
   width: 100%,
@@ -1132,7 +1094,7 @@ The architecture keeps these meanings separate:
 
 #table(
   columns: (1.35fr, 3.4fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   [*Representation*], [*Role*],
   [Raw acquisition], [The numerical samples as returned by the instrument, when preserved],
@@ -1143,7 +1105,7 @@ The architecture keeps these meanings separate:
 
 The governing rule is:
 
-> Display representations are disposable; recorded measurement data is not.
+#pull[Display representations are disposable; recorded measurement data is not.]
 
 = Configuration and connection discovery
 
@@ -1155,8 +1117,8 @@ not a runtime container that every component mutates.
 The flow is roughly:
 
 #block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
+  fill: blue-pale,
+  stroke: 0.5pt + hairline,
   inset: 8pt,
   radius: 3pt,
   width: 100%,
@@ -1321,7 +1283,7 @@ to concrete failure modes.
 
 #table(
   columns: (2.25fr, 3.2fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   [*Decision*], [*Reason*],
   [Devices do not connect during construction], [Clear ownership, deterministic tests, explicit lifecycle],
@@ -1351,7 +1313,7 @@ The main contract groups are:
 
 #table(
   columns: (1.8fr, 3.4fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   [*Area*], [*What the test should protect*],
   [Lifecycle], [Construction does not unexpectedly connect; connect/probe failures leave no registered half-open handle; close is safe],
@@ -1382,7 +1344,7 @@ question it answers.
 
 #table(
   columns: (2.15fr, 3.2fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   [*Source*], [*Responsibility*],
   [#source("src/iyzee/lab.py", [lab.py])], [Authoritative inventory and lifecycle of connected instruments],
@@ -1468,8 +1430,8 @@ what the pages do, and where to find the deeper technical documents.
 A concise mental model for a contributor is:
 
 #block(
-  fill: luma(245),
-  stroke: 0.5pt + luma(205),
+  fill: blue-pale,
+  stroke: 0.5pt + hairline,
   inset: 8pt,
   radius: 3pt,
   width: 100%,
@@ -1516,4 +1478,3 @@ historical context is useful, explain it only insofar as it clarifies a current
 invariant. Otherwise the architecture guide should describe the system that is
 actually running today.
 
-*Always strive for improvement, always be humble.*

@@ -1,43 +1,17 @@
 // iyzee MXA and measurement guide
-
 #import "requirements.typ": *
 
-#set document(
-  title: "iyzee MXA control and measurement model",
-  author: "iyzee",
-)
-
-#set page(
-  margin: (x: 2.2cm, y: 2cm),
-  header: context [
-    #set text(size: 8pt)
-    #smallcaps[iyzee]
-    #h(1fr)
-    MXA & measurements
-  ],
-  footer: context [
-    #set text(size: 8pt)
-    #h(1fr)
-    #counter(page).display("1 / 1", both: true)
-  ],
-)
-
-#set par(justify: true, leading: 0.55em)
-#set heading(numbering: "1.")
-#set text(size: 10pt)
-
-#hero(
+#part(
   "Scientific + software reference",
   "MXA control and measurement",
-  "From analyzer state and SCPI to noise spectra, synchronization, and persisted measurement records."
+  "From analyzer state and SCPI to noise spectra, synchronization, and persisted measurement records.",
+  id: "part-mxa",
 )
-
-#v(0.65em)
 
 #callout(
   "Reading rule",
   [
-    This guide describes the current iyzee measurement model. Each important
+    This part describes the current iyzee measurement model. Each important
     instrument setting is experimental state: it has a physical meaning, a
     driver-level implementation, and a place in the saved record.
   ],
@@ -46,11 +20,7 @@
 
 #v(0.6em)
 
-*Status:* documentation of the current `moonshine` implementation. This guide explains the boundary between the experiment code, the MXA driver, and the measurement quantities returned to Python. It is not a replacement for the Keysight programmer's or measurement references.
-
-#align(center)[#outline(title: [Contents], indent: 1.2em)]
-
-#pagebreak()
+*Status:* documentation of the current implementation. This guide explains the boundary between the experiment code, the MXA driver, and the measurement quantities returned to Python. It is not a replacement for the Keysight programmer's or measurement references.
 
 = Code and instrument boundary
 
@@ -73,17 +43,9 @@ The experiment layer builds measurements from `Step` objects. `BandwidthStep` sc
 The useful abstraction is not "send a command and get a trace" but a chain of
 state transformations:
 
-#diagram(
-  ```mermaid
-flowchart LR
-  A["physical signal"] --> B["MXA input state"]
-  B --> C["IF / RBW / detector"]
-  C --> D["sweep + averaging"]
-  D --> E["trace estimator"]
-  E --> F["Python result"]
-  F --> G["analysis + archive"]```.text,
+#flow(
+  "physical signal", "MXA input state", "IF / RBW / detector", "sweep + averaging", "trace estimator", "Python result", "analysis + archive",
   caption: [The measured trace is the endpoint of a configured estimator, not a raw detector stream.],
-  width: 94%,
 )
 
 A reproducible analysis must therefore preserve the settings that can change
@@ -182,7 +144,7 @@ The scientific rule is simple: a trace is reproducible only when the settings th
 The analyzer sees an electrical noise spectrum. The underlying optical
 experiment is governed by the Rubidium medium, laser detuning, polarization
 and detection chain. The dedicated
-#link("rubidium-physics.typ")[Rubidium physics guide] develops that connection,
+#link(<part-rubidium>)[Rubidium physics guide] develops that connection,
 including D1/D2 hyperfine structure, warm-vapor broadening, polarization
 self-rotation and the squeezing/shot-noise reference.
 
@@ -190,16 +152,9 @@ At the implementation boundary, the frequency-scan step changes the laser
 setpoint, waits, reads the wavemeter, acquires the squeezing trace, closes the
 shutter, and then acquires the shot-noise reference.
 
-#diagram(
-  ```mermaid
-flowchart LR
-  A["laser frequency"] --> B["Rb detuning"]
-  B --> C["PSR / optical state"]
-  C --> D["photodetection"]
-  D --> E["RF spectrum"]
-  E --> F["MXA trace"]```.text,
+#flow(
+  "laser frequency", "Rb detuning", "PSR / optical state", "photodetection", "RF spectrum", "MXA trace",
   caption: [The MXA is downstream of the atomic physics: it measures an electrical consequence of the optical state.],
-  width: 94%,
 )
 
 = Current experiment workflows
@@ -218,7 +173,7 @@ The key comparison in that workflow is squeezing versus shot noise. A difference
 
 #table(
   columns: (1.2fr, 1.65fr, 2fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left),
   [*Concept*], [*Project API*], [*SCPI*],
@@ -249,4 +204,3 @@ The key comparison in that workflow is squeezing versus shot noise. A difference
 
 Keep this guide tied to the implementation. When a code change alters analyzer behavior, SCPI commands, units, timing, calibration assumptions, experiment ordering, or persisted metadata, update the corresponding paragraph here. Avoid documenting historical procedures that no longer exist in the code.
 
-*Always strive for improvement, always be humble.*

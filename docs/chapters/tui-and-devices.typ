@@ -1,38 +1,12 @@
 // iyzee TUI and device interaction guide
-
 #import "requirements.typ": *
 
-#set document(
-  title: "iyzee TUI and device interaction guide",
-  author: "iyzee",
-)
-
-#set page(
-  margin: (x: 2.2cm, y: 2cm),
-  header: context [
-    #set text(size: 8pt)
-    #smallcaps[iyzee]
-    #h(1fr)
-    TUI & devices
-  ],
-  footer: context [
-    #set text(size: 8pt)
-    #h(1fr)
-    #counter(page).display("1 / 1", both: true)
-  ],
-)
-
-#set par(justify: true, leading: 0.55em)
-#set heading(numbering: "1.")
-#set text(size: 10pt)
-
-#hero(
+#part(
   "Software architecture + operator reference",
   "TUI and device interaction",
-  "How iyzee connects real instruments, exposes them to the terminal UI and console, and keeps hardware operations reusable outside Textual."
+  "How iyzee connects real instruments, exposes them to the terminal UI and console, and keeps hardware operations reusable outside Textual.",
+  id: "part-tui",
 )
-
-#v(0.65em)
 
 #callout(
   "Design invariant",
@@ -46,11 +20,7 @@
 
 #v(0.6em)
 
-*Status:* documentation of the current implementation. This guide explains how the terminal UI, the experiment layer, and the instrument drivers fit together, and gives a working reference for talking to each instrument directly. For MXA-specific SCPI detail and the measurement physics, see the companion #link("mxa-and-measurements.typ")[MXA and measurement guide].
-
-#align(center)[#outline(title: [Contents], indent: 1.2em)]
-
-#pagebreak()
+*Status:* documentation of the current implementation. This guide explains how the terminal UI, the experiment layer, and the instrument drivers fit together, and gives a working reference for talking to each instrument directly. For MXA-specific SCPI detail and the measurement physics, see the companion #link(<part-mxa>)[MXA and measurement guide].
 
 = One foundation, two entry points
 
@@ -75,7 +45,7 @@ flowchart LR
 
 #table(
   columns: (1fr, 1.7fr, 1.7fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 6pt,
   align: (left, left, left),
   [*Concern*], [`iyzee` (script)], [`iyzee-tui` (interactive)],
@@ -110,7 +80,7 @@ hardware-specific command syntax out of the experiment and TUI layers.
 
 #table(
   columns: (1.3fr, 1fr, 2fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 6pt,
   align: (left, left, left),
   [*`IP` member*], [*Address*], [*Instrument*],
@@ -124,7 +94,7 @@ These are lab-network fixtures, not configuration — they live as a `StrEnum` i
 
 == Keysight MXA
 
-The MXA is by far the most-used instrument and has its own dedicated guide — see #link("mxa-and-measurements.typ")[MXA and measurement guide] for the full SCPI command map, RBW/VBW/detector semantics, and the squeezing/shot-noise measurement workflow. The short version: `mxa.py` wraps every operation (frequency, bandwidth, sweep control, trace transfer, markers, triggering) as a plain Python method that writes or queries one SCPI command — application code never contains a raw SCPI string.
+The MXA is by far the most-used instrument and has its own dedicated guide — see #link(<part-mxa>)[MXA and measurement guide] for the full SCPI command map, RBW/VBW/detector semantics, and the squeezing/shot-noise measurement workflow. The short version: `mxa.py` wraps every operation (frequency, bandwidth, sweep control, trace transfer, markers, triggering) as a plain Python method that writes or queries one SCPI command — application code never contains a raw SCPI string.
 
 == Power supply and optical shutter
 
@@ -132,7 +102,7 @@ The MXA is by far the most-used instrument and has its own dedicated guide — s
 
 #table(
   columns: (1.5fr, 1.8fr, 2fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left, left),
   [*Method*], [*SCPI written*], [*Note*],
@@ -154,7 +124,7 @@ Typical commands sent via `LeCroy.send()`:
 
 #table(
   columns: (1.6fr, 2.2fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left),
   [*Command*], [*Purpose*],
@@ -175,7 +145,7 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
 
 #table(
   columns: (1.4fr, 2.4fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left),
   [*Endpoint*], [*Used by*],
@@ -292,7 +262,7 @@ The storage layer is shared with experiment sweeps through `experiment.io.save_n
 = References
 
 - Repository implementation: `src/iyzee/devices/base.py`, `src/iyzee/devices/power.py`, `src/iyzee/devices/scope.py`, `src/iyzee/scope_workflows.py`, `src/iyzee/devices/wavemeter.py`, `src/iyzee/tui/`, and the associated tests.
-- #link("mxa-and-measurements.typ")[MXA and measurement guide] — MXA SCPI reference, measurement physics, and the squeezing/shot-noise workflow.
+- #link(<part-mxa>)[MXA and measurement guide] — MXA SCPI reference, measurement physics, and the squeezing/shot-noise workflow.
 - Rohde & Schwarz, *HMP Series Power Supply User Manual*: `INST:NSEL`, `INST OUTn`, `OUTP:SEL`, `OUTP:GEN` selection and output semantics.
 - LeCroy, *Remote Control Manual*: VICP protocol framing, `WF?`/`INSPECT?` waveform transfer, and (for the channel/trigger/math control added on top of that) the `<channel>:VOLT_DIV`/`OFFSET`/`COUPLING`/`ATTENUATION`/`BANDWIDTH_LIMIT`/`TRACE`/`INVERT_SET`, `TRIG_SELECT`/`TRIG_LEVEL`/`TRIG_SLOPE`/`TRIG_COUPLING`/`TRIG_MODE`/`TRIG_DELAY`, and `DEFINE EQN` command families.
 - PyVISA documentation, resource strings and `query_binary_values()`: #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
@@ -303,4 +273,3 @@ The storage layer is shared with experiment sweeps through `experiment.io.save_n
 
 Keep this guide tied to the implementation. When a driver's commands, the instrument registry, a screen's behavior, or the console's namespace changes, update the corresponding section here in the same change — don't let this fade into a description of an earlier version of the code. Avoid documenting historical designs that no longer exist (an earlier revision of this codebase copied live objects into the console's namespace and had to track and clean them up again on disconnect; `lab`'s live-lookup design replaced that entirely, and this guide should never again describe the older mechanism as current).
 
-*Always strive for improvement, always be humble.*

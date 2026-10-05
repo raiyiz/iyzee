@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 import numpy as np
 import requests
 
-from ..config import IP, address
+from ..config import IP
 
 log = logging.getLogger("iyzee.wavemeter")
 
@@ -107,7 +107,7 @@ class Wavemeter:
         self,
         channel: int = DEFAULT_CHANNEL,
         *,
-        host: str | None = None,
+        host: str = IP.WAVEMETER,
         port: int = WAVEMETER_PORT,
     ) -> None:
         self.channel = channel
@@ -117,7 +117,7 @@ class Wavemeter:
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.host or address(IP.WAVEMETER)}:{self.port}/api/"
+        return f"http://{self.host}:{self.port}/api/"
 
     def __repr__(self) -> str:
         return f"<Wavemeter {self.base_url} default channel {self.channel}>"
@@ -149,25 +149,17 @@ class Wavemeter:
     def read_frequency(self, channel: int | None = None) -> float:
         """Frequency of one channel in THz (default: this client's channel)."""
         channel = self.channel if channel is None else channel
-        try:
-            return float(self._request(READ_PATH.format(channel=channel), timeout=READ_TIMEOUT_S))
-        except (OSError, ValueError, UnicodeError) as exc:
-            raise WavemeterReadoutError(f"Failed to read wavemeter channel {channel}") from exc
+        return float(self._request(READ_PATH.format(channel=channel), timeout=READ_TIMEOUT_S))
 
     @endpoint("POST", SET_PID_PATH)
     def set_pid_setpoint(self, freq: float, channel: int | None = None) -> None:
         """Set the PID lock setpoint of one channel, in THz (regulation stays off)."""
         channel = self.channel if channel is None else channel
-        try:
-            self._request(
-                SET_PID_PATH,
-                data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
-                timeout=SETPOINT_TIMEOUT_S,
-            )
-        except (OSError, UnicodeError) as exc:
-            raise WavemeterReadoutError(
-                f"Failed to set the setpoint of wavemeter channel {channel} to {freq} THz"
-            ) from exc
+        self._request(
+            SET_PID_PATH,
+            data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
+            timeout=SETPOINT_TIMEOUT_S,
+        )
         log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
 
     def get(self, path: str, *, timeout: float = READ_TIMEOUT_S) -> str:

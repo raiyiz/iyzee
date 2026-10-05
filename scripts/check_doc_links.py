@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check source-code links in README.md and docs/*.typ.
+"""Check source-code links in README.md and docs/**/*.typ.
 
 Supported forms:
   #src-link("src/iyzee/foo.py", line: N)
@@ -107,7 +107,7 @@ def process(path: Path, typst: bool, fix: bool) -> list[str]:
 
 fix = "--fix" in sys.argv[1:]
 errors = [
-    error for doc in sorted((ROOT / "docs").glob("*.typ")) for error in process(doc, True, fix)
+    error for doc in sorted((ROOT / "docs").rglob("*.typ")) for error in process(doc, True, fix)
 ]
 errors.extend(process(ROOT / "README.md", False, fix))
 

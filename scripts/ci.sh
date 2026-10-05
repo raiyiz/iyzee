@@ -9,12 +9,8 @@ sync() { uv sync --locked --group dev; }
 docs() {
     rm -rf build/docs
     mkdir -p build/docs
-    for source in docs/*.typ; do
-        name=${source##*/}
-        # requirements.typ only declares Typst package imports.
-        [ "$name" = requirements.typ ] && continue
-        typst compile "$source" "build/docs/${name%.typ}.pdf"
-    done
+    # One book: docs/main.typ includes every chapter in docs/chapters/.
+    typst compile docs/main.typ build/docs/iyzee-guide.pdf
 }
 
 doc_links() {

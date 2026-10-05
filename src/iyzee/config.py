@@ -36,7 +36,7 @@ class IP(StrEnum):
     POWER_SUPPLY = "10.140.1.15"
     NOISE_ANALYZER = "10.140.1.40"
     SCOPE = "10.140.1.220"
-    WAVEMETER = "10.140.1.215"
+    WAVEMETER = "10.140.1.119"
 
 
 class ConfigError(RuntimeError):
