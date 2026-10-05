@@ -201,6 +201,22 @@ def test_wavemeter_handle_probe_uses_its_configured_channel(
     assert seen == [4]
 
 
+def test_wavemeter_handle_probe_propagates_read_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = OSError("switch unreachable")
+
+    def fail(self, channel=None):
+        raise failure
+
+    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", fail)
+
+    with pytest.raises(OSError) as caught:
+        WavemeterHandle().probe()
+
+    assert caught.value is failure
+
+
 # -- ScopeHandle ----------------------------------------------------------
 
 
