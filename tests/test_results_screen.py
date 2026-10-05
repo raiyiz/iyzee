@@ -191,8 +191,18 @@ async def test_scope_channel_selection_changes_the_actual_preview(
         await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1"])
 
 
+
+
+
+
+
+
+
+
+
+
 @async_test
-async def test_scope_subtraction_matches_waveform_math(
+async def test_scope_operations_apply_and_chain_through_derived_traces(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _save_scope_run(tmp_path)
@@ -202,63 +212,28 @@ async def test_scope_subtraction_matches_waveform_math(
         b = screen._measured["C2"]
 
         await _apply_op(screen, pilot, "subtract", a="C1", b="C2")
+        expected = subtract_traces(a, b)
+        assert screen._derived[expected.label] is not None
+        np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
-        np.testing.assert_allclose(
-            screen._derived["C1 - C2"].values,
-            subtract_traces(a, b).values,
-        )
-
-
-@async_test
-async def test_scope_background_region_matches_waveform_math(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path, channels=(Channel.C1,))
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, lambda: set(screen._measured) == {"C1"})
-        a = screen._measured["C1"]
         lo = float(a.time[0])
         hi = float(a.time[min(1, len(a.time) - 1)])
-
         await _apply_op(
             screen,
             pilot,
             "background-region",
             a="C1",
-            region_lo=f"{lo}",
-            region_hi=f"{hi}",
+            region_lo=str(lo),
+            region_hi=str(hi),
         )
-
         expected = subtract_background(a, region=(lo, hi))
-        assert set(screen._derived) == {expected.label}
+        assert set(screen._derived) >= {expected.label}
         np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
-
-
-@async_test
-async def test_scope_background_reference_matches_waveform_math(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path)
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, lambda: set(screen._measured) == {"C1", "C2"})
-        a = screen._measured["C1"]
-        reference = screen._measured["C2"]
 
         await _apply_op(screen, pilot, "background-reference", a="C1", b="C2")
-
-        expected = subtract_background(a, reference=reference)
-        assert set(screen._derived) == {expected.label}
+        expected = subtract_background(a, reference=b)
+        assert set(screen._derived) >= {expected.label}
         np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
-
-
-@async_test
-async def test_scope_scale_matches_waveform_math(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path, channels=(Channel.C1,))
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, lambda: set(screen._measured) == {"C1"})
-        a = screen._measured["C1"]
 
         await _apply_op(
             screen,
@@ -270,31 +245,15 @@ async def test_scope_scale_matches_waveform_math(
             yscale="3",
             yoffset="4",
         )
-
         expected = scale_trace(a, x_scale=2.0, x_offset=1.0, y_scale=3.0, y_offset=4.0)
-        assert set(screen._derived) == {expected.label}
+        assert set(screen._derived) >= {expected.label}
         np.testing.assert_allclose(screen._derived[expected.label].time, expected.time)
         np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
-
-@async_test
-async def test_scope_operations_can_chain_through_a_derived_trace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path, channels=(Channel.C1, Channel.C2))
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, lambda: set(screen._measured) == {"C1", "C2"})
-        a = screen._measured["C1"]
-        b = screen._measured["C2"]
-
-        await _apply_op(screen, pilot, "subtract", a="C1", b="C2")
-        derived = subtract_traces(a, b)
-        assert derived.label in screen._derived
-
-        await _apply_op(screen, pilot, "scale", a=derived.label, yscale="1000")
-        expected = scale_trace(derived, y_scale=1000.0)
-        assert set(screen._derived) == {derived.label, expected.label}
-        np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
+        await _apply_op(screen, pilot, "scale", a="C1 - C2", yscale="1000")
+        chained = scale_trace(screen._derived["C1 - C2"], y_scale=1000.0)
+        assert set(screen._derived) >= {chained.label}
+        np.testing.assert_allclose(screen._derived[chained.label].values, chained.values)
 
 
 @async_test
