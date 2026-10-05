@@ -124,6 +124,7 @@ class Page(VerticalScroll, can_focus=False):
 
     def on_show(self) -> None:
         """Refresh/focus the page after it becomes the active page."""
+
     @property
     def iyzee_app(self) -> IyzeeApp:
         """The concrete app instance used by every page in this TUI."""
