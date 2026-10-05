@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from helpers import async_test
+from helpers import async_test, wait_until
 from textual.geometry import Region
 from textual.widgets import ContentSwitcher, Select
 
