@@ -33,7 +33,10 @@ def test_read_frequency_uses_the_requested_and_default_channel(
             {"timeout": wavemeter.READ_TIMEOUT_S},
         ),
         (
-            f"http://{wavemeter.IP.WAVEMETER}:{wavemeter.WAVEMETER_PORT}/api/{wavemeter.DEFAULT_CHANNEL}/",
+            (
+                f"http://{wavemeter.IP.WAVEMETER}:{wavemeter.WAVEMETER_PORT}"
+                f"/api/{wavemeter.DEFAULT_CHANNEL}/"
+            ),
             {"timeout": wavemeter.READ_TIMEOUT_S},
         ),
     ]
@@ -90,7 +93,9 @@ def test_single_readout_subtracts_the_reference(monkeypatch: pytest.MonkeyPatch)
 def test_set_pid_setpoint_posts_the_expected_request(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, Any] = {}
 
-    def post(url: str, data: bytes | None = None, timeout: float | None = None) -> requests.Response:
+    def post(
+        url: str, data: bytes | None = None, timeout: float | None = None
+    ) -> requests.Response:
         seen.update(url=url, data=data, timeout=timeout)
         return response("")
 
@@ -112,13 +117,18 @@ def test_client_last_seen_changes_only_after_a_successful_response(
     client = wavemeter.Wavemeter()
     assert client.last_seen is None
 
-    monkeypatch.setattr(wavemeter.requests, "get", lambda *args, **kwargs: response("377.123456"))
+    monkeypatch.setattr(
+        wavemeter.requests, "get", lambda *args, **kwargs: response("377.123456")
+    )
     assert client.read_frequency(4) == pytest.approx(377.123456)
     seen = client.last_seen
     assert seen is not None and seen.tzinfo is wavemeter.timezone.utc
 
     failure = requests.Timeout("timed out")
-    monkeypatch.setattr(wavemeter.requests, "get", lambda *args, **kwargs: (_ for _ in ()).throw(failure))
+    def fail(*args: Any, **kwargs: Any) -> requests.Response:
+        raise failure
+
+    monkeypatch.setattr(wavemeter.requests, "get", fail)
     with pytest.raises(requests.Timeout) as caught:
         client.read_frequency(4)
     assert caught.value is failure
