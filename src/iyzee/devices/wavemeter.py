@@ -131,9 +131,6 @@ class Wavemeter:
         else:
             response = requests.post(url, data=data, timeout=timeout)
 
-        if not response:
-            raise requests.ConnectionError
-
         with response:
             response.raise_for_status()
             body = response.content.decode("ascii")
