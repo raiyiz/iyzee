@@ -43,8 +43,9 @@ async def _open_results_screen(
     app = app_mod.IyzeeApp(prefs_file=prefs_file)
     async with app.run_test() as pilot:
         await pilot.press("t")
-        await pilot.pause(0.3)
-        yield app.query_one(ResultsScreen), pilot
+        screen = app.query_one(ResultsScreen)
+        await wait_until(pilot, lambda: screen.query_one("#results-list", ListView).has_focus)
+        yield screen, pilot
 
 
 def _summary(screen: ResultsScreen) -> str:
