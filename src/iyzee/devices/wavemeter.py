@@ -131,9 +131,8 @@ class Wavemeter:
         else:
             response = requests.post(url, data=data, timeout=timeout)
 
-        with response:
-            response.raise_for_status()
-            body = response.content.decode("ascii")
+        response.raise_for_status()
+        body = response.content.decode("ascii")
 
         self.last_seen = datetime.now(timezone.utc)
         return body
