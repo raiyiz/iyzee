@@ -72,7 +72,6 @@ async def test_connect_error_is_shown_verbatim_and_leaves_no_handle(
     async with app.run_test() as pilot:
         screen, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "error")
-        await pilot.pause(0.1)
         app.export_screenshot()  # force a real render of the table
         # DataTable parses str cells as markup; what it would display is
         # exactly the original message, brackets and all.
@@ -106,7 +105,7 @@ async def test_enter_on_a_connecting_row_does_not_open_the_device_twice(
     app = connect_app(monkeypatch, first, second)
     async with app.run_test() as pilot:
         screen, table = await enter_on_first_row(app, pilot)
-        await pilot.pause(0.1)  # the first connect is now in flight
+        await _row_is(pilot, table, "connecting...")
         await pilot.press("enter")  # impatient second press
         await _row_is(pilot, table, "connected")
         assert first.connect_calls == 1
@@ -124,7 +123,7 @@ async def test_disconnect_requires_a_fresh_second_enter(monkeypatch: pytest.Monk
         await wait_until(pilot, lambda: not screen._busy)  # the row is usable again
 
         await pilot.press("enter")  # first Enter arms it...
-        await pilot.pause(0.2)
+        await wait_until(pilot, lambda: screen._armed is not None)
         assert "fake" in app.handles and handle.disconnect_calls == 0
         assert "Press Enter again to disconnect Fake." in notifications(app)
 
@@ -135,7 +134,6 @@ async def test_disconnect_requires_a_fresh_second_enter(monkeypatch: pytest.Monk
             time.monotonic() - 1,
         )  # force the confirmation window to expire
         await pilot.press("enter")
-        await pilot.pause(0.2)
         assert "fake" in app.handles and handle.disconnect_calls == 0
 
         # A genuinely fresh second Enter does disconnect.
@@ -156,6 +154,5 @@ async def test_disconnect_is_refused_while_a_sweep_is_running(
         app.sweep_running = True
 
         await pilot.press("enter", "enter")
-        await pilot.pause(0.2)
         assert handle.disconnect_calls == 0 and "fake" in app.handles
         assert any("sweep is running" in m for m in notifications(app))
