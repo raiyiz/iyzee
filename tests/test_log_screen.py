@@ -59,8 +59,11 @@ async def test_log_screen_can_browse_a_rotated_file(
         await pilot.press("l")
 
         screen = app.query_one(LogScreen)
-        view = screen.query_one("#log-view", RichLog)
-        await wait_until(pilot, lambda: any("an old record" in line.text for line in view.lines))
         source = screen.query_one("#log-source", Select)
+        await wait_until(
+            pilot,
+            lambda: str(log_root / "iyzee.log.1") in [value for _label, value in source._options],
+        )
         source.value = str(log_root / "iyzee.log.1")
+        view = screen.query_one("#log-view", RichLog)
         await wait_until(pilot, lambda: any("an old record" in line.text for line in view.lines))
