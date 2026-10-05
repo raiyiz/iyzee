@@ -148,7 +148,7 @@ async def test_q_asks_first_and_quits_on_the_second_press() -> None:
         assert app.is_running, "one stray q must not quit"
         assert any("Press q again" in message for message in notifications(app))
         await pilot.press("q")
-        await pilot.pause(0.5)
+        await wait_until(pilot, lambda: not app.is_running)
     assert not app.is_running
 
 
@@ -183,7 +183,7 @@ async def test_exiting_the_app_disconnects_every_connected_instrument() -> None:
         await pilot.pause()
         app.handles["one"], app.handles["two"] = one, two
         await pilot.press("ctrl+q")
-        await pilot.pause(0.5)
+        await wait_until(pilot, lambda: not app.is_running)
     assert (one.disconnect_calls, two.disconnect_calls) == (1, 1)
     assert app.handles == {}
 

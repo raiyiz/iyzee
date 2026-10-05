@@ -292,7 +292,9 @@ async def test_console_interrupt_scrollback_and_shutdown() -> None:
 
         # Ctrl+C stops a running cell and the console stays usable.
         session.send(b"\x15while True: pass\r")
-        await pilot.pause(0.5)
+        deadline = time.monotonic() + 1.0
+        while not session.executing and time.monotonic() < deadline:
+            await pilot.pause(0.01)
         assert session.executing
         await pilot.press("ctrl+c")
         assert await _wait(pilot, app, "KeyboardInterrupt")
