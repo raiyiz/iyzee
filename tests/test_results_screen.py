@@ -240,7 +240,16 @@ async def test_scope_operations_apply_and_chain_through_derived_traces(
         np.testing.assert_allclose(screen._derived[expected.label].time, expected.time)
         np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
-        await _apply_op(screen, pilot, "scale", a=subtracted.label, yscale="1000")
+        await _apply_op(
+            screen,
+            pilot,
+            "scale",
+            a=subtracted.label,
+            xscale="1",
+            xoffset="0",
+            yscale="1000",
+            yoffset="0",
+        )
         chained = scale_trace(screen._derived[subtracted.label], y_scale=1000.0)
         assert set(screen._derived) >= {chained.label}
         np.testing.assert_allclose(screen._derived[chained.label].values, chained.values)
