@@ -61,8 +61,7 @@ async def test_page_navigation_and_footer_contracts() -> None:
 
         await pilot.press("i")
         assert switcher.current == "console"
-        await pilot.pause()
-        assert pilot.app.screen.focused is not None
+        await wait_until(pilot, lambda: pilot.app.screen.focused is not None)
         assert pilot.app.screen.focused.id == "console-terminal"
 
         # From the console only the F-keys navigate; the terminal owns the letters.
@@ -223,6 +222,9 @@ async def test_a_lost_link_is_reported_once_released_and_reconnectable(
         app._check_links()
         app._check_links()  # one poll must announce the loss only once
         await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "lost")
+        await wait_until(
+            pilot, lambda: any("connection lost" in m for m in notifications(app))
+        )
 
         assert "mxa" not in app.handles
         assert "Enter to reconnect" in str(table.get_cell("mxa", DETAIL_COL))
