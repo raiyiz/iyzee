@@ -11,63 +11,36 @@ from iyzee.tui.screens.log import LogScreen
 
 
 @async_test
-async def test_log_screen_shows_buffered_and_live_records() -> None:
-    """Both delivery paths matter: startup records arrive through the shared
-    buffer, while records emitted after the page is open are appended live.
-
-    Keeping the two cases in one test preserves both lifecycle contracts
-    without maintaining two nearly identical Textual app harnesses.
-    """
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        logging.getLogger("iyzee.tui").warning("a warning before opening the log page")
-        await pilot.press("l")
-        await pilot.pause(0.3)
-
-        screen = app.query_one(LogScreen)
-        view = screen.query_one("#log-view", RichLog)
-        assert any("a warning before opening the log page" in line.text for line in view.lines)
-
-        before = len(view.lines)
-        logging.getLogger("iyzee.tui").info("an info event while on the log page")
-        await wait_until(pilot, lambda: len(view.lines) > before)
-
-
-@async_test
-async def test_log_screen_level_filter_hides_lower_severity_records() -> None:
+async def test_log_screen_shows_buffered_live_filtered_and_exception_records() -> None:
     app = IyzeeApp()
     async with app.run_test() as pilot:
         log = logging.getLogger("iyzee.tui")
+
         log.info("an info-level record")
-        await pilot.press("l")
-        await pilot.pause(0.3)
-
-        screen = app.query_one(LogScreen)
-        view = screen.query_one("#log-view", RichLog)
-        assert any("an info-level record" in line.text for line in view.lines)
-
-        screen.query_one("#log-level", Select).value = str(logging.WARNING)
-        await pilot.pause(0.3)
-        assert not any("an info-level record" in line.text for line in view.lines)
-
-
-@async_test
-async def test_log_screen_exception_records_include_a_traceback() -> None:
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        log = logging.getLogger("iyzee.tui")
         try:
             raise ValueError("boom")
         except ValueError:
             log.exception("something broke")
-        await pilot.press("l")
-        await pilot.pause(0.3)
 
-        screen = app.query_one(LogScreen)
-        view = screen.query_one("#log-view", RichLog)
+        await pilot.press("l")
+        view = app.query_one("#log-view", RichLog)
+        await wait_until(pilot, lambda: len(view.lines) >= 3)
+
         text = "\n".join(line.text for line in view.lines)
+        assert "an info-level record" in text
         assert "something broke" in text
         assert "ValueError: boom" in text
+
+        before = len(view.lines)
+        log.warning("a warning while on the log page")
+        await wait_until(pilot, lambda: len(view.lines) > before)
+
+        app.query_one("#log-level", Select).value = str(logging.WARNING)
+        await wait_until(
+            pilot,
+            lambda: not any("an info-level record" in line.text for line in view.lines),
+        )
+        assert any("a warning while on the log page" in line.text for line in view.lines)
 
 
 @async_test
