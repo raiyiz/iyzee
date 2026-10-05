@@ -213,7 +213,7 @@ async def test_scope_operations_apply_and_chain_through_derived_traces(
 
         await _apply_op(screen, pilot, "subtract", a="C1", b="C2")
         expected = subtract_traces(a, b)
-        assert screen._derived[expected.label] is not None
+        assert expected.label in screen._derived
         np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
         lo = float(a.time[0])
@@ -250,8 +250,8 @@ async def test_scope_operations_apply_and_chain_through_derived_traces(
         np.testing.assert_allclose(screen._derived[expected.label].time, expected.time)
         np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
-        await _apply_op(screen, pilot, "scale", a="C1 - C2", yscale="1000")
-        chained = scale_trace(screen._derived["C1 - C2"], y_scale=1000.0)
+        await _apply_op(screen, pilot, "scale", a=expected.label, yscale="1000")
+        chained = scale_trace(screen._derived[expected.label], y_scale=1000.0)
         assert set(screen._derived) >= {chained.label}
         np.testing.assert_allclose(screen._derived[chained.label].values, chained.values)
 
