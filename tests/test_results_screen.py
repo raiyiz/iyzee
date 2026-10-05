@@ -191,16 +191,6 @@ async def test_scope_channel_selection_changes_the_actual_preview(
         await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1"])
 
 
-
-
-
-
-
-
-
-
-
-
 @async_test
 async def test_scope_operations_apply_and_chain_through_derived_traces(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
