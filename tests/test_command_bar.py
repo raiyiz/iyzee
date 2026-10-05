@@ -48,7 +48,7 @@ async def test_a_page_name_switches_pages_and_q_quits():
         assert app.query_one(ContentSwitcher).current == "sweep"
 
         await run(pilot, "q")
-        await pilot.pause(0.5)
+        await wait_until(pilot, lambda: not app.is_running)
     assert not app.is_running
 
 
