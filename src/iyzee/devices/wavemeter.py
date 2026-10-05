@@ -82,10 +82,6 @@ Rb_transitions: list[tuple[str, float]] = [
 ]
 
 
-class WavemeterReadoutError(RuntimeError):
-    """Raised when a wavemeter measurement cannot be obtained or parsed."""
-
-
 def endpoint(verb: str, path: str) -> Callable[[_F], _F]:
     """Mark a method as the client for `verb /api/<path>` (`lab.api` shows it)."""
 
@@ -164,7 +160,7 @@ class Wavemeter:
 
     def get(self, path: str, *, timeout: float = READ_TIMEOUT_S) -> str:
         """Raw `GET /api/<path>`, body as text. For exploring routes not wrapped above;
-        errors are the plain `requests` ones, not `WavemeterReadoutError`."""
+        errors propagate as the underlying `requests`/parse exceptions."""
         return self._request(path, timeout=timeout)
 
     def post(self, path: str, *, timeout: float = SETPOINT_TIMEOUT_S, **form: object) -> str:
@@ -225,11 +221,7 @@ def track_frequency(
         nonlocal times, track_freq
 
         # Fetch laser frequency from the URL
-        try:  # readout laser frequency and plot laser detuning or absolute laser frequency
-            ls_frequency = read_frequency(channel) - reference_f
-        except WavemeterReadoutError as exc:
-            print(f"Error fetching data: {exc}")
-            return
+        ls_frequency = read_frequency(channel) - reference_f
 
         # Calculate the elapsed time since the start of data collection
         elapsed_time = time.time() - start_time
