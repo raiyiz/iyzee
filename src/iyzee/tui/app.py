@@ -307,6 +307,8 @@ class IyzeeApp(App):
 
     def action_show_page(self, page_id: str) -> None:
         self.query_one(ContentSwitcher).current = page_id
+        page = self.query_one(f"#{page_id}", Page)
+        page.on_show()
         nav = self.query_one(NavRail)
         nav.set_active(page_id)
         nav.refresh_instruments()
