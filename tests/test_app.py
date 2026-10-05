@@ -80,7 +80,6 @@ async def test_page_navigation_and_footer_contracts() -> None:
         assert pilot.app.screen.focused is pilot.app.screen.query_one("#instrument-table")
 
 
-
 @async_test
 async def test_nav_rail_and_sweep_banner_update_the_moment_a_connect_finishes(
     monkeypatch: pytest.MonkeyPatch,
@@ -147,7 +146,6 @@ async def test_q_requires_a_second_immediate_press() -> None:
         await wait_until(pilot, lambda: not app.is_running)
 
     assert not app.is_running
-
 
 
 @async_test
@@ -242,7 +240,6 @@ async def test_a_lost_link_is_reported_once_released_and_reconnectable(
         assert app.handles["mxa"] is fresh
         assert "mxa" not in app.lost_links
         assert table.get_cell("mxa", DETAIL_COL) == "back"
-
 
 
 @async_test

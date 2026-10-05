@@ -61,6 +61,7 @@ def test_read_frequency_exposes_the_underlying_failure(
             lambda *args, **kwargs: response(failure),
         )
     else:
+
         def get(*args: Any, **kwargs: Any) -> requests.Response:
             raise failure
 
@@ -116,14 +117,13 @@ def test_client_last_seen_changes_only_after_a_successful_response(
     client = wavemeter.Wavemeter()
     assert client.last_seen is None
 
-    monkeypatch.setattr(
-        wavemeter.requests, "get", lambda *args, **kwargs: response("377.123456")
-    )
+    monkeypatch.setattr(wavemeter.requests, "get", lambda *args, **kwargs: response("377.123456"))
     assert client.read_frequency(4) == pytest.approx(377.123456)
     seen = client.last_seen
     assert seen is not None and seen.tzinfo is wavemeter.timezone.utc
 
     failure = requests.Timeout("timed out")
+
     def fail(*args: Any, **kwargs: Any) -> requests.Response:
         raise failure
 
