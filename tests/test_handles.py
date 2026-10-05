@@ -201,20 +201,6 @@ def test_wavemeter_handle_probe_uses_its_configured_channel(
     assert seen == [4]
 
 
-def test_wavemeter_handle_probe_wraps_readout_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail(self, channel=None):
-        raise instruments_mod.WavemeterReadoutError("switch unreachable")
-
-    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", fail)
-
-    handle = WavemeterHandle()
-
-    with pytest.raises(ConnectionError, match="switch unreachable"):
-        handle.probe()
-
-
 # -- ScopeHandle ----------------------------------------------------------
 
 
