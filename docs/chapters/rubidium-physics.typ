@@ -240,7 +240,7 @@ is red of the reference.
       fill: none,
       inset: (x: 3pt, y: 3pt),
       [*Where*], [*Quantity*], [*Positive means*],
-      [`monitoring_frequencies`, in #src-link("src/iyzee/devices/wavemeter.py", line: 292)], [ν#sub[laser] − ν#sub[transition], × 10³ for GHz], [laser above the line],
+      [`monitoring_frequencies`, in #src-link("src/iyzee/devices/wavemeter.py", line: 284)], [ν#sub[laser] − ν#sub[transition], × 10³ for GHz], [laser above the line],
       [Rb page of the TUI, “From centre”], [ν#sub[transition] − ν#sub[centre of that isotope]], [line above its centre],
       [spectra in this part], [ν#sub[transition] − ν#sub[centre of #iso-name("85")]], [line above the #iso-name("85") centre; one axis for both isotopes],
     )
