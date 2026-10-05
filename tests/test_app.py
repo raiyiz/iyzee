@@ -61,8 +61,7 @@ async def test_page_navigation_and_footer_contracts() -> None:
 
         await pilot.press("i")
         assert switcher.current == "console"
-        await wait_until(pilot, lambda: pilot.app.screen.focused is not None)
-        assert pilot.app.screen.focused.id == "console-terminal"
+        await wait_until(pilot, lambda: getattr(pilot.app.screen.focused, "id", None) == "console-terminal")
 
         # From the console only the F-keys navigate; the terminal owns the letters.
         for key, page in [
