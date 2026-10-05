@@ -61,7 +61,7 @@ update() {
 }
 
 case "${1:-}" in
-    test)      sync; uv run --locked pytest ;;
+    test)      sync; uv run --locked pytest --durations=25 ;;
     lint)      sync; uv run --locked ruff check .; uv run --locked ruff format --check . ;;
     typecheck) sync; uv run --locked mypy src tests ;;
     doc-links) doc_links ;;
