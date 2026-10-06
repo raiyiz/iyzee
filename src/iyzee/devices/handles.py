@@ -26,7 +26,7 @@ from ..config import IP, address
 from .base import CH
 from .power import ShutterControl
 from .scope import LeCroy, LeCroyTimeoutError
-from .wavemeter import DEFAULT_CHANNEL, Wavemeter
+from .wavemeter import Wavemeter
 
 log = logging.getLogger("iyzee.instruments")
 
@@ -172,9 +172,9 @@ class WavemeterHandle(_LockedHandle):
     console a stateless :class:`~iyzee.devices.wavemeter.Wavemeter` client.
     """
 
-    def __init__(self, channel: int = DEFAULT_CHANNEL) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._client = Wavemeter(channel)
+        self._client = Wavemeter()
 
     def connect(self) -> None:
         return None
@@ -189,7 +189,7 @@ class WavemeterHandle(_LockedHandle):
 
     def probe(self) -> str:
         freq = self._client.read_frequency()
-        return f"ch{self._client.channel} = {freq:.6f} THz"
+        return f"wavemeter = {freq:.6f} THz"
 
 
 class ScopeHandle(_LockedHandle):

@@ -1,20 +1,15 @@
 """Client for the WS-7 wavemeter server's small HTTP API.
 
-:class:`Wavemeter` has one method per endpoint (so Tab completion in the console
-is the endpoint list; `lab.api("wavemeter")` prints it with the HTTP routes).
-Errors are left raw: a failed call raises the underlying `requests` error (its
-message already names host, port and path), a non-2xx reply raises `HTTPError`
-carrying the start of the reply body, and an unparseable reading raises the
-`ValueError` from `float()` quoting the text it got.
+Wavemeter is a small stateless HTTP client: constructing it does not connect
+to anything, and every method call is one ordinary requests call.
+The module-level functions are convenience calls on a default client, for
+scripts and experiment procedures.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
-from datetime import datetime, timezone
-from typing import TypeVar
 
 import numpy as np
 import requests
@@ -30,12 +25,6 @@ READ_TIMEOUT_S = 1.0
 SETPOINT_TIMEOUT_S = 3.0
 DEFAULT_CHANNEL = 4
 WAVEMETER_PORT = 8000
-
-# Routes under /api/. One definition each, shared by the call and its listing.
-READ_PATH = "frequency/{channel}/"
-SET_PID_PATH = "set_pid/"
-
-_F = TypeVar("_F", bound=Callable[..., object])
 
 
 # Scaling is a bit tricky here, since we span several orders of magnitude, but
@@ -83,91 +72,42 @@ Rb_transitions: list[tuple[str, float]] = [
 ]
 
 
-def endpoint(verb: str, path: str) -> Callable[[_F], _F]:
-    """Mark a method as the client for `verb /api/<path>` (`lab.api` shows it)."""
-
-    def mark(method: _F) -> _F:
-        method.rest = f"{verb} /api/{path}"  # type: ignore[attr-defined]
-        return method
-
-    return mark
-
-
 class Wavemeter:
-    """HTTP client for the wavemeter server. Stateless: nothing to open or close.
+    """HTTP client for the wavemeter server.
 
-    `channel` is the default for every call that takes one. `host` defaults
-    to the configured wavemeter address (`iyzee.config.address`), looked up on
-    every request, so a config change applies without restarting.
+    The client does not hold a connection or any measurement state. The host
+    and port only select where the individual HTTP requests are sent.
     """
 
-    def __init__(
-        self,
-        channel: int = DEFAULT_CHANNEL,
-        *,
-        host: str | None = None,
-        port: int = WAVEMETER_PORT,
-    ) -> None:
-        self.channel = channel
-        self.host = host
+    def __init__(self, host: str | None = None, port: int = WAVEMETER_PORT) -> None:
+        self.host = address(IP.WAVEMETER) if host is None else host
         self.port = port
-        self.last_seen: datetime | None = None
 
     @property
     def base_url(self) -> str:
         return f"http://{self.host or address(IP.WAVEMETER)}:{self.port}/api/"
 
     def __repr__(self) -> str:
-        return f"<Wavemeter {self.base_url} default channel {self.channel}>"
+        return f"<Wavemeter {self.base_url}>"
 
-    def _request(self, path: str, *, timeout: float, data: bytes | None = None) -> str:
-        """One bounded HTTP request; returns the decoded body.
+    def read_frequency(self, channel: int = DEFAULT_CHANNEL) -> float:
+        """Read the frequency of one wavemeter channel in THz."""
+        response = requests.get(
+            f"{self.base_url}{channel}/",
+            timeout=READ_TIMEOUT_S,
+        )
+        response.raise_for_status()
+        return float(response.text)
 
-        Raises `OSError` (`requests` errors, `HTTPError`, timeouts) or
-        `UnicodeError`, unwrapped. A successful HTTP response updates :attr:`last_seen` to its reception
-        time in UTC.
-        """
-        url = self.base_url + path
-        if data is None:
-            response = requests.get(url, timeout=timeout)
-        else:
-            response = requests.post(url, data=data, timeout=timeout)
-
-        if not response.ok:
-            raise requests.HTTPError(
-                f"{response.status_code} {response.reason} for {url}: {response.text[:200]!r}",
-                response=response,
-            )
-        body = response.content
-
-        self.last_seen = datetime.now(timezone.utc)
-        return body
-
-    @endpoint("GET", READ_PATH)
-    def read_frequency(self, channel: int | None = None) -> float:
-        """Frequency of one channel in THz (default: this client's channel)."""
-        channel = self.channel if channel is None else channel
-        return float(self._request(READ_PATH.format(channel=channel), timeout=READ_TIMEOUT_S))
-
-    @endpoint("POST", SET_PID_PATH)
-    def set_pid_setpoint(self, freq: float, channel: int | None = None) -> None:
-        """Set the PID lock setpoint of one channel, in THz (regulation stays off)."""
-        channel = self.channel if channel is None else channel
-        self._request(
-            SET_PID_PATH,
+    def set_pid_setpoint(self, freq: float, channel: int = DEFAULT_CHANNEL) -> None:
+        """Set the PID lock setpoint of one channel, in THz."""
+        response = requests.post(
+            f"{self.base_url}set_pid/",
             data={"freq_thz": freq, "channel": channel},
             timeout=SETPOINT_TIMEOUT_S,
         )
+        response.raise_for_status()
         log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
-
-    def get(self, path: str, *, timeout: float = READ_TIMEOUT_S) -> str:
-        """Raw `GET /api/<path>`, body as text. For exploring routes not wrapped above;
-        errors are the raw `requests` ones."""
-        return self._request(path, timeout=timeout)
-
-    def post(self, path: str, *, timeout: float = SETPOINT_TIMEOUT_S, **form: object) -> str:
-        """Raw `POST /api/<path>` with `form` as the urlencoded body. Same caveats as :meth:`get`."""
-        return self._request(path, timeout=timeout, data=form)
 
 
 def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, reference_f=0):
@@ -199,6 +139,9 @@ def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, r
     # Function to update the plot with new data
     def update_plot(ls_frequency):
         nonlocal times, track_freq
+
+        # Read the laser frequency and plot laser detuning or absolute laser frequency.
+        ls_frequency = read_frequency(channel) - reference_f
 
         # Calculate the elapsed time since the start of data collection
         elapsed_time = time.time() - start_time
