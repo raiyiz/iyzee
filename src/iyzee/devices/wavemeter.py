@@ -133,15 +133,12 @@ def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, r
     (_line,) = ax.plot([], [], "b-", label="Laser Frequency (THz)")
     ax.fill_between([], [], [], color="blue", alpha=0.3)
 
-    wavemeter = Wavemeter(channel)
+    wavemeter = Wavemeter()
     start_time = time.time()
 
     # Function to update the plot with new data
-    def update_plot(ls_frequency):
+    def update_plot(ls_frequency: float) -> None:
         nonlocal times, track_freq
-
-        # Read the laser frequency and plot laser detuning or absolute laser frequency.
-        ls_frequency = read_frequency(channel) - reference_f
 
         # Calculate the elapsed time since the start of data collection
         elapsed_time = time.time() - start_time
@@ -175,8 +172,8 @@ def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, r
 
     while time.time() - start_time <= total_time:
         try:
-            ls_frequency = wavemeter.read_frequency() - reference_f
-        except (OSError, ValueError) as exc:
+            ls_frequency = wavemeter.read_frequency(channel) - reference_f
+        except (requests.RequestException, OSError, ValueError) as exc:
             log.warning("[WS-7] ch%s: sample skipped: %r", channel, exc)
         else:
             update_plot(ls_frequency)
