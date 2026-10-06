@@ -192,8 +192,8 @@ already just picks a `Step` list and runs it.
   yet unified with `BaseDevice`'s connection lifecycle; treat as a standalone
   legacy driver. `scope_workflows.py` holds the operations built on top
   (channel/trigger settings, waveform acquisition) — see "Design direction".
-- **`devices/wavemeter.py`** — `Wavemeter`, a thin HTTP client (frequency
-  readout, PID setpoint); scripts use `Wavemeter()` directly.
+- **`devices/wavemeter.py`** — `Wavemeter`, a stateless HTTP client (frequency
+  readout, PID setpoint); scripts and the console use `Wavemeter()` directly.
 - **`devices/base.py`** — shared infrastructure: `BaseDevice` (VISA connect/close/
   context-manager lifecycle) and `CH` (PSU channel IDs). `KeysightMXA` and
   `PSU` both build on `BaseDevice`.
