@@ -148,9 +148,7 @@ class LabProxy:
         # now, so `lab.<Tab>` in the console shows what's *possible*
         # (mx/shutter/scope), not just what happens to be connected at
         # this exact moment.
-        return sorted(
-            {*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected"}
-        )
+        return sorted({*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected"})
 
     @property
     def connected(self) -> tuple[str, ...]:

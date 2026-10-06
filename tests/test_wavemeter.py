@@ -164,6 +164,4 @@ def test_single_readout_uses_the_plain_client(monkeypatch: pytest.MonkeyPatch) -
         lambda self, channel=wavemeter.DEFAULT_CHANNEL: 377.123456,
     )
 
-    assert wavemeter.single_readout(
-        1, reference_f=377.0, printing=False
-    ) == pytest.approx(0.123456)
+    assert wavemeter.single_readout(1, reference_f=377.0, printing=False) == pytest.approx(0.123456)
