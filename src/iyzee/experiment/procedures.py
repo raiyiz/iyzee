@@ -123,10 +123,10 @@ class FrequencyStep:
         if ctx.shutter is None:
             raise ValueError("FrequencyStep requires ctx.shutter to be set")
 
-        wavemeter = Wavemeter(self.wavemeter_channel)
-        wavemeter.set_pid_setpoint(self.frequency_thz)
+        wavemeter = Wavemeter()
+        wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
         time.sleep(self.relax_time_s)
-        measured_frequency = wavemeter.read_frequency()
+        measured_frequency = wavemeter.read_frequency(self.wavemeter_channel)
 
         try:
             ctx.shutter.open()
