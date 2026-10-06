@@ -26,6 +26,7 @@ from iyzee.devices.handles import (
     _VisaHandle,
 )
 from iyzee.devices.scope import LeCroyTimeoutError
+from iyzee.devices.wavemeter import DEFAULT_CHANNEL
 from iyzee.lab import INSTRUMENTS
 
 # -- LockedProxy --------------------------------------------------------
@@ -173,7 +174,7 @@ def test_wavemeter_handle_probe_reads_the_default_channel(
 ) -> None:
     seen: list[int] = []
 
-    def read(self, channel: int = instruments_mod.Wavemeter().read_frequency.__defaults__[0]):
+    def read(self, channel: int = DEFAULT_CHANNEL):
         seen.append(channel)
         return 377.105
 
@@ -183,7 +184,7 @@ def test_wavemeter_handle_probe_reads_the_default_channel(
 
     assert handle.probe() == "wavemeter = 377.105000 THz"
     assert isinstance(handle.device, instruments_mod.Wavemeter)
-    assert seen == [4]
+    assert seen == [DEFAULT_CHANNEL]
 
 
 def test_wavemeter_handle_probe_propagates_read_errors(
