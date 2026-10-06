@@ -15,7 +15,6 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import TypeVar
-from urllib.parse import urlencode
 
 import numpy as np
 import requests
@@ -33,7 +32,7 @@ DEFAULT_CHANNEL = 4
 WAVEMETER_PORT = 8000
 
 # Routes under /api/. One definition each, shared by the call and its listing.
-READ_PATH = "{channel}/"
+READ_PATH = "frequency/{channel}/"
 SET_PID_PATH = "set_pid/"
 
 _F = TypeVar("_F", bound=Callable[..., object])
@@ -139,7 +138,7 @@ class Wavemeter:
                 f"{response.status_code} {response.reason} for {url}: {response.text[:200]!r}",
                 response=response,
             )
-        body = response.content.decode("ascii")
+        body = response.content
 
         self.last_seen = datetime.now(timezone.utc)
         return body
@@ -156,7 +155,7 @@ class Wavemeter:
         channel = self.channel if channel is None else channel
         self._request(
             SET_PID_PATH,
-            data=f"freq_thz={freq}&channel={channel}".encode("ascii"),
+            data={"freq_thz": freq, "channel": channel},
             timeout=SETPOINT_TIMEOUT_S,
         )
         log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
@@ -168,7 +167,7 @@ class Wavemeter:
 
     def post(self, path: str, *, timeout: float = SETPOINT_TIMEOUT_S, **form: object) -> str:
         """Raw `POST /api/<path>` with `form` as the urlencoded body. Same caveats as :meth:`get`."""
-        return self._request(path, timeout=timeout, data=urlencode(form).encode("ascii"))
+        return self._request(path, timeout=timeout, data=form)
 
 
 def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, reference_f=0):

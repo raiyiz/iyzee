@@ -44,8 +44,8 @@ def test_read_frequency_uses_the_requested_and_default_channel(
     assert client.read_frequency() == pytest.approx(377.123456)
     timeout = {"timeout": wavemeter.READ_TIMEOUT_S}
     assert seen == [
-        (f"{base_url()}7/", timeout),
-        (f"{base_url()}{wavemeter.DEFAULT_CHANNEL}/", timeout),
+        (f"{base_url()}frequency/7/", timeout),
+        (f"{base_url()}frequency/{wavemeter.DEFAULT_CHANNEL}/", timeout),
     ]
 
 
@@ -114,7 +114,7 @@ def test_set_pid_setpoint_posts_the_expected_form(monkeypatch: pytest.MonkeyPatc
 
     expected = {
         "url": f"{base_url()}set_pid/",
-        "data": b"freq_thz=377.1052&channel=4",
+        "data": {"freq_thz": 377.1052, "channel": 4},
         "timeout": wavemeter.SETPOINT_TIMEOUT_S,
     }
     assert seen == [expected, expected]
