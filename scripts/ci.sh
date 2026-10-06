@@ -14,7 +14,7 @@ docs() {
 }
 
 doc_links() {
-    python3 scripts/check_doc_links.py
+    uv run scripts/check_doc_links.py
 }
 
 all() {
