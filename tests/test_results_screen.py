@@ -200,10 +200,16 @@ async def test_scope_operations_apply_and_chain_through_derived_traces(
         await wait_until(pilot, lambda: set(screen._measured) == {"C1", "C2"})
         a = screen._measured["C1"]
         b = screen._measured["C2"]
+        known: set[str] = set()
+
+        def expect_one_new(label: str) -> None:
+            """Each operation adds exactly one derived trace and disturbs no other."""
+            known.add(label)
+            assert set(screen._derived) == known
 
         await _apply_op(screen, pilot, "subtract", a="C1", b="C2")
         subtracted = subtract_traces(a, b)
-        assert subtracted.label in screen._derived
+        expect_one_new(subtracted.label)
         np.testing.assert_allclose(screen._derived[subtracted.label].values, subtracted.values)
 
         lo = float(a.time[0])
@@ -217,12 +223,12 @@ async def test_scope_operations_apply_and_chain_through_derived_traces(
             region_hi=str(hi),
         )
         expected = subtract_background(a, region=(lo, hi))
-        assert set(screen._derived) >= {expected.label}
+        expect_one_new(expected.label)
         np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
         await _apply_op(screen, pilot, "background-reference", a="C1", b="C2")
         expected = subtract_background(a, reference=b)
-        assert set(screen._derived) >= {expected.label}
+        expect_one_new(expected.label)
         np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
         await _apply_op(
@@ -236,7 +242,7 @@ async def test_scope_operations_apply_and_chain_through_derived_traces(
             yoffset="4",
         )
         expected = scale_trace(a, x_scale=2.0, x_offset=1.0, y_scale=3.0, y_offset=4.0)
-        assert set(screen._derived) >= {expected.label}
+        expect_one_new(expected.label)
         np.testing.assert_allclose(screen._derived[expected.label].time, expected.time)
         np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
@@ -251,7 +257,7 @@ async def test_scope_operations_apply_and_chain_through_derived_traces(
             yoffset="0",
         )
         chained = scale_trace(screen._derived[subtracted.label], y_scale=1000.0)
-        assert set(screen._derived) >= {chained.label}
+        expect_one_new(chained.label)
         np.testing.assert_allclose(screen._derived[chained.label].values, chained.values)
 
 

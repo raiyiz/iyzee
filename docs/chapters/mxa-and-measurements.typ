@@ -112,7 +112,7 @@ $ "configure" -> "INIT:CONT OFF" -> "INIT:IMM" -> "*OPC?" -> "read trace" $
 
 `wait_for_trigger_ready()` uses the Operation Status Register rather than a fixed delay to detect the analyzer's armed state. Trigger readiness and acquisition completion are different states, and neither one proves that an external physical source emitted the intended event.
 
-Fixed `sleep()` calls belong only where they represent characterized physical settling. This matters in `FrequencyStep`: the laser frequency setpoint is changed, the procedure waits `relax_time_s`, the shutter is opened only for the squeezing acquisition, the shutter is closed in a `finally` block, and the shot-noise reference is acquired afterward.
+Fixed `sleep()` calls belong only where they represent characterized physical settling. This matters in `FrequencyStep`: the laser frequency setpoint is changed, the procedure waits `relax_time_s` (default 0.5 s, `SETTLE_TIME_S`), reads the wavemeter and stores that reading with the step, the shutter is opened only for the squeezing acquisition, the shutter is closed in a `finally` block, and the shot-noise reference is acquired afterward.
 
 The software ordering is therefore explicit, but its scientific validity still depends on the physical system being sufficiently stationary during the sequence.
 
@@ -161,11 +161,7 @@ shutter, and then acquires the shot-noise reference.
 
 `run_bandwidth_sweep()` builds a sequence of `BandwidthStep` objects. Each step sets RBW, uses `VBW = 2 * RBW`, acquires squeezing and shot-noise traces, and records the RBW/VBW values as metadata. This scan is useful because the measured noise should approximately follow effective bandwidth for a white-noise region; deviations can reveal non-flat DUT noise, analyzer noise, effective-bandwidth differences, or estimator bias.
 
-`run_frequency_sweep()` builds `FrequencyStep` objects around a laser-frequency center value. Its settling interval is currently estimated as
-
-$ t_"settle" approx t_s N_a $
-
-from sweep duration `t_s` and average count `N_a`. This is an acquisition-workload heuristic, not a measured physical settling constant.
+`run_frequency_sweep()` builds `FrequencyStep` objects around a laser-frequency center value. Its settling interval is a fixed 0.5 s for the laser to settle on the new setpoint, after which the wavemeter is read and stored with the step. It is independent of sweep duration and average count, because each acquisition restarts the analyzer's averaging (`INIT:IMM`). It is a chosen value, not a measured settling constant; `build_frequency_sweep(relax_time_s=...)` overrides it.
 
 The key comparison in that workflow is squeezing versus shot noise. A difference between two dBm traces is a power ratio. A residual power requires linear-domain subtraction. Documentation and downstream analysis should keep those quantities distinct.
 

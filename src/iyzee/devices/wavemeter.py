@@ -2,8 +2,10 @@
 
 :class:`Wavemeter` has one method per endpoint (so Tab completion in the console
 is the endpoint list; `lab.api("wavemeter")` prints it with the HTTP routes).
-The module-level functions are the same calls on a default client, for scripts
-and experiment procedures.
+Errors are left raw: a failed call raises the underlying `requests` error (its
+message already names host, port and path), a non-2xx reply raises `HTTPError`
+carrying the start of the reply body, and an unparseable reading raises the
+`ValueError` from `float()` quoting the text it got.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from urllib.parse import urlencode
 import numpy as np
 import requests
 
-from ..config import IP
+from ..config import IP, address
 
 log = logging.getLogger("iyzee.wavemeter")
 
@@ -96,14 +98,15 @@ class Wavemeter:
     """HTTP client for the wavemeter server. Stateless: nothing to open or close.
 
     `channel` is the default for every call that takes one. `host` defaults
-    to the configured wavemeter address, looked up at call time.
+    to the configured wavemeter address (`iyzee.config.address`), looked up on
+    every request, so a config change applies without restarting.
     """
 
     def __init__(
         self,
         channel: int = DEFAULT_CHANNEL,
         *,
-        host: str = IP.WAVEMETER,
+        host: str | None = None,
         port: int = WAVEMETER_PORT,
     ) -> None:
         self.channel = channel
@@ -113,7 +116,7 @@ class Wavemeter:
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.host}:{self.port}/api/"
+        return f"http://{self.host or address(IP.WAVEMETER)}:{self.port}/api/"
 
     def __repr__(self) -> str:
         return f"<Wavemeter {self.base_url} default channel {self.channel}>"
@@ -121,8 +124,8 @@ class Wavemeter:
     def _request(self, path: str, *, timeout: float, data: bytes | None = None) -> str:
         """One bounded HTTP request; returns the decoded body.
 
-        Raises `OSError` (including `HTTPError` and timeouts), `UnicodeError`.
-        A successful HTTP response updates :attr:`last_seen` to its reception
+        Raises `OSError` (`requests` errors, `HTTPError`, timeouts) or
+        `UnicodeError`, unwrapped. A successful HTTP response updates :attr:`last_seen` to its reception
         time in UTC.
         """
         url = self.base_url + path
@@ -131,7 +134,11 @@ class Wavemeter:
         else:
             response = requests.post(url, data=data, timeout=timeout)
 
-        response.raise_for_status()
+        if not response.ok:
+            raise requests.HTTPError(
+                f"{response.status_code} {response.reason} for {url}: {response.text[:200]!r}",
+                response=response,
+            )
         body = response.content.decode("ascii")
 
         self.last_seen = datetime.now(timezone.utc)
@@ -156,7 +163,7 @@ class Wavemeter:
 
     def get(self, path: str, *, timeout: float = READ_TIMEOUT_S) -> str:
         """Raw `GET /api/<path>`, body as text. For exploring routes not wrapped above;
-        errors propagate as the underlying `requests`/parse exceptions."""
+        errors are the raw `requests` ones."""
         return self._request(path, timeout=timeout)
 
     def post(self, path: str, *, timeout: float = SETPOINT_TIMEOUT_S, **form: object) -> str:
@@ -164,35 +171,12 @@ class Wavemeter:
         return self._request(path, timeout=timeout, data=urlencode(form).encode("ascii"))
 
 
-def single_readout(
-    channel: int = DEFAULT_CHANNEL,
-    reference_f: float = 0,
-    label: str = "",
-    printing: bool = True,
-) -> float:
-    """Fetch one laser frequency and optionally subtract a reference."""
-    ls_frequency = read_frequency(channel) - reference_f
-    if printing:
-        print(
-            f"[WS-7] Laser Frequency in Channel {channel} (THz) (Ref: {label}): ",
-            ls_frequency,
-        )
-    return ls_frequency
+def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, reference_f=0):
+    """Live-plot one channel for `total_time` s, then save the plot and a CSV to `save_path`.
 
-
-def read_frequency(channel: int = DEFAULT_CHANNEL) -> float:
-    """Read one frequency from the wavemeter server."""
-    return Wavemeter().read_frequency(channel)
-
-
-def set_pid_setpoint(freq: float, channel: int = DEFAULT_CHANNEL) -> None:
-    """Set the PID setpoint on one wavemeter channel."""
-    Wavemeter().set_pid_setpoint(freq, channel)
-
-
-def track_frequency(
-    total_time, time_step, save_path, channel=DEFAULT_CHANNEL, reference_f=0, save_csv=False
-):
+    A failed read skips that sample (logged with the raw error) instead of
+    ending a long run and losing the data collected so far.
+    """
     # Plotting and the CSV export are only needed here. Imported lazily because
     # this module is also imported for its HTTP client by the TUI, where
     # pandas alone was a fifth of the startup time.
@@ -210,14 +194,12 @@ def track_frequency(
     (_line,) = ax.plot([], [], "b-", label="Laser Frequency (THz)")
     ax.fill_between([], [], [], color="blue", alpha=0.3)
 
+    wavemeter = Wavemeter(channel)
     start_time = time.time()
 
     # Function to update the plot with new data
-    def update_plot():
+    def update_plot(ls_frequency):
         nonlocal times, track_freq
-
-        # Fetch laser frequency from the URL
-        ls_frequency = read_frequency(channel) - reference_f
 
         # Calculate the elapsed time since the start of data collection
         elapsed_time = time.time() - start_time
@@ -250,7 +232,12 @@ def track_frequency(
         plt.pause(0.01)
 
     while time.time() - start_time <= total_time:
-        update_plot()
+        try:
+            ls_frequency = wavemeter.read_frequency() - reference_f
+        except (OSError, ValueError) as exc:
+            log.warning("[WS-7] ch%s: sample skipped: %r", channel, exc)
+        else:
+            update_plot(ls_frequency)
         time.sleep(time_step)
 
     plt.savefig(save_path + "/laser_frequency_plot.pdf", bbox_inches="tight", dpi=1500)
@@ -275,7 +262,8 @@ def monitoring_frequencies(channels):
     channels = list(channels)
     header = ["Transition"] + ["Frequencies (THz)"] + [f"Detuning (ch{c}) / GHz" for c in channels]
     rows = []
-    freqs = [single_readout(c, reference_f=0, printing=False) for c in channels]
+    wavemeter = Wavemeter()
+    freqs = [wavemeter.read_frequency(c) for c in channels]
 
     rows.append(["absolute freq (THz)"] + [""] + list(freqs))
     for label, f in Rb_transitions:

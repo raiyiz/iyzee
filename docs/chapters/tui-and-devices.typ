@@ -141,7 +141,7 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
 
 == Wavemeter
 
-`devices/wavemeter.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close. `Wavemeter` is a thin client with one method per endpoint (the module-level `read_frequency()` / `set_pid_setpoint()` are the same calls on a default client), and `last_seen` records the UTC time of the last successful HTTP response (`None` before the first one). `lab.wavemeter.<Tab>` in the console completes the API and `lab.api("wavemeter")` prints it with the HTTP routes; `get(path)` / `post(path, **form)` reach routes it doesn't wrap yet:
+`devices/wavemeter.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close. `Wavemeter` is a thin client with one method per endpoint and `last_seen` records the UTC time of the last successful HTTP response (`None` before the first one). `lab.wavemeter.<Tab>` in the console completes the API and `lab.api("wavemeter")` prints it with the HTTP routes; `get(path)` / `post(path, **form)` reach routes it doesn't wrap yet:
 
 #table(
   columns: (1.4fr, 2.4fr),
@@ -149,11 +149,11 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
   inset: 5pt,
   align: (left, left),
   [*Endpoint*], [*Used by*],
-  [`GET /api/{channel}/`], [`read_frequency()` (and `single_readout()`, which subtracts an optional reference) — current frequency (THz) on that channel],
+  [`GET /api/{channel}/`], [`read_frequency()` — current frequency (THz) on that channel],
   [`POST /api/set_pid/` (body `freq_thz=...&channel=...`)], [`set_pid_setpoint()` — set the PID lock setpoint; regulation itself is left off by design and must be enabled manually],
 )
 
-A failed or unparseable HTTP response raises `WavemeterReadoutError` rather than silently returning a plausible-looking frequency — deliberately, per the project's own safety rule (see the README's Safety notes): a communication failure must never masquerade as a measurement.
+A failed or unparseable HTTP response raises the raw error — a `requests` exception naming host and path, an `HTTPError` carrying the start of the reply body, or the `ValueError` from `float()` quoting the text it got — rather than silently returning a plausible-looking frequency — deliberately, per the project's own safety rule (see the README's Safety notes): a communication failure must never masquerade as a measurement.
 
 #diagram(
   ```mermaid
