@@ -2,7 +2,7 @@
 InstrumentHandle implementation.
 
 None of these touch real hardware. Each handle wraps a driver
-(KeysightMXA / ShutterControl / LeCroy / single_readout) that either
+(KeysightMXA / ShutterControl / LeCroy / Wavemeter) that either
 takes a fake device directly (_VisaHandle) or is constructed inside the
 handle itself — for the latter we monkeypatch the class/function
 `instruments.py` imports, not the real driver, so these stay fast and

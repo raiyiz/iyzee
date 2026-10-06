@@ -232,6 +232,8 @@ async def test_a_lost_link_is_reported_once_released_and_reconnectable(
         assert len([m for m in notifications(app) if "connection lost" in m]) == 1
 
         await wait_until(pilot, lambda: dead.disconnect_calls > 0)
+        assert "mxa" in app.lost_links
+        assert "reconnect Fake" in plain(app.query_one("#connect-hint", Static))
         assert lab.connected == ()
         with pytest.raises(AttributeError, match="not connected"):
             lab.mx

@@ -193,8 +193,7 @@ already just picks a `Step` list and runs it.
   legacy driver. `scope_workflows.py` holds the operations built on top
   (channel/trigger settings, waveform acquisition) — see "Design direction".
 - **`devices/wavemeter.py`** — `Wavemeter`, a thin HTTP client (frequency
-  readout, PID setpoint), with module-level `read_frequency()` /
-  `set_pid_setpoint()` for scripts.
+  readout, PID setpoint); scripts use `Wavemeter()` directly.
 - **`devices/base.py`** — shared infrastructure: `BaseDevice` (VISA connect/close/
   context-manager lifecycle) and `CH` (PSU channel IDs). `KeysightMXA` and
   `PSU` both build on `BaseDevice`.
@@ -310,7 +309,7 @@ This is laboratory/instrument-control software; a few rules matter more than
 in typical application code:
 
 - Never turn a hardware communication failure into a plausible measurement
-  value (see `WavemeterReadoutError`, `KeysightMXA.wait_opc()`).
+  value (see `Wavemeter.read_frequency()`, `KeysightMXA.wait_opc()`).
 - Don't change instrument setpoints or SCPI behavior without understanding
   and testing the change — these drive real hardware.
 - The interactive console intentionally has direct write access to connected
