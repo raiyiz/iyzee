@@ -141,19 +141,19 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
 
 == Wavemeter
 
-`devices/wavemeter.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close. `Wavemeter` is a thin client with one method per endpoint and `last_seen` records the UTC time of the last successful HTTP response (`None` before the first one). `lab.wavemeter.<Tab>` in the console completes the API and `lab.api("wavemeter")` prints it with the HTTP routes; `get(path)` / `post(path, **form)` reach routes it doesn't wrap yet:
+`devices/wavemeter.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close. `Wavemeter` is a thin client with one method per operation. Its host defaults to the configured wavemeter address and its port defaults to 8000; otherwise each method is a direct `requests` call. The client carries no connection or measurement state, so it can be used from the console immediately, without going through the Connect screen:
 
 #table(
   columns: (1.4fr, 2.4fr),
   stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left),
-  [*Endpoint*], [*Used by*],
-  [`GET /api/{channel}/`], [`read_frequency()` — current frequency (THz) on that channel],
-  [`POST /api/set_pid/` (body `freq_thz=...&channel=...`)], [`set_pid_setpoint()` — set the PID lock setpoint; regulation itself is left off by design and must be enabled manually],
+  [*Method*], [*Purpose*],
+  [`GET /api/{channel}/`], [`read_frequency()` reads the current frequency in THz],
+  [`POST /api/set_pid/`], [`set_pid_setpoint()` sends `freq_thz` and `channel` as form data],
 )
 
-A failed or unparseable HTTP response raises the raw error — a `requests` exception naming host and path, an `HTTPError` carrying the start of the reply body, or the `ValueError` from `float()` quoting the text it got — rather than silently returning a plausible-looking frequency — deliberately, per the project's own safety rule (see the README's Safety notes): a communication failure must never masquerade as a measurement.
+A failed HTTP response raises the exception from `requests.raise_for_status()`, and an invalid frequency becomes the normal `ValueError` from `float()`. Nothing is translated into a custom wavemeter exception, so the actual transport or parse failure remains visible to callers.
 
 #diagram(
   ```mermaid

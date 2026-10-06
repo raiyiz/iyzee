@@ -238,16 +238,14 @@ lab.results[-1].traces["squeezing"]  # last completed sweep
 lab.connected  # e.g. ("mx", "shutter")
 
 lab.wavemeter.read_frequency(4)  # THz; stateless HTTP client, no connection to open
-lab.wavemeter.last_seen  # UTC timestamp of the last successful HTTP response, or None
-lab.api()  # what is connected and available
-lab.api("scope", "trig")  # the scope's methods that mention "trig", with signatures
-lab.api("wavemeter")  # method list, with the HTTP route each one calls
+help(lab.wavemeter)  # ordinary Python/IPython help
+help(lab.wavemeter.read_frequency)  # method documentation and signature
 ```
 
 `Tab` completes methods on every instrument (`lab.scope.<Tab>`), and `?` shows a
-method's signature and docstring (`lab.scope.set_time_per_div?`). `lab.api` is the
-same information as one searchable listing, built by introspection so it is
-never out of date.
+method's signature and docstring (`lab.scope.set_time_per_div?`). For discovery,
+use IPython's normal `?`/`??`, `help(...)`, `dir(...)`, and tab completion rather
+than a second API-description mechanism.
 
 `lab` does a fresh lookup against the app's actual state on every attribute
 access — nothing is copied into the console when an instrument connects, and
@@ -309,7 +307,8 @@ This is laboratory/instrument-control software; a few rules matter more than
 in typical application code:
 
 - Never turn a hardware communication failure into a plausible measurement
-  value (see `Wavemeter.read_frequency()`, `KeysightMXA.wait_opc()`).
+  value; the wavemeter deliberately lets the underlying `requests`/parse
+  exceptions propagate.
 - Don't change instrument setpoints or SCPI behavior without understanding
   and testing the change — these drive real hardware.
 - The interactive console intentionally has direct write access to connected
