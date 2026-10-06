@@ -4,7 +4,6 @@ import pytest
 import requests
 
 import iyzee.devices.wavemeter as wavemeter
-from iyzee.config import IP, address
 from iyzee.devices.wavemeter import Wavemeter
 
 

@@ -1,6 +1,6 @@
 import pytest
 
-from iyzee.devices.wavemeter import Wavemeter
+from iyzee.devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
 from iyzee.experiment.core import ExperimentContext
 from iyzee.experiment.procedures import (
     BandwidthStep,
@@ -114,18 +114,22 @@ def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
 
     mx = FakeMXA()
     shutter = FakeShutterControl()
-    setpoints = []
+    events = []
     monkeypatch.setattr(
         Wavemeter,
         "set_pid_setpoint",
-        lambda self, freq, channel=None: setpoints.append((freq, channel or self.channel)),
+        lambda self, freq, channel=DEFAULT_CHANNEL: events.append(("set", freq, channel)),
     )
-    monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.100001)
+    monkeypatch.setattr(
+        Wavemeter,
+        "read_frequency",
+        lambda self, channel=DEFAULT_CHANNEL: events.append(("read", channel)) or 377.100001,
+    )
     ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter)
 
     result = FrequencyStep(frequency_thz=377.1, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
-    assert setpoints == [(377.1, 1)]
+    assert events == [("set", 377.1, 1), ("read", 1)]
     assert shutter.events == ["open", "close"]
     assert mx.trace_calls == [1, 2]
     assert result.traces["squeezing"] == [1]
@@ -139,7 +143,7 @@ def test_frequency_step_sets_settles_half_a_second_reads_then_records(monkeypatc
     monkeypatch.setattr(
         Wavemeter,
         "set_pid_setpoint",
-        lambda self, freq, channel=None: events.append(("set", freq, channel or self.channel)),
+        lambda self, freq, channel=DEFAULT_CHANNEL: events.append(("set", freq, channel)),
     )
     monkeypatch.setattr(
         "iyzee.experiment.procedures.time.sleep", lambda s: events.append(("sleep", s))
@@ -147,7 +151,7 @@ def test_frequency_step_sets_settles_half_a_second_reads_then_records(monkeypatc
     monkeypatch.setattr(
         Wavemeter,
         "read_frequency",
-        lambda self, channel=None: events.append(("read", channel or self.channel)) or 377.100002,
+        lambda self, channel=DEFAULT_CHANNEL: events.append(("read", channel)) or 377.100002,
     )
     monkeypatch.setattr(
         "iyzee.experiment.procedures.acquire_trace",
