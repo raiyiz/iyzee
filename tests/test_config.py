@@ -17,7 +17,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 def test_defaults_are_the_lab_addresses():
     assert address(IP.SCOPE) == "10.140.1.220"
-    assert address(IP.WAVEMETER) == "10.140.1.215"
+    assert address(IP.WAVEMETER) == "10.140.1.119"
 
 
 def test_config_file_overrides_an_address_and_the_data_dir(tmp_path: Path):
