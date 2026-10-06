@@ -53,7 +53,7 @@ def test_read_frequency_uses_default_channel(monkeypatch: pytest.MonkeyPatch) ->
         OSError("connection refused"),
     ],
 )
-def test_read_frequency_translates_request_failures(
+def test_read_frequency_propagates_request_failures(
     monkeypatch: pytest.MonkeyPatch, failure: BaseException
 ) -> None:
     def fail(*args, **kwargs):
@@ -61,8 +61,9 @@ def test_read_frequency_translates_request_failures(
 
     monkeypatch.setattr(wavemeter_readout.requests, "get", fail)
 
-    with pytest.raises(wavemeter_readout.WavemeterReadoutError, match="channel 1"):
+    with pytest.raises(type(failure)) as caught:
         wavemeter_readout.read_frequency(1)
+    assert caught.value is failure
 
 
 def test_read_frequency_translates_http_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,7 +73,7 @@ def test_read_frequency_translates_http_failure(monkeypatch: pytest.MonkeyPatch)
         lambda *args, **kwargs: response("server error", status=500),
     )
 
-    with pytest.raises(wavemeter_readout.WavemeterReadoutError, match="channel 1"):
+    with pytest.raises(requests.ConnectionError):
         wavemeter_readout.read_frequency(1)
 
 
@@ -83,7 +84,7 @@ def test_read_frequency_rejects_invalid_measurement(monkeypatch: pytest.MonkeyPa
         lambda *args, **kwargs: response("not-a-frequency"),
     )
 
-    with pytest.raises(wavemeter_readout.WavemeterReadoutError, match="channel 1"):
+    with pytest.raises(ValueError, match="not-a-frequency"):
         wavemeter_readout.read_frequency(1)
 
 
@@ -148,7 +149,7 @@ def test_set_pid_setpoint_uses_default_channel(monkeypatch: pytest.MonkeyPatch) 
         OSError("connection refused"),
     ],
 )
-def test_set_pid_setpoint_translates_request_failures(
+def test_set_pid_setpoint_propagates_request_failures(
     monkeypatch: pytest.MonkeyPatch, failure: BaseException
 ) -> None:
     def fail(*args, **kwargs):
@@ -201,7 +202,7 @@ def test_client_starts_without_a_last_seen_timestamp_and_records_successful_resp
 
     monkeypatch.setattr(wavemeter_readout.requests, "get", fail)
 
-    with pytest.raises(wavemeter_readout.WavemeterReadoutError):
+    with pytest.raises(requests.Timeout):
         client.read_frequency(4)
 
     assert client.last_seen == first_seen
