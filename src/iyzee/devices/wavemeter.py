@@ -2,8 +2,7 @@
 
 Wavemeter is a small stateless HTTP client: constructing it does not connect
 to anything, and every method call is one ordinary requests call.
-The module-level functions are convenience calls on a default client, for
-scripts and experiment procedures.
+The client is used directly from scripts and the console.
 """
 
 from __future__ import annotations
