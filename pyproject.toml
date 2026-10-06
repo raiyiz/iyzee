@@ -45,6 +45,7 @@ ignore_missing_imports = true
 
 [dependency-groups]
 dev = [
+    "ipdb>=0.13.13",
     "mypy>=1.18.2",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
