@@ -71,9 +71,7 @@ def test_request_failures_are_raised_unwrapped(
 
 
 @pytest.mark.parametrize("call", ["read", "set"])
-def test_http_errors_are_raised_by_requests(
-    monkeypatch: pytest.MonkeyPatch, call: str
-) -> None:
+def test_http_errors_are_raised_by_requests(monkeypatch: pytest.MonkeyPatch, call: str) -> None:
     verb = "get" if call == "read" else "post"
     monkeypatch.setattr(
         wavemeter.requests,
