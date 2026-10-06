@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -377,6 +377,15 @@ wheels = [
 ]
 
 [[package]]
+name = "decorator"
+version = "5.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/60/8b/32f9823da46cde7df2087faa08cd98d01b908f8dcab982cdba9c84e85355/decorator-5.3.1.tar.gz", hash = "sha256:4cbcdd55a6efadb9dbea26b858f4fb3264567b52d69ca0d25b721b553f60ea82", size = 58084, upload-time = "2026-05-18T06:03:28.057Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/7f/798705f5296a58ca505d600456748d1be48078eac8a7050d8a98bc9edb89/decorator-5.3.1-py3-none-any.whl", hash = "sha256:f47fe6fdbd2edd623ecfe36875d37aba411624e2670dd395dddae1358689bb3c", size = 10365, upload-time = "2026-05-18T06:03:26.517Z" },
+]
+
+[[package]]
 name = "distlib"
 version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -513,6 +522,19 @@ wheels = [
 ]
 
 [[package]]
+name = "ipdb"
+version = "0.13.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "decorator" },
+    { name = "ipython" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3d/1b/7e07e7b752017f7693a0f4d41c13e5ca29ce8cbcfdcc1fd6c4ad8c0a27a0/ipdb-0.13.13.tar.gz", hash = "sha256:e3ac6018ef05126d442af680aad863006ec19d02290561ac88b8b1c0b0cfc726", size = 17042, upload-time = "2023-03-09T15:40:57.487Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/4c/b075da0092003d9a55cf2ecc1cae9384a1ca4f650d51b00fc59875fe76f6/ipdb-0.13.13-py3-none-any.whl", hash = "sha256:45529994741c4ab6d2388bfa5d7b725c2cf7fe9deffabdb8a6113aa5ed449ed4", size = 12130, upload-time = "2023-03-09T15:40:55.021Z" },
+]
+
+[[package]]
 name = "ipython"
 version = "9.17.1"
 source = { registry = "https://pypi.org/simple" }
@@ -568,6 +590,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "ipdb" },
     { name = "mypy" },
     { name = "pre-commit" },
     { name = "pytest" },
@@ -595,6 +618,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "ipdb", specifier = ">=0.13.13" },
     { name = "mypy", specifier = ">=1.18.2" },
     { name = "pre-commit", specifier = ">=4.6.2" },
     { name = "pytest", specifier = ">=9.1.1" },
