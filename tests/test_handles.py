@@ -168,53 +168,35 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
 # -- WavemeterHandle ----------------------------------------------------------
 
 
-@pytest.mark.skip(reason="needs real instrument check for correct reply")
-def test_wavemeter_handle_probe_reads_the_default_channel(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen_clients = []
+def test_wavemeter_handle_probe_reads_the_default_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[int] = []
 
-    def read(self, channel=None):
-        seen_clients.append(self)
+    def read(self, channel: int = instruments_mod.Wavemeter().read_frequency.__defaults__[0]):
+        seen.append(channel)
         return 377.105
 
     monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
 
     handle = WavemeterHandle()
-    assert handle.probe() == "ch4 = 377.105000 THz"
-    assert handle.device.channel == instruments_mod.DEFAULT_CHANNEL
+
+    assert handle.probe() == "wavemeter = 377.105000 THz"
     assert isinstance(handle.device, instruments_mod.Wavemeter)
-    assert seen_clients == [handle.device]
-
-
-@pytest.mark.skip(reason="needs real instrument check for correct reply")
-def test_wavemeter_handle_probe_uses_its_configured_channel(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    seen: list[int] = []
-
-    def read(self, channel=None):
-        seen.append(self.channel if channel is None else channel)
-        return 377.105
-
-    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
-
-    handle = WavemeterHandle(channel=4)
-
-    assert handle.probe() == "ch4 = 377.105000 THz"
     assert seen == [4]
 
 
-@pytest.mark.skip(reason="WavemeterReadoutError is gone")
-def test_wavemeter_handle_probe_wraps_readout_error(
+def test_wavemeter_handle_probe_propagates_read_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     failure = OSError("switch unreachable")
 
-    def fail(self, channel=None):
+    def fail(self, channel: int = 4) -> float:
         raise failure
 
     monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", fail)
 
-    with pytest.raises(OSError) as caught:
+    with pytest.raises(OSError, match="switch unreachable") as caught:
         WavemeterHandle().probe()
 
     assert caught.value is failure
