@@ -1362,7 +1362,7 @@ question it answers.
   [#source("src/iyzee/tui/app.py", [tui/app.py])], [Application shell, page switching, shared state, commands, and shutdown],
   [#source("src/iyzee/tui/screens/page.py", [tui/screens/page.py])], [Common page mechanics, validation, readiness, and worker-to-UI handoff],
   [#source("src/iyzee/tui/screens/", [tui/screens/])], [Concrete user workflows and presentation],
-  [#source("src/iyzee/tui/ipython.py", [tui/ipython.py])], [`LabProxy`, shell configuration, history selection, and API introspection],
+  [#source("src/iyzee/tui/ipython.py", [tui/ipython.py])], [`LabProxy`, shell configuration, history selection, and native IPython introspection],
   [#source("src/iyzee/tui/ipython_session.py", [tui/ipython_session.py])], [In-process IPython terminal session and virtual streams],
   [#source("src/iyzee/tui/termkeys.py", [tui/termkeys.py])], [Keyboard event translation into terminal input bytes],
   [#source("src/iyzee/tui/vterm.py", [tui/vterm.py])], [Terminal-emulator state and scrollback via `pyte`],
