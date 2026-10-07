@@ -184,7 +184,7 @@ Completed in the README refresh:
 
 **Done when:** the scope documentation describes the current VISA/VXI-11 implementation and can be used as a debugging reference during a real hardware failure.
 
-**Phase 5 result:** the obsolete project-owned VICP transport is no longer part of the documentation model. The guide now documents `LeCroy` as a `BaseDevice` using VISA/VXI-11, with explicit timeout/connection invalidation and waveform-response validation.
+**Phase 5 result:** the obsolete project-owned scope transport layer is no longer part of the documentation model. The guide now documents `LeCroy` as a `BaseDevice` using VISA/VXI-11, with explicit timeout/connection invalidation and waveform-response validation.
 
 ## Phase 6 — Rubidium physics chapter polish
 
