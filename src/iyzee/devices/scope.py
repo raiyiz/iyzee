@@ -201,7 +201,8 @@ class LeCroy(BaseDevice):
             except pyvisa.errors.VisaIOError as exc:
                 self._drop()
                 raise self._translate(exc) from exc
-            self.instrument.chunk_size = self.CHUNK_SIZE
+            if self.instrument:
+                self.instrument.chunk_size = self.CHUNK_SIZE
 
     def disconnect(self) -> None:
         """Close the connection (idempotent)."""
