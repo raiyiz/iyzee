@@ -24,6 +24,7 @@ whatever the other fields happened to default to.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -38,13 +39,11 @@ from textual_plotext import PlotextPlot
 from ...devices.scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from ...experiment import create_dirs
 from ...scope_workflows import (
-    ChannelApplyResult,
-    ChannelError,
     ChannelSettings,
     ScopeAcquisition,
     TriggerSettings,
     acquire_scope_recording,
-    apply_and_verify_channel_settings,
+    apply_channel_settings,
     apply_trigger_settings,
     read_channel_settings,
     read_trigger_settings,
@@ -499,15 +498,21 @@ class ScopeScreen(Page):
         self._begin_settings_op("retrieve-settings", retrieve=True)
         if not silent:
             self.query_one("#scope-log", RichLog).write("Retrieving current settings…")
-        self._retrieve(handle.device, handle.lock, silent)
+        self._retrieve(handle.device, silent)
 
     @work(thread=True, exclusive=True, group="scope-retrieve", exit_on_error=False)
-    def _retrieve(self, scope: LeCroy, lock, silent: bool) -> None:
-        channel_settings, channel_errors = read_channel_settings(scope, CHANNELS, lock=lock)
+    def _retrieve(self, scope: LeCroy, silent: bool) -> None:
+        channel_settings: list[ChannelSettings] = []
+        channel_error: Exception | None = None
+        try:
+            channel_settings = read_channel_settings(scope, CHANNELS)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("scope: failed to read channel settings")
+            channel_error = exc
         trigger_settings: TriggerSettings | None = None
         trigger_error: Exception | None = None
         try:
-            trigger_settings = read_trigger_settings(scope, lock=lock)
+            trigger_settings = read_trigger_settings(scope)
         except Exception as exc:  # noqa: BLE001
             log.exception("scope: failed to read trigger settings")
             trigger_error = exc
@@ -515,7 +520,7 @@ class ScopeScreen(Page):
             self._finish_retrieve,
             scope,
             channel_settings,
-            channel_errors,
+            channel_error,
             trigger_settings,
             trigger_error,
             silent,
@@ -550,7 +555,7 @@ class ScopeScreen(Page):
         self,
         scope: LeCroy,
         channel_settings: Sequence[ChannelSettings],
-        channel_errors: Sequence[ChannelError],
+        channel_error: Exception | None,
         trigger_settings: TriggerSettings | None,
         trigger_error: Exception | None,
         silent: bool,
@@ -572,11 +577,11 @@ class ScopeScreen(Page):
             self._mark_clean(channel_fields(settings.channel))
         if trigger_settings is not None:
             self._mark_clean(TRIGGER_FIELDS)
-        for err in channel_errors:
-            log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
+        if channel_error is not None:
+            log_widget.write(f"[red]Channels: {escape(one_line(channel_error))}[/red]")
         self._last_applied_channel_settings = tuple(channel_settings) or None
         self._last_applied_trigger_settings = trigger_settings
-        self._settings_synced = not channel_errors and trigger_error is None
+        self._settings_synced = channel_error is None and trigger_error is None
         if self._settings_synced:
             log_widget.write("Scope settings synchronized from the instrument.")
         else:
@@ -636,7 +641,7 @@ class ScopeScreen(Page):
             self._refresh_scope_ui()
             return
         self._begin_settings_op("apply-channels")
-        self._apply_channels(handle.device, changed, baseline, handle.lock)
+        self._apply_channels(handle.device, changed, baseline)
 
     @work(thread=True, exclusive=True, group="scope-apply-channels", exit_on_error=False)
     def _apply_channels(
@@ -644,24 +649,22 @@ class ScopeScreen(Page):
         scope: LeCroy,
         settings: Sequence[ChannelSettings],
         baseline: Sequence[ChannelSettings],
-        lock,
     ) -> None:
+        verified: list[ChannelSettings] = []
+        error: Exception | None = None
         try:
-            result = apply_and_verify_channel_settings(
-                scope, settings, current_settings=baseline, lock=lock
-            )
+            verified = apply_channel_settings(scope, settings, current_settings=baseline)
         except Exception as exc:  # noqa: BLE001 - never leave the Apply button disabled
             log.exception("scope: applying channel settings failed")
-            result = ChannelApplyResult(
-                (), tuple(ChannelError(s.channel, exc) for s in settings), ()
-            )
-        self._ui(self._finish_apply_channels, scope, settings, result, baseline)
+            error = exc
+        self._ui(self._finish_apply_channels, scope, settings, verified, error, baseline)
 
     def _finish_apply_channels(
         self,
         scope: LeCroy,
         settings: Sequence[ChannelSettings],
-        result: ChannelApplyResult,
+        verified: Sequence[ChannelSettings],
+        error: Exception | None,
         baseline: Sequence[ChannelSettings],
     ) -> None:
         self._end_settings_op("apply-channels")
@@ -669,39 +672,58 @@ class ScopeScreen(Page):
             self._refresh_scope_ui()
             return
         log_widget = self.query_one("#scope-log", RichLog)
-        error_channels = {err.channel for err in result.errors}
         # The baseline is what the scope *reported* after the writes. Requested
         # values are never assumed to have been applied: the scope rounds
         # V/div and offset, and can ignore a command outright.
+        requested = {setting.channel: setting for setting in settings}
+        problems: list[str] = []
+        failed: set[Channel] = set()
+        for actual in verified:
+            want = requested[actual.channel]
+            if actual.enabled != want.enabled:
+                problems.append(
+                    f"{actual.channel} trace is {'ON' if actual.enabled else 'OFF'} "
+                    f"but {'ON' if want.enabled else 'OFF'} was requested"
+                )
+                failed.add(actual.channel)
+            if actual.coupling != want.coupling:
+                problems.append(
+                    f"{actual.channel} coupling is {actual.coupling.value} "
+                    f"but {want.coupling.value} was requested"
+                )
+                failed.add(actual.channel)
         known = {setting.channel: setting for setting in baseline}
-        for verified in result.verified:
-            known[verified.channel] = verified
+        for actual in verified:
+            known[actual.channel] = actual
         self._last_applied_channel_settings = (
             tuple(known[channel] for channel in CHANNELS if channel in known) or None
         )
-        for verified in result.verified:
-            channel = verified.channel
-            if channel in error_channels:
+        for actual in verified:
+            channel = actual.channel
+            if channel in failed:
                 # Keep what the user typed so they can retry; just re-evaluate
                 # "changed" against the now-truthful baseline.
                 for field_id in channel_fields(channel):
                     self._refresh_field_dirty(field_id)
                 continue
-            self._apply_retrieved_channel_settings(verified)  # shows any rounding
+            self._apply_retrieved_channel_settings(actual)  # shows any rounding
             self._mark_clean(channel_fields(channel))
+            want = requested[channel]
+            for name, label in (("volts_per_div", "V/div"), ("offset", "offset")):
+                asked, got = getattr(want, name), getattr(actual, name)
+                if not math.isclose(asked, got, rel_tol=1e-3, abs_tol=1e-6):
+                    log_widget.write(
+                        f"[yellow]{channel} {label}: requested {asked:g}, scope set {got:g}[/yellow]"
+                    )
         self._settings_synced = (
             all(self._channel_baseline(channel) is not None for channel in CHANNELS)
             and self._last_applied_trigger_settings is not None
         )
-        for adjustment in result.adjustments:
-            label = "V/div" if adjustment.field == "volts_per_div" else "offset"
-            log_widget.write(
-                f"[yellow]{adjustment.channel} {label}: requested {adjustment.requested:g}, "
-                f"scope set {adjustment.actual:g}[/yellow]"
-            )
-        if result.errors:
-            for err in result.errors:
-                log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
+        if error is not None:
+            problems.append(str(one_line(error)))
+        if problems:
+            for problem in problems:
+                log_widget.write(f"[red]{escape(problem)}[/red]")
             self.notify("Some channel changes failed — see the log.", severity="error")
             self._refresh_scope_ui()
             return
@@ -747,7 +769,7 @@ class ScopeScreen(Page):
             self._refresh_scope_ui()
             return
         self._begin_settings_op("apply-trigger")
-        self._apply_trigger(handle.device, settings, baseline, handle.lock)
+        self._apply_trigger(handle.device, settings, baseline)
 
     @work(thread=True, exclusive=True, group="scope-apply-trigger", exit_on_error=False)
     def _apply_trigger(
@@ -755,14 +777,13 @@ class ScopeScreen(Page):
         scope: LeCroy,
         settings: TriggerSettings,
         baseline: TriggerSettings,
-        lock,
     ) -> None:
         error: Exception | None = None
         verified: TriggerSettings | None = None
         verification_error: Exception | None = None
         try:
-            apply_trigger_settings(scope, settings, current_settings=baseline, lock=lock)
-            verified = read_trigger_settings(scope, lock=lock)
+            apply_trigger_settings(scope, settings, current_settings=baseline)
+            verified = read_trigger_settings(scope)
         except Exception as exc:  # noqa: BLE001
             log.exception("scope: failed to apply trigger settings")
             error = exc
@@ -893,7 +914,6 @@ class ScopeScreen(Page):
                 trigger_settings=trigger_settings,
                 applied_channel_settings=applied_channel_settings,
                 applied_trigger_settings=applied_trigger_settings,
-                lock=handle.lock,
             )
         except Exception as exc:  # noqa: BLE001 - never leave the Acquire button disabled
             log.exception("scope: acquisition failed")
@@ -940,8 +960,6 @@ class ScopeScreen(Page):
             )
         for warning in recording.warnings:
             log_widget.write(f"[yellow]{escape(warning)}[/yellow]")
-        for err in recording.errors:
-            log_widget.write(f"[red]{err.channel}: {escape(one_line(err.error))}[/red]")
         if recording.waveforms:
             plot = self.query_one("#scope-plot", PlotextPlot)
             first = recording.waveforms[0]
@@ -965,5 +983,3 @@ class ScopeScreen(Page):
                 severity="error",
                 markup=False,
             )
-        elif recording.errors and not recording.waveforms:
-            self.notify("Acquisition failed — see the log.", severity="error")
