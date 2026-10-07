@@ -87,13 +87,13 @@
 #callout(
   "How to read this guide",
   [
-    The four parts can be read in order or on their own. *Architecture* states
-    the ownership, locking and layering rules everything else follows.
-    *MXA and measurements* connects analyzer state to the quantities iyzee
-    records. *TUI and devices* is the operator and driver reference.
-    *Rubidium* is the physics layer: atomic structure, spectroscopy and
-    squeezing. The source code is authoritative; where prose and code
-    disagree, the implementation and its tests win.
+    The guide is organized as four parts. *Architecture* gives the stable
+    software map. *TUI and devices* explains interactive operation and the
+    hardware boundary. *MXA and measurements* connects analyzer state to the
+    quantities iyzee records. *Rubidium* supplies the scientific context.
+    Read the parts in order for a full tour, or jump directly to the one that
+    matches the work you are doing. The source code and tests are authoritative:
+    where prose and code disagree, the verified implementation wins.
   ],
 )
 
@@ -105,10 +105,24 @@
 }
 #outline(title: [Contents], depth: 2, indent: 1.4em)
 
+#v(0.8em)
+
+#callout(
+  "Choose your path",
+  [
+    #strong[Building or changing iyzee:] start with #link(<part-architecture>)[Architecture], then use #link(<part-tui>)[TUI and devices] for interactive and hardware-facing changes.
+
+    #strong[Changing a measurement:] read #link(<part-mxa>)[MXA and measurements] after the architecture chapter.
+
+    #strong[Working on the experiment or its interpretation:] continue to #link(<part-rubidium>)[Rubidium] after the software and measurement layers.
+  ],
+  tone: "result",
+)
+
 // -- parts -----------------------------------------------------------------
 #include "chapters/architecture.typ"
-#include "chapters/mxa-and-measurements.typ"
 #include "chapters/tui-and-devices.typ"
+#include "chapters/mxa-and-measurements.typ"
 #include "chapters/rubidium-physics.typ"
 
 #v(2em)
