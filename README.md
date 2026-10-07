@@ -1,5 +1,7 @@
 # iyzee
 
+-- this too convoluted!
+
 Small Python control and measurement toolkit for a lab setup, centered on
 automated noise measurements with a Keysight MXA. Two ways to run a
 measurement: a scripted CLI entry point (`iyzee`), and an interactive
