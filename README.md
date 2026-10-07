@@ -2,9 +2,7 @@
 
 **Lab instrument control and noise measurement for Python.**
 
-iyzee connects laboratory hardware to a small Python API, reproducible measurement procedures, and an interactive terminal UI. It is built around a Keysight MXA, with support for a LeCroy oscilloscope, power supply/shutter, and wavemeter.
-
-> **Python first, TUI second.** Hardware control and measurement logic stay usable from scripts and the IPython console; the TUI organizes them for interactive work.
+iyzee connects laboratory hardware to a small Python API, reproducible measurement procedures, and an interactive terminal UI. It is built around a Keysight MXA, with support for a LeCroy oscilloscope, power supply/shutter, and wavemeter. Hardware control and measurement logic is usable from scripts and the IPython console; the TUI organizes them for interactive work.
 
 [![CI](https://github.com/raiyiz/iyzee/actions/workflows/ci.yml/badge.svg)](https://github.com/raiyiz/iyzee/actions/workflows/ci.yml)
 
