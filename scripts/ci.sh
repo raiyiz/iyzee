@@ -14,7 +14,7 @@ docs() {
 }
 
 doc_links() {
-    uv run scripts/check_doc_links.py
+    uv run scripts/check_doc_links.py --fix
 }
 
 all() {
@@ -23,7 +23,7 @@ all() {
     uv run --locked ruff check .
     uv run --locked ruff format --check .
     uv run --locked mypy src tests
-    doc_links
+    uv run scripts/check_doc_links.py
     docs
 }
 
