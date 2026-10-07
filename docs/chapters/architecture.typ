@@ -606,16 +606,16 @@ persistence, and background work.
     arrow(dir: "↓"),
     node("LeCroy", "instrument commands and waveform semantics"),
     arrow(dir: "↓"),
-    node("VICPTransport", "framing and socket state"),
+    node("BaseDevice / PyVISA", "resource lifecycle, timeout and I/O"),
     arrow(dir: "↓"),
-    node("TCP socket", "bytes on the wire"),
-  ),
+    node("VXI-11", "VISA transport to the scope"),  ),
   caption: [The scope path crosses clear responsibility boundaries; the page owns presentation state while the lower layers own hardware semantics and transport.],
 )
 
 The page owns the human-facing state. The workflow owns the semantics of
 reading, applying, verifying, acquiring, and saving. The driver owns LeCroy
-commands. The transport owns framing and socket state.
+commands and response decoding. PyVISA owns the generic VISA resource and I/O
+mechanics.
 
 == Dirty state is a statement about knowledge
 
@@ -782,7 +782,7 @@ where the operation exists.
 
 == Why pages are not hardware drivers
 
-Putting SCPI or VICP directly into a widget method seems convenient at first:
+Putting SCPI or transport details directly into a widget method seems convenient at first:
 the button is right there, and the command can be issued immediately.
 
 The cost is duplication and isolation. A second caller then needs a second copy
