@@ -13,7 +13,7 @@ The work is intentionally staged. Each phase has a clear endpoint so documentati
 - [ ] Phase 2 — Architecture as the canonical developer map
 - [ ] Phase 3 — Measurement lifecycle
 - [ ] Phase 4 — TUI/device boundary and adding devices
-- [ ] Phase 5 — VICP / scope architecture
+- [x] Phase 5 — VISA / VXI-11 scope architecture
 - [ ] Phase 6 — Rubidium physics chapter polish
 - [ ] Phase 7 — ADR cleanup and final documentation pass
 
@@ -159,30 +159,30 @@ Completed in the README refresh:
 
 ---
 
-## Phase 5 — VICP / scope architecture
+## Phase 5 — VISA / VXI-11 scope architecture
 
-**Goal:** document the scope stack well enough that transport or synchronization failures can be diagnosed without archaeology.
+**Goal:** document the scope stack well enough that transport or synchronization failures can be diagnosed against the actual VISA implementation.
 
 ### Stack
 
-- [ ] Show the relationship:
-  `scope workflow → LeCroy abstraction → VICP transport → TCP socket → hardware`.
-- [ ] Explain the transport framing at the level required to understand the implementation.
-- [ ] Document connection establishment and teardown.
-- [ ] Document timeouts and partial/incomplete responses.
-- [ ] Explain what constitutes a lost connection and what state must be invalidated.
-- [ ] Explain waveform transfer and decoding at a conceptual level.
-- [ ] Distinguish transport failures from scope-command failures and from invalid waveform data.
+- [x] Show the relationship:
+  `scope workflow → LeCroy driver → BaseDevice / PyVISA → VXI-11 → hardware`.
+- [x] Explain the transport boundary at the level required to understand the implementation.
+- [x] Document connection establishment and teardown.
+- [x] Document VISA timeouts and partial/incomplete waveform responses.
+- [x] Explain what constitutes a lost connection and what state must be invalidated.
+- [x] Explain waveform transfer and decoding at a conceptual level.
+- [x] Distinguish VISA I/O failures from scope-command failures and from malformed waveform data.
 
 ### Diagnostics
 
-- [ ] Add a small failure-state diagram.
-- [ ] Give concrete pointers for debugging a timeout, dropped socket, or malformed waveform response.
-- [ ] Keep protocol detail limited to what helps users and contributors maintain the implementation.
+- [x] Add a compact failure-state diagram.
+- [x] Give concrete pointers for debugging a timeout, dropped resource, or malformed waveform response.
+- [x] Keep protocol detail limited to what helps users and contributors maintain the implementation.
 
-**Done when:** the VICP/scope chapter can be used as a debugging reference during a real hardware failure.
+**Done when:** the scope documentation describes the current VISA/VXI-11 implementation and can be used as a debugging reference during a real hardware failure.
 
----
+**Phase 5 result:** the obsolete project-owned VICP transport is no longer part of the documentation model. The guide now documents `LeCroy` as a `BaseDevice` using VISA/VXI-11, with explicit timeout/connection invalidation and waveform-response validation.
 
 ## Phase 6 — Rubidium physics chapter polish
 
