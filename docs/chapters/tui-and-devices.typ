@@ -66,9 +66,10 @@ Both paths build a list of `Step` objects and hand them to `run_sequence()`; not
 
 = Device layer
 
-The device layer is where software semantics meet real protocols: VISA,
-raw SCPI sockets, LeCroy VICP, and the WS-7 HTTP interface. Each adapter keeps
-hardware-specific command syntax out of the experiment and TUI layers.
+The device layer is where software semantics meet real protocols: VISA-based
+instrument resources and the WS-7 HTTP interface. VISA can use different resource
+kinds underneath (for example VXI-11 for the scope or a socket resource for the
+PSU), while the application keeps one explicit device lifecycle.
 
 
 == Connection lifecycle
@@ -80,7 +81,11 @@ hardware-specific command syntax out of the experiment and TUI layers.
 - `__enter__`/`__exit__` just call `connect()`/`close()`, so `with KeysightMXA() as mx:` is the same thing spelled as a context manager.
 - Constructing a device does *not* connect it — `KeysightMXA()` alone opens no socket. This is what keeps experiment code and tests independent of real hardware: a `Step` can be constructed and unit-tested without ever calling `connect()`.
 
-`KeysightMXA` and `PSU` both subclass `BaseDevice` directly, over `TCPIP0::<ip>::inst0::INSTR` (MXA) or a raw `TCPIP::<ip>::5025::SOCKET` (the R&S HMP4040 PSU, which doesn't speak the standard VISA `INSTR` resource string). `scope.py`'s `LeCroy` driver predates `BaseDevice` and manages its own raw TCP socket instead (see @sec-scope below) — this is a known, intentional gap, not an oversight; see the README's Known Gaps section.
+`KeysightMXA`, `PSU`, and `LeCroy` all subclass `BaseDevice`, while their VISA
+resources differ by instrument. The MXA uses `TCPIP0::<ip>::inst0::INSTR`, the
+PSU uses a VISA socket resource on port 5025, and the scope uses VISA/VXI-11.
+Construction does not open hardware; `connect()` owns the actual resource
+lifecycle.
 
 == Instrument addresses
 
@@ -124,7 +129,7 @@ The MXA is by far the most-used instrument and has its own dedicated guide — s
 
 == LeCroy oscilloscope <sec-scope>
 
-`scope.py`'s `LeCroy` driver talks LeCroy's VICP protocol directly over a raw TCP socket (port 1861) — it predates PyVISA in this codebase and has never been migrated onto `BaseDevice`. Every exchange follows the same shape: an 8-byte header (a flag byte, 3 reserved bytes, and a big-endian-on-the-wire 4-byte length) followed by that many bytes of payload; `vicp.recv_exact()` loops until the full payload has actually arrived, since a single `socket.recv()` is not guaranteed to return everything at once. VICP has no request IDs, so after any mid-message failure (timeout, peer close, bad header, interrupted transfer) a late reply would be handed to the next caller as if it answered that caller's question. `vicp.VICPTransport` therefore invalidates itself in that case: the socket is closed, `LeCroy.connected` becomes `False`, and the caller must reconnect. Errors raised after a response was read completely through EOI (a wrong block length, a non-ASCII reply) leave the stream aligned, so the connection stays usable. A binary waveform block is validated against its declared byte count, and a trailing line terminator can never be counted as sample data.
+`scope.py`'s `LeCroy` driver uses VISA/VXI-11 and inherits `BaseDevice`. It opens the configured VISA resource, uses no read termination because waveform bytes may contain line feeds, and increases the VISA chunk size for long records. The driver translates VISA timeouts into `LeCroyTimeoutError` and closes the resource after timeout or other VISA I/O failure, because the reply state is no longer trustworthy. Complete but malformed waveform payloads raise `LeCroyProtocolError` while keeping the connection usable. The definite-length binary block is validated against its declared byte count before conversion to samples.
 
 Typical commands sent via `LeCroy.send()`:
 
@@ -194,13 +199,13 @@ The shared `tui/screens/page.py` base owns page mechanics that are not domain-sp
 
 == Instrument registry and locking <sec-locking>
 
-`devices/handles.py` is the single place that knows how to build a uniform `InstrumentHandle` (`connect()` / `disconnect()` / `probe()` / `.device`) around each heterogeneous driver — VISA (`_VisaHandle`, wrapping `KeysightMXA`), the PSU-backed shutter (`ShutterHandle`), the scope's raw socket (`ScopeHandle`), and the wavemeter's stateless HTTP calls (`WavemeterHandle`). `lab.py` holds the `InstrumentSpec` registry and `Lab`, which owns the connected handles (connect, disconnect, dead-link detection, close-all) for the TUI, the console and scripts alike; adding a new instrument means one handle and one `InstrumentSpec` — no screen code changes. Addresses and the data directory come from `config.py` (environment variables or a `config.toml`).
+`devices/handles.py` is the single place that knows how to build a uniform `InstrumentHandle` (`connect()` / `disconnect()` / `probe()` / `.device`) around each heterogeneous driver — VISA (`_VisaHandle`, wrapping the VISA-backed devices), the PSU-backed shutter (`ShutterHandle`), the scope (`ScopeHandle`), and the wavemeter's stateless HTTP calls (`WavemeterHandle`). `lab.py` holds the `InstrumentSpec` registry and `Lab`, which owns the connected handles (connect, disconnect, dead-link detection, close-all) for the TUI, the console and scripts alike; adding a new instrument means one handle and one `InstrumentSpec` — no screen code changes. Addresses and the data directory come from `config.py` (environment variables or a `config.toml`).
 
 Each handle inherits `_LockedHandle`, which owns one re-entrant `threading.RLock` exposed by the `InstrumentHandle` protocol (`ScopeHandle` overrides it to return the `LeCroy` driver's own transaction lock, so the handle, the console proxy, workflow batches and the driver's multi-command transfers all share a single lock). The lock therefore stays on the handle rather than `IyzeeApp` keeping a separate `dict[str, threading.Lock]` alongside `handles`. `LockedProxy`, in the same module, wraps a live device so that *every method call* acquires a given lock for its duration — `ConnectScreen` and `SweepScreen` pass `handle.lock` when they hold it around their own hardware calls, and the console's `LabProxy` passes the same one. This is what stops a console command and a running sweep from issuing overlapping commands to the same physical instrument from two different threads at once. It's a coarse, call-level lock, not a queue — a long-running call (e.g. a slow sweep step) will make a concurrent caller wait for the whole call, not just contend briefly.
 
 Because the lock lives on the handle, not on `IyzeeApp`, a handle built and connected entirely outside a running app — a script's own `ScopeHandle`, say — gets the same synchronization guarantee for free. This is what makes @sec-convention below possible: the extracted operation functions take the lock as an optional argument rather than reaching for an app-owned table that may not exist. Because the lock is re-entrant, passing it through a `LockedProxy` over the same handle does not deadlock, and scope batches also enter the driver's own `transaction_lock` so a batch is atomic even against a thread that never saw the explicit lock.
 
-Handles that expose a live instrument use the same `.device` property regardless of whether the underlying driver is VISA, a PSU-backed shutter, or the scope socket. Console and screen code therefore use one adapter-facing property instead of reaching through instrument-specific aliases.
+Handles that expose a live instrument use the same `.device` property regardless of whether the underlying driver is VISA, a PSU-backed shutter, the VISA/VXI-11 scope, or the stateless HTTP client. Console and screen code therefore use one adapter-facing property instead of reaching through instrument-specific aliases.
 
 == Design convention: screens display and control, they don't implement <sec-convention>
 
@@ -246,13 +251,13 @@ lab.connected                          # e.g. ("mx", "shutter")
 The Scope page's *Acquire & save* is a measurement-recording operation, not just a plotting convenience. One click acquires the selected analog channels from the scope's `DAT1` waveform block and creates a new file pair under `data/YYYY-MM/` (a fresh random suffix means a normal acquisition never overwrites an earlier one):
 
 - the `.npz` contains numeric arrays only — one `time_<channel>` array, one calibrated `value_<channel>` array, and, for the real LeCroy driver, the exact signed 16-bit `raw_<channel>` samples returned by the scope;
-- the `.json` manifest identifies the recording (`measurement_id`, UTC start/end timestamps, software/Python versions, VICP address/port/timeout, and the instrument's `*IDN?` identity), records the requested TUI configuration and the configuration the scope reported after the last read-back, and describes every returned waveform; `schema_version` is 2;
+- the `.json` manifest identifies the recording (`measurement_id`, UTC start/end timestamps, software/Python versions, VISA address/timeout, and the instrument's `*IDN?` identity), records the requested TUI configuration and the configuration the scope reported after the last read-back, and describes every returned waveform; `schema_version` is 2;
 - an `acquisition` block states whether a running acquisition (trigger mode AUTO or NORMAL) was stopped for the download and restored afterwards (`freeze=True`, the default of `acquire_scope_recording()`), the prior trigger mode, and any non-fatal warnings (could not freeze or restore, identity unavailable), so channels can be trusted to come from one capture; SINGLE and STOP are left alone, and `freeze=False` opts out;
 - per-channel metadata (each channel's own timebase is read, not channel 1's) includes the scope-reported engineering unit, horizontal offset and sample interval, vertical gain and vertical offset, sample/finite counts, minimum/maximum value and sample/time index, peak-to-peak, RMS, standard deviation and maximum absolute value;
 - partial acquisition is preserved: channels that fail are listed under `errors` while successfully returned channels are still saved;
 - the NPZ is SHA-256 hashed after writing and the digest is recorded in the manifest, so a copied or archived data file can be checked for accidental modification.
 
-The calibrated values are derived from the scope's own reported `VERTICAL_GAIN` and `VERTICAL_OFFSET` (equivalently, `values = gain * raw_codes - offset`); the TUI's V/div and offset fields are recorded as configuration provenance, not silently treated as instrument readback. The raw signed 16-bit arrays are the preserved sample data when available; each waveform also records its own horizontal setup (`time_unit`, `time_offset` = first sample relative to the trigger, `time_interval`), and the requested/applied trigger settings carry `time_per_div`; the Results page shows time/div, the time window, sample count, interval and sample rate, and both the Scope and Results plots scale the time axis to a readable unit (ns/µs/ms). The scalar statistics in the manifest are convenience summaries derived from those calibrated arrays. This distinction matters because the legacy LeCroy driver cannot currently verify every vertical/trigger setting after it is written.
+The calibrated values are derived from the scope's own reported `VERTICAL_GAIN` and `VERTICAL_OFFSET` (equivalently, `values = gain * raw_codes - offset`); the TUI's V/div and offset fields are recorded as configuration provenance, not silently treated as instrument readback. The raw signed 16-bit arrays are the preserved sample data when available; each waveform also records its own horizontal setup (`time_unit`, `time_offset` = first sample relative to the trigger, `time_interval`), and the requested/applied trigger settings carry `time_per_div`; the Results page shows time/div, the time window, sample count, interval and sample rate, and both the Scope and Results plots scale the time axis to a readable unit (ns/µs/ms). The scalar statistics in the manifest are convenience summaries derived from those calibrated arrays. Requested configuration and instrument read-back remain separate because the scope can normalize or reject settings.
 
 The storage layer is shared with experiment sweeps through `experiment.io.save_numeric_recording()`, so atomic `.part` replacement, pickle-free numeric archives, JSON manifests and checksum handling remain one implementation rather than two persistence systems. The SHA-256 digest covers the completed NPZ itself; it lets a later analysis/archive step verify that the numeric payload has not changed since it was written.
 
@@ -270,7 +275,7 @@ The storage layer is shared with experiment sweeps through `experiment.io.save_n
 - Repository implementation: `src/iyzee/devices/base.py`, `src/iyzee/devices/power.py`, `src/iyzee/devices/scope.py`, `src/iyzee/scope_workflows.py`, `src/iyzee/devices/wavemeter.py`, `src/iyzee/tui/`, and the associated tests.
 - #link(<part-mxa>)[MXA and measurement guide] — MXA SCPI reference, measurement physics, and the squeezing/shot-noise workflow.
 - Rohde & Schwarz, *HMP Series Power Supply User Manual*: `INST:NSEL`, `INST OUTn`, `OUTP:SEL`, `OUTP:GEN` selection and output semantics.
-- LeCroy, *Remote Control Manual*: VICP protocol framing, `WF?`/`INSPECT?` waveform transfer, and (for the channel/trigger/math control added on top of that) the `<channel>:VOLT_DIV`/`OFFSET`/`COUPLING`/`ATTENUATION`/`BANDWIDTH_LIMIT`/`TRACE`/`INVERT_SET`, `TRIG_SELECT`/`TRIG_LEVEL`/`TRIG_SLOPE`/`TRIG_COUPLING`/`TRIG_MODE`/`TRIG_DELAY`, and `DEFINE EQN` command families.
+- LeCroy, *Remote Control Manual*: LeCroy command semantics, `WF?`/`INSPECT?` waveform transfer, and the channel/trigger command families used by the driver.
 - PyVISA documentation, resource strings and `query_binary_values()`: #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
 - Textual documentation, workers and focus: #link("https://textual.textualize.io/guide/workers/")[Workers guide]
 - prompt_toolkit and pyte, which host IPython's terminal UI in the console: #link("https://python-prompt-toolkit.readthedocs.io/")[prompt_toolkit documentation], #link("https://pyte.readthedocs.io/")[pyte documentation]
