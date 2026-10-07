@@ -80,8 +80,7 @@ def process(path: Path, typst: bool, fix: bool) -> tuple[list[str], list[str]]:
             definitions = [
                 n
                 for n, source_line in enumerate(lines, 1)
-                if (match_def := DEF.match(source_line))
-                and match_def.group(1) == symbol
+                if (match_def := DEF.match(source_line)) and match_def.group(1) == symbol
             ]
 
         if fix and len(definitions) == 1 and definitions[0] != line:

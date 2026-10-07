@@ -470,7 +470,7 @@ class ScopeScreen(Page):
         self,
         scope: LeCroy,
         channels: Sequence[ChannelSettings],
-        trigger: TriggerSettings | None,
+        trigger: TriggerSettings,
         verified_channels: Sequence[ChannelSettings],
         verified_trigger: TriggerSettings | None,
         error: Exception | None,
