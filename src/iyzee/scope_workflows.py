@@ -1,5 +1,5 @@
 """Scope workflow operations: configuration, acquisition, and persistence
-on top of the raw :class:`~iyzee.devices.scope.LeCroy` driver.
+on top of the :class:`~iyzee.devices.scope.LeCroy` driver.
 
 Plain functions and dataclasses, no Textual import — the same operations
 ``ScopeScreen``'s buttons trigger are usable identically from a script or
@@ -8,8 +8,8 @@ the IPython console::
     from iyzee.devices.scope import Channel, Coupling, LeCroy
     from iyzee.scope_workflows import ChannelSettings, apply_channel_settings
 
-    scope = LeCroy()
-    scope.connect("10.0.0.5")
+    scope = LeCroy("10.0.0.5")
+    scope.connect()
     apply_channel_settings(scope, [ChannelSettings(Channel.C1, True, 0.5, 0.0, Coupling.DC_1M)])
 
 ``read_channel_settings()``/``read_trigger_settings()`` are the read
@@ -789,10 +789,9 @@ def save_scope_acquisition(
         },
         "instrument": {
             "driver": "iyzee.devices.scope.LeCroy",
-            "protocol": "LeCroy VICP",
+            "protocol": "VISA (VXI-11)",
             "address": recording.instrument_address,
             "identity": recording.instrument_id,
-            "port": LeCroy.LECROY_SERVER_PORT,
             "socket_timeout_s": recording.socket_timeout_s,
         },
         "configuration": {

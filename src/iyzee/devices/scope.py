@@ -1,29 +1,32 @@
 import math
 import re
-import struct
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from enum import StrEnum
 
 import numpy as np
+import pyvisa
+from pyvisa.constants import StatusCode
 
-from .vicp import VICPFrame, VICPProtocolError, VICPTimeoutError, VICPTransport
+from ..config import IP, address
+from .base import BaseDevice
 
 
-class LeCroyTimeoutError(VICPTimeoutError):
-    """The scope didn't respond (or accept data) within the configured
-    socket timeout.
+class LeCroyTimeoutError(TimeoutError):
+    """The scope didn't answer within the VISA timeout.
 
-    Before a socket timeout was actually applied (see ``LeCroy.connect``),
-    a dead IP, a black-holed connection, or an instrument that simply
-    stopped answering mid-transfer would all hang the calling thread
-    forever instead of raising anything. This is a ``TimeoutError``
-    subclass — exactly what ``socket.timeout`` already is as of Python
-    3.10 — so any existing ``except TimeoutError``/``except OSError``/
-    ``except Exception`` handler still catches it; the point of a
-    dedicated subclass is giving callers something specific to catch, and
-    a message with real numbers in it (how long, how far into the
-    transfer) instead of a bare, contextless timeout.
+    A timed-out exchange leaves the reply stream in an unknown state (a late
+    answer would be handed to the next query), so the driver closes the
+    connection before raising this. ``LeCroy.connected`` becomes ``False`` and
+    the caller must reconnect. It is a ``TimeoutError`` subclass, so existing
+    ``except TimeoutError`` / ``except OSError`` handlers still catch it.
     """
+
+
+class LeCroyProtocolError(RuntimeError):
+    """A complete reply arrived but wasn't the expected shape (bad block header,
+    wrong byte count). The connection stays usable: nothing is left unread."""
 
 
 class Channel(StrEnum):
@@ -34,20 +37,6 @@ class Channel(StrEnum):
     C2 = "C2"
     C3 = "C3"
     C4 = "C4"
-
-
-class MathChannel(StrEnum):
-    """Math-function trace identifiers.
-
-    F5-F8 exist on some models (in addition to F1-F4) but aren't covered
-    here; pass their name as a plain string to the methods below if needed
-    — they all take ``Channel | MathChannel | str``.
-    """
-
-    F1 = "F1"
-    F2 = "F2"
-    F3 = "F3"
-    F4 = "F4"
 
 
 class Coupling(StrEnum):
@@ -93,14 +82,11 @@ __all__ = [
     "Channel",
     "Coupling",
     "LeCroy",
+    "LeCroyProtocolError",
     "LeCroyTimeoutError",
-    "MathChannel",
     "TriggerCoupling",
     "TriggerMode",
     "TriggerSlope",
-    "VICPFrame",
-    "VICPProtocolError",
-    "VICPTransport",
 ]
 
 
@@ -126,41 +112,71 @@ def _finite(value: float, what: str) -> float:
     return value  # unchanged: ``10`` stays ``10``, not ``10.0``
 
 
-class LeCroy:
-    """Remote control and waveform download for LeCroy scopes via VICP.
+_TERMINATORS = (b"\n", b"\r\n")
 
-    The driver targets the LeCroy/Teledyne LeCroy IEEE-488.2-style command
-    dialect used by WaveSurfer, WaveAce and X-Stream. Channel, trigger and
-    math methods forward that dialect; model-dependent vocabularies stay plain
-    strings rather than pretending to be universal enums.
 
-    Those commands follow Teledyne LeCroy's Remote Control manuals but have not
-    all been exercised on real hardware: verify against your instrument (most
-    accept a ``?`` query form to read back what was set) before relying on them
-    for anything safety-critical.
+def _definite_block(raw: bytes) -> bytes:
+    """The payload of a LeCroy ``DEF9`` binary block (``#9`` + nine-digit byte count).
+
+    ``raw`` is a complete reply, possibly preceded by a ``C1:WF DAT1,`` header
+    echo and followed by a line terminator. The declared count is authoritative:
+    a truncated block is an error, not something to pad out with the terminator.
+    """
+    marker = raw.find(b"#9")
+    if marker < 0:
+        raise LeCroyProtocolError("binary reply has no DEF9 (#9) block")
+    count_field = raw[marker + 2 : marker + 11]
+    if len(count_field) < 9 or not count_field.isdigit():
+        raise LeCroyProtocolError(f"invalid DEF9 byte count {count_field!r}")
+    expected = int(count_field)
+    body = raw[marker + 11 :]
+    if len(body) < expected:
+        raise LeCroyProtocolError(f"expected {expected} bytes, got {len(body)}")
+    if body[expected:] not in (b"", *_TERMINATORS):
+        raise LeCroyProtocolError(f"unexpected bytes after DEF9 block: {body[expected:]!r}")
+    return body[:expected]
+
+
+class LeCroy(BaseDevice):
+    """Remote control and waveform download for LeCroy scopes over VISA (VXI-11).
+
+    The scope must have remote control set to LXI/VXI-11 (not VICP). The driver
+    targets the LeCroy/Teledyne LeCroy IEEE-488.2-style command dialect used by
+    WaveSurfer, WaveAce and X-Stream. Channel and trigger methods forward that
+    dialect; anything else is one ``scope.send("...")`` / ``scope.query("...")``
+    away.
+
+    Those commands follow Teledyne LeCroy's Remote Control manuals; most accept
+    a ``?`` query form to read back what was set.
     """
 
-    MAX_TCP_CONNECT = 5  # time in s. to get a conn
-    MAC_TCP_READ = 3  # time in s. to wait for the DSO to respond
-    LECROY_SERVER_PORT = 1861  # as defined by LeCroy
-    CMD_BUF_LEN = 8192
+    DEFAULT_TIMEOUT_MS = 10_000
+    CHUNK_SIZE = 1 << 20  # VISA read chunk; the default is far too small for long records
 
-    def __init__(self):
-        self._transport = VICPTransport(
-            port=self.LECROY_SERVER_PORT,
-            connect_timeout=self.MAX_TCP_CONNECT,
-            io_timeout=self.MAC_TCP_READ,
-            max_command_length=self.CMD_BUF_LEN,
-            timeout_error=LeCroyTimeoutError,
+    def __init__(
+        self,
+        ip: str | None = None,
+        timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        resource_manager=None,
+    ):
+        super().__init__(
+            ip=ip or address(IP.SCOPE),
+            resource_manager=resource_manager,
+            timeout_ms=timeout_ms,
+            # No read termination: waveform bytes may contain 0x0A, and VXI-11
+            # marks the end of a reply itself. Text replies are stripped below.
+            read_termination=None,
+            write_termination="\n",
         )
+        self._lock = threading.RLock()
 
     @property
     def connected(self) -> bool:
-        return self._transport.connected
+        return self.instrument is not None
 
     @property
-    def address(self) -> str | None:
-        return self._transport.address
+    def address(self) -> str:
+        return str(self.ip)
 
     @property
     def transaction_lock(self) -> threading.RLock:
@@ -169,63 +185,91 @@ class LeCroy:
         Anything that must serialize with the driver (e.g. an instrument
         handle) should share this lock rather than keep a second one.
         """
-        return self._transport.transaction_lock
+        return self._lock
 
     @property
     def SOCK_TIMEOUT(self) -> float:
-        return self._transport.io_timeout
+        return self.timeout_ms / 1000
 
-    def connect(self, IP, delayval=None, connect_timeout=None):
-        """Connect to the IP with bounded handshake and I/O timeouts.
+    def connect(self) -> None:
+        """Open the VISA resource (idempotent). Raises :class:`LeCroyTimeoutError` / VISA errors."""
+        with self._lock:
+            if self.instrument is not None:
+                return
+            try:
+                super().connect()
+            except pyvisa.errors.VisaIOError as exc:
+                self._drop()
+                raise self._translate(exc) from exc
+            self.instrument.chunk_size = self.CHUNK_SIZE
 
-        Raises ``RuntimeError`` if already connected, and
-        :class:`LeCroyTimeoutError` / ``OSError`` if the scope can't be reached.
-        """
-        delayval = self.MAC_TCP_READ if delayval is None else delayval
-        connect_timeout = self.MAX_TCP_CONNECT if connect_timeout is None else connect_timeout
-        self._transport.connect(
-            IP,
-            connect_timeout=connect_timeout,
-            io_timeout=delayval,
-        )
+    def disconnect(self) -> None:
+        """Close the connection (idempotent)."""
+        self.close()
 
-    def check_link(self) -> bool:
-        """Whether the connection is still usable (no I/O; see ``VICPTransport.check_link``)."""
-        return self._transport.check_link()
-
-    def disconnect(self):
-        """Disconnect from the Scope and clear connection state (idempotent)."""
-        self._transport.close()
-
-    def send(self, message):
-        """Send one VICP command frame."""
-        self._transport.send_command(message)
-
-    def readAll(self):
-        """Read all response frames through EOI and return ``(flags, text)``."""
-        flag, data = self._transport.read_message()
+    def _drop(self) -> None:
         try:
-            return flag, data.decode("ascii")
-        except UnicodeDecodeError as exc:
-            raise VICPProtocolError("VICP response was not valid ASCII") from exc
+            self.close()
+        except Exception:  # the link is already broken; closing is best effort
+            self.instrument = None
+
+    def _translate(self, exc: pyvisa.errors.VisaIOError) -> Exception:
+        if exc.error_code == StatusCode.error_timeout:
+            return LeCroyTimeoutError(
+                f"{self.ip} did not respond within {self.timeout_ms / 1000:g}s"
+            )
+        return exc
+
+    @contextmanager
+    def _io(self) -> Iterator:
+        """Hold the lock for one VISA exchange; any I/O failure drops the connection."""
+        with self._lock:
+            inst = self.instrument
+            if inst is None:
+                raise RuntimeError("Instrument not connected")
+            try:
+                yield inst
+            except pyvisa.errors.VisaIOError as exc:
+                self._drop()
+                translated = self._translate(exc)
+                if translated is exc:
+                    raise
+                raise translated from exc
+
+    def send(self, message: str) -> None:
+        """Send one command."""
+        with self._io() as inst:
+            inst.write(message)
 
     def query(self, message: str, *, timeout: float | None = None) -> str:
         """Send ``message`` and atomically return the trimmed response text.
 
-        ``timeout`` overrides the I/O timeout for this exchange only.
+        ``timeout`` (seconds) overrides the VISA timeout for this exchange only.
         """
-        return self._transport.query(message, timeout=timeout)
+        if timeout is not None and timeout <= 0:
+            raise ValueError("timeout must be positive")
+        with self._io() as inst:
+            previous = inst.timeout
+            if timeout is not None:
+                inst.timeout = int(timeout * 1000)
+            try:
+                return inst.query(message).strip()
+            finally:
+                if timeout is not None and self.instrument is inst:
+                    inst.timeout = previous
 
     def idn(self, *, timeout: float | None = None) -> str:
         """Return the scope's ``*IDN?`` identification string."""
         return self.query("*IDN?", timeout=timeout)
 
     def _inspect(self, channel: Channel, field: str) -> str:
-        self.send(f'{_ident(channel, "channel")}:INSPECT? "{field}"')
-        return self.readAll()[1]
+        return self.query(f'{_ident(channel, "channel")}:INSPECT? "{field}"')
 
     def _inspect_number(self, channel: Channel, field: str) -> float:
-        return float(self._inspect(channel, field).split(":")[-1].split('"\n')[0].strip())
+        return float(self._inspect(channel, field).split(":")[-1].strip().strip('"').strip())
+
+    def _inspect_unit(self, channel: Channel, field: str) -> str:
+        return self._inspect(channel, field).split("Unit Name = ")[-1].strip().strip('"')
 
     # ------------------------------------------------------------------
     # Channel (vertical) control
@@ -248,34 +292,12 @@ class LeCroy:
         """
         self.send(f"{channel}:COUPLING {coupling}")
 
-    def set_attenuation(self, channel: Channel, factor: float) -> None:
-        """Tell the scope the probe attenuation factor on ``channel`` (e.g.
-        1, 10, or 100), so its vertical readings are scaled correctly."""
-        self.send(f"{channel}:ATTENUATION {_finite(factor, 'factor')}")
-
-    def set_bandwidth_limit(self, channel: Channel, limit: str) -> None:
-        """Set the bandwidth limit for ``channel``.
-
-        ``limit`` is a free string, not an enum: ``"OFF"`` and ``"ON"`` are
-        universal, but the specific reduced-bandwidth values it accepts
-        (e.g. ``"20MHZ"``, ``"200MHZ"``, ``"25MHZ"``) are model dependent.
-        Check ``<channel>:BANDWIDTH_LIMIT?`` on the instrument, or its
-        datasheet, for the values it actually supports.
-        """
-        self.send(f"{channel}:BANDWIDTH_LIMIT {limit}")
-
-    def set_trace_display(self, channel: Channel | MathChannel | str, state: bool) -> None:
+    def set_trace_display(self, channel: Channel | str, state: bool) -> None:
         """Show or hide ``channel``'s trace on the display.
 
-        Works for an analog channel or a math trace (anything with a
-        header-path prefix), which is why this accepts ``Channel |
-        MathChannel`` rather than only ``Channel``.
+        Also works for a math trace (``"F1"``): any header-path prefix is accepted.
         """
         self.send(f"{_ident(channel, 'channel')}:TRACE {'ON' if state else 'OFF'}")
-
-    def set_invert(self, channel: Channel | MathChannel | str, state: bool) -> None:
-        """Invert (or un-invert) ``channel``'s waveform."""
-        self.send(f"{_ident(channel, 'channel')}:INVERT_SET {'ON' if state else 'OFF'}")
 
     def get_coupling(self, channel: Channel) -> str:
         """Return the device's raw response to a coupling query (see
@@ -292,7 +314,7 @@ class LeCroy:
         (see :meth:`query` for why this isn't parsed further)."""
         return self.query(f"{channel}:OFFSET?")
 
-    def get_trace_display(self, channel: Channel | MathChannel | str) -> str:
+    def get_trace_display(self, channel: Channel | str) -> str:
         return self.query(f"{_ident(channel, 'channel')}:TRACE?")
 
     # ------------------------------------------------------------------
@@ -329,14 +351,6 @@ class LeCroy:
         :meth:`set_coupling`.
         """
         self.send(f"{source}:TRIG_COUPLING {coupling}")
-
-    def set_trigger_delay(self, delay_seconds: float) -> None:
-        """Position the trigger point in time relative to the acquisition.
-
-        A negative value delays the trigger point (showing more pre-trigger
-        data); a positive value shows less pre-trigger data, or none.
-        """
-        self.send(f"TRIG_DELAY {_finite(delay_seconds, 'delay_seconds')}")
 
     def set_time_per_div(self, seconds_per_div: float) -> None:
         """Set the horizontal scale (timebase), in seconds/division."""
@@ -378,77 +392,30 @@ class LeCroy:
         return self.query(f"{source}:TRIG_COUPLING?")
 
     # ------------------------------------------------------------------
-    # Math function control
+    # Waveform download
     # ------------------------------------------------------------------
-    def set_math_equation(self, math_channel: MathChannel, equation: str) -> None:
-        """Define what ``math_channel`` computes.
-
-        ``equation`` is written in the instrument's own expression syntax,
-        e.g. ``"C1-C2"`` for a difference, ``"AVG(C1)"`` for averaging,
-        ``"FFT(C1)"`` for a spectrum. The exact set of supported operators
-        and functions (and their exact spelling) is model and firmware
-        dependent — see your instrument's math chapter, or read back
-        ``<math_channel>:DEFINE?`` after setting one up on the front panel to
-        see the syntax it produces for a given operation. This method only
-        forwards the string; :meth:`set_math_difference`,
-        :meth:`set_math_average`, and :meth:`set_math_fft` are thin
-        convenience wrappers around the three operations mentioned above.
-        """
-        if not equation or any(c in equation for c in "';\"\\") or not equation.isprintable():
-            raise ValueError(f"invalid math equation {equation!r}")
-        self.send(f"{_ident(math_channel, 'math channel')}:DEFINE EQN,'{equation}'")
-
-    def set_math_difference(
-        self, math_channel: MathChannel, minuend: Channel, subtrahend: Channel
-    ) -> None:
-        """``math_channel`` = ``minuend`` - ``subtrahend``."""
-        self.set_math_equation(math_channel, f"{minuend}-{subtrahend}")
-
-    def set_math_average(self, math_channel: MathChannel, source: Channel) -> None:
-        """``math_channel`` = a running average of ``source``."""
-        self.set_math_equation(math_channel, f"AVG({source})")
-
-    def set_math_fft(self, math_channel: MathChannel, source: Channel) -> None:
-        """``math_channel`` = the FFT (spectrum) of ``source``."""
-        self.set_math_equation(math_channel, f"FFT({source})")
-
-    def get_math_equation(self, math_channel: MathChannel) -> str:
-        return self.query(f"{math_channel}:DEFINE?")
-
-    def getDataBytes(self, channel="C1", block="DAT1"):
-        """Return waveform samples as signed 8-bit values."""
-        with self.transaction_lock:
-            channel, block = _ident(channel, "channel"), _ident(block, "block")
-            self.send("CFMT DEF9,BYTE,BIN")
-            self.send(f"{channel}:WF? {block}")
-            data = self._transport.read_definite_block()
-            return list(struct.iter_unpack("b", data))
-
     def _read_words(self, channel: str, block: str) -> np.ndarray:
         """Download one waveform as signed 16-bit codes (little-endian on the wire)."""
         channel, block = _ident(channel, "channel"), _ident(block, "block")
-        with self.transaction_lock:
+        with self._io() as inst:
             # Format and byte order must be in force *before* the waveform is
             # requested: the scope encodes the WF? reply when it executes it.
-            self.send("CFMT DEF9,WORD,BIN")
-            self.send("CORD LO")
-            self.send(f"{channel}:WF? {block}")
-            data = self._transport.read_definite_block()
+            inst.write("CFMT DEF9,WORD,BIN")
+            inst.write("CORD LO")
+            inst.write(f"{channel}:WF? {block}")
+            raw = inst.read_raw()
+        data = _definite_block(raw)
         if len(data) % 2:
-            raise VICPProtocolError(f"odd number of waveform bytes received: {len(data)}")
+            raise LeCroyProtocolError(f"odd number of waveform bytes received: {len(data)}")
         return np.frombuffer(data, dtype="<i2").astype(np.int16)
-
-    def getDataWords(self, channel="C1", block="DAT1"):
-        """Return waveform samples as a tuple of signed 16-bit values."""
-        return tuple(self._read_words(channel, block).tolist())
 
     def getDataFloatsDetailed(self, channel="C1", block="DAT1"):
         """Return calibrated waveform data together with raw ADC codes."""
-        with self.transaction_lock:
+        with self._lock:
             word_values = self._read_words(channel, block)
             vertical_offset = self._inspect_number(channel, "VERTICAL_OFFSET")
             vertical_gain = self._inspect_number(channel, "VERTICAL_GAIN")
-            unit = self._inspect(channel, "VERTUNIT").split("Unit Name = ")[-1].split('"\n')[0]
+            unit = self._inspect_unit(channel, "VERTUNIT")
             values = vertical_gain * word_values.astype(np.float64) - vertical_offset
             return {
                 "unit": unit,
@@ -458,20 +425,10 @@ class LeCroy:
                 "vertical_offset": vertical_offset,
             }
 
-    def getDataFloats(self, channel="C1", block="DAT1"):
-        """Return one waveform in engineering units as ``(unit, values)``.
-
-        The detailed acquisition path is shared with scientific recording so
-        callers never need to download the same waveform twice just to retain
-        calibration metadata.
-        """
-        data = self.getDataFloatsDetailed(channel=channel, block=block)
-        return data["unit"], data["values"]
-
     def getHorProperties(self, channel="C1"):
         """Return the horizontal unit, offset, and sample interval."""
-        with self.transaction_lock:
-            horunit = self._inspect(channel, "HORUNIT").split("Unit Name = ")[-1].split('"\n')[0]
+        with self._lock:
+            horunit = self._inspect_unit(channel, "HORUNIT")
             offset = self._inspect_number(channel, "HORIZ_OFFSET")
             interval = self._inspect_number(channel, "HORIZ_INTERVAL")
             return horunit, offset, interval

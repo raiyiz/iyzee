@@ -3,7 +3,7 @@
 The drivers are deliberately heterogeneous: :class:`~iyzee.devices.mxa.KeysightMXA`
 and :class:`~iyzee.devices.power.PSU` are VISA
 (:class:`~iyzee.devices.base.BaseDevice`), the wavemeter is a stateless HTTP API,
-and the scope is a raw-socket driver. Each is wrapped in a small handle with the
+and the scope is VISA too, but with its own driver. Each is wrapped in a small handle with the
 same operations: ``connect()``, ``disconnect()``, ``probe()`` (a cheap call that
 confirms the link is alive and returns a short status string), ``alive``,
 ``device`` and a ``lock`` that serializes every call to that instrument.
@@ -193,7 +193,7 @@ class WavemeterHandle(_LockedHandle):
 
 
 class ScopeHandle(_LockedHandle):
-    """Adapter for the legacy :class:`~iyzee.devices.scope.LeCroy` raw-socket driver."""
+    """Adapter for the :class:`~iyzee.devices.scope.LeCroy` VISA (VXI-11) driver."""
 
     #: Seconds the scope gets to answer its first query after connecting.
     FIRST_RESPONSE_TIMEOUT = 15.0
@@ -201,19 +201,19 @@ class ScopeHandle(_LockedHandle):
     def __init__(self, ip: str | None = None) -> None:
         super().__init__()
         self._ip = ip or address(IP.SCOPE)
-        self._scope = LeCroy()
+        self._scope = LeCroy(str(self._ip))
 
     def connect(self) -> None:
-        self._scope.connect(str(self._ip))
+        self._scope.connect()
 
     def disconnect(self) -> None:
         self._scope.disconnect()
 
     def probe(self) -> str:
-        """Prove the scope *answers*, not just that port 1861 accepted a TCP connection.
+        """Prove the scope *answers*, not just that the VISA resource opened.
 
-        The first reply after connecting can be slow, and a timeout is fatal to
-        the VICP stream, so this one query gets a wider bound than steady state.
+        The first reply after connecting can be slow, and a timeout drops the
+        connection, so this one query gets a wider bound than steady state.
         """
         started = time.monotonic()
         try:
@@ -221,14 +221,14 @@ class ScopeHandle(_LockedHandle):
         except LeCroyTimeoutError as exc:
             raise ConnectionError(
                 f"{self._ip} accepted the connection but did not answer *IDN? within "
-                f"{self.FIRST_RESPONSE_TIMEOUT:g}s (is another VICP client holding the scope?)"
+                f"{self.FIRST_RESPONSE_TIMEOUT:g}s (is another client holding the scope?)"
             ) from exc
         log.info("scope answered *IDN? after %.2fs", time.monotonic() - started)
         return identity
 
     @property
     def alive(self) -> bool:
-        return self._scope.check_link()
+        return self._scope.connected
 
     @property
     def lock(self) -> threading.RLock:

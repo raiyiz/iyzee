@@ -7,7 +7,6 @@ from typing import Any
 
 import numpy as np
 import pytest
-from helpers import FakeSocket
 
 from iyzee.devices.scope import Channel, Coupling, TriggerCoupling, TriggerMode, TriggerSlope
 from iyzee.scope_workflows import (
@@ -28,7 +27,7 @@ class FakeScope:
     """Records every call ``scope_workflows`` makes, and can be told to
     fail on specific channels — enough to exercise the workflow logic
     (looping, partial-failure collection, shared-timebase reuse) without a
-    real socket or VICP framing (see ``test_scope.py`` for that layer)."""
+    real VISA resource (see ``test_scope.py`` for that layer)."""
 
     def __init__(
         self,
@@ -542,12 +541,16 @@ def test_a_parse_error_on_a_healthy_link_does_not_stop_the_batch():
 def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock():
     """The console's ``lab.scope`` is a LockedProxy over the handle's lock;
     passing that same lock to a workflow used to hang forever."""
+    from helpers import FakeResourceManager
+
     from iyzee.devices.handles import LockedProxy, ScopeHandle
+    from iyzee.devices.scope import LeCroy
 
     handle = ScopeHandle()
+    resources = FakeResourceManager()
+    handle._scope = LeCroy("10.0.0.1", resource_manager=resources)
+    handle.connect()
     assert handle.lock is handle.device.transaction_lock  # one lock, owned by the driver
-    sock = FakeSocket()
-    handle.device._transport.attach_socket(sock)
     proxy = LockedProxy(handle.device, handle.lock)
     outcome: list[object] = []
 
@@ -564,7 +567,7 @@ def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock()
 
     assert not worker.is_alive(), "deadlocked: handle lock re-entered through the proxy"
     assert outcome == [[]]
-    assert b"C1:VOLT_DIV 1.0" in bytes(sock.sent)
+    assert "C1:VOLT_DIV 1.0" in resources.resource.written
 
 
 def test_batch_holds_the_driver_lock_without_an_explicit_lock():

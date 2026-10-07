@@ -17,9 +17,7 @@ src/iyzee/
 │   ├── base.py             # shared VISA lifecycle (BaseDevice), PSU channels
 │   ├── mxa.py              # Keysight MXA SCPI/VISA driver
 │   ├── power.py            # power supply + optical shutter control
-│   ├── vicp.py             # VICP framing over TCP: thread-safe transport that drops the connection
-│   │                       # after any mid-message failure (no request IDs, so a late reply would desync)
-│   ├── scope.py            # LeCroy oscilloscope: waveform download + channel/trigger/math control
+│   ├── scope.py            # LeCroy oscilloscope (VISA/VXI-11): waveform download + channel/trigger control
 │   ├── wavemeter.py        # wavemeter HTTP client: readout, PID setpoint
 │   └── handles.py          # uniform connect/disconnect/probe/lock adapter per device, LockedProxy
 ├── scope_workflows.py     # scope operations + durable waveform recordings — plain
@@ -187,10 +185,10 @@ already just picks a `Step` list and runs it.
   SCPI strings.
 - **`devices/power.py`** — PSU control plus `ShutterControl`, a thin wrapper that
   drives the optical shutter through one PSU channel.
-- **`devices/scope.py`** — LeCroy oscilloscope driver (VICP protocol over TCP, framing in
-  `devices/vicp.py`, which drops the connection after any mid-message failure). Not
-  yet unified with `BaseDevice`'s connection lifecycle; treat as a standalone
-  legacy driver. `scope_workflows.py` holds the operations built on top
+- **`devices/scope.py`** — LeCroy oscilloscope driver on `BaseDevice` (VISA over
+  VXI-11; the scope's remote control must be set to LXI/VXI-11). A timeout or I/O error
+  drops the connection, since a late reply would otherwise answer the next query.
+  `scope_workflows.py` holds the operations built on top
   (channel/trigger settings, waveform acquisition) — see "Design direction".
 - **`devices/wavemeter.py`** — `Wavemeter`, a stateless HTTP client (frequency
   readout, PID setpoint); scripts and the console use `Wavemeter()` directly.

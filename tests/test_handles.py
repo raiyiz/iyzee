@@ -209,16 +209,20 @@ def test_wavemeter_handle_probe_propagates_read_errors(
 class _FakeLeCroy:
     answer: str | Exception = "LECROY,WS452,SN1,9.0"
 
-    def __init__(self) -> None:
+    def __init__(self, ip: str) -> None:
         self.connected_to: str | None = None
+        self.ip = ip
+        self.connected = False
         self.disconnected = False
         self.idn_timeouts: list[float | None] = []
 
-    def connect(self, ip: str) -> None:
-        self.connected_to = ip
+    def connect(self) -> None:
+        self.connected_to = self.ip
+        self.connected = True
 
     def disconnect(self) -> None:
         self.disconnected = True
+        self.connected = False
 
     def idn(self, *, timeout: float | None = None) -> str:
         self.idn_timeouts.append(timeout)
@@ -262,18 +266,15 @@ def test_instrument_registry_has_unique_nonempty_specs() -> None:
     assert all(spec.label for spec in INSTRUMENTS)
 
 
-def test_scope_handle_alive_follows_the_drivers_link_check(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Link(_FakeLeCroy):
-        healthy = True
-
-        def check_link(self) -> bool:
-            return self.healthy
-
-    monkeypatch.setattr(instruments_mod, "LeCroy", Link)
+def test_scope_handle_alive_follows_the_drivers_connected_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
     handle = ScopeHandle()
+    handle.connect()
     assert handle.alive
 
-    cast(Link, handle.device).healthy = False
+    cast(_FakeLeCroy, handle.device).connected = False  # e.g. dropped after a timeout
 
     assert not handle.alive
 
