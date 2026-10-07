@@ -26,9 +26,8 @@
 // One place decides which ref the "source" links point at. `scripts/
 // check_doc_links.py` validates the anchors against the working tree.
 #let repo-url = "https://github.com/raiyiz/iyzee/blob/"
-// The branch the guide describes; every linked path exists there. Switch to "main"
-// once the current layout is merged.
-#let repo-ref = "flirr"
+// Source anchors point at the canonical branch so links remain useful after merges.
+#let repo-ref = "main"
 
 #let src-link(path, line: none) = {
   let anchor = if line == none { "" } else { "#L" + str(line) }

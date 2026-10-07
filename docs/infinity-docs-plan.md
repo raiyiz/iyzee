@@ -9,7 +9,7 @@
 The work is intentionally staged. Each phase has a clear endpoint so documentation can be improved in focused commits without losing the thread.
 
 - [x] Phase 0 — README as the entry point
-- [ ] Phase 1 — Documentation landing page and structure
+- [x] Phase 1 — Documentation landing page and structure
 - [ ] Phase 2 — Architecture as the canonical developer map
 - [ ] Phase 3 — Measurement lifecycle
 - [ ] Phase 4 — TUI/device boundary and adding devices
@@ -69,7 +69,9 @@ Completed in the README refresh:
 
 **Done when:** someone opening the documentation cold can tell what the manual contains, where to start, and where to go for architecture, operation, or science.
 
-**Deliverable:** one focused structure/landing-page commit.
+**Phase 1 result:** `docs/README.md` is the web-facing documentation map; `docs/main.typ` is the compiled-guide entry point; the PDF contains only the four reader-facing chapters in deliberate order; helpers remain implementation details; source anchors point to `main`; chapter navigation is explicit; and `docs/adr/` is the canonical home for future ADRs.
+
+**Deliverable:** completed.
 
 ---
 

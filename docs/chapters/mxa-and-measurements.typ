@@ -9,18 +9,24 @@
 )
 
 #callout(
-  "Reading rule",
+  "What this part answers",
   [
-    This part describes the current iyzee measurement model. Each important
-    instrument setting is experimental state: it has a physical meaning, a
-    driver-level implementation, and a place in the saved record.
+    *Answers:* how analyzer configuration becomes a measured quantity, how SCPI
+    state, RBW/VBW, averaging and sweep timing affect the result, and what
+    measurement context is persisted.
+
+    *For:* contributors changing measurement procedures, analyzer behavior, or
+    result handling. It is a project-level reference, not a replacement for
+    Keysight's instrument manuals.
   ],
   tone: "result",
 )
 
 #v(0.6em)
 
-*Status:* documentation of the current implementation. This guide explains the boundary between the experiment code, the MXA driver, and the measurement quantities returned to Python. It is not a replacement for the Keysight programmer's or measurement references.
+*Reading path:* start with #link(<part-architecture>)[Architecture] for
+ownership and layering; use this part for analyzer and measurement semantics;
+see #link(<part-rubidium>)[Rubidium] for the physical interpretation.
 
 = Code and instrument boundary
 
@@ -195,6 +201,17 @@ The key comparison in that workflow is squeezing versus shot noise. A difference
 - NIST, *Spectrum Amplitude Definition, Generation, and Measurement*, Technical Note 699: bandwidth and equivalent-bandwidth concepts. #link("https://www.nist.gov/system/files/documents/calibrations/tn699.pdf")[Technical Note 699]
 - PyVISA documentation, `query_binary_values()`: binary transfer, datatype, endianness, and containers. #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
 - Repository implementation: `src/iyzee/base.py`, `src/iyzee/mxa.py`, `src/iyzee/experiment/`, and the associated tests.
+
+#callout(
+  "Where to go next",
+  [
+    For the application and device boundaries involved in a measurement,
+    see #link(<part-architecture>)[Architecture] and
+    #link(<part-tui>)[TUI and devices]. For atomic structure, PSR, and squeezing,
+    continue to #link(<part-rubidium>)[Rubidium].
+  ],
+  tone: "result",
+)
 
 = Maintenance rule
 

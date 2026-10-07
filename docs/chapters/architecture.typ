@@ -27,12 +27,14 @@
 )
 
 #callout(
-  "Status",
+  "What this part answers",
   [
-    This part describes the current implementation. It is an architecture
-    guide, not a generic instrument-control tutorial and not a complete API
-    reference. The source code remains authoritative; when code, tests, and
-    prose disagree, the implementation and its verified behavior win.
+    *Answers:* how iyzee is layered, who owns live instrument state, where
+    synchronization and persistence boundaries live, and where new code belongs.
+
+    *For:* contributors changing application structure, device integration,
+    workflows, or the shared session model. This is not a complete API
+    reference; the implementation and its verified tests remain authoritative.
   ],
 )
 
@@ -1465,6 +1467,17 @@ At every boundary, ask two questions:
 
 Most of the project's architecture follows from answering those questions
 consistently.
+
+#callout(
+  "Where to go next",
+  [
+    For interactive behavior or instrument integration, continue to
+    #link(<part-tui>)[TUI and devices]. For analyzer semantics and measurement
+    quantities, continue to #link(<part-mxa>)[MXA and measurements]. For the
+    physical experiment, see #link(<part-rubidium>)[Rubidium].
+  ],
+  tone: "result",
+)
 
 = Maintenance rule
 

@@ -71,6 +71,14 @@ docs/
 ```
 
 Helper files support the guide but are not themselves reader-facing chapters.
+The public structure is intentionally small: start with `docs/README.md`, then
+follow the compiled guide or the specific chapter that matches the task.
+
+## Architectural decisions
+
+Long-lived architectural decisions belong under [`adr/`](adr/). ADRs are
+decision records, not reader-facing chapters, and are not included in the
+compiled guide's contents.
 
 ## Build the guide
 

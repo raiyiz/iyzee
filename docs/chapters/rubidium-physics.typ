@@ -10,13 +10,17 @@
 )
 
 #callout(
-  "Purpose",
+  "What this part answers",
   [
-    This is the physics layer behind the software's Rubidium reference page
-    and its squeezing measurement workflow. It separates vacuum reference
-    frequencies from observed warm-vapor spectra, classical polarization
-    rotation from the quantum squeezing mechanism, and the physical experiment
-    from what the current software actually models.
+    *Answers:* how the relevant Rb D-line and hyperfine structure leads to the
+    observed warm-vapor response, how polarization self-rotation produces the
+    nonlinear interaction of interest, and how the physical quantities connect
+    to the measured noise.
+
+    *For:* readers interpreting the experiment, extending the scientific model,
+    or connecting spectra to the atomic physics. The chapter deliberately
+    distinguishes established reference data from quantities iyzee does not
+    infer automatically.
   ],
   tone: "result",
 )
@@ -605,6 +609,17 @@ multimode structure and geometry can strongly influence what is actually
 observed. Recent coherent-PSR work (ref. 9) is useful when distinguishing
 conventional polarization rotation from explicitly coherent spin-light
 interactions.
+
+#callout(
+  "Where to go next",
+  [
+    For the analyzer and persisted measurement path, see
+    #link(<part-mxa>)[MXA and measurements]. For interactive instrument access,
+    see #link(<part-tui>)[TUI and devices]. For the software structure behind
+    those interfaces, return to #link(<part-architecture>)[Architecture].
+  ],
+  tone: "result",
+)
 
 = Scientific maintenance rule
 

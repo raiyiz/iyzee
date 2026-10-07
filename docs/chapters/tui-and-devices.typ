@@ -9,18 +9,24 @@
 )
 
 #callout(
-  "Design invariant",
+  "What this part answers",
   [
-    The TUI organizes, displays and controls. Device and experiment machinery
-    remains ordinary Python, callable from scripts and the embedded console.
-    This separation is the main architectural boundary of iyzee.
+    *Answers:* how the TUI, live session, console, workflows, and device drivers
+    cooperate, how connection state is exposed, and how hardware operations stay
+    reusable outside Textual.
+
+    *For:* operators and contributors working on screens, device integration,
+    connection behavior, console access, or interactive acquisition. For the
+    underlying architecture, start with #link(<part-architecture>)[Architecture].
   ],
   tone: "result",
 )
 
 #v(0.6em)
 
-*Status:* documentation of the current implementation. This guide explains how the terminal UI, the experiment layer, and the instrument drivers fit together, and gives a working reference for talking to each instrument directly. For MXA-specific SCPI detail and the measurement physics, see the companion #link(<part-mxa>)[MXA and measurement guide].
+*Reading path:* use #link(<part-architecture>)[Architecture] for the stable
+software boundary, this part for interactive/device behavior, and
+#link(<part-mxa>)[MXA and measurements] for analyzer-specific semantics.
 
 = One foundation, two entry points
 
@@ -268,6 +274,17 @@ The storage layer is shared with experiment sweeps through `experiment.io.save_n
 - PyVISA documentation, resource strings and `query_binary_values()`: #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
 - Textual documentation, workers and focus: #link("https://textual.textualize.io/guide/workers/")[Workers guide]
 - prompt_toolkit and pyte, which host IPython's terminal UI in the console: #link("https://python-prompt-toolkit.readthedocs.io/")[prompt_toolkit documentation], #link("https://pyte.readthedocs.io/")[pyte documentation]
+
+#callout(
+  "Where to go next",
+  [
+    For the software boundaries behind the interactions described here, return
+    to #link(<part-architecture>)[Architecture]. For measurement setup and noise
+    interpretation, continue to #link(<part-mxa>)[MXA and measurements]. For
+    the scientific context behind the experiment, see #link(<part-rubidium>)[Rubidium].
+  ],
+  tone: "result",
+)
 
 = Maintenance rule
 
