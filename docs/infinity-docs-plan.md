@@ -10,7 +10,7 @@ The work is intentionally staged. Each phase has a clear endpoint so documentati
 
 - [x] Phase 0 — README as the entry point
 - [x] Phase 1 — Documentation landing page and structure
-- [ ] Phase 2 — Architecture as the canonical developer map
+- [x] Phase 2 — Architecture as the canonical developer map
 - [ ] Phase 3 — Measurement lifecycle
 - [ ] Phase 4 — TUI/device boundary and adding devices
 - [x] Phase 5 — VISA / VXI-11 scope architecture
@@ -105,6 +105,8 @@ Completed in the README refresh:
 - [ ] Keep links sparse and purposeful; do not turn the chapter into generated API documentation.
 
 **Done when:** a contributor can answer "where should this code live?" from this chapter alone.
+
+**Phase 2 result:** the architecture chapter is organized around stable boundaries, ownership, lifecycle, synchronization, measurement execution, TUI composition, persistence, and extension rules. The long file-by-file module inventory has been reduced to a compact responsibility map; scope transport documentation reflects VISA/VXI-11; and architectural tests are described in terms of cross-layer contracts rather than implementation trivia.
 
 ---
 
