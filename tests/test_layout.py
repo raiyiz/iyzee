@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from helpers import async_test
+from helpers import async_test, wait_until
 from textual.geometry import Region
 from textual.widgets import ContentSwitcher, Select
 
@@ -80,8 +80,8 @@ async def test_the_console_terminal_stays_reachable_on_short_terminals() -> None
     app = IyzeeApp()
     async with app.run_test(size=size) as pilot:
         await pilot.press("i")
-        await pilot.pause(0.3)
         terminal = app.query_one("#console-terminal")
+        await wait_until(pilot, lambda: app.focused is terminal)
         assert (await _scroll_to(pilot, terminal)).overlaps(terminal.region)
 
 

@@ -2,7 +2,8 @@ import time
 
 import pyvisa
 
-from iyzee import IP, BaseDevice
+from ..config import IP, address
+from .base import BaseDevice
 
 
 class KeysightMXA(BaseDevice):
@@ -12,9 +13,9 @@ class KeysightMXA(BaseDevice):
     triggering synchronization, and binary data transfer.
     """
 
-    def __init__(self, ip: IP = IP.NOISE_ANALYZER, timeout_ms: int = 5_000, resource_manager=None):
+    def __init__(self, ip: str | None = None, timeout_ms: int = 5_000, resource_manager=None):
         super().__init__(
-            ip=ip,
+            ip=ip or address(IP.NOISE_ANALYZER),
             resource_manager=resource_manager,
             timeout_ms=timeout_ms,
             read_termination="\n",

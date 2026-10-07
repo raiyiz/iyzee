@@ -13,9 +13,9 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
-from ..mxa import KeysightMXA
-from ..power import ShutterControl
-from ..wavemeter_readout import read_frequency, set_pid_setpoint
+from ..devices.mxa import KeysightMXA
+from ..devices.power import ShutterControl
+from ..devices.wavemeter import Wavemeter
 from .core import ExperimentContext, Step, StepResult, run_sequence
 
 TRACE_SQZ = 1
@@ -94,9 +94,16 @@ class BandwidthStep:
         )
 
 
+#: Seconds the laser gets to settle on a new PID setpoint before it is read.
+SETTLE_TIME_S = 0.5
+
+
 @dataclass
 class FrequencyStep:
-    """Set the laser frequency setpoint, wait to settle, and acquire.
+    """Set the laser frequency setpoint, wait to settle, read the wavemeter, and acquire.
+
+    The reading is taken after the settle time and right before the traces, and
+    is stored with the step as ``meta["measured_frequency_thz"]``.
 
     The shutter opens only around the squeezing acquisition and is closed
     again before the shot-noise reference trace is captured; that ordering
@@ -106,7 +113,7 @@ class FrequencyStep:
 
     frequency_thz: float
     wavemeter_channel: int
-    relax_time_s: float
+    relax_time_s: float = SETTLE_TIME_S
 
     @property
     def label(self) -> str:
@@ -116,9 +123,10 @@ class FrequencyStep:
         if ctx.shutter is None:
             raise ValueError("FrequencyStep requires ctx.shutter to be set")
 
-        set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
+        wavemeter = Wavemeter()
+        wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
         time.sleep(self.relax_time_s)
-        measured_frequency = read_frequency(self.wavemeter_channel)
+        measured_frequency = wavemeter.read_frequency(self.wavemeter_channel)
 
         try:
             ctx.shutter.open()
@@ -151,7 +159,7 @@ def bandwidth_sweep_steps(rbw_values_hz=None) -> list[BandwidthStep]:
 def frequency_sweep_steps(
     laser_center_thz: float = 377.1052067,
     wavemeter_channel: int = 4,
-    relax_time_s: float = 1.5,
+    relax_time_s: float = SETTLE_TIME_S,
     offsets_thz=None,
 ) -> list[FrequencyStep]:
     """Build a laser-frequency scan around laser_center_thz."""
@@ -207,10 +215,14 @@ def build_frequency_sweep(
     offsets_thz=None,
     *,
     sweep_duration_ms: int = 10,
+    relax_time_s: float = SETTLE_TIME_S,
 ) -> tuple[list[FrequencyStep], AnalyzerConfig]:
-    """Build a frequency sweep and derive its settle time from the analyzer config."""
+    """Build a frequency sweep and the analyzer configuration it needs.
+
+    The settle time is the laser's, not the analyzer's: every acquisition
+    restarts the averaging (``INIT:IMM``), so no analyzer-side wait is needed.
+    """
     config = frequency_sweep_config(sweep_duration_ms=sweep_duration_ms)
-    relax_time_s = config.sweep_duration_ms * config.avg_count / 1000
     steps = frequency_sweep_steps(
         laser_center_thz=laser_center_thz,
         wavemeter_channel=wavemeter_channel,

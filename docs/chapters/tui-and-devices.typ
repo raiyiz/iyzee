@@ -1,42 +1,43 @@
 // iyzee TUI and device interaction guide
+#import "requirements.typ": *
 
-#set document(
-  title: "iyzee TUI and device interaction guide",
-  author: "iyzee",
+#part(
+  "Software architecture + operator reference",
+  "TUI and device interaction",
+  "How iyzee connects real instruments, exposes them to the terminal UI and console, and keeps hardware operations reusable outside Textual.",
+  id: "part-tui",
 )
 
-#set page(
-  margin: (x: 2.2cm, y: 2cm),
-  header: context [
-    #set text(size: 8pt)
-    #smallcaps[iyzee]
-    #h(1fr)
-    TUI & devices
+#callout(
+  "Design invariant",
+  [
+    The TUI organizes, displays and controls. Device and experiment machinery
+    remains ordinary Python, callable from scripts and the embedded console.
+    This separation is the main architectural boundary of iyzee.
   ],
-  footer: context [
-    #set text(size: 8pt)
-    #h(1fr)
-    #counter(page).display("1 / 1", both: true)
-  ],
+  tone: "result",
 )
-
-#set par(justify: true, leading: 0.55em)
-#set heading(numbering: "1.")
-#set text(size: 10pt)
-
-#align(center)[
-  #text(size: 22pt, weight: "bold")[TUI and device interaction guide]
-  #v(0.4em)
-  #text(size: 11pt)[iyzee technical guide]
-]
 
 #v(0.6em)
 
-*Status:* documentation of the current implementation. This guide explains how the terminal UI, the experiment layer, and the instrument drivers fit together, and gives a working reference for talking to each instrument directly. For MXA-specific SCPI detail and the measurement physics, see the companion #link("mxa-and-measurements.typ")[MXA and measurement guide].
+*Status:* documentation of the current implementation. This guide explains how the terminal UI, the experiment layer, and the instrument drivers fit together, and gives a working reference for talking to each instrument directly. For MXA-specific SCPI detail and the measurement physics, see the companion #link(<part-mxa>)[MXA and measurement guide].
 
-#align(center)[#outline(title: [Contents], indent: 1.2em)]
+= One foundation, two entry points
 
-#pagebreak()
+The script and interactive application share the same lower layers:
+
+#diagram(
+  ```mermaid
+flowchart LR
+  A["iyzee script"] --> C["experiment layer"]
+  B["iyzee-tui"] --> C
+  D["embedded IPython"] --> E["Lab / live handles"]
+  E --> C
+  C --> F["device drivers"]
+  F --> G["physical instruments"]```.text,
+  caption: [Interactive presentation sits above reusable experiment and device operations.],
+  width: 94%,
+)
 
 = Two entry points, one foundation
 
@@ -44,7 +45,7 @@
 
 #table(
   columns: (1fr, 1.7fr, 1.7fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 6pt,
   align: (left, left, left),
   [*Concern*], [`iyzee` (script)], [`iyzee-tui` (interactive)],
@@ -58,6 +59,11 @@
 Both paths build a list of `Step` objects and hand them to `run_sequence()`; nothing about `experiment/` needed to change to support the TUI, and nothing about the TUI needed to know how a `BandwidthStep` or `FrequencyStep` actually talks to the MXA.
 
 = Device layer
+
+The device layer is where software semantics meet real protocols: VISA,
+raw SCPI sockets, LeCroy VICP, and the WS-7 HTTP interface. Each adapter keeps
+hardware-specific command syntax out of the experiment and TUI layers.
+
 
 == Connection lifecycle
 
@@ -74,7 +80,7 @@ Both paths build a list of `Step` objects and hand them to `run_sequence()`; not
 
 #table(
   columns: (1.3fr, 1fr, 2fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 6pt,
   align: (left, left, left),
   [*`IP` member*], [*Address*], [*Instrument*],
@@ -88,7 +94,7 @@ These are lab-network fixtures, not configuration — they live as a `StrEnum` i
 
 == Keysight MXA
 
-The MXA is by far the most-used instrument and has its own dedicated guide — see #link("mxa-and-measurements.typ")[MXA and measurement guide] for the full SCPI command map, RBW/VBW/detector semantics, and the squeezing/shot-noise measurement workflow. The short version: `mxa.py` wraps every operation (frequency, bandwidth, sweep control, trace transfer, markers, triggering) as a plain Python method that writes or queries one SCPI command — application code never contains a raw SCPI string.
+The MXA is by far the most-used instrument and has its own dedicated guide — see #link(<part-mxa>)[MXA and measurement guide] for the full SCPI command map, RBW/VBW/detector semantics, and the squeezing/shot-noise measurement workflow. The short version: `mxa.py` wraps every operation (frequency, bandwidth, sweep control, trace transfer, markers, triggering) as a plain Python method that writes or queries one SCPI command — application code never contains a raw SCPI string.
 
 == Power supply and optical shutter
 
@@ -96,7 +102,7 @@ The MXA is by far the most-used instrument and has its own dedicated guide — s
 
 #table(
   columns: (1.5fr, 1.8fr, 2fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left, left),
   [*Method*], [*SCPI written*], [*Note*],
@@ -118,7 +124,7 @@ Typical commands sent via `LeCroy.send()`:
 
 #table(
   columns: (1.6fr, 2.2fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left),
   [*Command*], [*Purpose*],
@@ -135,25 +141,41 @@ Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and
 
 == Wavemeter
 
-`wavemeter_readout.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close. `Wavemeter` is a thin client with one method per endpoint (the module-level `read_frequency()` / `set_pid_setpoint()` are the same calls on a default client), and `last_seen` records the UTC time of the last successful HTTP response (`None` before the first one). `lab.wavemeter.<Tab>` in the console completes the API and `lab.api("wavemeter")` prints it with the HTTP routes; `get(path)` / `post(path, **form)` reach routes it doesn't wrap yet:
+`devices/wavemeter.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close. `Wavemeter` is a thin client with one method per operation. Its host defaults to the configured wavemeter address and its port defaults to 8000; otherwise each method is a direct `requests` call. The client carries no connection or measurement state, so it can be used from the console immediately, without going through the Connect screen:
 
 #table(
   columns: (1.4fr, 2.4fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left),
-  [*Endpoint*], [*Used by*],
-  [`GET /api/{channel}/`], [`read_frequency()` (and `single_readout()`, which subtracts an optional reference) — current frequency (THz) on that channel],
-  [`POST /api/set_pid/` (body `freq_thz=...&channel=...`)], [`set_pid_setpoint()` — set the PID lock setpoint; regulation itself is left off by design and must be enabled manually],
+  [*Method*], [*Purpose*],
+  [`GET /api/{channel}/`], [`read_frequency()` reads the current frequency in THz],
+  [`POST /api/set_pid/`], [`set_pid_setpoint()` sends `freq_thz` and `channel` as form data],
 )
 
-A failed or unparseable HTTP response raises `WavemeterReadoutError` rather than silently returning a plausible-looking frequency — deliberately, per the project's own safety rule (see the README's Safety notes): a communication failure must never masquerade as a measurement.
+A failed HTTP response raises the exception from `requests.raise_for_status()`, and an invalid frequency becomes the normal `ValueError` from `float()`. Nothing is translated into a custom wavemeter exception, so the actual transport or parse failure remains visible to callers.
+
+#diagram(
+  ```mermaid
+flowchart TD
+  A["user action"] --> B["page / command"]
+  B --> C["validation + translation"]
+  C --> D["plain Python workflow"]
+  D --> E["instrument handle"]
+  E --> F["driver"]
+  F --> G["hardware"]
+  G --> E
+  E --> D
+  D --> B```.text,
+  caption: [A page translates interaction into reusable operations; it does not become the device driver.],
+  width: 94%,
+)
 
 = TUI architecture <sec-instruments>
 
 == Screens
 
-Six pages cover the common tasks (`tui/screens/`) — `ConnectScreen`, `SweepScreen`, `ScopeScreen`, `ResultsScreen`, `ConsoleScreen` and `LogScreen`, plain container widgets held by one `ContentSwitcher` (they keep the `*Screen` names from before the sidebar shell replaced Textual's per-page `Screen`s).
+Seven pages cover the common tasks (`tui/screens/`) — `ConnectScreen`, `SweepScreen`, `ScopeScreen`, `RbScreen` (the static rubidium D1/D2 reference), `ResultsScreen`, `ConsoleScreen` and `LogScreen`, plain container widgets held by one `ContentSwitcher` (they keep the `*Screen` names from before the sidebar shell replaced Textual's per-page `Screen`s).
 
 The shared `tui/screens/page.py` base owns page mechanics that are not domain-specific: scrolling/focus behavior, labeled-field construction, the finite/positive numeric validators, validation marking, the safe worker-to-UI callback, and the default no-op `refresh_readiness()` hook. `IyzeeApp.instruments_changed()` refreshes all mounted `Page` instances through that hook rather than naming each connection-dependent screen. Keeping that plumbing in one place lets each screen retain only its own controls, domain operations, and result presentation. `IyzeeApp` (`tui/app.py`) owns which one is currently visible plus the state that has to survive switching between them (`handles`, `last_run`). It does *not* own per-instrument locks any more — see @sec-locking below.
 
@@ -166,7 +188,7 @@ The shared `tui/screens/page.py` base owns page mechanics that are not domain-sp
 
 == Instrument registry and locking <sec-locking>
 
-`tui/instruments.py` is the single place that knows how to build a uniform `InstrumentHandle` (`connect()` / `disconnect()` / `probe()` / `.device`) around each heterogeneous driver — VISA (`_VisaHandle`, wrapping `KeysightMXA`), the PSU-backed shutter (`ShutterHandle`), the scope's raw socket (`ScopeHandle`), and the wavemeter's stateless HTTP calls (`WavemeterHandle`). Adding a new instrument to the Connect screen means adding one `InstrumentSpec` here — no screen code changes.
+`devices/handles.py` is the single place that knows how to build a uniform `InstrumentHandle` (`connect()` / `disconnect()` / `probe()` / `.device`) around each heterogeneous driver — VISA (`_VisaHandle`, wrapping `KeysightMXA`), the PSU-backed shutter (`ShutterHandle`), the scope's raw socket (`ScopeHandle`), and the wavemeter's stateless HTTP calls (`WavemeterHandle`). `lab.py` holds the `InstrumentSpec` registry and `Lab`, which owns the connected handles (connect, disconnect, dead-link detection, close-all) for the TUI, the console and scripts alike; adding a new instrument means one handle and one `InstrumentSpec` — no screen code changes. Addresses and the data directory come from `config.py` (environment variables or a `config.toml`).
 
 Each handle inherits `_LockedHandle`, which owns one re-entrant `threading.RLock` exposed by the `InstrumentHandle` protocol (`ScopeHandle` overrides it to return the `LeCroy` driver's own transaction lock, so the handle, the console proxy, workflow batches and the driver's multi-command transfers all share a single lock). The lock therefore stays on the handle rather than `IyzeeApp` keeping a separate `dict[str, threading.Lock]` alongside `handles`. `LockedProxy`, in the same module, wraps a live device so that *every method call* acquires a given lock for its duration — `ConnectScreen` and `SweepScreen` pass `handle.lock` when they hold it around their own hardware calls, and the console's `LabProxy` passes the same one. This is what stops a console command and a running sweep from issuing overlapping commands to the same physical instrument from two different threads at once. It's a coarse, call-level lock, not a queue — a long-running call (e.g. a slow sweep step) will make a concurrent caller wait for the whole call, not just contend briefly.
 
@@ -180,7 +202,18 @@ A page's job is the form, the buttons, the plot, and reporting a result — not 
 
 == Navigation
 
-Key handling relies entirely on Textual's own focus and binding-priority system, with no app-specific policy layer on top: a focused widget's own bindings (an `Input`'s text-entry keys, the console terminal's own keys) are offered the key first, and it only falls through to `IyzeeApp.BINDINGS` if the widget doesn't handle it. Those are `c`/`s`/`o`/`t`/`i`/`l` (switch page; the page you are already on is not offered) and `F1`–`F4`, which reach only Connect/Sweep/Results/Console — Textual's own key handling reserves those four specifically to escape the console's embedded terminal, so Scope and Log are letter-only (`o`, `l`) rather than extending that set — plus `Ctrl+Q` (quit at once) and `q` (quit on a second press within a few seconds, so a stray key can't close an app holding live instruments), `j`/`k` (move focus) and `Escape` (leave a text field). There is no hand-maintained "am I in insert mode" flag to keep in sync with what's actually focused — Textual's dispatch order is the single source of truth for that. `Ctrl+\` opens Textual's built-in Command Palette rather than a hand-rolled command bar or parser; it is a priority binding, checked before the focus chain, and is deliberately not `Ctrl+P`, which IPython's history recall uses.
+Key handling relies entirely on Textual's own focus and binding-priority system, with no app-specific policy layer on top: a focused widget's own bindings (an `Input`'s text-entry keys, the console terminal's own keys) are offered the key first, and it only falls through to `IyzeeApp.BINDINGS` if the widget doesn't handle it. Those are `c`/`s`/`o`/`r`/`t`/`i`/`l` (switch page; the page you are already on is not offered) and `F1`–`F4`, which reach only Connect/Sweep/Results/Console — Textual's own key handling reserves those four specifically to escape the console's embedded terminal, so Scope, Rb and Log are letter-only (`o`, `r`, `l`) rather than extending that set — plus `:` (vim-style command mode: page switching, `:connect scope`, and page-specific commands such as `:tdiv 2u`; see `tui/commands.py`), `Ctrl+Q` (quit at once) and `q` (quit on a second press within a few seconds, so a stray key can't close an app holding live instruments), `j`/`k` (move focus) and `Escape` (leave a text field). There is no hand-maintained "am I in insert mode" flag to keep in sync with what's actually focused — Textual's dispatch order is the single source of truth for that. `Ctrl+\` opens Textual's built-in Command Palette rather than a hand-rolled command bar or parser; it is a priority binding, checked before the focus chain, and is deliberately not `Ctrl+P`, which IPython's history recall uses.
+
+#callout(
+  "Concurrency invariant",
+  [
+    One physical instrument has one serialization boundary. Console calls,
+    screen workers and workflow batches therefore cannot interleave protocol
+    commands accidentally. Long-running hardware calls still occupy that
+    boundary for their full duration.
+  ],
+  tone: "result",
+)
 
 = The console in practice <sec-console>
 
@@ -228,8 +261,8 @@ The storage layer is shared with experiment sweeps through `experiment.io.save_n
 
 = References
 
-- Repository implementation: `src/iyzee/base.py`, `src/iyzee/power.py`, `src/iyzee/scope.py`, `src/iyzee/scope_workflows.py`, `src/iyzee/wavemeter_readout.py`, `src/iyzee/tui/`, and the associated tests.
-- #link("mxa-and-measurements.typ")[MXA and measurement guide] — MXA SCPI reference, measurement physics, and the squeezing/shot-noise workflow.
+- Repository implementation: `src/iyzee/devices/base.py`, `src/iyzee/devices/power.py`, `src/iyzee/devices/scope.py`, `src/iyzee/scope_workflows.py`, `src/iyzee/devices/wavemeter.py`, `src/iyzee/tui/`, and the associated tests.
+- #link(<part-mxa>)[MXA and measurement guide] — MXA SCPI reference, measurement physics, and the squeezing/shot-noise workflow.
 - Rohde & Schwarz, *HMP Series Power Supply User Manual*: `INST:NSEL`, `INST OUTn`, `OUTP:SEL`, `OUTP:GEN` selection and output semantics.
 - LeCroy, *Remote Control Manual*: VICP protocol framing, `WF?`/`INSPECT?` waveform transfer, and (for the channel/trigger/math control added on top of that) the `<channel>:VOLT_DIV`/`OFFSET`/`COUPLING`/`ATTENUATION`/`BANDWIDTH_LIMIT`/`TRACE`/`INVERT_SET`, `TRIG_SELECT`/`TRIG_LEVEL`/`TRIG_SLOPE`/`TRIG_COUPLING`/`TRIG_MODE`/`TRIG_DELAY`, and `DEFINE EQN` command families.
 - PyVISA documentation, resource strings and `query_binary_values()`: #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
@@ -240,4 +273,3 @@ The storage layer is shared with experiment sweeps through `experiment.io.save_n
 
 Keep this guide tied to the implementation. When a driver's commands, the instrument registry, a screen's behavior, or the console's namespace changes, update the corresponding section here in the same change — don't let this fade into a description of an earlier version of the code. Avoid documenting historical designs that no longer exist (an earlier revision of this codebase copied live objects into the console's namespace and had to track and clean them up again on disconnect; `lab`'s live-lookup design replaced that entirely, and this guide should never again describe the older mechanism as current).
 
-*Always strive for improvement, always be humble.*

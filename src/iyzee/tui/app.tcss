@@ -89,6 +89,36 @@ Screen {
     color: $text-muted;
 }
 
+/* -- Rb ----------------------------------------------------------------- */
+
+/* The two D-line plots sit side by side, the transition table below them. */
+#rb-plots {
+    height: 18;
+    margin: 0 2;
+}
+
+.rb-plot {
+    width: 1fr;
+    min-width: 36;
+}
+
+#rb-table {
+    height: 1fr;
+    min-height: 10;
+    margin: 1 2;
+}
+
+/* Narrow terminals: stack the plots instead of squeezing both. */
+.-narrow #rb-plots {
+    layout: vertical;
+    height: auto;
+}
+
+.-narrow .rb-plot {
+    width: 1fr;
+    height: 16;
+}
+
 /* -- Sweep -------------------------------------------------------------- */
 
 /* "Not ready: connect the MXA first" — only displayed while something the
@@ -223,12 +253,6 @@ Screen {
     background: $primary 8%;
 }
 
-#scope-sync-status.scope-dirty {
-    border-left: thick $accent;
-    color: $accent;
-    background: $accent 10%;
-}
-
 /* One panel per analog channel: 1 column (narrow), 2 (medium), 4 (wide) —
    same reflow tiers as .field-grid, but channel panels are bordered boxes
    rather than bare label+input pairs, so they get their own class. */
@@ -255,27 +279,12 @@ Screen {
     padding: 0 1 1 1;
 }
 
-.channel-panel.scope-dirty,
-#scope-trigger.scope-dirty {
-    border: round $accent;
-}
-
-.channel-panel .scope-dirty,
-#scope-trigger .scope-dirty {
-    border: round $accent;
-}
-
-.channel-panel.scope-dirty Checkbox,
-#scope-trigger.scope-dirty Select {
-    color: $accent;
-}
-
 .channel-title {
     padding: 0 0 1 0;
 }
 
-#apply-channels {
-    margin: 0 2 1 2;
+#apply-settings {
+    margin: 1 2;
     width: 100%;
 }
 
@@ -284,11 +293,6 @@ Screen {
     margin: 1 2 0 2;
     border: round $primary-darken-1;
     padding: 0 1 1 1;
-}
-
-#apply-trigger {
-    margin-top: 1;
-    width: 100%;
 }
 
 /* "Acquire": alone in its own grid (rather than a plain Button) so it
@@ -508,4 +512,27 @@ Screen {
     min-height: 12;
     margin: 1 2;
     border: round $primary;
+}
+
+
+/* ":" command line: replaces the footer while open */
+#command-bar {
+    dock: bottom;
+    display: none;
+    height: 1;
+    background: $panel;
+}
+#command-bar.-active {
+    display: block;
+}
+#command-bar > .cmd-prompt {
+    width: 1;
+    color: $accent;
+    text-style: bold;
+}
+#command-input {
+    height: 1;
+    border: none;
+    padding: 0;
+    background: $panel;
 }

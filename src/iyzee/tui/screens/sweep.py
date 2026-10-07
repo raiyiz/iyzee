@@ -53,6 +53,7 @@ from ...experiment import (
     run_sequence,
     save_step_results,
 )
+from ..commands import Command
 from ..plotting import draw_series, prepare_series
 from ..text import one_line
 from ..workers import LastRun
@@ -184,6 +185,23 @@ class SweepScreen(Page):
                 + " first — press F1 for the Connect page."
             )
         status.display = bool(missing)
+
+    def commands(self) -> list[Command]:
+        return [
+            Command(
+                "run", lambda _: self.press_button("run-sweep", "start the sweep"), "Run the sweep"
+            ),
+            Command(
+                "abort",
+                lambda _: self.press_button("abort-sweep", "abort the sweep"),
+                "Abort the running sweep",
+            ),
+            Command(
+                "capture",
+                lambda _: self.press_button("capture-trace", "capture a trace"),
+                "Capture a single trace",
+            ),
+        ]
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run-sweep":

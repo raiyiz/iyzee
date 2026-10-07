@@ -1,42 +1,26 @@
 // iyzee MXA and measurement guide
+#import "requirements.typ": *
 
-#set document(
-  title: "iyzee MXA control and measurement model",
-  author: "iyzee",
+#part(
+  "Scientific + software reference",
+  "MXA control and measurement",
+  "From analyzer state and SCPI to noise spectra, synchronization, and persisted measurement records.",
+  id: "part-mxa",
 )
 
-#set page(
-  margin: (x: 2.2cm, y: 2cm),
-  header: context [
-    #set text(size: 8pt)
-    #smallcaps[iyzee]
-    #h(1fr)
-    MXA & measurements
+#callout(
+  "Reading rule",
+  [
+    This part describes the current iyzee measurement model. Each important
+    instrument setting is experimental state: it has a physical meaning, a
+    driver-level implementation, and a place in the saved record.
   ],
-  footer: context [
-    #set text(size: 8pt)
-    #h(1fr)
-    #counter(page).display("1 / 1", both: true)
-  ],
+  tone: "result",
 )
-
-#set par(justify: true, leading: 0.55em)
-#set heading(numbering: "1.")
-#set text(size: 10pt)
-
-#align(center)[
-  #text(size: 22pt, weight: "bold")[MXA control and measurement model]
-  #v(0.4em)
-  #text(size: 11pt)[iyzee technical guide]
-]
 
 #v(0.6em)
 
-*Status:* documentation of the current `moonshine` implementation. This guide explains the boundary between the experiment code, the MXA driver, and the measurement quantities returned to Python. It is not a replacement for the Keysight programmer's or measurement references.
-
-#align(center)[#outline(title: [Contents], indent: 1.2em)]
-
-#pagebreak()
+*Status:* documentation of the current implementation. This guide explains the boundary between the experiment code, the MXA driver, and the measurement quantities returned to Python. It is not a replacement for the Keysight programmer's or measurement references.
 
 = Code and instrument boundary
 
@@ -53,6 +37,19 @@ $ "MXA" -> "SCPI response" -> "PyVISA" -> "KeysightMXA" -> "Python" $
 The driver deliberately keeps the SCPI boundary thin. For example, `set_center_freq(freq_hz)` writes `FREQ:CENT`, `set_rbw(rbw_hz)` writes `BWID`, and `get_trace_data()` selects ASCII or binary transfer before reading the trace. Units are explicit at the Python boundary: frequencies are in Hz, sweep duration in ms, RF reference and marker powers in dBm where applicable, and counts are dimensionless.
 
 The experiment layer builds measurements from `Step` objects. `BandwidthStep` scans RBW; `FrequencyStep` changes the laser setpoint, waits for a configured settling interval, and acquires squeezing and shot-noise traces with the shutter closed again before the reference acquisition. `main.py` runs a fixed bandwidth sweep as a script, plots it, and saves the resulting `StepResult` objects; the `iyzee-tui` application (see the top-level README) runs either sweep interactively, with live progress, from the same `Step`/`run_sequence()` building blocks.
+
+= Measurement architecture
+
+The useful abstraction is not "send a command and get a trace" but a chain of
+state transformations:
+
+#flow(
+  "physical signal", "MXA input state", "IF / RBW / detector", "sweep + averaging", "trace estimator", "Python result", "analysis + archive",
+  caption: [The measured trace is the endpoint of a configured estimator, not a raw detector stream.],
+)
+
+A reproducible analysis must therefore preserve the settings that can change
+the estimator or its calibration.
 
 = Measurement configuration
 
@@ -96,6 +93,15 @@ so doubling effective bandwidth predicts about `3.01 dB`, subject to filter shap
 
 The analyzer itself contributes noise. Any background subtraction must therefore be justified in linear power and under the same relevant instrument state. Subtracting two dBm values gives a logarithmic ratio, not a physical power difference. When a residual power is required, convert to linear power first, subtract there, and convert back only after the subtraction.
 
+#callout(
+  "Bandwidth is part of the physical observable",
+  [
+    In a white-noise region, integrated power scales approximately with
+    effective noise bandwidth. A bandwidth sweep therefore tests the complete
+    analyzer + detector + DUT chain; it is not merely a formatting operation.
+  ],
+)
+
 = Acquisition and synchronization
 
 The driver separates configuration, arming, acquisition, and readout. The normal single-sweep path is:
@@ -106,11 +112,24 @@ $ "configure" -> "INIT:CONT OFF" -> "INIT:IMM" -> "*OPC?" -> "read trace" $
 
 `wait_for_trigger_ready()` uses the Operation Status Register rather than a fixed delay to detect the analyzer's armed state. Trigger readiness and acquisition completion are different states, and neither one proves that an external physical source emitted the intended event.
 
-Fixed `sleep()` calls belong only where they represent characterized physical settling. This matters in `FrequencyStep`: the laser frequency setpoint is changed, the procedure waits `relax_time_s`, the shutter is opened only for the squeezing acquisition, the shutter is closed in a `finally` block, and the shot-noise reference is acquired afterward.
+Fixed `sleep()` calls belong only where they represent characterized physical settling. This matters in `FrequencyStep`: the laser frequency setpoint is changed, the procedure waits `relax_time_s` (default 0.5 s, `SETTLE_TIME_S`), reads the wavemeter and stores that reading with the step, the shutter is opened only for the squeezing acquisition, the shutter is closed in a `finally` block, and the shot-noise reference is acquired afterward.
 
 The software ordering is therefore explicit, but its scientific validity still depends on the physical system being sufficiently stationary during the sequence.
 
 = Data transfer and persistence
+
+#diagram(
+  ```mermaid
+flowchart TD
+  A["configure"] --> B["arm / start"]
+  B --> C{"complete?"}
+  C -->|no| C
+  C -->|yes| D["read trace"]
+  D --> E["attach metadata"]
+  E --> F["persist numeric data + manifest"]```.text,
+  caption: [Acquisition is separated from persistence so the numerical result retains its measurement context.],
+  width: 94%,
+)
 
 Trace data can be transferred as ASCII values or IEEE 488.2 binary floating-point data. The binary path explicitly selects 32-bit floats and big-endian decoding. Transport format does not define the physical units; interpretation still depends on the analyzer mode and measurement configuration.
 
@@ -120,15 +139,29 @@ The minimum useful record includes the frequency coordinate and unit, analyzer c
 
 The scientific rule is simple: a trace is reproducible only when the settings that can change its numerical meaning are recorded with it.
 
+= Rubidium and the optical experiment
+
+The analyzer sees an electrical noise spectrum. The underlying optical
+experiment is governed by the Rubidium medium, laser detuning, polarization
+and detection chain. The dedicated
+#link(<part-rubidium>)[Rubidium physics guide] develops that connection,
+including D1/D2 hyperfine structure, warm-vapor broadening, polarization
+self-rotation and the squeezing/shot-noise reference.
+
+At the implementation boundary, the frequency-scan step changes the laser
+setpoint, waits, reads the wavemeter, acquires the squeezing trace, closes the
+shutter, and then acquires the shot-noise reference.
+
+#flow(
+  "laser frequency", "Rb detuning", "PSR / optical state", "photodetection", "RF spectrum", "MXA trace",
+  caption: [The MXA is downstream of the atomic physics: it measures an electrical consequence of the optical state.],
+)
+
 = Current experiment workflows
 
 `run_bandwidth_sweep()` builds a sequence of `BandwidthStep` objects. Each step sets RBW, uses `VBW = 2 * RBW`, acquires squeezing and shot-noise traces, and records the RBW/VBW values as metadata. This scan is useful because the measured noise should approximately follow effective bandwidth for a white-noise region; deviations can reveal non-flat DUT noise, analyzer noise, effective-bandwidth differences, or estimator bias.
 
-`run_frequency_sweep()` builds `FrequencyStep` objects around a laser-frequency center value. Its settling interval is currently estimated as
-
-$ t = t_s N_a $
-
-from sweep duration `t_s` and average count `N_a`. This is an acquisition-workload estimate, not a demonstrated physical settling constant.
+`run_frequency_sweep()` builds `FrequencyStep` objects around a laser-frequency center value. Its settling interval is a fixed 0.5 s for the laser to settle on the new setpoint, after which the wavemeter is read and stored with the step. It is independent of sweep duration and average count, because each acquisition restarts the analyzer's averaging (`INIT:IMM`). It is a chosen value, not a measured settling constant; `build_frequency_sweep(relax_time_s=...)` overrides it.
 
 The key comparison in that workflow is squeezing versus shot noise. A difference between two dBm traces is a power ratio. A residual power requires linear-domain subtraction. Documentation and downstream analysis should keep those quantities distinct.
 
@@ -136,7 +169,7 @@ The key comparison in that workflow is squeezing versus shot noise. A difference
 
 #table(
   columns: (1.2fr, 1.65fr, 2fr),
-  stroke: 0.5pt,
+  stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left),
   [*Concept*], [*Project API*], [*SCPI*],
@@ -167,4 +200,3 @@ The key comparison in that workflow is squeezing versus shot noise. A difference
 
 Keep this guide tied to the implementation. When a code change alters analyzer behavior, SCPI commands, units, timing, calibration assumptions, experiment ordering, or persisted metadata, update the corresponding paragraph here. Avoid documenting historical procedures that no longer exist in the code.
 
-*Always strive for improvement, always be humble.*

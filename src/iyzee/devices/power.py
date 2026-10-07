@@ -1,4 +1,5 @@
-from iyzee import CH, IP, BaseDevice
+from ..config import IP, address
+from .base import CH, BaseDevice
 
 
 class PSU(BaseDevice):
@@ -37,10 +38,10 @@ class ShutterControl:
     def __init__(
         self,
         chan: CH = CH.THREE,
-        ip: IP = IP.POWER_SUPPLY,
+        ip: str | None = None,
         resource_manager=None,
     ):
-        self.psu = PSU(ip=ip, resource_manager=resource_manager)
+        self.psu = PSU(ip=ip or address(IP.POWER_SUPPLY), resource_manager=resource_manager)
         self.chan = chan
 
     def connect(self):

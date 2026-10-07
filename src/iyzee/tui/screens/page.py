@@ -23,7 +23,9 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from textual.containers import Vertical, VerticalScroll
 from textual.widget import Widget
-from textual.widgets import Input, Label, Select
+from textual.widgets import Button, Input, Label, Select
+
+from ..commands import Command, CommandError
 
 if TYPE_CHECKING:
     from ..app import IyzeeApp
@@ -120,6 +122,9 @@ class Page(VerticalScroll, can_focus=False):
       reflow forms without separating them.
     """
 
+    def on_show(self) -> None:
+        """Refresh/focus the page after it becomes the active page."""
+
     @property
     def iyzee_app(self) -> IyzeeApp:
         """The concrete app instance used by every page in this TUI."""
@@ -171,6 +176,22 @@ class Page(VerticalScroll, can_focus=False):
     def on_input_changed(self, event: Input.Changed) -> None:
         """Editing a previously invalid input clears its error marker."""
         event.input.remove_class("-invalid")
+
+    def commands(self) -> list[Command]:
+        """``:`` commands this page offers while it is shown (see ``tui/commands.py``)."""
+        return []
+
+    def press_button(self, button_id: str, doing: str) -> str:
+        """Press one of this page's buttons for a command, with the button's own guards.
+
+        A disabled button (not connected, busy, nothing to apply) is a clear error
+        rather than a silent no-op.
+        """
+        button = self.query_one(f"#{button_id}", Button)
+        if button.disabled:
+            raise CommandError(f"cannot {doing} right now (not connected, busy, or nothing to do)")
+        button.press()
+        return f"{doing}…"
 
     def refresh_readiness(self) -> None:
         """Hook for pages whose controls depend on connected instruments.

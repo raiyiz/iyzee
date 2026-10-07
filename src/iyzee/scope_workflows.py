@@ -1,15 +1,15 @@
 """Scope workflow operations: configuration, acquisition, and persistence
-on top of the raw :class:`~iyzee.scope.LeCroy` driver.
+on top of the :class:`~iyzee.devices.scope.LeCroy` driver.
 
 Plain functions and dataclasses, no Textual import — the same operations
 ``ScopeScreen``'s buttons trigger are usable identically from a script or
 the IPython console::
 
-    from iyzee.scope import Channel, Coupling, LeCroy
+    from iyzee.devices.scope import Channel, Coupling, LeCroy
     from iyzee.scope_workflows import ChannelSettings, apply_channel_settings
 
-    scope = LeCroy()
-    scope.connect("10.0.0.5")
+    scope = LeCroy("10.0.0.5")
+    scope.connect()
     apply_channel_settings(scope, [ChannelSettings(Channel.C1, True, 0.5, 0.0, Coupling.DC_1M)])
 
 ``read_channel_settings()``/``read_trigger_settings()`` are the read
@@ -23,50 +23,40 @@ reference the rest of this module's setters are written against, but —
 like those setters — has not been exercised against real hardware; verify
 against your instrument before relying on it for anything safety-critical.
 
-``lock`` on every function here is optional: a script with its own
-private ``LeCroy`` (nothing else could be contending for it) doesn't need
-one. Pass a handle's own lock (``instruments.InstrumentHandle.lock``) when
-the same scope might be touched concurrently by something else — the
-TUI's ``ScopeScreen`` does exactly this, and it's what makes calling these
-same functions safe from the IPython console at the same time a screen is
-mid-acquisition, or from two screens/scripts sharing one connected handle.
-The lock is re-entrant and, for a ``ScopeHandle``, is the driver's own
-transaction lock; every batch here also enters the driver's ``transaction_lock`` itself.
+Every batch holds the driver's re-entrant ``transaction_lock`` (for a
+``ScopeHandle`` that is also the handle's own lock), so these functions are safe
+to call from a screen worker, the IPython console, or a script at the same time.
 
 Two behaviours worth knowing before relying on a recording:
 
-* ``apply_and_verify_channel_settings()`` reads every channel back after
-  writing. The scope's reported values, not the request, are what should be
-  treated as applied (it rounds V/div and offset, and can ignore a command).
+* ``apply_channel_settings()`` returns what the scope reports after writing, and
+  that, not the request, is what should be treated as applied (it rounds V/div
+  and offset, and can ignore a command).
 * ``acquire_scope_recording(freeze=True)`` (the default) stops a *running*
   acquisition (trigger mode AUTO/NORMAL) for the download and restores the
   previous mode afterwards, so every channel comes from the same capture.
   Pass ``freeze=False`` to leave the trigger mode alone.
 
-If the driver reports its connection lost (any timeout or framing error
-invalidates it), batch loops stop and mark the remaining channels as not
-attempted instead of continuing on a stream that can no longer be trusted.
+The first failure raises. A timeout or I/O error also drops the driver's
+connection (see ``LeCroyTimeoutError``), so there is nothing left to continue on.
 """
 
 from __future__ import annotations
 
-import contextlib
 import logging
-import math
 import platform
 import re
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import numpy as np
 
+from .devices.scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from .experiment.core import utc_now
 from .experiment.io import save_numeric_recording
-from .scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 
 log = logging.getLogger("iyzee.scope_workflows")
 
@@ -97,18 +87,6 @@ class TriggerSettings:
 
 
 @dataclass(frozen=True)
-class ChannelError:
-    """One channel's operation failed; carries which channel and why.
-
-    Used by configuration and acquisition helpers so partial hardware failures
-    can be reported without discarding successful channels. The acquisition
-    path preserves these errors in the scientific recording manifest."""
-
-    channel: Channel
-    error: Exception
-
-
-@dataclass(frozen=True)
 class ScopeWaveform:
     """One channel's time series plus the scope data needed to interpret it.
 
@@ -134,9 +112,8 @@ class ScopeWaveform:
 class ScopeAcquisition:
     """In-memory scope record ready to be persisted as a scientific measurement.
 
-    The object deliberately separates requested configuration from the subset
-    known to have been applied successfully. A failed channel remains visible in
-    ``errors`` while successful waveforms stay available for saving and plotting."""
+    The object deliberately separates requested configuration from the
+    configuration the scope reported after the last apply."""
 
     measurement_id: str
     started_at_utc: str
@@ -148,7 +125,6 @@ class ScopeAcquisition:
     applied_channel_settings: tuple[ChannelSettings, ...] | None
     applied_trigger_settings: TriggerSettings | None
     waveforms: tuple[ScopeWaveform, ...]
-    errors: tuple[ChannelError, ...]
     # Provenance. All optional so existing constructors keep working.
     instrument_id: str | None = None
     """``*IDN?`` reply (make, model, serial, firmware), if the scope answered."""
@@ -158,30 +134,6 @@ class ScopeAcquisition:
     prior_trigger_mode: TriggerMode | None = None
     warnings: tuple[str, ...] = ()
     """Non-fatal problems (could not freeze / restore, identity unavailable)."""
-
-
-@dataclass(frozen=True)
-class SettingAdjustment:
-    """A numeric setting the scope accepted but rounded to something else."""
-
-    channel: Channel
-    field: str
-    requested: float
-    actual: float
-
-
-@dataclass(frozen=True)
-class ChannelApplyResult:
-    """Outcome of :func:`apply_and_verify_channel_settings`.
-
-    ``verified`` is what the scope itself reported *after* the writes, not what
-    was requested, so it is the right value to store as the new baseline and to
-    record as the applied configuration.
-    """
-
-    verified: tuple[ChannelSettings, ...]
-    errors: tuple[ChannelError, ...]
-    adjustments: tuple[SettingAdjustment, ...]
 
 
 def _stats(time: np.ndarray, values: np.ndarray) -> dict[str, float | int | None]:
@@ -236,45 +188,6 @@ def _software_version() -> str:
         return version("iyzee")
     except PackageNotFoundError:
         return "unknown"
-
-
-LockLike = AbstractContextManager[object]
-
-
-@contextlib.contextmanager
-def _guarded(scope: object, lock: LockLike | None) -> Iterator[None]:
-    """Hold the caller's lock and the driver's lock for a complete batch.
-
-    ``ScopeHandle.lock`` is the same re-entrant lock exposed by the driver as
-    ``transaction_lock``; when they are the same object, entering it twice is
-    unnecessary. Test doubles without a driver lock still use the explicit
-    ``lock=`` argument.
-    """
-    with contextlib.ExitStack() as stack:
-        driver_lock = getattr(scope, "transaction_lock", None)
-        if lock is not None:
-            stack.enter_context(lock)
-        if driver_lock is not None and driver_lock is not lock:
-            stack.enter_context(driver_lock)
-        yield
-
-
-def _link_lost(scope: object) -> bool:
-    """True once the driver has dropped its connection after a failure.
-
-    The transport invalidates itself when a timeout, disconnect or framing
-    error leaves the byte stream untrustworthy. Continuing with the next
-    channel would read a late reply as that channel's answer, so batch loops
-    stop instead. Scopes without a ``connected`` flag are assumed healthy.
-    """
-    return getattr(scope, "connected", True) is False
-
-
-def _not_attempted(channels: Sequence[Channel]) -> list[ChannelError]:
-    return [
-        ChannelError(channel, ConnectionError("scope connection lost; channel not attempted"))
-        for channel in channels
-    ]
 
 
 def _value(raw: str) -> str:
@@ -340,7 +253,7 @@ def _trigger_source(raw: str) -> str:
     The reply is comma-separated — trigger type, a qualifier, then the
     source, then further qualifiers (e.g.
     ``"TRIG_SELECT EDGE,SR,C1,HT,OFF"``, matching the
-    ``"EDGE,SR,{source}"`` shape :meth:`~iyzee.scope.LeCroy.set_trigger_source`
+    ``"EDGE,SR,{source}"`` shape :meth:`~iyzee.devices.scope.LeCroy.set_trigger_source`
     itself writes) — so the source is the third comma field of the value.
     """
     fields = _value(raw).split(",")
@@ -349,29 +262,44 @@ def _trigger_source(raw: str) -> str:
     return fields[2]
 
 
+def read_channel_settings(scope: LeCroy, channels: Sequence[Channel]) -> list[ChannelSettings]:
+    """Read every channel's current vertical settings back from the scope.
+
+    One locked batch; the first failure raises. The result has the same shape
+    :func:`apply_channel_settings` takes in, so a value can be edited and passed
+    straight back.
+    """
+    settings: list[ChannelSettings] = []
+    with scope.transaction_lock:
+        for channel in channels:
+            volts_per_div = _parse_volts(scope.get_volts_per_div(channel))
+            offset = _parse_volts(scope.get_offset(channel))
+            coupling = Coupling(_value(scope.get_coupling(channel)))
+            enabled = _value(scope.get_trace_display(channel)) == "ON"
+            settings.append(ChannelSettings(channel, enabled, volts_per_div, offset, coupling))
+    return settings
+
+
 def apply_channel_settings(
     scope: LeCroy,
     settings: Sequence[ChannelSettings],
     *,
     current_settings: Mapping[Channel, ChannelSettings] | Sequence[ChannelSettings] | None = None,
-    lock: LockLike | None = None,
-) -> list[ChannelError]:
-    """Apply channel settings, optionally writing only fields that changed.
+) -> list[ChannelSettings]:
+    """Write channel settings, then return what the scope reports for them.
 
-    With ``current_settings`` supplied, it is the known baseline returned by
-    :func:`read_channel_settings` (or a previously successful apply). Each
-    channel is compared field-by-field and only changed values are written.
-    This lets a caller edit one field in a complete retrieved snapshot without
-    re-sending unrelated settings.
+    The scope rounds vertical scale and offset (0.123 V/div may become 0.1) and
+    can ignore a command, so "written" is not "applied": the returned list is
+    the read-back, in the order of ``settings``. Compare it with what was
+    requested; it is also the right value to keep as the new baseline.
 
-    A channel missing from the supplied baseline is deliberately skipped and
-    reported as an error: without a trustworthy baseline, writing its form
-    defaults could silently overwrite a setting already on the instrument.
-    Omitting ``current_settings`` preserves the original full-write behavior
-    for standalone callers that explicitly want to configure every field.
+    With ``current_settings`` (a snapshot from :func:`read_channel_settings`),
+    only fields that differ from it are written. Every channel must be in the
+    snapshot: without a trustworthy baseline, writing form defaults could
+    overwrite a setting already on the instrument, so this raises before
+    writing anything. Without ``current_settings`` every field is written.
 
-    One channel's failure doesn't stop the rest. The whole batch is held under
-    one lock acquisition so another caller cannot interleave a reconfiguration.
+    One locked batch; the first failure raises (earlier writes stay applied).
     """
     baseline = (
         None
@@ -380,135 +308,24 @@ def apply_channel_settings(
         if isinstance(current_settings, Mapping)
         else {s.channel: s for s in current_settings}
     )
-    errors: list[ChannelError] = []
-    with _guarded(scope, lock):
-        for index, desired in enumerate(settings):
-            current = baseline.get(desired.channel) if baseline is not None else None
-            if baseline is not None and current is None:
-                error = RuntimeError(
-                    f"{desired.channel} has no retrieved baseline; refusing to overwrite it"
-                )
-                log.warning("scope: %s", error)
-                errors.append(ChannelError(desired.channel, error))
-                continue
-            try:
-                if current is None or desired.volts_per_div != current.volts_per_div:
-                    scope.set_volts_per_div(desired.channel, desired.volts_per_div)
-                if current is None or desired.offset != current.offset:
-                    scope.set_offset(desired.channel, desired.offset)
-                if current is None or desired.coupling != current.coupling:
-                    scope.set_coupling(desired.channel, desired.coupling)
-                if current is None or desired.enabled != current.enabled:
-                    scope.set_trace_display(desired.channel, desired.enabled)
-            except Exception as exc:  # noqa: BLE001 - collected, not swallowed
-                log.exception("scope: failed to apply %s settings", desired.channel)
-                errors.append(ChannelError(desired.channel, exc))
-                if _link_lost(scope):
-                    errors.extend(_not_attempted([s.channel for s in settings[index + 1 :]]))
-                    break
-    return errors
-
-
-def apply_and_verify_channel_settings(
-    scope: LeCroy,
-    settings: Sequence[ChannelSettings],
-    *,
-    current_settings: Mapping[Channel, ChannelSettings] | Sequence[ChannelSettings] | None = None,
-    lock: LockLike | None = None,
-    rel_tol: float = 1e-3,
-    abs_tol: float = 1e-6,
-) -> ChannelApplyResult:
-    """Apply channel settings, then read them back and report what the scope holds.
-
-    The scope quantizes vertical scale and offset (0.123 V/div may become
-    0.1 V/div), and a command can be silently ignored, so "written" is not
-    "applied". After the writes every channel in ``settings`` is read back:
-
-    * ``enabled`` / ``coupling`` are discrete, so a difference is an error.
-    * ``volts_per_div`` / ``offset`` differing beyond tolerance are reported as
-      :class:`SettingAdjustment` (informational, not a failure).
-    * A channel that cannot be read back is an error ("could not verify") and
-      is absent from ``verified``.
-
-    The whole write + read-back is one locked batch. If the link is lost the
-    read-back is skipped, since a dead stream cannot be trusted.
-    """
-    with _guarded(scope, lock):
-        errors = list(apply_channel_settings(scope, settings, current_settings=current_settings))
-        if _link_lost(scope):
-            return ChannelApplyResult((), tuple(errors), ())
-        attempted = [s.channel for s in settings]
-        verified, read_errors = read_channel_settings(scope, attempted)
-
-    errors.extend(
-        ChannelError(e.channel, RuntimeError(f"could not verify {e.channel}: {e.error}"))
-        for e in read_errors
-    )
-    desired = {s.channel: s for s in settings}
-    adjustments: list[SettingAdjustment] = []
-    for actual in verified:
-        want = desired[actual.channel]
-        if actual.enabled != want.enabled:
-            errors.append(
-                ChannelError(
-                    actual.channel,
-                    RuntimeError(
-                        f"{actual.channel} trace is {'ON' if actual.enabled else 'OFF'} "
-                        f"but {'ON' if want.enabled else 'OFF'} was requested"
-                    ),
-                )
+    if baseline is not None:
+        missing = [str(s.channel) for s in settings if s.channel not in baseline]
+        if missing:
+            raise RuntimeError(
+                f"{', '.join(missing)} has no retrieved baseline; refusing to overwrite it"
             )
-        if actual.coupling != want.coupling:
-            errors.append(
-                ChannelError(
-                    actual.channel,
-                    RuntimeError(
-                        f"{actual.channel} coupling is {actual.coupling.value} "
-                        f"but {want.coupling.value} was requested"
-                    ),
-                )
-            )
-        for name in ("volts_per_div", "offset"):
-            requested, got = getattr(want, name), getattr(actual, name)
-            if not math.isclose(requested, got, rel_tol=rel_tol, abs_tol=abs_tol):
-                adjustments.append(SettingAdjustment(actual.channel, name, requested, got))
-    return ChannelApplyResult(tuple(verified), tuple(errors), tuple(adjustments))
-
-
-def read_channel_settings(
-    scope: LeCroy, channels: Sequence[Channel], *, lock: LockLike | None = None
-) -> tuple[list[ChannelSettings], list[ChannelError]]:
-    """Read every channel's current vertical settings back from the scope.
-
-    The read counterpart of :func:`apply_channel_settings`: same batching
-    shape (one lock acquisition for the whole read, one channel's failure
-    doesn't stop the rest), same ``ChannelSettings`` shape out as
-    ``apply_channel_settings`` takes in — so the values this returns can
-    be edited (change one field, leave the rest as read) and passed
-    straight back to ``apply_channel_settings`` without reconstructing
-    anything by hand.
-
-    Returns ``(settings, errors)``, in the same order as ``channels``
-    minus any that failed; a channel present in ``errors`` is simply
-    absent from ``settings`` rather than the whole read failing.
-    """
-    settings: list[ChannelSettings] = []
-    errors: list[ChannelError] = []
-    with _guarded(scope, lock):
-        for index, channel in enumerate(channels):
-            try:
-                volts_per_div = _parse_volts(scope.get_volts_per_div(channel))
-                offset = _parse_volts(scope.get_offset(channel))
-                coupling = Coupling(_value(scope.get_coupling(channel)))
-                enabled = _value(scope.get_trace_display(channel)) == "ON"
-                settings.append(ChannelSettings(channel, enabled, volts_per_div, offset, coupling))
-            except Exception as exc:  # noqa: BLE001 - collected, not swallowed
-                log.exception("scope: failed to read %s settings", channel)
-                errors.append(ChannelError(channel, exc))
-                if _link_lost(scope):
-                    errors.extend(_not_attempted(channels[index + 1 :]))
-                    break
-    return settings, errors
+    with scope.transaction_lock:
+        for desired in settings:
+            current = baseline[desired.channel] if baseline is not None else None
+            if current is None or desired.volts_per_div != current.volts_per_div:
+                scope.set_volts_per_div(desired.channel, desired.volts_per_div)
+            if current is None or desired.offset != current.offset:
+                scope.set_offset(desired.channel, desired.offset)
+            if current is None or desired.coupling != current.coupling:
+                scope.set_coupling(desired.channel, desired.coupling)
+            if current is None or desired.enabled != current.enabled:
+                scope.set_trace_display(desired.channel, desired.enabled)
+        return read_channel_settings(scope, [s.channel for s in settings])
 
 
 def apply_trigger_settings(
@@ -516,7 +333,6 @@ def apply_trigger_settings(
     settings: TriggerSettings,
     *,
     current_settings: TriggerSettings | None = None,
-    lock: LockLike | None = None,
 ) -> None:
     """Apply trigger settings, optionally writing only fields that changed.
 
@@ -529,10 +345,9 @@ def apply_trigger_settings(
 
     Omitting ``current_settings`` keeps the original behavior: write the full
     trigger configuration supplied by the caller. The mode is always written
-    last, so an arming mode never fires against a half-updated configuration. Failures still raise because
-    there is only one trigger configuration to report.
+    last, so an arming mode never fires against a half-updated configuration.
     """
-    with _guarded(scope, lock):
+    with scope.transaction_lock:
         if current_settings is None:
             scope.set_trigger_source(settings.source)
             scope.set_trigger_slope(settings.source, settings.slope)
@@ -562,15 +377,12 @@ def apply_trigger_settings(
             scope.set_trigger_mode(settings.mode)
 
 
-def read_trigger_settings(scope: LeCroy, *, lock: LockLike | None = None) -> TriggerSettings:
+def read_trigger_settings(scope: LeCroy) -> TriggerSettings:
     """Read the scope's current trigger configuration back.
 
-    The read counterpart of :func:`apply_trigger_settings`, including its
-    error handling: raises on failure rather than collecting errors —
-    there's one trigger, not a batch, so there's nothing to partially
-    read.
+    The read counterpart of :func:`apply_trigger_settings`; raises on failure.
     """
-    with _guarded(scope, lock):
+    with scope.transaction_lock:
         source = Channel(_trigger_source(scope.get_trigger_source()))
         mode = TriggerMode(_value(scope.get_trigger_mode()))
         slope = TriggerSlope(_value(scope.get_trigger_slope(source)))
@@ -615,52 +427,56 @@ def acquire_scope_recording(
     trigger_settings: TriggerSettings | None = None,
     applied_channel_settings: Sequence[ChannelSettings] | None = None,
     applied_trigger_settings: TriggerSettings | None = None,
-    lock: LockLike | None = None,
     freeze: bool = True,
 ) -> ScopeAcquisition:
     """Acquire ``DAT1`` waveforms and capture their interpretation metadata.
 
     The returned object contains per-channel time axes, calibrated values,
-    optional raw signed 16-bit samples, scope-reported calibration data, and
+    raw signed 16-bit samples, scope-reported calibration data, and
     descriptive statistics. It also carries the requested configuration and
     the last configuration known to have been applied. This function does
     not write to disk; :func:`save_scope_acquisition` owns persistence.
 
-    Consistency: each channel's own timebase is read alongside its data (a
-    math trace or a different record length need not share channel 1's).
-    Channels are downloaded one after another, so with ``freeze=True`` (the
-    default) a *running* acquisition (trigger mode AUTO or NORMAL) is stopped
-    for the download and the previous mode restored afterwards; otherwise
-    each channel could come from a different capture. SINGLE and STOP hold
-    still already and are left alone. If freezing or restoring fails, the
-    recording still succeeds and says so in ``warnings``.
+    Each channel's own timebase is read alongside its data. Channels are
+    downloaded one after another, so with ``freeze=True`` (the default) a
+    *running* acquisition (trigger mode AUTO or NORMAL) is stopped for the
+    download and the previous mode restored afterwards; otherwise each channel
+    could come from a different capture. SINGLE and STOP hold still already.
+    If freezing or restoring fails the recording still succeeds and says so in
+    ``warnings``.
 
-    Acquisition is deliberately tolerant of per-channel failures: a channel
-    that cannot be downloaded is recorded as an error while other channels
-    are retained, unless the connection itself was lost, in which case the
-    remaining channels are reported as not attempted.
+    The first channel that fails to download raises; the trigger mode is still
+    restored first (best effort).
     """
     if not channels:
         raise ValueError("at least one channel is required")
     started = utc_now()
     measurement_id = uuid.uuid4().hex
-    errors: list[ChannelError] = []
-    waveforms: list[ScopeWaveform] = []
     warnings: list[str] = []
     instrument_id: str | None = None
     prior_mode: TriggerMode | None = None
     frozen = False
 
-    with _guarded(scope, lock):
-        query = getattr(scope, "query", None)
-        if callable(query):
-            try:
-                instrument_id = str(query("*IDN?"))
-            except Exception as exc:  # noqa: BLE001 - provenance is best-effort
-                log.warning("scope: could not read *IDN?: %s", exc)
-                warnings.append(f"instrument identity unavailable: {exc}")
+    def restore() -> str | None:
+        assert prior_mode is not None
+        try:
+            scope.set_trigger_mode(prior_mode)
+        except Exception as exc:  # noqa: BLE001 - reported, not raised
+            log.warning("scope: could not restore trigger mode %s: %s", prior_mode, exc)
+            return (
+                f"could not restore trigger mode {prior_mode.value}; scope is left "
+                f"in {TriggerMode.STOP.value}: {exc}"
+            )
+        return None
 
-        if freeze and not _link_lost(scope):
+    with scope.transaction_lock:
+        try:
+            instrument_id = str(scope.query("*IDN?"))
+        except Exception as exc:  # noqa: BLE001 - provenance is best-effort
+            log.warning("scope: could not read *IDN?: %s", exc)
+            warnings.append(f"instrument identity unavailable: {exc}")
+
+        if freeze:
             try:
                 prior_mode = TriggerMode(_value(scope.get_trigger_mode()))
                 if prior_mode in (TriggerMode.AUTO, TriggerMode.NORMAL):
@@ -671,29 +487,13 @@ def acquire_scope_recording(
                 warnings.append(f"could not freeze acquisition; channels may differ: {exc}")
 
         try:
-            for index, channel in enumerate(channels):
-                try:
-                    waveforms.append(_download_waveform(scope, channel))
-                except Exception as exc:  # noqa: BLE001
-                    log.exception("scope: failed to acquire %s", channel)
-                    errors.append(ChannelError(channel, exc))
-                    if _link_lost(scope):
-                        errors.extend(_not_attempted(channels[index + 1 :]))
-                        break
-        finally:
-            if frozen and prior_mode is not None and not _link_lost(scope):
-                try:
-                    scope.set_trigger_mode(prior_mode)
-                except Exception as exc:  # noqa: BLE001
-                    log.exception("scope: could not restore trigger mode %s", prior_mode)
-                    warnings.append(
-                        f"could not restore trigger mode {prior_mode.value}; scope is left "
-                        f"in {TriggerMode.STOP.value}: {exc}"
-                    )
-            elif frozen:
-                warnings.append(
-                    f"connection lost while frozen; trigger mode {prior_mode} not restored"
-                )
+            waveforms = [_download_waveform(scope, channel) for channel in channels]
+        except BaseException:
+            if frozen:
+                restore()
+            raise
+        if frozen and (problem := restore()) is not None:
+            warnings.append(problem)
 
     return ScopeAcquisition(
         measurement_id=measurement_id,
@@ -708,7 +508,6 @@ def acquire_scope_recording(
         ),
         applied_trigger_settings=applied_trigger_settings,
         waveforms=tuple(waveforms),
-        errors=tuple(errors),
         instrument_id=instrument_id,
         frozen=frozen,
         prior_trigger_mode=prior_mode,
@@ -788,11 +587,10 @@ def save_scope_acquisition(
             "python": platform.python_version(),
         },
         "instrument": {
-            "driver": "iyzee.scope.LeCroy",
-            "protocol": "LeCroy VICP",
+            "driver": "iyzee.devices.scope.LeCroy",
+            "protocol": "VISA (VXI-11)",
             "address": recording.instrument_address,
             "identity": recording.instrument_id,
-            "port": LeCroy.LECROY_SERVER_PORT,
             "socket_timeout_s": recording.socket_timeout_s,
         },
         "configuration": {
@@ -815,10 +613,6 @@ def save_scope_acquisition(
             "warnings": list(recording.warnings),
         },
         "waveforms": channel_metadata,
-        "errors": [
-            {"channel": e.channel.value, "type": type(e.error).__name__, "error": str(e.error)}
-            for e in recording.errors
-        ],
         "data_semantics": {
             "value_arrays": "engineering units using the scope-reported VERTICAL_GAIN and VERTICAL_OFFSET",
             "raw_arrays": "signed 16-bit waveform codes returned by the scope when available",

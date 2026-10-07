@@ -1,5 +1,5 @@
 #!/bin/sh
-# One entry point for CI and local checks: scripts/ci.sh {test|lint|typecheck|docs|all|update}
+# One entry point for CI and local checks: scripts/ci.sh {test|lint|typecheck|doc-links|docs|all|update}
 set -eu
 
 cd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/.."
@@ -9,12 +9,12 @@ sync() { uv sync --locked --group dev; }
 docs() {
     rm -rf build/docs
     mkdir -p build/docs
-    for source in docs/*.typ; do
-        name=${source##*/}
-        # requirements.typ only declares Typst package imports.
-        [ "$name" = requirements.typ ] && continue
-        typst compile "$source" "build/docs/${name%.typ}.pdf"
-    done
+    # One book: docs/main.typ includes every chapter in docs/chapters/.
+    typst compile docs/main.typ build/docs/iyzee-guide.pdf
+}
+
+doc_links() {
+    uv run scripts/check_doc_links.py --fix
 }
 
 all() {
@@ -23,6 +23,7 @@ all() {
     uv run --locked ruff check .
     uv run --locked ruff format --check .
     uv run --locked mypy src tests
+    uv run scripts/check_doc_links.py
     docs
 }
 
@@ -60,11 +61,12 @@ update() {
 }
 
 case "${1:-}" in
-    test)      sync; uv run --locked pytest ;;
+    test)      sync; uv run --locked pytest --durations=25 ;;
     lint)      sync; uv run --locked ruff check .; uv run --locked ruff format --check . ;;
     typecheck) sync; uv run --locked mypy src tests ;;
+    doc-links) doc_links ;;
     docs)      docs ;;
     all)       all ;;
     update)    update ;;
-    *)         echo "usage: $0 {test|lint|typecheck|docs|all|update}" >&2; exit 2 ;;
+    *)         echo "usage: $0 {test|lint|typecheck|doc-links|docs|all|update}" >&2; exit 2 ;;
 esac

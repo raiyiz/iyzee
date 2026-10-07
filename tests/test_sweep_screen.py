@@ -218,7 +218,6 @@ async def _press_run_and_wait(app: IyzeeApp) -> None:
         await pilot.pause()
         await pilot.click("#run-sweep")
         await wait_until(pilot, lambda: app.last_run is not None)
-        await pilot.pause(0.2)
 
 
 def _points_on_disk(directory: Path) -> int:
@@ -242,7 +241,7 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
 
     def fake_run_sequence(steps, ctx, *, on_error, on_step):
         started.set()
-        release.wait(5)
+        release.wait(2)
         on_step(0, 3, object(), _result(0), None)
 
     app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
@@ -346,7 +345,6 @@ async def test_capture_trace_plots_power_vs_frequency() -> None:
     async with app.run_test() as pilot:
         screen = await _open_sweep_screen(pilot)
         screen._start_capture()
-        await pilot.pause(0.1)
         await wait_until(pilot, lambda: not screen.query_one("#capture-trace").disabled)
         assert fake_mxa.trace_updates == [(1, True), (1, False)]
         log = " ".join(

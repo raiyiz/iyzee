@@ -1,20 +1,16 @@
-"""Uniform instrument handles for the Connect screen.
+"""Uniform lifecycle adapters for the lab's devices.
 
-The lab's devices are deliberately heterogeneous at the driver level —
-:class:`~iyzee.mxa.KeysightMXA` and :class:`~iyzee.power.PSU` are VISA
-(:class:`~iyzee.base.BaseDevice`), the wavemeter is a stateless HTTP API,
-and the scope is a raw-socket legacy driver. Rather than teaching the TUI
-about each of those, every device is wrapped in a small adapter that
-implements the same lifecycle operations: ``connect()``, ``disconnect()``,
-and ``probe()`` (a cheap call that both confirms the link is alive and returns
-a short human-readable status string).
+The drivers are deliberately heterogeneous: :class:`~iyzee.devices.mxa.KeysightMXA`
+and :class:`~iyzee.devices.power.PSU` are VISA
+(:class:`~iyzee.devices.base.BaseDevice`), the wavemeter is a stateless HTTP API,
+and the scope is VISA too, but with its own driver. Each is wrapped in a small handle with the
+same operations: ``connect()``, ``disconnect()``, ``probe()`` (a cheap call that
+confirms the link is alive and returns a short status string), ``alive``,
+``device`` and a ``lock`` that serializes every call to that instrument.
 
-Adding a new instrument to the Connect screen is: write one adapter class
-here, add one :class:`InstrumentSpec` to ``INSTRUMENTS`` below. No screen
-code changes required.
-All handles also expose ``.lock`` for shared serialization. Handles expose their
-underlying device/client as ``.device``; stateless adapters such as the wavemeter
-still provide a reusable client there.
+Nothing here knows about the TUI: scripts, the console and the TUI all go
+through the same handles (see :class:`iyzee.lab.Lab`). :class:`LockedProxy`
+hands a device out with every method call taking that lock.
 """
 
 from __future__ import annotations
@@ -23,16 +19,14 @@ import functools
 import logging
 import threading
 import time
-from collections.abc import Callable
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ..base import CH, IP
-from ..mxa import KeysightMXA
-from ..power import ShutterControl
-from ..scope import LeCroy, LeCroyTimeoutError
-from ..wavemeter_readout import DEFAULT_CHANNEL, Wavemeter, WavemeterReadoutError
+from ..config import IP, address
+from .base import CH
+from .power import ShutterControl
+from .scope import LeCroy, LeCroyTimeoutError
+from .wavemeter import Wavemeter
 
 log = logging.getLogger("iyzee.instruments")
 
@@ -85,7 +79,7 @@ class InstrumentHandle(Protocol):
         console (via :class:`LockedProxy`), or a plain script holding this
         same handle directly.
 
-        Owned by the handle, not by :class:`~iyzee.tui.app.IyzeeApp`
+        Owned by the handle, not by :class:`~iyzee.lab.Lab`
         (which used to keep a separate ``dict[str, threading.Lock]``
         alongside ``handles``): a handle built and connected outside any
         running app — the whole point of a script/console-first design —
@@ -118,7 +112,7 @@ class _LockedHandle:
 
 
 class _VisaHandle(_LockedHandle):
-    """Adapter for any :class:`~iyzee.base.BaseDevice` (MXA, raw PSU)."""
+    """Adapter for any :class:`~iyzee.devices.base.BaseDevice` (MXA, raw PSU)."""
 
     def __init__(self, device) -> None:
         super().__init__()
@@ -138,17 +132,17 @@ class _VisaHandle(_LockedHandle):
 
     @property
     def device(self):
-        """The wrapped device (e.g. a live :class:`~iyzee.mxa.KeysightMXA`)."""
+        """The wrapped device (e.g. a live :class:`~iyzee.devices.mxa.KeysightMXA`)."""
         return self._device
 
 
 class ShutterHandle(_LockedHandle):
-    """Adapter for :class:`~iyzee.power.ShutterControl`."""
+    """Adapter for :class:`~iyzee.devices.power.ShutterControl`."""
 
-    def __init__(self, chan: CH = CH.THREE, ip: IP = IP.POWER_SUPPLY) -> None:
+    def __init__(self, chan: CH = CH.THREE, ip: str | None = None) -> None:
         super().__init__()
         self._chan = chan
-        self._ip = ip
+        self._ip = ip or address(IP.POWER_SUPPLY)
         self._shutter: ShutterControl | None = None
 
     def connect(self) -> None:
@@ -175,12 +169,12 @@ class WavemeterHandle(_LockedHandle):
 
     There is no persistent connection to open. The handle provides the shared
     instrument lock, performs one real readout when probing, and hands the
-    console a stateless :class:`~iyzee.wavemeter_readout.Wavemeter` client.
+    console a stateless :class:`~iyzee.devices.wavemeter.Wavemeter` client.
     """
 
-    def __init__(self, channel: int = DEFAULT_CHANNEL) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._client = Wavemeter(channel)
+        self._client = Wavemeter()
 
     def connect(self) -> None:
         return None
@@ -194,35 +188,32 @@ class WavemeterHandle(_LockedHandle):
         return self._client
 
     def probe(self) -> str:
-        try:
-            freq = self._client.read_frequency()
-        except WavemeterReadoutError as exc:
-            raise ConnectionError(str(exc)) from exc
-        return f"ch{self._client.channel} = {freq:.6f} THz"
+        freq = self._client.read_frequency()
+        return f"wavemeter = {freq:.6f} THz"
 
 
 class ScopeHandle(_LockedHandle):
-    """Adapter for the legacy :class:`~iyzee.scope.LeCroy` raw-socket driver."""
+    """Adapter for the :class:`~iyzee.devices.scope.LeCroy` VISA (VXI-11) driver."""
 
     #: Seconds the scope gets to answer its first query after connecting.
     FIRST_RESPONSE_TIMEOUT = 15.0
 
-    def __init__(self, ip: IP = IP.SCOPE) -> None:
+    def __init__(self, ip: str | None = None) -> None:
         super().__init__()
-        self._ip = ip
-        self._scope = LeCroy()
+        self._ip = ip or address(IP.SCOPE)
+        self._scope = LeCroy(str(self._ip))
 
     def connect(self) -> None:
-        self._scope.connect(str(self._ip))
+        self._scope.connect()
 
     def disconnect(self) -> None:
         self._scope.disconnect()
 
     def probe(self) -> str:
-        """Prove the scope *answers*, not just that port 1861 accepted a TCP connection.
+        """Prove the scope *answers*, not just that the VISA resource opened.
 
-        The first reply after connecting can be slow, and a timeout is fatal to
-        the VICP stream, so this one query gets a wider bound than steady state.
+        The first reply after connecting can be slow, and a timeout drops the
+        connection, so this one query gets a wider bound than steady state.
         """
         started = time.monotonic()
         try:
@@ -230,14 +221,14 @@ class ScopeHandle(_LockedHandle):
         except LeCroyTimeoutError as exc:
             raise ConnectionError(
                 f"{self._ip} accepted the connection but did not answer *IDN? within "
-                f"{self.FIRST_RESPONSE_TIMEOUT:g}s (is another VICP client holding the scope?)"
+                f"{self.FIRST_RESPONSE_TIMEOUT:g}s (is another client holding the scope?)"
             ) from exc
         log.info("scope answered *IDN? after %.2fs", time.monotonic() - started)
         return identity
 
     @property
     def alive(self) -> bool:
-        return self._scope.check_link()
+        return self._scope.connected
 
     @property
     def lock(self) -> threading.RLock:
@@ -253,18 +244,6 @@ class ScopeHandle(_LockedHandle):
     def device(self) -> LeCroy:
         """The underlying live LeCroy driver."""
         return self._scope
-
-
-@dataclass(frozen=True)
-class InstrumentSpec:
-    """One row in the Connect screen: a name plus how to build its handle."""
-
-    key: str
-    label: str
-    make: Callable[[], InstrumentHandle]
-    # Compact name for the narrow nav rail, where the full label wraps and
-    # strands the status dot on a line of its own. Defaults to ``label``.
-    short: str = ""
 
 
 class LockedProxy:
@@ -316,11 +295,3 @@ class LockedProxy:
 
     def __repr__(self) -> str:
         return repr(object.__getattribute__(self, "_target"))
-
-
-INSTRUMENTS: list[InstrumentSpec] = [
-    InstrumentSpec("mxa", "Keysight MXA", lambda: _VisaHandle(KeysightMXA()), short="MXA"),
-    InstrumentSpec("shutter", "Shutter (PSU CH3)", lambda: ShutterHandle(), short="Shutter"),
-    InstrumentSpec("wavemeter", "Wavemeter (WS-7)", lambda: WavemeterHandle(), short="Wavemeter"),
-    InstrumentSpec("scope", "LeCroy scope [legacy]", lambda: ScopeHandle(), short="Scope"),
-]

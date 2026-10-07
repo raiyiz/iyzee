@@ -18,7 +18,7 @@ from test_scope_workflows import FakeScope, StatefulScope
 from textual.pilot import Pilot
 from textual.widgets import Button, Checkbox, Input, RichLog, Select
 
-from iyzee.scope import Channel, Coupling, TriggerSlope
+from iyzee.devices.scope import Channel, Coupling, TriggerSlope
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens import scope as scope_screen_mod
 from iyzee.tui.screens.scope import ScopeScreen
@@ -48,14 +48,7 @@ async def _synced(pilot: Pilot[Any], screen: ScopeScreen) -> None:
     Do not press "Retrieve" on top of it: a second retrieve finishing later
     would overwrite whatever the test has typed into the form by then.
     """
-    await wait_until(
-        pilot,
-        lambda: (
-            screen._last_applied_channel_settings is not None
-            and not screen._settings_busy
-            and not screen._retrieve_in_flight
-        ),
-    )
+    await wait_until(pilot, lambda: screen._synced and not screen._busy)
 
 
 def _set(screen: ScopeScreen, widget_id: str, value: str) -> None:
@@ -82,9 +75,6 @@ class GatedScope(ScreenScope):
 
 @async_test
 async def test_editing_a_field_while_a_retrieve_is_in_flight_does_not_break_the_result() -> None:
-    """Regression: this raised "Set changed size during iteration" in the retrieve
-    callback (the dirty set was mutated while a generator over it was still being
-    consumed), skipping the rest of the callback and leaving the page stuck "busy"."""
     scope = GatedScope()
     async with IyzeeApp().run_test() as pilot:
         screen = await _open(pilot, scope)
@@ -96,64 +86,66 @@ async def test_editing_a_field_while_a_retrieve_is_in_flight_does_not_break_the_
         screen.query_one("#retrieve-settings", Button).press()
         await wait_until(pilot, scope.entered.is_set)  # the worker is now inside the scope read
         _set(screen, "C1-vdiv", "0.9")  # the user types while it waits
-        await wait_until(pilot, lambda: "C1-vdiv" in screen._dirty_fields)
         scope.gate.set()
 
-        await wait_until(
-            pilot, lambda: not screen._retrieve_in_flight and not screen._settings_busy
-        )
-        # The callback must run to completion. (Its exception used to be swallowed by
-        # ``_ui``, and later Input.Changed events tidied the form, so only the work
-        # the crash skipped, like this confirmation, shows it.)
+        await wait_until(pilot, lambda: not screen._busy)
         assert _log(screen).count("Scope settings synchronized from the instrument.") == 2
-        assert screen._settings_synced
+        assert screen._synced
         assert screen.query_one("#C1-vdiv", Input).value == original  # form re-synced
-        assert "C1-vdiv" not in screen._dirty_fields
-        assert not screen.query_one("#C1-vdiv", Input).has_class("scope-dirty")
 
 
-# -- apply channel changes: the baseline is what the scope reports ------------------------
+# -- apply: the form shows what the scope reports ------------------------------------------
 
 
 @async_test
-async def test_applying_channel_changes_tracks_verified_state_and_failed_edits() -> None:
+async def test_apply_writes_only_changes_and_shows_what_the_scope_reports() -> None:
     scope = ScreenScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
     async with IyzeeApp().run_test() as pilot:
         app = pilot.app
         assert isinstance(app, IyzeeApp)
         screen = await _open(pilot, scope)
         await _synced(pilot, screen)
+        scope.calls.clear()
 
         _set(screen, "C1-vdiv", "0.123")
-        await pilot.pause()
-        screen.query_one("#apply-channels", Button).press()
+        screen.query_one("#apply-settings", Button).press()
         await wait_until(pilot, lambda: "Applied and verified" in _log(screen))
 
-        baseline = screen._channel_baseline(Channel.C1)
-        assert baseline is not None
-        assert baseline.volts_per_div == pytest.approx(0.1)
+        assert [c for c in scope.calls if c[0].startswith("set_")] == [
+            ("set_volts_per_div", Channel.C1, 0.123)
+        ]  # nothing else was written
         assert float(screen.query_one("#C1-vdiv", Input).value) == pytest.approx(0.1)
         assert "C1 V/div: requested 0.123, scope set 0.1" in _log(screen)
-        assert "C1-vdiv" not in screen._dirty_fields
+        assert screen._channel_state is not None
+        assert screen._channel_state[0].volts_per_div == pytest.approx(0.1)
 
-        before = screen._channel_baseline(Channel.C2)
-        assert before is not None
         screen.query_one("#C2-coupling", Select).value = Coupling.DC_50.value
-        await pilot.pause()
-        screen.query_one("#apply-channels", Button).press()
+        screen.query_one("#apply-settings", Button).press()
         await wait_until(pilot, lambda: "coupling is" in _log(screen))
 
         assert "C2 coupling is D1M but D50 was requested" in _log(screen)
         assert any("Some channel changes failed" in n for n in notifications(app))
-        baseline = screen._channel_baseline(Channel.C2)
-        assert baseline is not None and baseline.coupling == before.coupling
-        assert screen.query_one("#C2-coupling", Select).value == Coupling.DC_50.value
-        assert "C2-coupling" in screen._dirty_fields
-        assert not screen.query_one("#apply-channels", Button).disabled
+        # The form now shows the truth (the scope ignored the command).
+        assert screen.query_one("#C2-coupling", Select).value == Coupling.DC_1M.value
+        assert not screen._busy
 
 
 @async_test
-async def test_apply_after_the_scope_disconnects_releases_the_busy_flag_and_keeps_the_baseline() -> (
+async def test_apply_with_no_changes_writes_nothing() -> None:
+    scope = ScreenScope()
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open(pilot, scope)
+        await _synced(pilot, screen)
+        scope.calls.clear()
+
+        screen.query_one("#apply-settings", Button).press()
+        await wait_until(pilot, lambda: "No changes to apply." in _log(screen))
+
+        assert scope.calls == []
+
+
+@async_test
+async def test_apply_after_the_scope_disconnects_releases_the_busy_flag_and_keeps_the_state() -> (
     None
 ):
     scope = ScreenScope()
@@ -162,21 +154,17 @@ async def test_apply_after_the_scope_disconnects_releases_the_busy_flag_and_keep
         assert isinstance(app, IyzeeApp)
         screen = await _open(pilot, scope)
         await _synced(pilot, screen)
-        baseline = screen._last_applied_channel_settings
-        assert baseline is not None
-        scope.calls.clear()
+        state = screen._channel_state
+        trigger = screen._trigger_state
+        assert state is not None and trigger is not None
 
         app.handles.pop("scope")  # disconnected between the click and the worker starting
-        screen._settings_busy = True
-        screen._apply_channels(scope, [baseline[0]], baseline, threading.Lock())
+        screen._busy = True
+        screen._apply(scope, [state[0]], None, state, trigger)
 
-        # Not stuck "busy", and the stale result is discarded: baseline untouched.
-        # (The Apply button itself is legitimately disabled again with no scope connected.)
-        await wait_until(pilot, lambda: not screen._settings_busy)
-        assert screen._last_applied_channel_settings == baseline
-
-
-# -- apply trigger changes -------------------------------------------------------------------
+        # Not stuck "busy", and the stale result is discarded: state untouched.
+        await wait_until(pilot, lambda: not screen._busy)
+        assert screen._channel_state == state
 
 
 class TriggerScope(ScreenScope):
@@ -212,12 +200,8 @@ class TriggerScope(ScreenScope):
         self.trigger_state = replace(self.trigger_state, slope=slope)
 
 
-def _trigger_dirty(screen: ScopeScreen) -> set[str]:
-    return {field_id for field_id in screen._dirty_fields if field_id.startswith("trig-")}
-
-
 @async_test
-async def test_applying_trigger_changes_shows_what_the_scope_reports_and_cleans_the_form() -> None:
+async def test_applying_trigger_changes_shows_what_the_scope_reports() -> None:
     scope = TriggerScope()
     async with IyzeeApp().run_test() as pilot:
         screen = await _open(pilot, scope)
@@ -225,22 +209,17 @@ async def test_applying_trigger_changes_shows_what_the_scope_reports_and_cleans_
 
         _set(screen, "trig-level", "0.25")
         screen.query_one("#trig-slope", Select).value = TriggerSlope.NEGATIVE.value
-        await wait_until(pilot, lambda: _trigger_dirty(screen) == {"trig-level", "trig-slope"})
-        screen.query_one("#apply-trigger", Button).press()
-        await wait_until(pilot, lambda: "Trigger settings applied and verified." in _log(screen))
+        screen.query_one("#apply-settings", Button).press()
+        await wait_until(pilot, lambda: "Applied and verified changes." in _log(screen))
 
-        verified = screen._last_applied_trigger_settings
+        verified = screen._trigger_state
         assert verified is not None
         assert verified.level_volts == 0.25 and verified.slope is TriggerSlope.NEGATIVE
-        assert _trigger_dirty(screen) == set()
-        assert not screen.query_one("#trig-level", Input).has_class("scope-dirty")
-        assert not screen._settings_busy and screen._settings_synced
+        assert not screen._busy and screen._synced
 
 
 @async_test
-async def test_a_refused_trigger_apply_is_reported_keeps_the_edit_and_releases_the_busy_flag() -> (
-    None
-):
+async def test_a_refused_apply_is_reported_keeps_the_edit_and_requires_a_retrieve() -> None:
     scope = TriggerScope(refuse_level=True)
     async with IyzeeApp().run_test() as pilot:
         app = pilot.app
@@ -249,17 +228,17 @@ async def test_a_refused_trigger_apply_is_reported_keeps_the_edit_and_releases_t
         await _synced(pilot, screen)
 
         _set(screen, "trig-level", "0.25")
-        await wait_until(pilot, lambda: "trig-level" in screen._dirty_fields)
-        screen.query_one("#apply-trigger", Button).press()
+        screen.query_one("#apply-settings", Button).press()
         await wait_until(pilot, lambda: "level refused" in _log(screen))
 
-        assert not screen._settings_busy
-        assert "trig-level" in screen._dirty_fields  # still editable, so the user can retry
-        assert not screen._settings_synced
-        assert any("Trigger settings failed" in n for n in notifications(app))
+        assert not screen._busy
+        assert screen.query_one("#trig-level", Input).value == "0.25"  # still editable, to retry
+        assert not screen._synced  # what the scope holds is unknown until the next Retrieve
+        assert screen.query_one("#apply-settings", Button).disabled
+        assert any("Applying settings failed" in n for n in notifications(app))
 
 
-@pytest.mark.parametrize("operation", ["retrieve", "apply-trigger"])
+@pytest.mark.parametrize("operation", ["retrieve", "apply"])
 @async_test
 async def test_an_operation_finishing_after_a_disconnect_releases_its_flags(
     operation: str,
@@ -277,17 +256,32 @@ async def test_an_operation_finishing_after_a_disconnect_releases_its_flags(
             screen.query_one("#retrieve-settings", Button).press()
         else:
             _set(screen, "trig-level", "0.25")
-            await wait_until(pilot, lambda: "trig-level" in screen._dirty_fields)
-            screen.query_one("#apply-trigger", Button).press()
+            screen.query_one("#apply-settings", Button).press()
         await wait_until(pilot, scope.entered.is_set)  # the worker is inside the scope call
 
         app.handles.pop("scope")  # the link goes away mid-operation
         scope.gate.set()
 
-        await wait_until(pilot, lambda: not screen._settings_busy)
-        assert not screen._retrieve_in_flight
+        await wait_until(pilot, lambda: not screen._busy)
         if operation == "retrieve":
             assert not screen.query_one("#retrieve-settings", Button).disabled
+
+
+@async_test
+async def test_acquire_refuses_while_the_form_has_changes_the_scope_does_not() -> None:
+    scope = ScreenScope()
+    async with IyzeeApp().run_test() as pilot:
+        app = pilot.app
+        assert isinstance(app, IyzeeApp)
+        screen = await _open(pilot, scope)
+        await _synced(pilot, screen)
+
+        _set(screen, "trig-level", "0.25")
+        screen.query_one("#acquire-waveforms", Button).press()
+        await pilot.pause()
+
+        assert any("press Apply" in n for n in notifications(app))
+        assert "Acquiring" not in _log(screen)
 
 
 # -- acquire ---------------------------------------------------------------------------------
@@ -304,6 +298,8 @@ async def test_acquire_saves_and_reports_that_a_running_acquisition_was_paused(
         await _synced(pilot, screen)
         for channel in ("C2", "C3", "C4"):
             screen.query_one(f"#{channel}-enable", Checkbox).value = False
+        screen.query_one("#apply-settings", Button).press()
+        await wait_until(pilot, lambda: "Applied and verified" in _log(screen))
 
         screen.query_one("#acquire-waveforms", Button).press()
         await wait_until(pilot, lambda: "Saved acquisition" in _log(screen))

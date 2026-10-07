@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -17,7 +18,10 @@ from textual.containers import Horizontal
 from textual.markup import escape
 from textual.widgets import ContentSwitcher, Footer, Header, Static
 
-from .instruments import INSTRUMENTS, InstrumentHandle
+from ..devices.handles import InstrumentHandle
+from ..lab import INSTRUMENTS, Lab
+from .command_bar import CommandBar
+from .commands import Command, CommandError, CommandRegistry
 from .ipython import default_history_file
 from .ipython_session import IPythonSession
 from .logging_support import LogEntry
@@ -27,6 +31,7 @@ from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.log import LogScreen
 from .screens.page import Page
+from .screens.rb import RbScreen
 from .screens.results import ResultsScreen
 from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
@@ -39,6 +44,7 @@ PAGE_SPECS = (
     ("connect", "Connect", ConnectScreen),
     ("sweep", "Sweep", SweepScreen),
     ("scope", "Scope", ScopeScreen),
+    ("rb", "Rb", RbScreen),
     ("results", "Results", ResultsScreen),
     ("console", "Console", ConsoleScreen),
     ("log", "Log", LogScreen),
@@ -170,6 +176,7 @@ class IyzeeApp(App):
         Binding("c", "show_page('connect')", "Connect"),
         Binding("s", "show_page('sweep')", "Sweep"),
         Binding("o", "show_page('scope')", "Scope"),
+        Binding("r", "show_page('rb')", "Rb"),
         Binding("t", "show_page('results')", "Results"),
         Binding("i", "show_page('console')", "Console"),
         Binding("l", "show_page('log')", "Log"),
@@ -184,6 +191,8 @@ class IyzeeApp(App):
         # from the footer, which is already crowded; the first press says so.
         Binding("ctrl+q", "quit", "Quit", priority=True),
         Binding("q", "request_quit", "Quit", show=False),
+        # Vim-style command line (``:help`` lists the commands available on this page).
+        Binding("colon", "command_mode", "Command", show=False),
         Binding("escape", "blur_focused", "Leave field", show=False),
         Binding("j", "focus_next", "Focus next", show=False),
         Binding("k", "focus_previous", "Focus previous", show=False),
@@ -220,7 +229,10 @@ class IyzeeApp(App):
         # own reference to a handler that (in tests) gets replaced every
         # time a new IyzeeApp() is constructed — see install()'s docstring.
         self.log_handler = install_logging(self._on_log_entry)
-        self.handles: dict[str, InstrumentHandle] = {}
+        # The session's instruments live in the core ``Lab`` (no Textual in it);
+        # ``handles`` is its connected-handles dict, shared rather than copied.
+        self.lab = Lab()
+        self.handles: dict[str, InstrumentHandle] = self.lab.handles
         # No per-app lock table anymore — each InstrumentHandle owns its
         # own threading.Lock (see instruments.InstrumentHandle.lock) so
         # that a page's background worker (Connect, Sweep), the IPython
@@ -264,29 +276,15 @@ class IyzeeApp(App):
         self.set_interval(self.LINK_CHECK_INTERVAL, self._check_links)
 
     def _check_links(self) -> None:
-        """Notice links that died while nobody was talking to them.
+        """Notice links that died while nobody was talking to them (no instrument I/O)."""
+        for key in self.lab.drop_dead_links():
+            self._link_lost(key)
 
-        Cheap: ``alive`` does no instrument I/O. Handles without the
-        attribute (test doubles, adapters that cannot tell) count as alive.
-        """
-        for key, handle in list(self.handles.items()):
-            if not getattr(handle, "alive", True):
-                self._link_lost(key, handle)
-
-    def _link_lost(self, key: str, handle: InstrumentHandle) -> None:
-        if self.handles.get(key) is not handle:
-            return  # already disconnected or replaced
-        del self.handles[key]
+    def _link_lost(self, key: str) -> None:
         spec = next((s for s in INSTRUMENTS if s.key == key), None)
         label = spec.label if spec is not None else key
         reason = "link lost - press Enter to reconnect"
         self.lost_links[key] = reason
-        log.warning("%s: connection lost; dropped it so it can be reconnected", key)
-        # Release whatever is left of the dead link off the UI thread: the
-        # driver's disconnect takes the instrument lock.
-        threading.Thread(
-            target=self._release_dead_link, args=(key, handle), name=f"release-{key}", daemon=True
-        ).start()
         for screen in self.query(ConnectScreen):
             screen.show_lost(key, reason)
         self.instruments_changed()
@@ -297,14 +295,6 @@ class IyzeeApp(App):
             markup=False,
         )
 
-    @staticmethod
-    def _release_dead_link(key: str, handle: InstrumentHandle) -> None:
-        try:
-            with handle.lock:
-                handle.disconnect()
-        except Exception:  # noqa: BLE001 - the link is already dead; just don't leak
-            log.debug("releasing dead link %s failed", key, exc_info=True)
-
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="app-body"):
@@ -313,9 +303,12 @@ class IyzeeApp(App):
                 for page_id, page_cls in self.PAGES.items():
                     yield page_cls(id=page_id)
         yield Footer(compact=True)
+        yield CommandBar(id="command-bar")  # docked over the footer while open
 
     def action_show_page(self, page_id: str) -> None:
         self.query_one(ContentSwitcher).current = page_id
+        page = cast("Page | ConsoleScreen", self.query_one(f"#{page_id}"))
+        page.on_show()
         nav = self.query_one(NavRail)
         nav.set_active(page_id)
         nav.refresh_instruments()
@@ -384,40 +377,133 @@ class IyzeeApp(App):
         self.close_instruments()
 
     def close_instruments(self, timeout: float = 5.0) -> None:
-        """Disconnect every connected instrument, in parallel, within ``timeout``.
+        """Disconnect every connected instrument within ``timeout`` (see ``Lab.close_all``)."""
+        self.lab.close_all(timeout)
 
-        Each disconnect takes that instrument's lock first, so it waits
-        for an in-flight sweep step or console call instead of tearing the
-        link down under it. An instrument that stays busy past the
-        deadline is skipped (and logged) rather than blocking the exit —
-        the OS reclaims its sockets when the process ends anyway.
-        """
-        handles = dict(self.handles)
-        self.handles.clear()
-        if not handles:
+    # -- ":" command mode ---------------------------------------------------
+
+    def action_command_mode(self) -> None:
+        self.query_one(CommandBar).open()
+
+    def _current_page(self) -> Page | None:
+        current = self.query_one(ContentSwitcher).current
+        return self.query_one(f"#{current}", Page) if current else None
+
+    def command_registry(self) -> CommandRegistry:
+        """Global commands plus those of the page being shown (which may shadow them)."""
+        registry = CommandRegistry(self._global_commands())
+        page = self._current_page()
+        if page is not None:
+            registry.add(*page.commands())
+        return registry
+
+    def run_command(self, line: str) -> None:
+        try:
+            message = self.command_registry().execute(line)
+        except CommandError as exc:
+            self.notify(str(exc), severity="error", timeout=5, markup=False)
             return
-        deadline = time.monotonic() + timeout
+        except Exception as exc:  # noqa: BLE001 - a bad command must never take the app down
+            log.exception("command failed: %s", line)
+            self.notify(f"command failed: {exc}", severity="error", timeout=6, markup=False)
+            return
+        if message:
+            self.notify(message, timeout=5, markup=False)
 
-        def close(key: str, handle: InstrumentHandle) -> None:
-            lock = handle.lock
-            if not lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
-                log.warning("shutdown: %s still busy after %.0fs, not disconnecting", key, timeout)
-                return
-            try:
-                handle.disconnect()
-            except Exception:  # noqa: BLE001 - one bad instrument mustn't stop the rest
-                log.exception("shutdown: error closing %s", key)
-            finally:
-                lock.release()
+    def _global_commands(self) -> list[Command]:
+        instrument_keys = [spec.key for spec in INSTRUMENTS]
+        keys_and_all = [*instrument_keys, "all"]
 
-        threads = [
-            threading.Thread(target=close, args=item, name=f"close-{item[0]}", daemon=True)
-            for item in handles.items()
+        def complete_keys(prefix: str) -> list[str]:
+            return [k for k in keys_and_all if k.startswith(prefix)]
+
+        def targets(args: list[str]) -> list[str]:
+            chosen = instrument_keys if "all" in args else args
+            unknown = [a for a in chosen if a not in instrument_keys]
+            if unknown:
+                raise CommandError(
+                    f"unknown instrument {unknown[0]!r}; known: {', '.join(instrument_keys)}"
+                )
+            return chosen
+
+        def goto(page_id: str) -> Callable[[list[str]], str | None]:
+            def run(args: list[str]) -> str | None:
+                if args:
+                    raise CommandError(f":{page_id} takes no arguments")
+                self.action_show_page(page_id)
+                return None
+
+            return run
+
+        def connect(args: list[str]) -> str | None:
+            if not args:
+                self.action_show_page("connect")
+                return None
+            screen = self.query_one(ConnectScreen)
+            return "; ".join(screen.request_connect(key) for key in targets(args))
+
+        def disconnect(args: list[str]) -> str | None:
+            if not args:
+                raise CommandError("usage: :disconnect <instrument>... | all")
+            screen = self.query_one(ConnectScreen)
+            return "; ".join(screen.request_disconnect(key) for key in targets(args))
+
+        def status(args: list[str]) -> str:
+            lines = []
+            for spec in INSTRUMENTS:
+                state = (
+                    "connected" if spec.key in self.handles else self.lost_links.get(spec.key, "-")
+                )
+                lines.append(f"{spec.key}: {state}")
+            return "\n".join(lines)
+
+        def help_(args: list[str]) -> str:
+            return self.command_registry().help_text(args[0] if args else None)
+
+        def quit_(args: list[str]) -> None:
+            self.exit()
+
+        commands = [
+            Command(
+                "connect",
+                connect,
+                "Connect page, or connect the named instruments",
+                usage="[<instrument>... | all]",
+                complete=complete_keys,
+                aliases=("c",),
+            ),
+            Command(
+                "disconnect",
+                disconnect,
+                "Disconnect instruments",
+                usage="<instrument>... | all",
+                complete=complete_keys,
+            ),
+            Command("status", status, "Which instruments are connected"),
+            Command(
+                "help",
+                help_,
+                "List the commands available on this page",
+                usage="[command]",
+                complete=lambda prefix: [
+                    n for n in self.command_registry().names if n.startswith(prefix)
+                ],
+                aliases=("h",),
+            ),
+            Command("quit", quit_, "Quit now (q asks for confirmation instead)", aliases=("q",)),
         ]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(max(0.0, deadline - time.monotonic()))
+        for page_id, label, key in (
+            ("sweep", "Sweep", "s"),
+            ("scope", "Scope", "o"),
+            ("rb", "Rb", "r"),
+            ("results", "Results", "t"),
+            ("console", "Console", "i"),
+            ("log", "Log", "l"),
+        ):
+            commands.append(
+                Command(page_id, goto(page_id), f"Go to the {label} page", aliases=(key,))
+            )
+        return commands
 
     QUIT_CONFIRM_S = 4.0
 

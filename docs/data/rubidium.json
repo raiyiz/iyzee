@@ -1,0 +1,252 @@
+{
+ "generated_by": "scripts/export_rb_data.py",
+ "source": "iyzee.devices.wavemeter.Rb_transitions (D. A. Steck, Rubidium D Line Data)",
+ "centers_thz": {
+  "85": {
+   "D1": 377.10738569,
+   "D2": 384.23040637
+  },
+  "87": {
+   "D1": 377.1074635,
+   "D2": 384.230484468
+  }
+ },
+ "levels_ghz": {
+  "85": {
+   "ground": {
+    "2": 1.770843907,
+    "3": -1.264888521
+   },
+   "D1": {
+    "2": -0.210922866,
+    "3": 0.150659183
+   },
+   "D2": {
+    "1": -0.113306896,
+    "2": -0.083954916,
+    "3": -0.020502886,
+    "4": 0.100357272
+   },
+   "residual_ghz": 2.67e-07
+  },
+  "87": {
+   "ground": {
+    "1": 4.271676632,
+    "2": -2.56300598
+   },
+   "D1": {
+    "1": -0.51041,
+    "2": 0.306246
+   },
+   "D2": {
+    "0": -0.302073799,
+    "1": -0.229851798,
+    "2": -0.072911296,
+    "3": 0.19374081
+   },
+   "residual_ghz": 1e-08
+  }
+ },
+ "transitions": [
+  {
+   "label": "D1 - Rb85_F22",
+   "line": "D1",
+   "isotope": 85,
+   "f_ground": 2,
+   "f_excited": 2,
+   "thz": 377.108945611,
+   "detuning_ghz": 1.559920922,
+   "strength": 0.222222222
+  },
+  {
+   "label": "D1 - Rb85_F23",
+   "line": "D1",
+   "isotope": 85,
+   "f_ground": 2,
+   "f_excited": 3,
+   "thz": 377.109307193,
+   "detuning_ghz": 1.921502922,
+   "strength": 0.777777778
+  },
+  {
+   "label": "D1 - Rb85_F32",
+   "line": "D1",
+   "isotope": 85,
+   "f_ground": 3,
+   "f_excited": 2,
+   "thz": 377.105909878,
+   "detuning_ghz": -1.475811516,
+   "strength": 0.555555556
+  },
+  {
+   "label": "D1 - Rb85_F33",
+   "line": "D1",
+   "isotope": 85,
+   "f_ground": 3,
+   "f_excited": 3,
+   "thz": 377.10627146,
+   "detuning_ghz": -1.114229516,
+   "strength": 0.444444444
+  },
+  {
+   "label": "D1 - Rb87_F11",
+   "line": "D1",
+   "isotope": 87,
+   "f_ground": 1,
+   "f_excited": 1,
+   "thz": 377.111224767,
+   "detuning_ghz": 3.761266632,
+   "strength": 0.166666667
+  },
+  {
+   "label": "D1 - Rb87_F12",
+   "line": "D1",
+   "isotope": 87,
+   "f_ground": 1,
+   "f_excited": 2,
+   "thz": 377.112041423,
+   "detuning_ghz": 4.577922632,
+   "strength": 0.833333333
+  },
+  {
+   "label": "D1 - Rb87_F21",
+   "line": "D1",
+   "isotope": 87,
+   "f_ground": 2,
+   "f_excited": 1,
+   "thz": 377.104390084,
+   "detuning_ghz": -3.073415979,
+   "strength": 0.5
+  },
+  {
+   "label": "D1 - Rb87_F22",
+   "line": "D1",
+   "isotope": 87,
+   "f_ground": 2,
+   "f_excited": 2,
+   "thz": 377.10520674,
+   "detuning_ghz": -2.256759979,
+   "strength": 0.5
+  },
+  {
+   "label": "D2 - Rb85_F21",
+   "line": "D2",
+   "isotope": 85,
+   "f_ground": 2,
+   "f_excited": 1,
+   "thz": 384.232063907,
+   "detuning_ghz": 1.657536922,
+   "strength": 0.3
+  },
+  {
+   "label": "D2 - Rb85_F22",
+   "line": "D2",
+   "isotope": 85,
+   "f_ground": 2,
+   "f_excited": 2,
+   "thz": 384.232093259,
+   "detuning_ghz": 1.686888922,
+   "strength": 0.388888889
+  },
+  {
+   "label": "D2 - Rb85_F23",
+   "line": "D2",
+   "isotope": 85,
+   "f_ground": 2,
+   "f_excited": 3,
+   "thz": 384.232156711,
+   "detuning_ghz": 1.750340922,
+   "strength": 0.311111111
+  },
+  {
+   "label": "D2 - Rb85_F32",
+   "line": "D2",
+   "isotope": 85,
+   "f_ground": 3,
+   "f_excited": 2,
+   "thz": 384.229057526,
+   "detuning_ghz": -1.348843516,
+   "strength": 0.079365079
+  },
+  {
+   "label": "D2 - Rb85_F33",
+   "line": "D2",
+   "isotope": 85,
+   "f_ground": 3,
+   "f_excited": 3,
+   "thz": 384.229120978,
+   "detuning_ghz": -1.285391516,
+   "strength": 0.277777778
+  },
+  {
+   "label": "D2 - Rb85_F34",
+   "line": "D2",
+   "isotope": 85,
+   "f_ground": 3,
+   "f_excited": 4,
+   "thz": 384.229241838,
+   "detuning_ghz": -1.164531516,
+   "strength": 0.642857143
+  },
+  {
+   "label": "D2 - Rb87_F10",
+   "line": "D2",
+   "isotope": 87,
+   "f_ground": 1,
+   "f_excited": 0,
+   "thz": 384.234454071,
+   "detuning_ghz": 3.969602832,
+   "strength": 0.166666667
+  },
+  {
+   "label": "D2 - Rb87_F11",
+   "line": "D2",
+   "isotope": 87,
+   "f_ground": 1,
+   "f_excited": 1,
+   "thz": 384.234526293,
+   "detuning_ghz": 4.041824832,
+   "strength": 0.416666667
+  },
+  {
+   "label": "D2 - Rb87_F12",
+   "line": "D2",
+   "isotope": 87,
+   "f_ground": 1,
+   "f_excited": 2,
+   "thz": 384.234683234,
+   "detuning_ghz": 4.198765332,
+   "strength": 0.416666667
+  },
+  {
+   "label": "D2 - Rb87_F21",
+   "line": "D2",
+   "isotope": 87,
+   "f_ground": 2,
+   "f_excited": 1,
+   "thz": 384.227691611,
+   "detuning_ghz": -2.792857779,
+   "strength": 0.05
+  },
+  {
+   "label": "D2 - Rb87_F22",
+   "line": "D2",
+   "isotope": 87,
+   "f_ground": 2,
+   "f_excited": 2,
+   "thz": 384.227848551,
+   "detuning_ghz": -2.635917279,
+   "strength": 0.25
+  },
+  {
+   "label": "D2 - Rb87_F23",
+   "line": "D2",
+   "isotope": 87,
+   "f_ground": 2,
+   "f_excited": 3,
+   "thz": 384.228115203,
+   "detuning_ghz": -2.369265179,
+   "strength": 0.7
+  }
+ ]
+}

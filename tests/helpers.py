@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import os
-import socket
 import threading
 import time
 from collections.abc import Awaitable, Callable
@@ -24,8 +23,8 @@ from textual.pilot import Pilot
 from textual.widgets import DataTable, Static
 
 from iyzee.experiment import StepResult, save_step_results
+from iyzee.lab import InstrumentSpec
 from iyzee.tui import app as app_mod
-from iyzee.tui.instruments import InstrumentSpec
 from iyzee.tui.screens import connect as connect_mod
 from iyzee.tui.screens.connect import ConnectScreen
 from iyzee.tui.workers import LastRun
@@ -199,75 +198,63 @@ def save_run(
     return path
 
 
-class FakeSocket:
-    """A stand-in for a connected TCP socket, with the whole surface VICPTransport touches.
+class FakeVisaResource:
+    """A stand-in for an open PyVISA resource.
 
-    ``recv`` serves ``data`` in ``chunk``-byte pieces; once drained it times out,
-    or reports a closed peer (``b""``) with ``eof=True``. A peek on an empty
-    buffer looks like an idle, healthy link. ``connect`` succeeds instantly
-    unless ``fail_connect`` is set. Everything the transport does to it is
-    recorded: ``sent``, ``timeouts`` (every ``settimeout``), ``closed``.
+    ``replies`` are served in order, one per ``query``/``read``/``read_raw``; an
+    ``Exception`` item is raised instead. Everything the driver does to it is
+    recorded: ``written``, ``timeouts`` (every ``timeout`` assignment), ``closed``.
     """
 
-    def __init__(
-        self,
-        data: bytes = b"",
-        chunk: int = 4096,
-        timeout: float = 3.0,
-        *,
-        eof: bool = False,
-        fail_connect: bool = False,
-    ) -> None:
-        self.buf = bytearray(data)
-        self.chunk = chunk
-        self.eof = eof
-        self.fail_connect = fail_connect
-        self.sent = bytearray()
-        self.timeouts: list[float] = []
+    def __init__(self, replies: object = (), timeout: int = 10_000) -> None:
+        self.replies = list(replies)  # type: ignore[call-overload]
+        self.written: list[str] = []
+        self.timeouts: list[int] = []
         self.closed = False
-        self.connected_to: object = None
+        self.chunk_size: int | None = None
         self._timeout = timeout
 
-    def gettimeout(self) -> float:
+    @property
+    def timeout(self) -> int:
         return self._timeout
 
-    def settimeout(self, value: float) -> None:
+    @timeout.setter
+    def timeout(self, value: int) -> None:
         self._timeout = value
         self.timeouts.append(value)
 
-    def recv(self, n: int, flags: int = 0) -> bytes:
-        if flags & socket.MSG_PEEK:
-            if self.buf:
-                return bytes(self.buf[:n])
-            if self.eof:
-                return b""
-            raise BlockingIOError
-        if not self.buf:
-            if self.eof:
-                return b""
-            raise TimeoutError("timed out")
-        take = min(n, self.chunk, len(self.buf))
-        data = bytes(self.buf[:take])
-        del self.buf[:take]
-        return data
+    def write(self, message: str) -> None:
+        self.written.append(message)
 
-    def send(self, data: bytes) -> int:
-        self.sent.extend(data)
-        return len(data)
+    def _next(self) -> object:
+        item = self.replies.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
 
-    def connect(self, address: object) -> None:
-        if self.fail_connect:
-            raise TimeoutError("timed out")
-        self.connected_to = address
+    def read_raw(self) -> bytes:
+        item = self._next()
+        return item if isinstance(item, bytes) else str(item).encode()
 
-    def setsockopt(self, *args: object) -> None:
-        pass
+    def read(self) -> str:
+        item = self._next()
+        return item.decode() if isinstance(item, bytes) else str(item)
 
-    def getsockname(self) -> tuple[str, int]:
-        return ("127.0.0.1", 0)
-
-    def shutdown(self, how: int) -> None:
-        pass
+    def query(self, message: str) -> str:
+        self.write(message)
+        return self.read()
 
     def close(self) -> None:
         self.closed = True
+
+
+class FakeResourceManager:
+    """Hands out one :class:`FakeVisaResource` and remembers the address it was opened at."""
+
+    def __init__(self, resource: FakeVisaResource | None = None) -> None:
+        self.resource = resource or FakeVisaResource()
+        self.opened: list[str] = []
+
+    def open_resource(self, address: str) -> FakeVisaResource:
+        self.opened.append(address)
+        return self.resource

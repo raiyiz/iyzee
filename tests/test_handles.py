@@ -2,7 +2,7 @@
 InstrumentHandle implementation.
 
 None of these touch real hardware. Each handle wraps a driver
-(KeysightMXA / ShutterControl / LeCroy / single_readout) that either
+(KeysightMXA / ShutterControl / LeCroy / Wavemeter) that either
 takes a fake device directly (_VisaHandle) or is constructed inside the
 handle itself — for the latter we monkeypatch the class/function
 `instruments.py` imports, not the real driver, so these stay fast and
@@ -17,16 +17,17 @@ from typing import cast
 
 import pytest
 
-from iyzee.scope import LeCroyTimeoutError
-from iyzee.tui import instruments as instruments_mod
-from iyzee.tui.instruments import (
-    INSTRUMENTS,
+from iyzee.devices import handles as instruments_mod
+from iyzee.devices.handles import (
     LockedProxy,
     ScopeHandle,
     ShutterHandle,
     WavemeterHandle,
     _VisaHandle,
 )
+from iyzee.devices.scope import LeCroyTimeoutError
+from iyzee.devices.wavemeter import DEFAULT_CHANNEL
+from iyzee.lab import INSTRUMENTS
 
 # -- LockedProxy --------------------------------------------------------
 
@@ -168,51 +169,38 @@ def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.Monke
 # -- WavemeterHandle ----------------------------------------------------------
 
 
-def test_wavemeter_handle_probe_reads_the_default_channel(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen_clients = []
-
-    def read(self, channel=None):
-        seen_clients.append(self)
-        return 377.105
-
-    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
-
-    handle = WavemeterHandle()
-    assert handle.probe() == "ch4 = 377.105000 THz"
-    assert handle.device.channel == instruments_mod.DEFAULT_CHANNEL
-    assert isinstance(handle.device, instruments_mod.Wavemeter)
-    assert seen_clients == [handle.device]
-
-
-def test_wavemeter_handle_probe_uses_its_configured_channel(
+def test_wavemeter_handle_probe_reads_the_default_channel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen: list[int] = []
 
-    def read(self, channel=None):
-        seen.append(self.channel if channel is None else channel)
+    def read(self, channel: int = DEFAULT_CHANNEL):
+        seen.append(channel)
         return 377.105
 
     monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
 
-    handle = WavemeterHandle(channel=4)
+    handle = WavemeterHandle()
 
-    assert handle.probe() == "ch4 = 377.105000 THz"
-    assert seen == [4]
+    assert handle.probe() == "wavemeter = 377.105000 THz"
+    assert isinstance(handle.device, instruments_mod.Wavemeter)
+    assert seen == [DEFAULT_CHANNEL]
 
 
-def test_wavemeter_handle_probe_wraps_readout_error(
+def test_wavemeter_handle_probe_propagates_read_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail(self, channel=None):
-        raise instruments_mod.WavemeterReadoutError("switch unreachable")
+    failure = OSError("switch unreachable")
+
+    def fail(self, channel: int = 4) -> float:
+        raise failure
 
     monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", fail)
 
-    handle = WavemeterHandle()
+    with pytest.raises(OSError, match="switch unreachable") as caught:
+        WavemeterHandle().probe()
 
-    with pytest.raises(ConnectionError, match="switch unreachable"):
-        handle.probe()
+    assert caught.value is failure
 
 
 # -- ScopeHandle ----------------------------------------------------------
@@ -221,16 +209,20 @@ def test_wavemeter_handle_probe_wraps_readout_error(
 class _FakeLeCroy:
     answer: str | Exception = "LECROY,WS452,SN1,9.0"
 
-    def __init__(self) -> None:
+    def __init__(self, ip: str) -> None:
         self.connected_to: str | None = None
+        self.ip = ip
+        self.connected = False
         self.disconnected = False
         self.idn_timeouts: list[float | None] = []
 
-    def connect(self, ip: str) -> None:
-        self.connected_to = ip
+    def connect(self) -> None:
+        self.connected_to = self.ip
+        self.connected = True
 
     def disconnect(self) -> None:
         self.disconnected = True
+        self.connected = False
 
     def idn(self, *, timeout: float | None = None) -> str:
         self.idn_timeouts.append(timeout)
@@ -274,18 +266,15 @@ def test_instrument_registry_has_unique_nonempty_specs() -> None:
     assert all(spec.label for spec in INSTRUMENTS)
 
 
-def test_scope_handle_alive_follows_the_drivers_link_check(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Link(_FakeLeCroy):
-        healthy = True
-
-        def check_link(self) -> bool:
-            return self.healthy
-
-    monkeypatch.setattr(instruments_mod, "LeCroy", Link)
+def test_scope_handle_alive_follows_the_drivers_connected_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
     handle = ScopeHandle()
+    handle.connect()
     assert handle.alive
 
-    cast(Link, handle.device).healthy = False
+    cast(_FakeLeCroy, handle.device).connected = False  # e.g. dropped after a timeout
 
     assert not handle.alive
 
