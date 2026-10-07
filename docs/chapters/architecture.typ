@@ -88,7 +88,7 @@ while presenting them through multiple interfaces.
 == What `iyzee` is not
 
 It is deliberately *not* a generic instrument framework trying to erase all
-device differences. A LeCroy VICP scope, a Keysight VISA analyzer, and a
+device differences. A LeCroy VISA/VXI-11 scope, a Keysight VISA analyzer, and a
 stateless HTTP wavemeter do not have the same protocol semantics, and pretending
 otherwise would move useful complexity into a fake abstraction.
 
@@ -237,7 +237,7 @@ These rules impose useful constraints on where new code can go.
     arrow(dir: "↓"),
     node("Instrument semantics", "driver/client operation"),
     arrow(dir: "↓"),
-    node("Resource mechanics", "VISA, VICP/TCP, HTTP"),
+    node("Resource mechanics", "VISA, HTTP"),
     arrow(dir: "↓"),
     node("Physical state", "the instrument actually responds or changes"),
   ),
@@ -301,7 +301,7 @@ as a pile of files.
     arrow(dir: "↓"),
     node("device drivers", "instrument-specific semantics"),
     arrow(dir: "↓"),
-    node("transport / client", "VISA, VICP/TCP, HTTP"),
+    node("transport / client", "PyVISA, HTTP client"),
     arrow(dir: "↓"),
     node("hardware", "the physical instrument"),
   ),
@@ -316,11 +316,12 @@ layer composes driver operations into laboratory actions. The *TUI* and
 *console* layers expose those actions to a human. `Lab` and its handles bind
 all of that to the actual connected resources of one running session.
 
-The arrows are intentionally one-way in responsibility. A VICP transport does
-not know that a received block is an oscilloscope waveform. The oscilloscope
-driver does not know whether it was called by a Textual button or a Python
-script. A scope workflow does not know how a Textual widget represents a dirty
-field.
+The arrows are intentionally one-way in responsibility. PyVISA moves data
+through the selected VISA resource; it does not know that a received block is
+an oscilloscope waveform. The oscilloscope driver owns LeCroy command semantics
+and waveform decoding. A scope workflow does not know whether it was called by
+a Textual button or a Python script, and it does not know how a widget
+represents a dirty field.
 
 = Ownership and lifecycle
 
@@ -450,7 +451,7 @@ forcing every device into one command model.
   [*Instrument*], [*Client/driver*], [*Transport*],
   [Keysight MXA], [`KeysightMXA`], [VISA / SCPI],
   [PSU / shutter], [`PSU` / `ShutterControl`], [VISA / PSU commands],
-  [LeCroy scope], [`LeCroy`], [VICP over TCP],
+  [LeCroy scope], [`LeCroy`], [VISA / VXI-11],
   [Wavemeter], [`Wavemeter`], [HTTP],
 )
 
@@ -488,9 +489,9 @@ lock and then call through a proxy that acquires the same lock again. A plain
 
 The scope is slightly different in implementation detail. Its handle returns
 the LeCroy driver's transaction lock rather than introducing a second unrelated
-lock. This is important because a VICP waveform transfer is itself a compound
-transaction consisting of multiple framed reads; the same transaction boundary
-therefore protects both driver-level operations and higher-level callers.
+lock. A waveform acquisition may involve several VISA reads and the driver may
+need to update connection state when an I/O operation fails; the same transaction
+boundary therefore protects both the driver operation and higher-level callers.
 
 = Drivers and workflows are different layers
 
@@ -680,112 +681,84 @@ This is a recurring design principle in `iyzee`: preserve physically valid
 information while making the invalid or uncertain part impossible to confuse
 with success.
 
-= VICP: protocol → transport → instrument
+= Scope transport: VISA / VXI-11 → instrument
 
-The LeCroy stack is intentionally split into three layers.
-
-#figure(
-  stack(
-    spacing: 4pt,
-    node("LeCroy semantics", "waveform, trigger, channel and acquisition meaning"),
-    arrow(dir: "↓"),
-    node("LeCroy driver", "instrument commands and response decoding"),
-    arrow(dir: "↓"),
-    node("VICPTransport", "frame boundaries, timeouts and connection state"),
-    arrow(dir: "↓"),
-    node("TCP", "byte stream"),
-  ),
-  caption: [The VICP boundary isolates byte-stream mechanics from LeCroy-specific instrument semantics.],
-)
-
-The transport in `src/iyzee/devices/vicp.py` owns framing, socket lifetime,
-timeouts, partial send/receive handling, and transport invalidation. The
-oscilloscope driver owns things such as channel configuration and waveform
-interpretation.
-
-This prevents protocol details from leaking into every scope workflow.
-
-== VICP frames are not `recv()` calls
-
-TCP provides an ordered byte stream, not message boundaries. One call to
-`socket.recv(n)` can return fewer than `n` bytes even when the peer has more data
-on the way.
-
-VICP therefore has a fixed-size header followed by a payload whose length is
-specified in the header. `_recv_exact()` repeatedly receives until the exact
-requested number of bytes has arrived or the connection fails.
-
-The same principle applies to sends: `_send_all()` must account for partial
-writes rather than assuming one call transfers the whole frame.
-
-The transport's `_HEADER` is a network-order structure containing the VICP
-flags/version/reserved bytes and a payload length. Keeping this parsing inside
-the transport means the LeCroy driver receives complete protocol messages
-rather than having to reason about TCP fragmentation.
-
-== Why a failed partial message invalidates the connection
-
-A transport timeout is not necessarily just a slow operation. If the program
-has consumed only part of a frame, it no longer knows whether bytes arriving
-later belong to that response or to something else at the application level.
-
-There are no request IDs in the protocol that let a later response be matched
-back to an earlier request. Retrying on the same stream can therefore create a
-worse failure:
+The LeCroy scope now uses the same VISA lifecycle as the other session-owned
+VISA instruments, with the scope speaking the LeCroy command dialect over a
+VXI-11 resource. The driver no longer contains a project-owned VICP transport
+or raw TCP framing layer.
 
 #figure(
   stack(
     spacing: 4pt,
-    node("request A", "response expected"),
+    node("ScopeScreen", "form state, validation, interaction"),
     arrow(dir: "↓"),
-    node("timeout / partial frame", "stream position is unknown"),
+    node("scope_workflows", "read, apply, verify, acquire, save"),
     arrow(dir: "↓"),
-    node("request B", "same socket would be reused"),
+    node("LeCroy", "LeCroy commands and waveform semantics"),
     arrow(dir: "↓"),
-    node("late response A", "could be mistaken for response B"),
+    node("BaseDevice / PyVISA", "resource lifecycle, timeout and I/O"),
+    arrow(dir: "↓"),
+    node("VXI-11", "VISA transport to the scope"),
   ),
-  caption: [Without request identifiers, a partially consumed VICP response cannot safely be followed by another request on the same stream.],
+  caption: [The scope follows the common resource lifecycle; LeCroy-specific command and waveform semantics remain in the driver.],
 )
 
-For this reason, a mid-frame I/O failure invalidates the VICP connection. A new
-connection starts from a clean stream state instead of trying to guess where
-it is inside the old one.
+`LeCroy` subclasses `BaseDevice`. The common base opens the configured VISA
+resource, applies the timeout and terminations, and owns close/reuse semantics.
+For the scope, reads are intentionally unterminated because waveform payloads
+can contain line-feed bytes; the VXI-11 layer identifies the end of the VISA
+response. The driver increases the VISA chunk size for long waveform records.
 
-This rule is stronger than simply setting `connected = False`. The transport
-actually clears its socket/address state and closes the socket so subsequent
-callers cannot accidentally keep using the corrupted stream.
+== Connection and timeout semantics
 
-== Not every protocol error kills the stream
+`ScopeHandle` performs an active `*IDN?` probe after connecting. The first probe
+gets a wider timeout than normal steady-state calls because a real scope may
+take longer to answer immediately after the resource opens.
 
-There is an important converse detail. If the transport has completely
-consumed a frame or the complete definite-length payload, then a semantic
-parsing error is different from an incomplete transfer.
+A VISA timeout or other VISA I/O failure makes the scope connection unusable.
+The driver closes the resource and clears its connected state before re-raising
+the error. This is deliberate: a late reply must not be allowed to answer a
+subsequent query through an already-uncertain connection.
 
-For example, if a payload is syntactically invalid *after the full payload has
-already been read*, the byte stream is still aligned for the next message. The
-connection can remain usable.
+#figure(
+  stack(
+    spacing: 4pt,
+    node("VISA exchange", "query or waveform transfer"),
+    arrow(dir: "↓"),
+    node("timeout / I/O failure", "reply state is no longer trusted"),
+    arrow(dir: "↓"),
+    node("close resource", "connected = false"),
+    arrow(dir: "↓"),
+    node("reconnect", "fresh VISA session"),
+  ),
+  caption: [Transport uncertainty invalidates the scope session instead of reusing a possibly contaminated exchange.],
+)
 
-That distinction is worth documenting because it is a general transport rule:
+== Complete response versus invalid content
 
-#pull[Lose the connection when stream alignment is uncertain; do not tear down a healthy stream merely because a fully received payload contains bad content.]
+A transport failure and a malformed but completely received payload are
+different cases. The driver can keep the connection when it has consumed a
+complete response but its contents violate the expected waveform format.
+`LeCroyProtocolError` covers those protocol/content errors; a timeout remains a
+connection error.
 
-= Transport state and link monitoring
+The binary waveform path validates the LeCroy definite-length block before
+turning its contents into samples. A declared byte count is authoritative: a
+truncated response is an error rather than data to pad or silently reinterpret.
 
-`VICPTransport` owns a transaction lock and a connection state. `connect()`
-publishes the socket only after the TCP connection and socket tuning succeed.
-This avoids exposing a partially initialized transport to other callers.
+== Why this boundary matters
 
-`check_link()` performs cheap link-state checking and invalidates the transport
-when the peer is known to have disappeared.
+With VISA handling connection mechanics, the scope driver only has to reason
+about the instrument's command language and response formats. The workflow
+then reasons about useful laboratory operations, and the TUI reasons about
+interaction and presentation.
 
-`ScopeHandle.alive` delegates to that mechanism. The application can therefore
-notice that a scope disappeared and remove its handle from the active inventory
-without first issuing a normal measurement command from the UI.
+#pull[The project owns the instrument semantics; PyVISA owns the generic VISA transport mechanics.]
 
-That is also why the Connect page, the console, and the scope workflow can all
-see the same underlying loss of connection instead of maintaining incompatible
-beliefs about the device.
-
+That is the important consequence of removing the old VICP layer: the scope is
+now structurally closer to the MXA and PSU, while still retaining the
+LeCroy-specific parsing and configuration logic that actually matters.
 = The TUI is an orchestration and presentation layer
 
 The TUI has one particularly important design constraint: the Textual event
@@ -849,7 +822,8 @@ Textual.
 = Worker boundaries and UI responsiveness
 
 Hardware latency is unbounded from the perspective of the event loop. A VISA
-query can wait. A VICP transfer can timeout. A wavemeter request can stall.
+query can wait. A scope waveform transfer can timeout. A wavemeter request can
+stall.
 Waveform conversion and plotting can also be expensive even after the hardware
 has responded.
 
@@ -1075,7 +1049,7 @@ That context includes, where available:
 
 - measurement identity and timestamps,
 - software/runtime information,
-- VICP address and timeout information,
+- VISA address and timeout information,
 - instrument identity,
 - requested and applied configuration,
 - acquisition/freeze/restore state,
@@ -1187,7 +1161,7 @@ software than in an ordinary GUI.
 == Never manufacture a measurement
 
 A communication failure must not quietly become a plausible number. Explicit
-exceptions such as wavemeter readout errors, VISA failures, or VICP timeouts are
+exceptions such as wavemeter readout errors, VISA failures, or scope timeouts are
 part of the measurement's truth.
 
 == Hardware truth beats UI optimism
@@ -1262,7 +1236,7 @@ The analogous scope path is:
     arrow(dir: "↓"),
     node("acquire_scope_recording", "freeze, download, decode, scale"),
     arrow(dir: "↓"),
-    node("LeCroy → VICP → TCP", "instrument and transport"),
+    node("LeCroy → PyVISA → VXI-11", "instrument and transport"),
     arrow(dir: "↓"),
     node("ScopeAcquisition", "valid waveforms plus explicit errors"),
     arrow(dir: "↓"),
@@ -1294,7 +1268,7 @@ to concrete failure modes.
   [TUI delegates reusable operations], [Hardware semantics remain testable and callable without Textual],
   [Scope workflows are plain functions], [Console and scripts can reuse the same laboratory operations],
   [Blocking I/O runs in workers], [The UI event loop must remain responsive],
-  [VICP drops the connection after mid-stream failure], [No request IDs means retrying a corrupted stream risks misinterpreting a late response],
+  [Scope I/O failure closes the VISA resource], [A late reply on an uncertain session must not answer a later query],
   [Scope settings are read back], [The instrument may quantize, normalize, reject, or otherwise alter a write],
   [Results are persisted during acquisition], [Interrupted runs retain successful information],
   [IPython is embedded], [Console and TUI share the same live resources and locks],
@@ -1322,7 +1296,7 @@ The main contract groups are:
   [Handles], [Shared synchronization and the common adapter contract],
   [`Lab`], [Connected inventory, dead-link removal, and bounded shutdown],
   [Experiment core], [Step ordering, callbacks, failure policies, and explicit run status],
-  [VICP], [Exact framing, partial reads/writes, timeout behavior, and connection invalidation],
+  [VISA / VXI-11], [Resource lifecycle, timeout behavior, and connection invalidation for scope I/O],
   [Scope workflows], [Readback invariants, clean/dirty state, partial results, and acquisition preconditions],
   [Persistence], [Atomic files, numeric-only archives, manifests, status, and checksums],
   [Workers], [Blocking operations remain off the UI thread and results return through the UI boundary],
@@ -1331,7 +1305,7 @@ The main contract groups are:
 )
 
 A strong architectural test is one that would fail if someone accidentally
-reintroduced the old wrong behavior. For example, a VICP test should not merely
+reintroduced the old wrong behavior. Scope tests should not merely
 show that a happy-path frame parses; it should also prove that a short payload
 or timeout cannot leave the transport pretending that its stream is valid.
 
@@ -1354,8 +1328,7 @@ question it answers.
   [#source("src/iyzee/devices/handles.py", [devices/handles.py])], [Uniform resource adapters, shared locks, and `LockedProxy`],
   [#source("src/iyzee/devices/mxa.py", [devices/mxa.py])], [Keysight MXA SCPI/VISA semantics],
   [#source("src/iyzee/devices/power.py", [devices/power.py])], [PSU operations and optical shutter control],
-  [#source("src/iyzee/devices/scope.py", [devices/scope.py])], [LeCroy instrument semantics over VICP],
-  [#source("src/iyzee/devices/vicp.py", [devices/vicp.py])], [Thread-safe VICP framing, socket lifecycle, and stream integrity],
+  [#source("src/iyzee/devices/scope.py", [devices/scope.py])], [LeCroy instrument semantics over VISA / VXI-11],
   [#source("src/iyzee/devices/wavemeter.py", [devices/wavemeter.py])], [Stateless wavemeter HTTP client],
   [#source("src/iyzee/experiment/core.py", [experiment/core.py])], [Step protocol, run context, step results, failure recording, and sequencing],
   [#source("src/iyzee/experiment/procedures.py", [experiment/procedures.py])], [Reusable analyzer configurations, steps, and sweep builders],
@@ -1382,7 +1355,7 @@ A new hardware capability should normally be added at the lowest layer that
 knows enough to implement it correctly.
 
 For a new instrument command, add a driver method rather than placing raw SCPI
-or VICP into a screen. For a new laboratory operation composed from existing
+or transport/protocol mechanics into a screen. For a new laboratory operation composed from existing
 driver calls, add or extend a workflow. For a reusable measurement pattern, use
 a `Step` and the experiment layer. For a new way to present an existing
 operation, extend the TUI without moving the operation upward into the page.
