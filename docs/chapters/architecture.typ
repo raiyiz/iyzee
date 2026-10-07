@@ -163,8 +163,8 @@ the fact.
       *3. Drivers express instrument semantics*
 
       Higher layers should ask for meaningful operations such as
-      `set_rbw()` or waveform acquisition. SCPI strings, VICP frames, socket
-      timeouts, and response decoding belong below that boundary.
+      `set_rbw()` or waveform acquisition. SCPI commands, VISA resource details,
+      transport errors, and response decoding belong below that boundary.
 
       See #source("src/iyzee/devices/mxa.py", [devices/mxa.py]) and
       #source("src/iyzee/devices/scope.py", [devices/scope.py]).
@@ -756,9 +756,9 @@ interaction and presentation.
 
 #pull[The project owns the instrument semantics; PyVISA owns the generic VISA transport mechanics.]
 
-That is the important consequence of removing the old VICP layer: the scope is
-now structurally closer to the MXA and PSU, while still retaining the
-LeCroy-specific parsing and configuration logic that actually matters.
+The important consequence is that the scope is now structurally closer to the MXA
+and PSU, while still retaining the LeCroy-specific parsing and configuration logic
+that actually matters.
 = The TUI is an orchestration and presentation layer
 
 The TUI has one particularly important design constraint: the Textual event
