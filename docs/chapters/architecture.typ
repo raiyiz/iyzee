@@ -685,8 +685,8 @@ with success.
 
 The LeCroy scope now uses the same VISA lifecycle as the other session-owned
 VISA instruments, with the scope speaking the LeCroy command dialect over a
-VXI-11 resource. The driver no longer contains a project-owned VICP transport
-or raw TCP framing layer.
+VXI-11 resource. The driver contains no project-owned transport or raw TCP framing
+layer.
 
 #figure(
   stack(
