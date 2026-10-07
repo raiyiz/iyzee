@@ -190,11 +190,11 @@ The README is the **quick-start and orientation layer**. The full technical guid
 
 | Guide | Covers |
 | --- | --- |
+| [Documentation guide](docs/README.md) | how the technical guide is organized and where to start |
 | [Architecture](docs/chapters/architecture.typ) | ownership, locking, layering, and design decisions |
-| [MXA & measurements](docs/chapters/mxa-and-measurements.typ) | analyzer state, SCPI, RBW/VBW, noise density, squeezing and shot-noise measurements |
 | [TUI & devices](docs/chapters/tui-and-devices.typ) | TUI structure, device interaction, connection details, navigation and console internals |
+| [MXA & measurements](docs/chapters/mxa-and-measurements.typ) | analyzer state, SCPI, RBW/VBW, noise density, squeezing and shot-noise measurements |
 | [Rubidium physics](docs/chapters/rubidium-physics.typ) | D1/D2 structure, spectroscopy, polarization self-rotation and quantum-noise measurements |
-| [TUI/device architecture decision](docs/adr_0001_tui_vs_devices_separation.md) | why hardware machinery stays outside the TUI |
 
 The compiled guide is published by CI as the <code>iyzee-documentation</code> artifact.
 
