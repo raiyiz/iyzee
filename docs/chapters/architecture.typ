@@ -1305,50 +1305,36 @@ The main contract groups are:
 )
 
 A strong architectural test is one that would fail if someone accidentally
-reintroduced the old wrong behavior. Scope tests should not merely
-show that a happy-path frame parses; it should also prove that a short payload
-or timeout cannot leave the transport pretending that its stream is valid.
+reintroduced the old wrong behavior. Scope tests should not merely prove that a happy-path acquisition works; they
+should also protect connection invalidation on VISA I/O failure and validation
+of complete-but-malformed waveform responses.
 
 Likewise, a scope test should be willing to fail when requested settings and
 verified settings diverge. That is precisely the kind of bug the architecture
 exists to make visible.
 
-= Module and responsibility map
+= Responsibility map
 
-The repository is easier to maintain when each file can be described by the
-question it answers.
+The useful map is by responsibility, not by every module in the repository.
 
 #table(
-  columns: (2.15fr, 3.2fr),
+  columns: (2fr, 3.3fr),
   stroke: 0.5pt + hairline,
   inset: 5pt,
-  [*Source*], [*Responsibility*],
-  [#source("src/iyzee/lab.py", [lab.py])], [Authoritative inventory and lifecycle of connected instruments],
-  [#source("src/iyzee/devices/base.py", [devices/base.py])], [Shared VISA lifecycle and PSU channel infrastructure],
-  [#source("src/iyzee/devices/handles.py", [devices/handles.py])], [Uniform resource adapters, shared locks, and `LockedProxy`],
-  [#source("src/iyzee/devices/mxa.py", [devices/mxa.py])], [Keysight MXA SCPI/VISA semantics],
-  [#source("src/iyzee/devices/power.py", [devices/power.py])], [PSU operations and optical shutter control],
-  [#source("src/iyzee/devices/scope.py", [devices/scope.py])], [LeCroy instrument semantics over VISA / VXI-11],
-  [#source("src/iyzee/devices/wavemeter.py", [devices/wavemeter.py])], [Stateless wavemeter HTTP client],
-  [#source("src/iyzee/experiment/core.py", [experiment/core.py])], [Step protocol, run context, step results, failure recording, and sequencing],
-  [#source("src/iyzee/experiment/procedures.py", [experiment/procedures.py])], [Reusable analyzer configurations, steps, and sweep builders],
-  [#source("src/iyzee/experiment/io.py", [experiment/io.py])], [Recording formats, atomic persistence, figures, and numeric helpers],
-  [#source("src/iyzee/scope_workflows.py", [scope_workflows.py])], [Reusable scope read/apply/verify/acquire/save operations],
-  [#source("src/iyzee/tui/app.py", [tui/app.py])], [Application shell, page switching, shared state, commands, and shutdown],
-  [#source("src/iyzee/tui/screens/page.py", [tui/screens/page.py])], [Common page mechanics, validation, readiness, and worker-to-UI handoff],
-  [#source("src/iyzee/tui/screens/", [tui/screens/])], [Concrete user workflows and presentation],
-  [#source("src/iyzee/tui/ipython.py", [tui/ipython.py])], [`LabProxy`, shell configuration, history selection, and native IPython introspection],
-  [#source("src/iyzee/tui/ipython_session.py", [tui/ipython_session.py])], [In-process IPython terminal session and virtual streams],
-  [#source("src/iyzee/tui/termkeys.py", [tui/termkeys.py])], [Keyboard event translation into terminal input bytes],
-  [#source("src/iyzee/tui/vterm.py", [tui/vterm.py])], [Terminal-emulator state and scrollback via `pyte`],
-  [#source("src/iyzee/tui/terminal_view.py", [tui/terminal_view.py])], [Rendering of the virtual terminal inside Textual],
-  [#source("src/iyzee/tui/workers.py", [tui/workers.py])], [Small worker-facing result objects such as `LastRun`],
-  [#source("src/iyzee/waveform_math.py", [waveform_math.py])], [Reusable numerical operations on waveform recordings],
+  [*Layer / anchor*], [*Question it answers*],
+  [#source("src/iyzee/lab.py", [Lab])], [Which instruments are connected, and who owns their lifecycle?],
+  [#source("src/iyzee/devices/base.py", [BaseDevice])], [How is a VISA resource opened, configured, reused, and closed?],
+  [#source("src/iyzee/devices/handles.py", [handles])], [How are heterogeneous live resources exposed through one lifecycle and locking contract?],
+  [#source("src/iyzee/devices/", [device drivers])], [How does one physical instrument express its own commands, state, and response formats?],
+  [#source("src/iyzee/experiment/core.py", [experiment core])], [How are reproducible points executed, reported, and recorded?],
+  [#source("src/iyzee/experiment/procedures.py", [procedures])], [How are reusable measurement sequences constructed?],
+  [#source("src/iyzee/scope_workflows.py", [scope workflows])], [How are scope-specific operations composed without depending on Textual?],
+  [#source("src/iyzee/tui/", [TUI])], [How are existing operations presented, validated, scheduled, and observed interactively?],
 )
 
-This map is intentionally responsibility-oriented. It should help a reader
-choose where new code belongs before opening an editor.
-
+The key anchors are enough to orient a contributor. Individual modules should
+be discovered from those boundaries rather than maintained as a second manual
+index here.
 = How to extend the system
 
 A new hardware capability should normally be added at the lowest layer that
@@ -1365,7 +1351,7 @@ The practical decision tree is:
 #figure(
   stack(
     spacing: 4pt,
-    node("Does this describe bytes or framing?", "yes → transport"),
+    node("Does this require lower-level communication machinery?", "only if the client library does not provide it"),
     arrow(dir: "↓"),
     node("Does this describe one instrument's semantics?", "yes → device driver"),
     arrow(dir: "↓"),
@@ -1387,18 +1373,13 @@ same concept.
 This architecture guide is the conceptual entry point. It should explain the
 system as a whole and then hand the reader to more specialized documents.
 
-The current documentation has two useful companions:
+The documentation landing page is `docs/README.md`; it explains the reading
+paths and build entry point. The specialized chapters then carry the detail:
+`TUI and devices` for interactive/hardware behavior, `MXA and measurements` for
+analyzer semantics, and `Rubidium` for the scientific context.
 
-- `docs/tui-and-devices.typ` is the detailed guide to TUI/device interaction,
-  connection behavior, command surfaces, and direct instrument usage.
-- `docs/mxa-and-measurements.typ` covers MXA control, analyzer semantics,
-  measurement quantities, and the associated physics.
-
-The architecture guide should link to those documents rather than copying their
+The architecture guide should link to those chapters rather than copying their
 full command references or measurement discussion.
-
-The README remains the operational landing page: how to run the application,
-what the pages do, and where to find the deeper technical documents.
 
 = End-to-end mental model
 
