@@ -1,399 +1,242 @@
 # iyzee
 
--- this too convoluted!
+**Lab instrument control and noise measurement for Python.**
 
-Small Python control and measurement toolkit for a lab setup, centered on
-automated noise measurements with a Keysight MXA. Two ways to run a
-measurement: a scripted CLI entry point (`iyzee`), and an interactive
-terminal UI with a live console (`iyzee-tui`).
+iyzee connects laboratory hardware to a small Python API, reproducible measurement procedures, and an interactive terminal UI. It is built around a Keysight MXA, with support for a LeCroy oscilloscope, power supply/shutter, and wavemeter.
 
-## Layout
+> **Python first, TUI second.** Hardware control and measurement logic stay usable from scripts and the IPython console; the TUI organizes them for interactive work.
 
-```text
-src/iyzee/
-├── main.py               # CLI entry point: own resources, run a procedure, plot, save
-├── config.py              # instrument addresses + data directory (env var / config.toml overrides)
-├── lab.py                 # Lab: the connected instruments of a session (connect, disconnect, dead
-│                          # links, close-all) + the INSTRUMENTS registry; no Textual, shared by TUI/console/scripts
-├── devices/               # everything that talks to hardware
-│   ├── base.py             # shared VISA lifecycle (BaseDevice), PSU channels
-│   ├── mxa.py              # Keysight MXA SCPI/VISA driver
-│   ├── power.py            # power supply + optical shutter control
-│   ├── scope.py            # LeCroy oscilloscope (VISA/VXI-11): waveform download + channel/trigger control
-│   ├── wavemeter.py        # wavemeter HTTP client: readout, PID setpoint
-│   └── handles.py          # uniform connect/disconnect/probe/lock adapter per device, LockedProxy
-├── scope_workflows.py     # scope operations + durable waveform recordings — plain
-│                          # functions/dataclasses on top of devices/scope.py, no Textual; see
-│                          # "Design direction" below
-├── experiment/            # composable measurement procedures
-│   ├── core.py             # Step protocol, ExperimentContext, StepResult, run_sequence()
-│   ├── procedures.py      # AnalyzerConfig, prepare_analyzer(), acquire_trace(), BandwidthStep, FrequencyStep, run_*_sweep()
-│   └── io.py                # DATA_ROOT (<project root>/data), create_dirs(), save_step_results(), build_figure(), multiplot()
-└── tui/                    # interactive terminal UI (`iyzee-tui`)
-    ├── app.py              # IyzeeApp: nav rail, page switcher, key bindings, shared state, shutdown
-    ├── app.tcss            # layout and responsive rules (width breakpoints)
-    ├── ipython.py          # the `lab` namespace (LabProxy), shell configuration, history file location
-    ├── ipython_session.py  # IPython's terminal shell, running in-process on a virtual terminal
-    ├── logging_support.py  # captures the app's own logging: session buffer + rotating file history
-    ├── vterm.py            # terminal screen model (pyte) with scrollback
-    ├── termkeys.py         # Textual key events -> terminal input bytes
-    ├── terminal_view.py    # widget that shows the virtual terminal and types into it
-    ├── plotting.py         # plotext drawing shared by the Sweep, Scope, Results and Console pages
-    ├── text.py             # showing externally produced text safely (markup-safe)
-    ├── workers.py          # LastRun: the sweep result handed to the console
-    └── screens/            # the seven pages
-        ├── page.py         # shared page base, form helpers/validation, readiness hook, and worker→UI plumbing
-        ├── connect.py      # ConnectScreen
-        ├── sweep.py        # SweepScreen
-        ├── scope.py        # ScopeScreen — form/plot only; operations live in scope_workflows.py
-        ├── rb.py           # RbScreen: rubidium D1/D2 transitions (stick plots + table)
-        ├── results.py      # ResultsScreen — browse saved Sweep/Scope runs, derive/export waveforms
-        ├── console.py      # ConsoleScreen + IyzeeConsole: the page around IPython's terminal UI
-        └── log.py          # LogScreen: the app's own logging, live and browsable
-```
+[![CI](https://github.com/raiyiz/iyzee/actions/workflows/ci.yml/badge.svg)](https://github.com/raiyiz/iyzee/actions/workflows/ci.yml)
 
-## Running the TUI
+## Start here
 
-```sh
+### Install
+
+Requires **Python 3.14+** and [uv](https://docs.astral.sh/uv/).
+
+~~~sh
 uv sync
+~~~
+
+### Run the interactive lab
+
+~~~sh
 uv run iyzee-tui
-```
+~~~
 
-Seven pages cover the common tasks (the classes keep their `*Screen` names, but
-they are plain container widgets inside one `ContentSwitcher`, not Textual
-`Screen`s). Switch between them with `c` / `s` / `o` / `r` / `t` / `i` / `l`,
-`F1`–`F4` (Connect/Sweep/Results/Console only — see below), or by clicking the
-nav rail; `Ctrl+Q` quits at once, `q` quits after a second press (a running cell is
-interrupted and connected instruments are disconnected on the way out):
+The TUI is the normal entry point for interactive measurements:
 
-**Command mode.** `:` opens a vim-style command line over the footer (not in
-text fields or the console, where it is just a character); `Enter` runs,
-`Esc` cancels, `Up`/`Down` recall history, `Tab` completes. Commands match by
-unique prefix (`:conn` is `:connect`) and `:help` lists what the current page
-offers:
+~~~text
+┌─────────┬──────────────────────────────────────────────┐
+│ Connect │  connect / disconnect instruments            │
+│ Sweep   │  configure and run MXA measurements          │
+│ Scope   │  configure and acquire oscilloscope traces   │
+│ Rb      │  browse rubidium D1/D2 transitions           │
+│ Results │  inspect and export saved measurements       │
+│ Console │  work directly with the live Python objects  │
+│ Log     │  inspect application logs                    │
+└─────────┴──────────────────────────────────────────────┘
+~~~
 
-| Command | Does |
+Navigate with the letter keys (<code>c s o r t i l</code>) or the navigation rail. <code>F1</code>–<code>F4</code> provide quick access to Connect, Sweep, Results, and Console.
+
+### Run the script interface
+
+~~~sh
+uv run iyzee
+~~~
+
+The script entry point is useful for a straightforward measurement run. The same lower-level device and experiment code is available to Python code without the TUI.
+
+---
+
+## The workflow
+
+A typical measurement has a deliberately small number of layers:
+
+~~~mermaid
+flowchart LR
+    U["TUI / script / IPython"] --> L["Lab session"]
+    L --> P["Experiment procedures"]
+    P --> D["Device drivers"]
+    D --> H["Real hardware"]
+    P --> R["Recorded results"]
+    R --> T["Results / plots"]
+~~~
+
+**The important boundary:** UI code composes operations; it does not own the instrument protocol. Device drivers expose reusable hardware operations, while <code>experiment/</code> contains measurement procedures and result handling.
+
+For the architecture and the reasoning behind this split, see the [architecture chapter](docs/chapters/architecture.typ).
+
+## Instruments
+
+| Instrument | Interface | What iyzee uses it for |
+| --- | --- | --- |
+| **Keysight MXA** | VISA / SCPI | noise spectra and automated sweeps |
+| **LeCroy scope** | VISA / VXI-11 | waveform acquisition and channel/trigger control |
+| **Power supply / shutter** | VISA | supply control and optical shutter |
+| **Wavemeter** | HTTP | frequency readout and PID setpoints |
+
+Hardware is **not** connected merely by constructing a driver. Connections are explicit and owned by the application/session, which keeps experiment code testable and makes failure handling visible.
+
+## TUI at a glance
+
+| Page | Purpose |
 | --- | --- |
-| `:connect`, `:sweep`, `:scope`, `:results`, `:console`, `:log` | go to a page (`:c` `:s` `:o` `:t` `:i` `:l` for short) |
-| `:connect scope mxa` / `:connect all`, `:disconnect scope` | connect or disconnect instruments |
-| `:status`, `:help [cmd]`, `:quit` (`:q`) | connected instruments, command list, quit now |
-| Scope page: `:retrieve`, `:apply [channels\|trigger]`, `:acquire`, `:tdiv 2u` | what its buttons do; `:tdiv` sets time/div (`2u`, `500n`, `1.5m`, `1e-6`) and applies it |
-| Sweep page: `:run`, `:abort`, `:capture` | the sweep buttons |
-| Results page: `:refresh`, `:latest`, `:width 40` | re-scan, select the newest run, list width in percent |
+| <code>c</code> **Connect** | Connect and disconnect individual instruments |
+| <code>s</code> **Sweep** | Run bandwidth or frequency sweeps with live progress and traces |
+| <code>o</code> **Scope** | Synchronize scope settings, apply changes, acquire and save waveforms |
+| <code>r</code> **Rb** | Inspect the rubidium D1/D2 hyperfine transition tables |
+| <code>t</code> **Results** | Browse saved sweep/scope recordings and export scope plots |
+| <code>i</code> **Console** | Use the live IPython session |
+| <code>l</code> **Log** | Follow and inspect application logs |
 
-A command whose button is disabled (not connected, busy, nothing to apply) says
-so instead of doing nothing. New commands are one `Command(...)` in the page's
-`commands()` method (or `IyzeeApp._global_commands`); the parsing and
-completion live in `tui/commands.py`, free of Textual.
+### Command line
 
-- **Connect** (`c`) — one row per instrument (MXA, shutter/PSU, wavemeter,
-  scope). Enter connects the selected row; on a connected row it asks for a
-  second Enter to disconnect (and refuses while a sweep is running). The nav
-  rail's instrument dots follow connections live.
-- **Sweep** (`s`) — configure and run a bandwidth or frequency sweep, with
-  a live progress bar and trace plot. Built directly on `Step`/
-  `run_sequence()` — it doesn't duplicate anything from `experiment/`. A
-  banner says which instrument still needs connecting, a bad field is marked
-  and focused, and every point is saved to disk as it is measured, so an
-  interrupted run keeps what it had.
-- **Scope** (`o`) — connect to the LeCroy and the page automatically retrieves
-  its current channel/trigger state once. The page shows whether the form is
-  synchronized, highlights local edits, and enables each Apply action only when
-  there is a delta to send. Apply writes only changed fields; *Retrieve current
-  settings* re-syncs after a front-panel change. **Acquire & save** is available
-  only for a synchronized, clean state and records enabled-channel waveforms
-  under `data/YYYY-MM/` as a numeric `.npz` plus JSON manifest.
-- **Rb** (`r`) — the rubidium D1/D2 hyperfine transitions that
-  `devices.wavemeter.Rb_transitions` references the wavemeter to: one stick plot
-  per D line (both isotopes, on a shared GHz axis) over a table of absolute
-  frequencies. Highlighting a row marks that transition in the plots. Line
-  positions only — no strengths or broadening — and no instrument is needed.
-- **Results** (`t`) — browse previously recorded `.npz` runs on disk (sweeps
-  and scope acquisitions); the preview follows the highlighted run, and scope
-  runs add channel selection, waveform operations and PNG export.
-- **Console** (`i`) — IPython's own terminal UI, in the app process, with live
-  access to connected instruments and the last sweep's results. See below.
-- **Log** (`l`) — the app's own logging, live by default, with a level
-  filter and a way to browse older rotated log files.
+Inside the TUI, <code>:</code> opens a small command line. It is intentionally complementary to the navigation keys:
 
-`F1`–`F4` reach only Connect/Sweep/Results/Console — Textual's own key
-handling reserves those four specifically to escape the console's embedded
-terminal (see the comment on `IyzeeApp.BINDINGS`); Scope, Rb and Log are
-letter-only (`o`, `r`, `l`) to avoid extending that.
+~~~text
+:connect          :sweep          :scope
+:results          :console        :log
+:connect all      :disconnect scope
+:status           :help           :quit
+~~~
 
-**Keyboard.** Outside text-entry widgets, `j`/`k` move focus (Textual's own
-`focus_next()`/`focus_previous()`) and `Escape` leaves a text field. `Ctrl+\`
-opens Textual's built-in Command Palette, exposing the app's actions without a
-second command parser (not `:` or `Ctrl+P` — IPython's history uses `Ctrl+P`).
-Whether a key means "navigation" or "text entry" is decided by Textual itself:
-a focused widget's own keys take priority over `IyzeeApp.BINDINGS`, so there is
-no hand-maintained mode flag to drift out of sync — except for priority
-bindings like the palette's, which are checked before the focus chain; see the
-comment on `IyzeeApp.COMMAND_PALETTE_BINDING`. While the console's terminal has
-focus it owns nearly every key: only `F1`–`F4`, `Ctrl+Q` and `Ctrl+\` reach the
-app (see the console section).
+Page-specific commands are available where useful, for example <code>:run</code> on Sweep and <code>:acquire</code> on Scope. <code>:help</code> is the authoritative list.
 
-## How a measurement flows
+### Keyboard
 
-A measurement is a sequence of `Step`s run against a shared, already-connected
-`ExperimentContext`. The important ownership boundary is explicit — this is
-what both the CLI script and the TUI's Sweep screen build on:
+Outside text-entry widgets:
 
-1. Something creates the required hardware objects and owns their lifecycle.
-   `main.py` (the script path) enters `KeysightMXA` as a context manager, so
-   the VISA resource is opened there and closed when the procedure finishes
-   or raises. The TUI's Connect screen does the equivalent for interactive
-   use — connect/disconnect is explicit there too, just user-driven instead
-   of a `with` block.
-2. A `run_*` procedure in `procedures.py` (or, for the TUI, `SweepScreen`
-   composing the same lower-level pieces directly) receives those
-   already-owned devices and configures them via `prepare_analyzer()`. It
-   does not create, connect, or disconnect hardware.
-3. A list of `Step`s (e.g. `BandwidthStep`, `FrequencyStep`) is built —
-   each one describes a single reproducible measurement point.
-4. `run_sequence()` runs each step in order, logging progress and either
-   stopping on the first failure (`on_error="raise"`, the default) or
-   skipping a bad point and continuing (`on_error="skip"`). An optional
-   `on_step` callback fires after every step, success or failure — the TUI's
-   live progress bar and trace plot are the only thing hooked into it;
-   `run_sequence()` itself stays UI-agnostic and works exactly as before
-   with no callback at all.
-5. Each step returns a `StepResult`: the scan coordinate, its unit, the
-   acquired traces, and metadata needed to reproduce that point (RBW/VBW,
-   laser setpoint, etc.).
-6. After hardware has been released, the results get plotted —
-   `build_figure()` returns a `matplotlib` `Figure` without displaying it
-   (what the TUI would use to export one), and `multiplot()` wraps that with
-   `plt.show()` for the script path — and `save_step_results()` writes them
-   to a compressed `.npz` archive with per-point metadata embedded alongside
-   the data.
+- <code>j</code> / <code>k</code> move focus.
+- <code>Escape</code> leaves a text field.
+- <code>Ctrl+\\</code> opens Textual's command palette.
+- <code>Ctrl+Q</code> quits immediately; <code>q</code> quits after a second press.
 
-Constructing a device does not connect it. `BaseDevice` opens the VISA resource
-when `connect()` is called, normally through the explicit `with device:`
-boundary in the application entry point. This keeps hardware access out of
-experiment construction and makes procedure tests independent of real
-instruments.
+The embedded console deliberately keeps normal terminal editing keys for IPython.
 
-Adding a new experiment means adding a new `Step` subclass and a factory
-function in `procedures.py`, not writing a new hand-rolled loop. That's also
-why `SweepScreen` doesn't need to change when a new sweep type is added — it
-already just picks a `Step` list and runs it.
+---
 
-## Instrument drivers
+## The IPython console
 
-- **`devices/mxa.py`** — hardware abstraction for the Keysight MXA. New MXA
-  capabilities should be implemented here as reusable SCPI/VISA methods;
-  code in `experiment/` should call those methods rather than contain raw
-  SCPI strings.
-- **`devices/power.py`** — PSU control plus `ShutterControl`, a thin wrapper that
-  drives the optical shutter through one PSU channel.
-- **`devices/scope.py`** — LeCroy oscilloscope driver on `BaseDevice` (VISA over
-  VXI-11; the scope's remote control must be set to LXI/VXI-11). A timeout or I/O error
-  drops the connection, since a late reply would otherwise answer the next query.
-  `scope_workflows.py` holds the operations built on top
-  (channel/trigger settings, waveform acquisition) — see "Design direction".
-- **`devices/wavemeter.py`** — `Wavemeter`, a stateless HTTP client (frequency
-  readout, PID setpoint); scripts and the console use `Wavemeter()` directly.
-- **`devices/base.py`** — shared infrastructure: `BaseDevice` (VISA connect/close/
-  context-manager lifecycle) and `CH` (PSU channel IDs). `KeysightMXA` and
-  `PSU` both build on `BaseDevice`.
-- **`config.py`** — where things are: `IP` holds the default instrument
-  addresses and `address(IP.SCOPE)` resolves the one to use; `data_root()` is
-  where recordings and logs go. Override either without touching code: set
-  `IYZEE_SCOPE_IP` / `IYZEE_NOISE_ANALYZER_IP` / `IYZEE_POWER_SUPPLY_IP` /
-  `IYZEE_WAVEMETER_IP` / `IYZEE_DATA_DIR`, or write `config.toml` in the user
-  config directory (or wherever `IYZEE_CONFIG` points):
+Press <code>i</code> to work with the same connected instruments from a real IPython shell.
 
-  ```toml
-  [addresses]
-  scope = "10.140.1.221"
-
-  [paths]
-  data = "/srv/iyzee-data"
-  ```
-
-  A config file that exists but doesn't parse is an error, not a silent fallback.
-- **`lab.py`** — `Lab` owns the connected instruments of a session:
-  `lab.connect("scope")`, `lab.device("scope")`, `lab.disconnect(...)`,
-  `lab.close_all()`. The TUI (`app.lab`) and the console's `lab` use it, and so
-  can a script.
-
-## Interactive IPython console
-
-The Console screen (`i`) embeds a real IPython shell in the same process as
-the application, with IPython's own terminal UI (vi or emacs editing). Connected
-instruments and the last sweep's results are reachable through a single `lab` object:
-
-```python
+~~~python
 lab.mx.set_center_freq(1.5e6)
 lab.mx.set_rbw(24e3)
 lab.mx.single_sweep_wait()
+
 trace = lab.mx.get_trace_data(1)
 
-from iyzee.scope_workflows import ChannelSettings, apply_channel_settings
+lab.connected
+lab.results[-1].traces["squeezing"]
 
-apply_channel_settings(lab.scope, [ChannelSettings(Channel.C1, True, 0.5, 0.0, Coupling.DC_1M)])
+lab.wavemeter.read_frequency(4)
+~~~
 
-lab.results[-1].traces["squeezing"]  # last completed sweep
-lab.connected  # e.g. ("mx", "shutter")
+Use ordinary IPython discovery:
 
-lab.wavemeter.read_frequency(4)  # THz; stateless HTTP client, no connection to open
-help(lab.wavemeter)  # ordinary Python/IPython help
-help(lab.wavemeter.read_frequency)  # method documentation and signature
-```
+~~~python
+lab.scope.<TAB>
+lab.mx.set_rbw?
+help(lab.wavemeter)
+~~~
 
-`Tab` completes methods on every instrument (`lab.scope.<Tab>`), and `?` shows a
-method's signature and docstring (`lab.scope.set_time_per_div?`). For discovery,
-use IPython's normal `?`/`??`, `help(...)`, `dir(...)`, and tab completion rather
-than a second API-description mechanism.
+<code>lab</code> reflects the application's current connection state rather than caching stale instrument references. Calls to the same physical instrument are serialized so console activity cannot overlap with a screen worker using that instrument.
 
-`lab` does a fresh lookup against the app's actual state on every attribute
-access — nothing is copied into the console when an instrument connects, and
-nothing needs cleaning up when it disconnects, because nothing is ever
-cached. Ask for `lab.mx` after disconnecting the MXA and you get an
-immediate, clear `AttributeError`, not a stale reference that fails
-confusingly later. This also means a user's own `mx = 5` for a scratch
-calculation never collides with anything — `lab` owns exactly one name in
-the shell, not one per instrument.
+The console is an in-process IPython terminal, not a second control API. Completion, history, magics, inspection, top-level <code>await</code>, and <code>%debug</code> are provided by IPython itself.
 
-Every instrument call made through `lab` (and every one a screen's own
-background worker makes) is serialized per-instrument, so the console and,
-say, a running sweep can't issue overlapping commands to the same physical
-device from two threads at once.
+---
 
-Everything IPython offers comes from IPython itself rather than a
-re-implementation: completion, inspection (`?`/`??`), magics, shell commands,
-top-level `await`, `%debug`, and history — Up/Down and `Ctrl+R` recall commands,
-and history-based auto-suggestions appear as you type. History is persistent
-across runs for a real run of the app only (`iyzee-tui`'s entry point passes
-`default_history_file()` as `IyzeeApp.console_history_file`); everything else —
-every test in this codebase, and any direct construction — keeps it in
-`:memory:`. That split matters: IPython's own default history file
-(`~/.ipython/profile_default/history.sqlite`) is shared by every
-`InteractiveShell` on the machine and caused a real test-suite hang, since a full
-test run builds many shells that each register an `atexit` write against that one
-ever-growing file. See the docstrings of `default_history_file` and
-`shell_config` in `ipython.py`. Jedi completion is disabled: it does static
-analysis and can't see through `lab`'s dynamic attribute lookup, so `lab.<Tab>`
-would silently return nothing; IPython's own completer is instead allowed to look
-through the proxies (`Completer.policy_overrides` in `shell_config`), so
-`lab.mx.<Tab>` completes too.
+## Configuration
 
-**How it works.** The console page runs IPython's own terminal UI (prompt_toolkit's
-prompt: editing, completion menu, history search, auto-suggestions, `%magics`,
-`?` help, `%debug`) *inside the app process*, so `lab.mx` is the live instrument
-rather than a copy across a process boundary. prompt_toolkit only needs a
-"terminal" to read keystrokes from and write escape sequences to, so it is given
-virtual ones (`tui/ipython_session.py`): keystrokes are encoded by
-`tui/termkeys.py` and written to a pipe input, and its output is interpreted by a
-terminal emulator (`tui/vterm.py`, built on `pyte`) and painted by
-`tui/terminal_view.py`, with scrollback (mouse wheel or Shift+PageUp/Down). The
-shell runs in its own thread; `print()` output is routed to the console by
-thread, `input()` prompts on the virtual terminal, and Ctrl+C interrupts the
-running cell. `IyzeeApp(console_editing_mode="vi" | "emacs")` (env
-`IYZEE_EDITING_MODE`) chooses IPython's editing mode; the default is vi.
+Instrument addresses and the data directory can be overridden without changing source code.
 
-Because the terminal owns the keyboard, only the F-keys, Ctrl+Q and the command
-palette (Ctrl+\) reach the app while it has focus — `c`/`s`/`t`/`i` are typing.
-Everything else — Tab, Escape, Ctrl+P/N/R — is IPython's. Ctrl+Z is never
-forwarded (IPython binds it to "suspend", which would stop the whole TUI).
-Not supported: `getpass` (it opens `/dev/tty`), and output from threads the
-cell itself starts goes to Textual's capture rather than the terminal.
+Environment variables:
 
+~~~text
+IYZEE_SCOPE_IP
+IYZEE_NOISE_ANALYZER_IP
+IYZEE_POWER_SUPPLY_IP
+IYZEE_WAVEMETER_IP
+IYZEE_DATA_DIR
+~~~
 
-## Safety notes
+Or use <code>config.toml</code> in the user config directory (or set <code>IYZEE_CONFIG</code>):
 
-This is laboratory/instrument-control software; a few rules matter more than
-in typical application code:
+~~~toml
+[addresses]
+scope = "10.140.1.221"
 
-- Never turn a hardware communication failure into a plausible measurement
-  value; the wavemeter deliberately lets the underlying `requests`/parse
-  exceptions propagate.
-- Don't change instrument setpoints or SCPI behavior without understanding
-  and testing the change — these drive real hardware.
-- The interactive console intentionally has direct write access to connected
-  devices through `lab`; use it with the same care as writing Python against
-  the instrument drivers directly. Instrument calls are serialized against
-  concurrent screen activity (see `instruments.LockedProxy`), but nothing
-  stops you from issuing a command that's simply wrong for the current
-  experiment state.
+[paths]
+data = "/srv/iyzee-data"
+~~~
+
+A present but invalid configuration file is an error; iyzee does not silently fall back to defaults.
+
+## Data
+
+Measurements are written below <code>data/YYYY-MM/</code> by default.
+
+Sweep results contain the acquired traces together with the analyzer/scan metadata needed to interpret each point. Scope acquisitions store numeric waveform data plus a JSON manifest containing the requested and read-back configuration, instrument identity, calibration and derived quantities.
+
+The Results page can browse these recordings without reconnecting to the instrument that produced them.
+
+---
 
 ## Documentation
 
-The technical guide is written in Typst and compiled to PDF in CI (GitHub Actions
-and GitLab publish it as a pipeline artifact). It is one book with four parts,
-compiled from `docs/main.typ` (chapters in `docs/chapters/`) and published as
-`iyzee-guide.pdf`. It shares a dark-blue visual
-language, renders Mermaid and native Typst figures, and draws its rubidium figures
-from the same `Rb_transitions` table the application uses:
+The README is the **quick-start and orientation layer**. The full technical guide goes deeper and is compiled to PDF in CI.
 
-- [Architecture](docs/chapters/architecture.typ): ownership, locking, layering and
-  the reasoning behind them.
-- [MXA control and measurement](docs/chapters/mxa-and-measurements.typ): the
-  measurement physics tied to analyzer state, SCPI commands and the Python
-  implementation (RBW/VBW, detectors, ENBW, noise density, squeezing/shot-noise
-  workflow).
-- [TUI and device interaction](docs/chapters/tui-and-devices.typ): how `iyzee-tui`
-  and the `iyzee` script share the `experiment/` layer, per-instrument connection
-  details and command references, and how the TUI is built (screens, instrument
-  registry and locking, navigation, the console's `lab`).
-- [Rubidium](docs/chapters/rubidium-physics.typ): the atomic structure behind the
-  experiment, D1/D2 hyperfine transitions with strengths, warm-vapor spectroscopy,
-  polarization self-rotation, quantum noise and the squeezing/shot-noise
-  measurement chain. Its figure data lives in `docs/data/rubidium.json`; after
-  editing `Rb_transitions`, run `uv run python scripts/export_rb_data.py`.
+| Guide | Covers |
+| --- | --- |
+| [Architecture](docs/chapters/architecture.typ) | ownership, locking, layering, and design decisions |
+| [MXA & measurements](docs/chapters/mxa-and-measurements.typ) | analyzer state, SCPI, RBW/VBW, noise density, squeezing and shot-noise measurements |
+| [TUI & devices](docs/chapters/tui-and-devices.typ) | TUI structure, device interaction, connection details, navigation and console internals |
+| [Rubidium physics](docs/chapters/rubidium-physics.typ) | D1/D2 structure, spectroscopy, polarization self-rotation and quantum-noise measurements |
+| [TUI/device architecture decision](docs/adr_0001_tui_vs_devices_separation.md) | why hardware machinery stays outside the TUI |
 
-[`docs/adr_0001_tui_vs_devices_separation.md`](docs/adr_0001_tui_vs_devices_separation.md)
-records the architecture decision behind the layering below.
+The compiled guide is published by CI as the <code>iyzee-documentation</code> artifact.
 
-For a reproducible measurement, the relevant instrument state travels with the
-data. Sweep records carry frequency/range and analyzer settings in
-`StepResult.meta` and the JSON sidecar. Scope records carry the requested
-configuration, what the scope reported after a read-back (not what was
-requested), scope calibration and per-channel timebase, instrument identity
-(`*IDN?`), whether a running acquisition was paused for the capture, raw
-waveform codes when available, and derived statistics beside the arrays.
-
-## Design direction
-
-Python first, TUI second: the TUI organizes, displays and controls; it does not
-contain machinery a script could reasonably need.
-
-1. **`main.py` / `tui/app.py`**: resource ownership and composition for the
-   script and interactive paths. Both sit on the same layers below.
-2. **`experiment/procedures.py`**: what to measure (analyzer setup, scan
-   parameters, sequencing).
-3. **`experiment/{core,io}.py`**: the machinery procedures are built from
-   (`Step` execution, saving, plotting).
-4. **`devices/*`**: reusable, hardware-specific instrument control.
-5. **`devices/base.py`, `config.py`, `lab.py`**: connection lifecycle, addresses, and the connected-instrument session.
-
-**Screens display and control; they don't implement.** `scope_workflows.py` is
-the template: `ScopeScreen` reads and validates the form, then calls a plain
-function (`apply_channel_settings`, `apply_and_verify_channel_settings`,
-`acquire_scope_recording`) that takes the driver directly and has no Textual
-import. The same call works from a script, or from the console as
-`apply_channel_settings(lab.scope, [...])`. Pass an `InstrumentHandle.lock` as
-`lock=` to serialize against concurrent access; a script with a private
-connection can omit it. For the scope the lock is the driver's own re-entrant
-transaction lock, so passing it, even through `lab.scope`, cannot deadlock.
-Use `apply_and_verify_channel_settings` when you need to know what the scope
-actually holds afterwards. A new screen with real device-orchestration logic
-should follow this shape from the start, in a module beside the driver it
-operates on. Split `procedures.py` (and `tui/screens/`) further as they grow.
+---
 
 ## Development
 
-```sh
+~~~sh
 uv sync
-scripts/ci.sh test        # pytest
-scripts/ci.sh lint        # ruff check + format --check
-scripts/ci.sh typecheck   # mypy src tests
-scripts/ci.sh doc-links   # validate README/docs source anchors
-scripts/ci.sh docs        # compile the Typst guides (needs typst + package access)
-scripts/ci.sh all         # everything, as the dependency-update workflow does
-```
 
-GitHub Actions (`.github/workflows/ci.yml`) and GitLab (`.gitlab-ci.yml`) run
-the same `scripts/ci.sh` targets. `.pre-commit-config.yaml` runs the lint
-target on commit.
+scripts/ci.sh test        # pytest
+scripts/ci.sh lint        # ruff
+scripts/ci.sh typecheck   # mypy
+scripts/ci.sh doc-links   # validate documentation links
+scripts/ci.sh docs        # compile the Typst guide
+scripts/ci.sh all         # run everything
+~~~
+
+GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets.
+
+The codebase is intentionally layered:
+
+~~~text
+src/iyzee/
+├── devices/             hardware drivers
+├── experiment/          measurement procedures + result handling
+├── lab.py               connected-instrument session
+├── scope_workflows.py   reusable scope operations
+└── tui/                 interactive presentation/control
+~~~
+
+When adding functionality, prefer putting reusable instrument or measurement machinery below <code>tui/</code>. A screen should validate input, call the underlying operation, and display the result.
+
+## Safety
+
+This software controls real laboratory hardware.
+
+- Treat instrument commands and setpoints as real hardware operations.
+- Communication failures must never become plausible measurement values.
+- The console has direct write access to connected instruments; use it like direct Python hardware control.
+- Understand the current experiment state before changing a device setting.
+
+---
+
+**For the quick path:** <code>uv sync</code> → <code>uv run iyzee-tui</code> → **Connect** → **Sweep / Scope / Console**.
