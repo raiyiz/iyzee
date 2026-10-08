@@ -276,6 +276,11 @@ $ Delta nu_"D,FWHM" =
 nu_0 sqrt(8 k_B T ln(2) / (m c^2))
 . $
 
+The width follows in three steps. At temperature $T$ the Maxwell–Boltzmann velocity component along the beam is Gaussian with variance
+$sigma_v^2 = k_B T / m$. The first-order Doppler shift maps it linearly onto frequency, so the absorption envelope is Gaussian with
+$sigma_nu = nu_0 sigma_v / c$. A Gaussian has full width at half maximum $2 sqrt(2 ln 2) sigma_nu$, which is the expression above.
+The $sqrt(T slash m)$ scaling is why the table below grows by about 10 % between 295 K and 360 K and why #iso-name("87") is slightly wider than #iso-name("85").
+
 #figure(
   table(
     columns: (1.3fr, 1fr, 1fr, 1fr, 1fr),
@@ -317,7 +322,7 @@ then broadened by the Gaussian above. The marker on the D1 figure is the
 application's default sweep centre.
 
 #figure(
-  rb-spectrum("D1", marker: (thz: 377.1052067, label: [default sweep centre 377.1052067 THz])),
+  rb-spectrum("D1", marker: (thz: fact-raw("sweeps.frequency_steps.center_thz"), label: [default sweep centre #fact("sweeps.frequency_steps.center_thz") THz])),
   caption: [D1 line: stick positions with relative strengths, and the Doppler-broadened absorption they produce at 330 K. The ground-state splitting resolves four groups; the excited-state structure inside each group is only partly resolved (#iso-name("87") F = 2 shows two humps).],
 )
 
@@ -446,6 +451,38 @@ noise (ref. 5), spatial multimode structure (ref. 6) and cell geometry and
 optical depth (ref. 7). Observed squeezing in these experiments is of order
 1 dB, including sub-MHz analysis frequencies (ref. 8).
 
+== From decibels to a squeezing parameter <rb-r>
+
+For an ideal squeezer acting on one sideband pair, the Bogoliubov coefficients are $mu = cosh r$ and $nu = sinh r$ with $r >= 0$ the squeezing parameter
+(the phase of $nu$ only decides which quadrature is the squeezed one, so it is taken real). They satisfy $|mu|^2 - |nu|^2 = 1$ for every $r$. With
+$a_"out" = mu a + nu a^dagger$, the two quadratures transform as
+
+$ X_"out" = (mu + nu) X_"in" = e^(r) X_"in", quad P_"out" = (mu - nu) P_"in" = e^(-r) P_"in". $
+
+Vacuum has variance $1 slash 2$ in each, so the output variances are $V_(plus.minus) = 1/2 e^(plus.minus 2r)$ and, relative to vacuum,
+
+$ S_"dB" = 10 log_10 e^(-2r) = -(20 / ln(10)) r approx -8.686 thin r. $
+
+#let r-of(db) = db * calc.ln(10) / 20
+#figure(
+  table(
+    columns: (1fr, 1fr, 1.4fr, 1.6fr),
+    align: (right, right, right, right),
+    table.header([*Squeezing*], [*r*], [*V / V#sub[vac]*], [*Anti-squeezed quadrature*]),
+    ..for db in (1, 3, 6, 10) {
+      ([#db dB], [#fmt(r-of(db), 3)], [#fmt(calc.pow(10.0, -db / 10), 3)], [+#db dB])
+    },
+  ),
+  caption: [The pure-state relation: decibels, squeezing parameter, variance ratio. The last column is the anti-squeezing of a lossless state.],
+)
+
+Loss changes this picture asymmetrically. After efficiency $eta$ the variances become $1 - eta + eta e^(∓ 2r)$: the squeezed quadrature
+loses most of its benefit while the anti-squeezed one barely changes, so a lossy state shows much more anti-squeezing than squeezing without any
+excess noise at all. For $eta = 0.8$ and $r = 0.5$ the pure state is ±#fmt(20 * 0.5 / calc.ln(10), 2) dB but the detected values are
+#fmt(10 * calc.log(1 - 0.8 + 0.8 * calc.exp(-1.0), base: 10), 2) dB and +#fmt(10 * calc.log(1 - 0.8 + 0.8 * calc.exp(1.0), base: 10), 2) dB.
+A large anti-squeezing/squeezing asymmetry is therefore evidence about loss first; only the part that exceeds what the loss predicts points to
+excess atomic or technical noise (ref. 5).
+
 = The useful detuning window
 
 Changing optical detuning moves several competing effects at once:
@@ -492,6 +529,35 @@ the observable squeezing through this vacuum mixing, and the penalty is steep:
 
 Electronics noise is an additional additive contribution and must be
 characterized separately.
+
+*Undoing the loss.* Write $v = V_"field" slash V_"vac"$ for the squeezing before detection. Then the measured level is
+
+$ S_"meas" = 10 log_10 (1 - eta + eta v), $
+
+which can never go below the *loss floor* $10 log_10 (1 - eta)$, however large the generated squeezing. Inverting gives the squeezing the apparatus
+produced, for a measured level and an efficiency you must supply:
+
+$ v = (10^(S_"meas" slash 10) - (1 - eta)) / eta, quad S_"generated" = 10 log_10 v. $
+
+#let generated(meas, eta) = {
+  let v = (calc.pow(10.0, meas / 10) - (1 - eta)) / eta
+  if v <= 0 { [below the loss floor] } else { [#fmt(10 * calc.log(v, base: 10), 2) dB] }
+}
+#figure(
+  table(
+    columns: (1.4fr, 1fr, 1fr, 1fr),
+    align: (left, right, right, right),
+    table.header([*Measured*], [*η = 60 %*], [*η = 80 %*], [*η = 90 %*]),
+    ..for meas in (-1, -2, -3) {
+      ([#fmt(meas, 0) dB], [#generated(meas, 0.6)], [#generated(meas, 0.8)], [#generated(meas, 0.9)])
+    },
+  ),
+  caption: [Squeezing generated before detection, from a measured level and a total efficiency η. The correction grows quickly as η falls.],
+)
+
+Here $eta$ is the product of every loss between the vapor and the spectrum analyzer: transmission of the optics, mode matching or visibility with the
+reference, and photodiode quantum efficiency. iyzee records no efficiency, so a generated-squeezing figure is always the experimenter's calculation
+layered on the recorded level.
 
 = Squeezing versus shot noise
 
@@ -541,10 +607,54 @@ $ S_"dB" = 10 log_10 ((P_"sqz" - P_"el") / (P_"shot" - P_"el")). $
   [
     iyzee records two traces per point, `squeezing` and `shot_noise`, both in dBm. It records *no electronics-background trace* and subtracts none. The number the Results page and the data examples report is
     $ overline(Delta)_"dB" = 1/N sum_(i=1)^N (P_(i,"sqz")^"dBm" - P_(i,"shot")^"dBm"), $
-    the mean over trace samples of the per-sample dB difference (#code("difference_values_many"), #code("difference_statistic")). It equals the $S_"dB"$ above only when the electronics noise is negligible next to both traces and the traces are flat across the samples; otherwise it is an average of ratios rather than the ratio of averages. Treat it as the raw comparison, and subtract a separately measured background in linear units yourself when the electronics floor matters (the first example in @data-reading does the first step; the background is yours to supply).
+    the mean over trace samples of the per-sample dB difference (#code("difference_values_many"), #code("difference_statistic")). It equals the $S_"dB"$ above only when the electronics noise is negligible next to both traces and the traces are flat across the samples; otherwise it is an average of ratios rather than the ratio of averages. Treat it as the raw comparison, and subtract a separately measured electronics background in linear units yourself when that floor matters: the recorded traces make it possible, but the software does not do it for you.
   ],
   tone: "warning",
 )
+
+== How precisely can the software resolve a squeezing number? <rb-statistics>
+
+The answer is a statistical floor, not a promise: it is what the averaging buys under idealized assumptions, and real scatter will be larger. Treat the
+noise in the analyzer's filter as Gaussian. Its detected power over one correlation time is then exponentially distributed, and two facts about the
+*logarithm* of such a variable set the scale (both checked by simulation in the test suite):
+
+- the mean of $10 log_10 P$ lies #fmt(0.5772156649015329 * 10 / calc.ln(10), 2) dB below $10 log_10 overline(P)$ (Euler's constant: $10 gamma slash ln(10)$), so logarithmic averaging of noise reads low by that fixed amount;
+- one sample has a standard deviation of #fmt(calc.pi / calc.sqrt(6) * 10 / calc.ln(10), 2) dB ($pi slash sqrt(6) dot 10 slash ln(10)$), and averaging $N$ independent samples divides it by $sqrt(N)$. Averaging *power* instead would give #fmt(10 / calc.ln(10), 2) dB$slash sqrt(N)$, about 28 % less.
+
+How many independent samples does a measurement hold? A zero-span trace of duration $T$ through a resolution filter of bandwidth $B$ holds about $B T$ independent
+values, and the analyzer's trace average multiplies that by the number of sweeps, so $N_"eff" approx n_"avg" B T$. The scatter of one trace's mean level is then
+$sigma approx 5.57 slash sqrt(N_"eff")$ dB, and of the difference of two independent traces $sqrt(2) sigma$:
+
+#let eff(c) = c.avg_count * c.res_bw_hz * c.sweep_duration_ms / 1000
+#let sigma-db(n) = calc.pi / calc.sqrt(6) * 10 / calc.ln(10) / calc.sqrt(n)
+#figure(
+  table(
+    columns: (1.7fr, 1fr, 1fr, 1fr, 1fr, 1fr),
+    align: (left, right, right, right, right, right),
+    table.header([*Preset*], [*n#sub[avg]*], [*B*], [*T*], [*N#sub[eff]*], [*σ of difference*]),
+    ..for (name, key) in (("Frequency sweep", "frequency"), ("Bandwidth sweep (script)", "bandwidth")) {
+      let c = fact-raw("sweeps." + key)
+      (
+        [#name],
+        [#c.avg_count],
+        [#si(c.res_bw_hz, "Hz")],
+        [#c.sweep_duration_ms ms],
+        [#fmt(eff(c), 0)],
+        [#fmt(calc.sqrt(2) * sigma-db(eff(c)), 3) dB],
+      )
+    },
+  ),
+  caption: [Idealized statistical scatter of the squeezing-minus-shot-noise difference at the standard presets, from the values the code uses. A longer sweep duration or more averages raises N#sub[eff] proportionally.],
+)
+
+Two things follow. First, the fixed #fmt(0.5772156649015329 * 10 / calc.ln(10), 2) dB bias is present in *both* traces and cancels in their difference, which is why the
+difference, not an absolute level, is the quantity to report; the cancellation holds for noise-like signals and fails for a coherent tone or a strongly non-Gaussian
+trace, so check the traces for peaks. Second, a statistical floor of a few hundredths of a dB is far below the roughly 1 dB squeezing this kind of experiment
+reports, so repeat-to-repeat scatter you actually observe is dominated by something else (laser lock and drift, alignment, background, the time between the two
+traces) and should be measured by repeating a point, not read off this table. Instrument-specific effects (the detector type, the filter shape, correlation between
+neighbouring trace points) change the constants, which is another reason to treat the table as a floor.
+
+#tested-by("test_log_averaging_constants_quoted_in_the_physics_part", "test_log_bias_cancels_in_the_difference_and_scatter_follows_the_formula", "test_the_reported_number_is_the_mean_of_per_sample_db_differences", "test_squeezing_parameter_and_loss_formulas_round_trip")
 
 = Mapping the physics into iyzee
 

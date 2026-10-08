@@ -112,7 +112,7 @@
   block(width: 100%, above: 0.8em, below: 1em, inset: (left: 9pt, y: 2pt), stroke: (left: 1.5pt + green-edge))[
     #text(size: 8pt, weight: "bold", fill: green-edge, tracking: 0.06em)[PINNED BY TESTS]
     #v(0.15em)
-    #text(size: 8.5pt)[#items.join([ · ])]
+    #text(size: 8.5pt)[#items.join(linebreak())]
   ]
 }
 
