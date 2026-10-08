@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build ``docs/data/code-index.json``: the bridge between the guide and the code.
+"""Build ``docs/code-index.json``: the bridge between the guide and the code.
 
 The guide never hard-codes a line number, a default value, a file layout or a
 manifest field. It *asks* this index, and the index is computed from the code:
@@ -32,7 +32,7 @@ manifest field. It *asks* this index, and the index is computed from the code:
 
 Usage::
 
-    uv run scripts/docs_index.py            # (re)write docs/data/code-index.json
+    uv run scripts/docs_index.py            # (re)write docs/code-index.json
     uv run scripts/docs_index.py --check    # fail if the committed file is stale
 
 The generated file is not committed (it changes with every edit that moves a
@@ -53,7 +53,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
-OUTPUT = ROOT / "docs" / "data" / "code-index.json"
+OUTPUT = ROOT / "docs" / "code-index.json"
 DOCS = ROOT / "docs"
 sys.path.insert(0, str(SRC))
 
@@ -741,10 +741,9 @@ def main() -> int:
     if args.check:
         current = OUTPUT.read_text(encoding="utf-8") if OUTPUT.exists() else ""
         if current != text:
-            print("docs/data/code-index.json is stale; run scripts/docs_index.py", file=sys.stderr)
+            print("docs/code-index.json is stale; run scripts/docs_index.py", file=sys.stderr)
             return 1
         return 0
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(text, encoding="utf-8")
     print(
         f"wrote {OUTPUT.relative_to(ROOT)}: {len(index['symbols'])} symbols, "
