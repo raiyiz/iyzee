@@ -1,4 +1,4 @@
-from iyzee import CH, IP
+from iyzee import IP, SHUTTER_CHANNEL_DEFAULT
 from iyzee.devices.power import PSU, ShutterControl
 
 
@@ -37,10 +37,10 @@ def test_psu_accepts_injected_resource_manager():
     psu.connect()
     assert psu.instrument is resource_manager.opened[0][1]
 
-    psu.set_voltage(1.7, CH.THREE)
-    psu.set_current(0.01, CH.THREE)
-    psu.enable_output(CH.THREE)
-    psu.disable_output(CH.THREE)
+    psu.set_voltage(1.7, SHUTTER_CHANNEL_DEFAULT)
+    psu.set_current(0.01, SHUTTER_CHANNEL_DEFAULT)
+    psu.enable_output(SHUTTER_CHANNEL_DEFAULT)
+    psu.disable_output(SHUTTER_CHANNEL_DEFAULT)
 
     assert psu.instrument.commands == [
         "INST:NSEL 3",
