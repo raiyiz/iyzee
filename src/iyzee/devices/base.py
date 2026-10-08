@@ -8,6 +8,7 @@ from ..config import IP
 
 SHUTTER_CHANNEL_DEFAULT = 3
 
+
 class BaseDevice:
     """Common VISA connection handling for laboratory instruments."""
 
@@ -58,4 +59,4 @@ class BaseDevice:
         return False
 
 
-__all__ = ["CH", "IP", "BaseDevice"]
+__all__ = ["IP", "BaseDevice"]
