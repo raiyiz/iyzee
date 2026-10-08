@@ -17,6 +17,8 @@ in this order of precedence:
 A config file that exists but cannot be parsed raises :class:`ConfigError`
 rather than being ignored: silently talking to the wrong instrument is worse
 than not starting.
+
+Guide: :guide:`arch-config`
 """
 
 from __future__ import annotations

@@ -8,6 +8,8 @@ it composes the same lower-level pieces they're built from
 ``run_sequence``) directly, which is exactly what that layer is meant for:
 a new caller with different needs (here, live progress) is a few lines
 against the existing building blocks, not a change to ``experiment/``.
+
+Guide: :guide:`sec-pages`
 """
 
 from __future__ import annotations
@@ -232,7 +234,7 @@ class SweepScreen(Page):
             self.notify("Connect the MXA first — press F1 for the Connect page.", severity="error")
             return
         # The Connect screen always builds "mxa" from a _VisaHandle and
-        # "shutter" from a ShutterHandle (see instruments.INSTRUMENTS) —
+        # "shutter" from a ShutterHandle (see lab.INSTRUMENTS) —
         # handles is typed dict[str, InstrumentHandle] because that's all
         # the Connect screen itself needs, but this screen needs the
         # concrete wrapper's .device/.shutter, which aren't on that
@@ -323,7 +325,7 @@ class SweepScreen(Page):
         # the whole run, not just individual calls — a sweep is one logical
         # operation, and interleaving a console cell's commands partway
         # through it would be just as broken as interleaving two sweeps.
-        # This is the same lock instruments.LockedProxy acquires per call
+        # This is the same lock devices.handles.LockedProxy acquires per call
         # for console code, and ConnectScreen acquires around connect/
         # disconnect — each handle's own .lock (see InstrumentHandle.lock),
         # not a table IyzeeApp used to keep separately.

@@ -1,3 +1,10 @@
+"""LeCroy oscilloscope driver over VISA (VXI-11).
+
+Commands, DEF9 binary-block validation and the drop-the-connection-on-I/O-failure rule.
+
+Guide: :guide:`arch-scope-transport`
+"""
+
 import math
 import re
 import threading

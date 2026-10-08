@@ -39,6 +39,8 @@ Two behaviours worth knowing before relying on a recording:
 
 The first failure raises. A timeout or I/O error also drops the driver's
 connection (see ``LeCroyTimeoutError``), so there is nothing left to continue on.
+
+Guide: :guide:`arch-scope-case`
 """
 
 from __future__ import annotations

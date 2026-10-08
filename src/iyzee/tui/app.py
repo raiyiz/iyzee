@@ -234,7 +234,7 @@ class IyzeeApp(App):
         self.lab = Lab()
         self.handles: dict[str, InstrumentHandle] = self.lab.handles
         # No per-app lock table anymore — each InstrumentHandle owns its
-        # own threading.Lock (see instruments.InstrumentHandle.lock) so
+        # own threading.Lock (see devices.handles.InstrumentHandle.lock) so
         # that a page's background worker (Connect, Sweep), the IPython
         # console (via LockedProxy — see ipython.namespace_from_handles),
         # and a handle used entirely outside this app all get the same

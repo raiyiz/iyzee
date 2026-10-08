@@ -19,6 +19,8 @@ trigger together — then refreshes the form from the read-back, so a value the
 scope rounded or ignored shows up as what it really is. *Acquire* records the
 enabled channels. Apply and Acquire need a successful Retrieve first, so
 defaults in the form are never pushed to an instrument that hasn't been read.
+
+Guide: :guide:`sec-scope-recording`
 """
 
 from __future__ import annotations
@@ -55,7 +57,7 @@ from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
 
 if TYPE_CHECKING:
-    from ..instruments import InstrumentHandle
+    from ...devices.handles import InstrumentHandle
 
 log = logging.getLogger("iyzee.tui")
 

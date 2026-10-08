@@ -1,7 +1,7 @@
 """Composable, tested building blocks for hardware experiment procedures.
 
-See ``docs/mxa-and-measurements.typ`` for the instrument-level model and the
-project README for how this package fits together. In short: a ``Step``
+See the guide's MXA part (:guide:`part-mxa`) for the instrument-level model and
+the Architecture part (:guide:`arch-execution`) for how this package fits together. In short: a ``Step``
 describes one reproducible measurement point; ``run_sequence`` runs a list
 of them against a shared, already-connected ``ExperimentContext``; and the
 concrete procedures in ``procedures.py`` are configuration over that

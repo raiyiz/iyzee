@@ -12,6 +12,8 @@ implemented once, without Textual::
 
 Adding an instrument: write a handle in ``devices/handles.py`` and add one
 :class:`InstrumentSpec` to ``INSTRUMENTS`` below. No screen code changes.
+
+Guide: :guide:`arch-lab`
 """
 
 from __future__ import annotations
