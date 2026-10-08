@@ -251,13 +251,12 @@ is red of the reference.
 
 == Where the standard sweep sits
 
-The experiment's default laser-frequency centre, 377.1052067 THz
-(`frequency_sweep_steps` in
-#code("frequency_sweep_steps", label: "source")), is #fmt((377.1052067 - rb-data.centers_thz.at("85").D1) * 1e3, 3) GHz from the
+The experiment's default laser-frequency centre, #fact("sweeps.frequency_steps.center_thz") THz
+(the default of #code("frequency_sweep_steps")), is #fmt((fact-raw("sweeps.frequency_steps.center_thz") - rb-data.centers_thz.at("85").D1) * 1e3, 3) GHz from the
 #iso-name("85") D1 centre. Compared with the table it coincides — to the 40 kHz
 rounding of the stored seven decimals — with the #iso-name("87") D1
-F = 2 → F′ = 2 line. The default scan is two points, offsets of −10 MHz and 0
-from that centre (`offsets_thz`), far inside one Doppler width: it samples a
+F = 2 → F′ = 2 line. The default scan is #fact("sweeps.frequency_steps.count") points, offsets of #number-text(calc.round(fact-raw("sweeps.frequency_steps.offsets_thz.0") * 1e6, digits: 3)) MHz and #number-text(calc.round(fact-raw("sweeps.frequency_steps.offsets_thz.1") * 1e6, digits: 3))
+from that centre, far inside one Doppler width: it samples a
 feature, it does not map the spectrum. Scans that cover several features pass
 their own offsets.
 
@@ -537,6 +536,16 @@ $ S_"dB" = 10 log_10 ((P_"sqz" - P_"el") / (P_"shot" - P_"el")). $
   tone: "warning",
 )
 
+#callout(
+  "What the software actually computes",
+  [
+    iyzee records two traces per point, `squeezing` and `shot_noise`, both in dBm. It records *no electronics-background trace* and subtracts none. The number the Results page and the data examples report is
+    $ overline(Delta)_"dB" = 1/N sum_(i=1)^N (P_(i,"sqz")^"dBm" - P_(i,"shot")^"dBm"), $
+    the mean over trace samples of the per-sample dB difference (#code("difference_values_many"), #code("difference_statistic")). It equals the $S_"dB"$ above only when the electronics noise is negligible next to both traces and the traces are flat across the samples; otherwise it is an average of ratios rather than the ratio of averages. Treat it as the raw comparison, and subtract a separately measured background in linear units yourself when the electronics floor matters (the first example in @data-reading does the first step; the background is yours to supply).
+  ],
+  tone: "warning",
+)
+
 = Mapping the physics into iyzee
 
 The current implementation exposes a compact set of experimental controls:
@@ -549,10 +558,12 @@ The current implementation exposes a compact set of experimental controls:
     [Measured frequency], [`read_frequency()`], [checks the actual laser frequency],
     [Reference lines], [`Rb_transitions`, Rb page (`r`)], [locates D1/D2 hyperfine lines],
     [Optical state], [shutter and optical setup], [selects the squeezed/reference path],
-    [RF analysis frequency], [`center_hz` (1.5 MHz in the frequency sweep, zero span)], [sets the analyzed noise frequency],
+    [RF analysis frequency], [`center_hz` (#fact-si("sweeps.frequency.center_hz", "Hz") in the frequency sweep, zero span)], [sets the analyzed noise frequency],
     [RBW / VBW], [`AnalyzerConfig`, `BandwidthStep`], [sets spectral resolution and estimator behavior],
     [Averaging], [`avg_count`, `avg_type`], [controls variance and acquisition cost],
     [Reference], [shot-noise trace], [defines the comparison baseline],
+    [Squeezing number], [#code("difference_statistic"), per-sample dB difference], [the raw comparison; no background subtraction],
+    [Detuning of a recorded point], [`measured_frequency_thz` minus a `Rb_transitions` entry], [where on the line structure the point sits],
   ),
   caption: [Physical quantities and where the code holds them.],
 )
@@ -564,10 +575,26 @@ The analyzer configuration is `AnalyzerConfig` in
 and the standard frequency-sweep analyzer setup is `frequency_sweep_config` in
 #code("frequency_sweep_config", label: "source").
 
+== From a recording to a detuning <rb-detuning>
+
+A frequency-sweep recording stores, for every point, the wavemeter reading taken after the laser settled
+(`measured_frequency_thz`). The reference table #code("Rb_transitions") holds the D1 and D2 hyperfine lines of both isotopes
+in THz, the same values the Rb page shows. The detuning of a point from a line is their difference, which is what #code("monitoring_frequencies") prints
+live for the current laser frequency; this script does it for a saved run, using the nearest line:
+
+#raw(read("../examples/detuning.py"), lang: "python", block: true)
+
+The test suite runs this script against a recording written by the real save functions. Two cautions belong to the physics, not the
+code: the detuning is only as good as the wavemeter's absolute accuracy and calibration, and "nearest line" is a convenience: in warm vapor several
+Doppler-broadened hyperfine lines overlap, so the nearest tabulated line is not necessarily the one that matters for the effect you are studying.
+
+#tested-by("test_detuning_example_reports_distance_to_the_nearest_rubidium_line")
+
 = What the software does not infer
 
 The present Rubidium path does not automatically infer:
 
+- the electronics background, or a linear-power squeezing level (see the callout in the section on squeezing versus shot noise);
 - vapor temperature or density from a spectrum;
 - absolute detuning from a fitted absorption profile;
 - transition strengths from the stick height;
