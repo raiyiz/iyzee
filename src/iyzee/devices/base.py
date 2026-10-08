@@ -1,21 +1,12 @@
 """Shared device infrastructure for laboratory instruments."""
 
-from enum import IntEnum
 from typing import Any
 
 import pyvisa
 
 from ..config import IP
 
-
-class CH(IntEnum):
-    """Power-supply channel identifiers."""
-
-    ONE = 1
-    TWO = 2
-    THREE = 3
-    FOUR = 4
-
+SHUTTER_CHANNEL_DEFAULT = 3
 
 class BaseDevice:
     """Common VISA connection handling for laboratory instruments."""

@@ -25,7 +25,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
 from ..config import IP, address
-from .base import CH
+from .base import SHUTTER_CHANNEL_DEFAULT
 from .power import ShutterControl
 from .scope import LeCroy, LeCroyTimeoutError
 from .wavemeter import Wavemeter
@@ -141,7 +141,7 @@ class _VisaHandle(_LockedHandle):
 class ShutterHandle(_LockedHandle):
     """Adapter for :class:`~iyzee.devices.power.ShutterControl`."""
 
-    def __init__(self, chan: CH = CH.THREE, ip: str | None = None) -> None:
+    def __init__(self, chan: int = SHUTTER_CHANNEL_DEFAULT, ip: str | None = None) -> None:
         super().__init__()
         self._chan = chan
         self._ip = ip or address(IP.POWER_SUPPLY)
@@ -158,7 +158,7 @@ class ShutterHandle(_LockedHandle):
             self._shutter = None
 
     def probe(self) -> str:
-        return f"shutter ready on CH{int(self._chan)}"
+        return f"shutter ready on CH{self._chan}"
 
     @property
     def device(self) -> ShutterControl | None:

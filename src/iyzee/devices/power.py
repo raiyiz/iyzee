@@ -1,5 +1,5 @@
 from ..config import IP, address
-from .base import CH, BaseDevice
+from .base import SHUTTER_CHANNEL_DEFAULT, BaseDevice
 
 
 class PSU(BaseDevice):
@@ -9,19 +9,19 @@ class PSU(BaseDevice):
         port = 5025
         return self.rm.open_resource(f"TCPIP::{self.ip}::{port}::SOCKET")
 
-    def set_voltage(self, voltage: float, channel: CH):
+    def set_voltage(self, voltage: float, channel: int):
         self.instrument.write(f"INST:NSEL {channel}")
         self.instrument.write(f"VOLT {voltage}")
 
-    def enable_output(self, channel: CH):
+    def enable_output(self, channel: int):
         self.instrument.write(f"INST OUT{channel}")
         self.instrument.write("OUTP:SEL 1")
 
-    def disable_output(self, channel: CH):
+    def disable_output(self, channel: int):
         self.instrument.write(f"INST OUT{channel}")
         self.instrument.write("OUTP:SEL 0")
 
-    def set_current(self, current: float, channel: CH):
+    def set_current(self, current: float, channel: int):
         self.instrument.write(f"INST:NSEL {channel}")
         self.instrument.write(f"CURR {current}")
 
@@ -37,7 +37,7 @@ class ShutterControl:
 
     def __init__(
         self,
-        chan: CH = CH.THREE,
+        chan: CH = SHUTTER_CHANNEL_DEFAULT,
         ip: str | None = None,
         resource_manager=None,
     ):
