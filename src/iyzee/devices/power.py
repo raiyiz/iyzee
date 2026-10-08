@@ -37,7 +37,7 @@ class ShutterControl:
 
     def __init__(
         self,
-        chan: CH = SHUTTER_CHANNEL_DEFAULT,
+        chan: int = SHUTTER_CHANNEL_DEFAULT,
         ip: str | None = None,
         resource_manager=None,
     ):
