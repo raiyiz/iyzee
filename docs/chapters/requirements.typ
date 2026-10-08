@@ -25,11 +25,11 @@
 
 // -- code links ------------------------------------------------------------
 // The guide never hard-codes a line number, a default value or a file layout.
-// `scripts/docs_index.py` reads the code and writes `data/code-index.json`
+// `scripts/docs_index.py` reads the code and writes `code-index.json`
 // (run by `scripts/ci.sh docs` before compiling); everything below asks it.
 // A name that no longer exists, or became ambiguous, stops the build with the
 // reference that broke instead of silently linking to the wrong line.
-#let index = json("../data/code-index.json")
+#let index = json("../code-index.json")
 
 // Where "source" links point. CI passes the commit being built, so every link
 // in a PDF lands on the exact lines of the code that PDF describes:

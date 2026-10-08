@@ -7,7 +7,7 @@ cd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/.."
 sync() { uv sync --locked --group dev; }
 
 # The guide asks the code for names, line numbers, defaults and the on-disk schema;
-# this writes that index (docs/data/code-index.json, not committed).
+# this writes that index (docs/code-index.json, not committed).
 docs_index() {
     uv run --locked scripts/docs_index.py
 }
@@ -24,7 +24,7 @@ docs() {
     # Every code link in the PDF points at the commit it was built from.
     ref="${DOCS_REF:-${GITHUB_SHA:-${CI_COMMIT_SHA:-$(git rev-parse HEAD 2>/dev/null || echo main)}}}"
     # One book: docs/main.typ includes every chapter in docs/chapters/.
-    typst compile --input "ref=$ref" docs/main.typ build/docs/iyzee-guide.pdf
+    typst compile --root docs --input "ref=$ref" docs/main.typ build/docs/iyzee-guide.pdf
 }
 
 doc_links() {
