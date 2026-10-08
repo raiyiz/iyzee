@@ -1,6 +1,9 @@
 """What the console's IPython shell is made of: the ``lab`` namespace,
 its locking, and its configuration. (Running the shell lives in
-``ipython_session.py``.)"""
+``ipython_session.py``.)
+
+Guide: :guide:`arch-labproxy`
+"""
 
 from __future__ import annotations
 

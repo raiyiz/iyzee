@@ -8,7 +8,10 @@ scope acquisitions use channel-specific ``time_*``/``value_*`` arrays and
 may also retain raw ``raw_*`` waveform codes. Keeping the arrays numeric means
 readers never need ``allow_pickle=True`` — loading a recording cannot invoke
 NumPy's pickle-based object-array deserialization. Older object-array archives
-written by a pre-split version of this module are intentionally unsupported."""
+written by a pre-split version of this module are intentionally unsupported.
+
+Guide: :guide:`data-where`
+"""
 
 from __future__ import annotations
 
@@ -114,9 +117,8 @@ def load_recording(path: Path) -> Recording:
     The single reader for the pair :func:`save_numeric_recording` writes;
     ``ResultsScreen`` goes through this rather than
     re-implementing "np.load a dict, then try to parse the matching
-    .json" — see the ``experiment.io`` design note in ``adr_0001`` on
-    consolidating a transformation applied more than once before it reaches
-    a renderer.
+    .json", so a transformation applied more than once is consolidated before
+    it reaches a renderer.
 
     A missing or corrupt sidecar (partial write, hand edit) is tolerated —
     ``metadata`` comes back ``{}`` rather than raising — because the numeric

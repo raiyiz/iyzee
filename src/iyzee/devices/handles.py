@@ -11,6 +11,8 @@ confirms the link is alive and returns a short status string), ``alive``,
 Nothing here knows about the TUI: scripts, the console and the TUI all go
 through the same handles (see :class:`iyzee.lab.Lab`). :class:`LockedProxy`
 hands a device out with every method call taking that lock.
+
+Guide: :guide:`arch-handles`
 """
 
 from __future__ import annotations
