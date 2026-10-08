@@ -24,7 +24,7 @@ docs() {
     # Every code link in the PDF points at the commit it was built from.
     ref="${DOCS_REF:-${GITHUB_SHA:-${CI_COMMIT_SHA:-$(git rev-parse HEAD 2>/dev/null || echo main)}}}"
     # One book: docs/main.typ includes every chapter in docs/chapters/.
-    typst compile --root . --input "ref=$ref" docs/main.typ build/docs/iyzee-guide.pdf
+    typst compile --root docs --input "ref=$ref" docs/main.typ build/docs/iyzee-guide.pdf
 }
 
 doc_links() {
