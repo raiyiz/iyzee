@@ -36,7 +36,7 @@ $ "MXA" -> "SCPI response" -> "PyVISA" -> "KeysightMXA" -> "Python" $
 
 The driver deliberately keeps the SCPI boundary thin. For example, `set_center_freq(freq_hz)` writes `FREQ:CENT`, `set_rbw(rbw_hz)` writes `BWID`, and `get_trace_data()` selects ASCII or binary transfer before reading the trace. Units are explicit at the Python boundary: frequencies are in Hz, sweep duration in ms, RF reference and marker powers in dBm where applicable, and counts are dimensionless.
 
-The experiment layer builds measurements from `Step` objects. `BandwidthStep` scans RBW; `FrequencyStep` changes the laser setpoint, waits for a configured settling interval, and acquires squeezing and shot-noise traces with the shutter closed again before the reference acquisition. `main.py` runs a fixed bandwidth sweep as a script, plots it, and saves the resulting `StepResult` objects; the `iyzee-tui` application (see the top-level README) runs either sweep interactively, with live progress, from the same `Step`/`run_sequence()` building blocks.
+The experiment layer builds measurements from `Step` objects. `BandwidthStep` scans RBW; `FrequencyStep` changes the laser setpoint, waits for a configured settling interval, and acquires squeezing and shot-noise traces with the shutter closed again before the reference acquisition. A script that imports the library runs a sweep with #code("run_bandwidth_sweep") or #code("run_frequency_sweep") (or composes steps itself) and saves the resulting `StepResult` objects with #code("save_step_results"); the `iyz` application (see the top-level README) runs either sweep interactively, with live progress, from the same `Step`/`run_sequence()` building blocks.
 
 = Measurement architecture
 
@@ -74,7 +74,7 @@ $ "input" -> "attenuation / preamp" -> "mixer / IF" -> "RBW" -> "detector" -> "V
   [Trigger source], [#fact("sweeps.analyzer_defaults.trig_source")], [#fact("sweeps.bandwidth.trig_source")], [#fact("sweeps.frequency.trig_source")],
 )
 
-The Sweep page uses these presets but sets the bandwidth sweep's duration to 10 ms itself (#code("SweepScreen._build_bandwidth_run")), so a TUI run and the script entry point differ in that one setting.
+The Sweep page uses these presets but sets the bandwidth sweep's duration to 10 ms itself (#code("SweepScreen._build_bandwidth_run")), so a TUI run and a library call to #code("run_bandwidth_sweep") differ in that one setting.
 
 #callout(
   "Zero span: the trace is time, not frequency",

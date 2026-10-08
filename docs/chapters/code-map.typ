@@ -19,7 +19,7 @@ A module's docstring may also point back with a `:guide:` role, which the build 
   experiment: "Experiment and analysis",
   session: "Session and workflows",
   tui: "Terminal UI",
-  entry: "Entry points",
+  entry: "Package root",
 )
 
 // page of a labelled section, as text

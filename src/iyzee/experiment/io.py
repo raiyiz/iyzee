@@ -34,7 +34,7 @@ from .core import StepResult
 # Where all measurement runs are written and (in the TUI) read back from —
 # <project root>/data, i.e. a sibling of src/, not inside the installed
 # package. That makes it a fixed, predictable place regardless of the
-# current working directory `iyzee`/`iyzee-tui` is launched from, and easy
+# current working directory `iyz` is launched from, and easy
 # to find, back up or point other tools at, without digging into src/iyzee/.
 #
 # Resolved once at import from ``iyzee.config.data_root()``: an
@@ -412,7 +412,7 @@ def build_figure(results: list[StepResult]):
 def multiplot(results: list[StepResult]) -> None:
     """Build and display the squeezing-minus-shot-noise figure.
 
-    Kept for the script/CLI entry point (``main.py``) and existing callers.
+    Kept for scripts and notebooks that want the one-call figure.
     Non-interactive callers should use :func:`build_figure` instead.
     """
     build_figure(results)
