@@ -86,3 +86,27 @@ def test_load_scope_example_reads_what_save_scope_acquisition_wrote(data_dir, ca
     assert "LECROY,TEST (VISA (VXI-11))" in out
     assert "could not freeze" in out
     assert "C1: 4 samples" in out
+
+
+def test_detuning_example_reports_distance_to_the_nearest_rubidium_line(data_dir, capsys):
+    from iyzee.devices.wavemeter import Rb_transitions
+
+    label, line = next(t for t in Rb_transitions if t[0] == "D1 - Rb87_F22")
+    measured = line + 5e-6  # 5 MHz above the line
+    results = [
+        StepResult(
+            "freq",
+            line,
+            "THz",
+            {"squeezing": [-61.0, -61.0], "shot_noise": [-58.0, -58.0]},
+            {"measured_frequency_thz": measured},
+        )
+    ]
+    save_step_results(
+        results, data_dir, {"status": "completed", "failed_steps": []}, name="frequency"
+    )
+    runpy.run_path(str(EXAMPLES / "detuning.py"))
+    out = capsys.readouterr().out
+    assert f"from {label}" in out
+    assert "+5.0 MHz" in out
+    assert "-3.00 dB" in out
