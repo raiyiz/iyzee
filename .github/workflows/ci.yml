@@ -46,11 +46,14 @@ jobs:
           version: "0.12.22"
           python-version: "3.14"
 
+      - name: Build documentation index
+        run: scripts/ci.sh docs-index
+
       - name: Set up Typst
         uses: typst-community/setup-typst@v5
         with:
           typst-version: "0.15.1"
-          cache-dependency-path: docs/main.typ
+          cache-dependency-path: docs/chapters/requirements.typ
 
       - name: Compile documentation
         run: scripts/ci.sh docs
