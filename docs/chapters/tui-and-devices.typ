@@ -41,7 +41,7 @@ flowchart LR
 
 = Two entry points, one foundation
 
-`iyzee` (a script, `main.py`) and `iyzee-tui` (an interactive terminal app, `tui/app.py`) are both callers of the same `experiment/` layer described in the top-level README — neither one duplicates measurement logic. The difference is entirely about *who owns the hardware lifecycle and how progress is observed*:
+`iyzee` (a script, `main.py`) and `iyzee-tui` (an interactive terminal app, `tui/app.py`) are both callers of the same `experiment/` layer — neither one duplicates measurement logic. The difference is entirely about *who owns the hardware lifecycle and how progress is observed*:
 
 #table(
   columns: (1fr, 1.7fr, 1.7fr),
@@ -58,47 +58,72 @@ flowchart LR
 
 Both paths build a list of `Step` objects and hand them to `run_sequence()`; nothing about `experiment/` needed to change to support the TUI, and nothing about the TUI needed to know how a `BandwidthStep` or `FrequencyStep` actually talks to the MXA.
 
-= Device layer
+= Device layer <sec-devices>
 
-The device layer is where software semantics meet real protocols: VISA,
-raw SCPI sockets, LeCroy VICP, and the WS-7 HTTP interface. Each adapter keeps
-hardware-specific command syntax out of the experiment and TUI layers.
-
-
-== Connection lifecycle
-
-`BaseDevice` (`base.py`) is the shared contract every VISA-based driver builds on:
-
-- `connect()` opens the VISA resource once; a second call is a no-op if already connected.
-- `close()` closes it if open, and is safe to call more than once.
-- `__enter__`/`__exit__` just call `connect()`/`close()`, so `with KeysightMXA() as mx:` is the same thing spelled as a context manager.
-- Constructing a device does *not* connect it — `KeysightMXA()` alone opens no socket. This is what keeps experiment code and tests independent of real hardware: a `Step` can be constructed and unit-tested without ever calling `connect()`.
-
-`KeysightMXA` and `PSU` both subclass `BaseDevice` directly, over `TCPIP0::<ip>::inst0::INSTR` (MXA) or a raw `TCPIP::<ip>::5025::SOCKET` (the R&S HMP4040 PSU, which doesn't speak the standard VISA `INSTR` resource string). `scope.py`'s `LeCroy` driver predates `BaseDevice` and manages its own raw TCP socket instead (see @sec-scope below) — this is a known, intentional gap, not an oversight; see the README's Known Gaps section.
-
-== Instrument addresses
+The device layer is where software semantics meet real protocols. Four transports
+are in use, and each adapter keeps hardware-specific syntax out of the experiment and
+TUI layers.
 
 #table(
-  columns: (1.3fr, 1fr, 2fr),
+  columns: (1.2fr, 1.5fr, 2.3fr),
   stroke: 0.5pt + hairline,
-  inset: 6pt,
+  inset: 5pt,
   align: (left, left, left),
-  [*`IP` member*], [*Address*], [*Instrument*],
-  [`NOISE_ANALYZER`], [`10.140.1.40`], [Keysight MXA signal analyzer],
-  [`POWER_SUPPLY`], [`10.140.1.15`], [Rohde & Schwarz HMP4040 (shutter driver)],
-  [`SCOPE`], [`10.140.1.220`], [LeCroy oscilloscope],
-  [`WAVEMETER`], [`10.140.1.215`], [WS-7 wavemeter HTTP switch server],
+  [*Instrument*], [*Driver*], [*Transport*],
+  [Keysight MXA], [#code("KeysightMXA")], [VISA, `TCPIP0::<ip>::inst0::INSTR`, SCPI],
+  [R&S HMP4040 PSU / shutter], [#code("PSU"), #code("ShutterControl")], [VISA raw socket, `TCPIP::<ip>::5025::SOCKET`],
+  [LeCroy scope], [#code("LeCroy")], [VISA, `TCPIP0::<ip>::inst0::INSTR` (VXI-11)],
+  [WS-7 wavemeter], [#code("Wavemeter")], [HTTP, port #fact("drivers.wavemeter_port")],
 )
 
-These are lab-network fixtures, not configuration — they live as a `StrEnum` in `base.py` (`IP`) precisely so a driver's constructor default (`ip: IP = IP.NOISE_ANALYZER`, etc.) is self-documenting about which physical box it talks to.
+== Connection lifecycle <sec-lifecycle>
 
-== Keysight MXA
+#code("BaseDevice") is the contract every VISA driver (MXA, PSU, scope) builds on:
 
-The MXA is by far the most-used instrument and has its own dedicated guide — see #link(<part-mxa>)[MXA and measurement guide] for the full SCPI command map, RBW/VBW/detector semantics, and the squeezing/shot-noise measurement workflow. The short version: `mxa.py` wraps every operation (frequency, bandwidth, sweep control, trace transfer, markers, triggering) as a plain Python method that writes or queries one SCPI command — application code never contains a raw SCPI string.
+- #code("BaseDevice.connect") opens the VISA resource once; a second call is a no-op.
+- #code("BaseDevice.close") closes it if open and is safe to call twice.
+- `__enter__`/`__exit__` call those two, so `with KeysightMXA() as mx:` is the same thing as a context manager.
+- Constructing a device does *not* connect it. `KeysightMXA()` alone opens nothing, which keeps experiment code and tests independent of hardware.
 
-== Power supply and optical shutter
+The scope driver is a #code("BaseDevice") like the others (it used to carry its own raw
+socket). It differs only where it must: no read termination, a larger read chunk, and
+its own lock and error translation (@arch-scope-transport).
 
-`power.py`'s `PSU` drives an R&S HMP4040 over its raw SCPI-over-socket interface (port 5025, no `INSTR` VISA resource string):
+#anchors("BaseDevice", "BaseDevice.connect", "BaseDevice.close")
+
+== Instrument addresses <sec-addresses>
+
+Addresses are defaults that can be overridden without editing code; the precedence is
+environment variable, then `config.toml`, then the default below (#code("config.address")). A config
+file that exists but cannot be parsed raises #code("ConfigError") instead of being ignored.
+
+#table(
+  columns: (1.3fr, 1fr, 1.7fr, 2fr),
+  stroke: 0.5pt + hairline,
+  inset: 6pt,
+  align: (left, left, left, left),
+  [*`IP` member*], [*Default*], [*Environment variable*], [*Instrument*],
+  [`NOISE_ANALYZER`], [#fact("addresses.noise_analyzer.default")], [#raw(fact("addresses.noise_analyzer.env"))], [Keysight MXA],
+  [`POWER_SUPPLY`], [#fact("addresses.power_supply.default")], [#raw(fact("addresses.power_supply.env"))], [R&S HMP4040 (shutter)],
+  [`SCOPE`], [#fact("addresses.scope.default")], [#raw(fact("addresses.scope.env"))], [LeCroy oscilloscope],
+  [`WAVEMETER`], [#fact("addresses.wavemeter.default")], [#raw(fact("addresses.wavemeter.env"))], [WS-7 wavemeter server],
+)
+
+The data directory follows the same rule: #raw(fact("config.env_data_dir")), then `[paths] data`
+in the config file, then `<checkout>/data` for a source checkout or a per-user data
+directory for an installed package (#code("data_root")). `IYZEE_CONFIG` names an alternative
+config file.
+
+== Keysight MXA <sec-mxa-driver>
+
+The MXA is the most-used instrument and has its own part (@part-mxa) with the SCPI map,
+RBW/VBW/detector semantics and the measurement workflow. In short: #code("KeysightMXA") wraps
+every operation as a plain method that writes or queries one SCPI command, with a
+#fact-ms("drivers.mxa_timeout_ms") default timeout; application code contains no raw SCPI string.
+
+== Power supply and optical shutter <sec-psu>
+
+#code("PSU") drives an R&S HMP4040 over its raw SCPI-over-socket interface (port 5025):
 
 #table(
   columns: (1.5fr, 1.8fr, 2fr),
@@ -108,52 +133,88 @@ The MXA is by far the most-used instrument and has its own dedicated guide — s
   [*Method*], [*SCPI written*], [*Note*],
   [`set_voltage(v, ch)`], [`INST:NSEL <ch>` then `VOLT <v>`], [selects the channel by number, then sets its voltage],
   [`set_current(i, ch)`], [`INST:NSEL <ch>` then `CURR <i>`], [same selection form as `set_voltage`],
-  [`enable_output(ch)`], [`INST OUT<ch>` then `OUTP:SEL 1`], [selects the channel by *name* (`OUT1`..`OUT4`), a different form from `INST:NSEL` above — both are valid HMP4040 syntax; this is an existing quirk in the driver, not a bug to "fix" without testing against real hardware],
+  [`enable_output(ch)`], [`INST OUT<ch>` then `OUTP:SEL 1`], [selects the channel by *name* (`OUT1`..`OUT4`), a different form from `INST:NSEL`; both are valid HMP4040 syntax, and this quirk should not be "fixed" without testing on the instrument],
   [`disable_output(ch)`], [`INST OUT<ch>` then `OUTP:SEL 0`], [],
   [`enable_global_output()`], [`OUTP:GEN 1`], [master output switch, independent of per-channel `OUTP:SEL`],
   [`disable_global_output()`], [`OUTP:GEN 0`], [],
 )
 
-`ShutterControl` (also in `power.py`) is a thin, purpose-built wrapper: its `__init__` connects the PSU immediately and sets the shutter's trigger voltage/current (*1.7 V, 10 mA* — hardcoded, matching the physical shutter's rated trigger levels, not a tunable setting), so by the time a `ShutterControl` object exists it's ready to `open()`/`close()`. This is why the TUI's `ShutterHandle` (see @sec-instruments) treats *constructing* a `ShutterControl` as the "connect" step rather than a separate call.
+#code("ShutterControl") is a thin wrapper that owns a #code("PSU"). Like every other device it
+does *not* connect when constructed: #code("ShutterControl.connect") connects the PSU and sets the
+shutter channel to 1.7 V and 10 mA (the shutter's trigger levels, hard-coded rather than
+configurable), and closing the PSU on a failed connect so nothing is left half-open.
+#code("ShutterControl.disconnect") closes the shutter before releasing the PSU, so a disconnect
+never leaves the beam path open. The shutter is channel 3 (`CH.THREE`) by default.
 
 == LeCroy oscilloscope <sec-scope>
 
-`scope.py`'s `LeCroy` driver talks LeCroy's VICP protocol directly over a raw TCP socket (port 1861) — it predates PyVISA in this codebase and has never been migrated onto `BaseDevice`. Every exchange follows the same shape: an 8-byte header (a flag byte, 3 reserved bytes, and a big-endian-on-the-wire 4-byte length) followed by that many bytes of payload; `vicp.recv_exact()` loops until the full payload has actually arrived, since a single `socket.recv()` is not guaranteed to return everything at once. VICP has no request IDs, so after any mid-message failure (timeout, peer close, bad header, interrupted transfer) a late reply would be handed to the next caller as if it answered that caller's question. `vicp.VICPTransport` therefore invalidates itself in that case: the socket is closed, `LeCroy.connected` becomes `False`, and the caller must reconnect. Errors raised after a response was read completely through EOI (a wrong block length, a non-ASCII reply) leave the stream aligned, so the connection stays usable. A binary waveform block is validated against its declared byte count, and a trailing line terminator can never be counted as sample data.
+#code("LeCroy") controls WaveSurfer/WaveAce/X-Stream scopes over *VISA (VXI-11)*. The scope's
+remote control must be set to LXI/VXI-11, not VICP.
 
-Typical commands sent via `LeCroy.send()`:
+#callout(
+  "Migration note",
+  [
+    Earlier versions spoke LeCroy's VICP protocol over a raw socket (port 1861). That driver
+    and its transport are gone. If a scope that used to work now times out on connect,
+    check its remote-control setting first; a scope still set to VICP will not answer VXI-11.
+  ],
+  tone: "warning",
+)
+
+The driver forwards LeCroy's header-path dialect; anything it does not wrap is one
+#code("LeCroy.send") or #code("LeCroy.query") away. The commands it issues:
 
 #table(
-  columns: (1.6fr, 2.2fr),
+  columns: (1.7fr, 2.2fr),
   stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left),
   [*Command*], [*Purpose*],
-  [`CFMT DEF9,BYTE,BIN` / `...,WORD,BIN`], [select 8-bit or 16-bit binary waveform transfer format],
-  [`<channel>:WF? <block>`], [request waveform data — `block` is `DAT1` (raw acquisition) or `DAT2` (a processing result: FFT, extrema, ...)],
-  [`CORD LO`], [byte order for word transfers (`<LSB><MSB>`)],
-  [`<channel>:INSPECT? "VERTICAL_OFFSET"` / `"VERTICAL_GAIN"`], [scaling needed to convert raw words to volts, used by `getDataFloats()`],
-  [`<channel>:INSPECT? "HORUNIT"` / `"HORIZ_OFFSET"` / `"HORIZ_INTERVAL"`], [reconstruct the time axis: `t[i] = HORIZ_INTERVAL * i + HORIZ_OFFSET`],
+  [`CFMT DEF9,WORD,BIN`], [16-bit binary transfer in definite-length (`#9`) blocks; written before every `WF?`],
+  [`CORD LO`], [little-endian word order; also written before every `WF?`],
+  [`<channel>:WF? DAT1`], [request the waveform block (`DAT1` = the acquisition)],
+  [`<channel>:INSPECT? "VERTICAL_GAIN"` / `"VERTICAL_OFFSET"` / `"VERTUNIT"`], [scaling and unit: `value = gain × code − offset`],
+  [`<channel>:INSPECT? "HORUNIT"` / `"HORIZ_OFFSET"` / `"HORIZ_INTERVAL"`], [time axis: `t[i] = HORIZ_OFFSET + i × HORIZ_INTERVAL`],
+  [`<channel>:VOLT_DIV`, `OFFSET`, `COUPLING`, `TRACE`], [vertical setup (setters and `?` getters)],
+  [`TRIG_SELECT EDGE,SR,<source>`, `TRIG_MODE`, `<source>:TRIG_LEVEL` / `TRIG_SLOPE` / `TRIG_COUPLING`], [edge trigger on one source; the mode is written last (@sec-convention)],
+  [`TIME_DIV`], [horizontal scale; acquisition-wide, so it lives with the trigger settings],
 )
 
-Because this driver isn't `BaseDevice`-integrated, the TUI's `ScopeHandle` (@sec-instruments) calls `LeCroy.connect(ip)`/`.disconnect()` directly rather than going through the usual `connect()`/`close()` contract (`connect()` raises if already connected and `disconnect()` is idempotent, rather than returning status codes), and `ScopeHandle.probe()` can only report that the TCP handshake succeeded; the instrument's `*IDN?` reply is instead captured, best-effort, in each saved recording.
+Only the Edge trigger type is wrapped; other types are a `scope.send("TRIG_SELECT ...")` away.
+Enumerations cover the values fixed across the family: #code("Channel") (#fact-raw("scope_enums.Channel").values().join(", ")),
+#code("Coupling") (#fact-raw("scope_enums.Coupling").values().join(", ")), #code("TriggerCoupling"), #code("TriggerSlope") and #code("TriggerMode")
+(#fact-raw("scope_enums.TriggerMode").values().join(", ")). Getters return the instrument's raw reply; parsing
+(`5.00E-01V` into volts, `TDIV 5.00E-06 S` into seconds) happens one layer up, in the workflows.
 
-Beyond waveform download, `LeCroy` also exposes channel (vertical), trigger, and math-function control — `set_volts_per_div()`, `set_coupling()`, `set_trace_display()`, `set_trigger_mode()`/`set_trigger_source()`/`set_trigger_level()`/`set_trigger_slope()`/`set_trigger_coupling()`, the horizontal scale `set_time_per_div()` / `get_time_per_div()` (`TIME_DIV`), and `set_math_equation()` with `set_math_difference()`/`set_math_average()`/`set_math_fft()` convenience wrappers around it. These build the same header-path command strings as the table above (e.g. `C1:COUPLING D50`, `TRIG_SELECT EDGE,SR,C1`, `F1:DEFINE EQN,'C1-C2'`), routed through `LeCroy.send()`; a `query()` helper (`send()` + `readAll()`, trimmed) backs the handful of getters. `Channel`, `MathChannel`, `Coupling`, `TriggerCoupling`, `TriggerSlope`, and `TriggerMode` are `StrEnum`s for the values that are fixed across the LeCroy family this driver targets; bandwidth-limit and math-equation strings stay plain `str` parameters because those vocabularies are genuinely model dependent (see the docstrings for specifics and their sourcing).
+#code("ScopeHandle") adapts the driver to the common handle contract. Its `probe()` asks `*IDN?` with a
+#fact("drivers.scope_first_response_s") s allowance, because the first reply after connecting can be slow and a
+timeout drops the connection; if the scope accepts the connection but stays silent, the error says another client may be holding it.
+Its lock *is* the driver's transaction lock, so there is only one lock to reason about.
 
-== Wavemeter
+#anchors("LeCroy", "LeCroy.connect", "LeCroy.query", "LeCroy.getDataFloatsDetailed", "ScopeHandle", "TriggerMode")
 
-`devices/wavemeter.py` talks to a WS-7 wavemeter switch's small HTTP API rather than SCPI — there's no persistent connection to open or close. `Wavemeter` is a thin client with one method per operation. Its host defaults to the configured wavemeter address and its port defaults to 8000; otherwise each method is a direct `requests` call. The client carries no connection or measurement state, so it can be used from the console immediately, without going through the Connect screen:
+== Wavemeter <sec-wavemeter>
+
+#code("Wavemeter") talks to the WS-7 switch server's small HTTP API. It is stateless: constructing it
+connects to nothing, and every call is one `requests` call, so it can be used from the console
+before the Connect page has probed it. Every request is bounded (#fact("drivers.wavemeter_read_timeout_s") s for reads,
+#fact("drivers.wavemeter_setpoint_timeout_s") s for setpoints) because a sweep calls it while holding instrument
+locks, and an unanswered request would freeze the run.
 
 #table(
   columns: (1.4fr, 2.4fr),
   stroke: 0.5pt + hairline,
   inset: 5pt,
   align: (left, left),
-  [*Method*], [*Purpose*],
-  [`GET /api/{channel}/`], [`read_frequency()` reads the current frequency in THz],
-  [`POST /api/set_pid/`], [`set_pid_setpoint()` sends `freq_thz` and `channel` as form data],
+  [*Request*], [*Purpose*],
+  [`GET /api/{channel}/`], [#code("Wavemeter.read_frequency") reads the frequency in THz (default channel #fact("drivers.wavemeter_default_channel"))],
+  [`POST /api/set_pid/`], [#code("Wavemeter.set_pid_setpoint") sends `freq_thz` and `channel` as form data],
 )
 
-A failed HTTP response raises the exception from `requests.raise_for_status()`, and an invalid frequency becomes the normal `ValueError` from `float()`. Nothing is translated into a custom wavemeter exception, so the actual transport or parse failure remains visible to callers.
+A failed HTTP response raises the exception from `raise_for_status()`, and an unparseable reply raises the
+`ValueError` from `float()`. Nothing is translated, so the real failure stays visible; in a sweep a failed
+wavemeter call fails that step instead of recording a plausible number. The reference transition table
+(`Rb_transitions`, from Steck) lives in the same module and also feeds the Rb page and the physics part.
 
 #diagram(
   ```mermaid
@@ -173,56 +234,127 @@ flowchart TD
 
 = TUI architecture <sec-instruments>
 
-== Screens
+== Pages <sec-pages>
 
-Seven pages cover the common tasks (`tui/screens/`) — `ConnectScreen`, `SweepScreen`, `ScopeScreen`, `RbScreen` (the static rubidium D1/D2 reference), `ResultsScreen`, `ConsoleScreen` and `LogScreen`, plain container widgets held by one `ContentSwitcher` (they keep the `*Screen` names from before the sidebar shell replaced Textual's per-page `Screen`s).
+Seven pages cover the common tasks. They are plain container widgets held by one `ContentSwitcher`, so the nav rail
+can persist across switches.
 
-The shared `tui/screens/page.py` base owns page mechanics that are not domain-specific: scrolling/focus behavior, labeled-field construction, the finite/positive numeric validators, validation marking, the safe worker-to-UI callback, and the default no-op `refresh_readiness()` hook. `IyzeeApp.instruments_changed()` refreshes all mounted `Page` instances through that hook rather than naming each connection-dependent screen. Keeping that plumbing in one place lets each screen retain only its own controls, domain operations, and result presentation. `IyzeeApp` (`tui/app.py`) owns which one is currently visible plus the state that has to survive switching between them (`handles`, `last_run`). It does *not* own per-instrument locks any more — see @sec-locking below.
+#table(
+  columns: (auto, auto, 1fr),
+  stroke: 0.5pt + hairline,
+  inset: 5pt,
+  [*Key*], [*Page*], [*Purpose*],
+  [`c` / F1], [#code("ConnectScreen")], [one row per instrument; Enter connects or disconnects (in a worker thread)],
+  [`s` / F2], [#code("SweepScreen")], [bandwidth or frequency sweep with live progress and per-point checkpointing; also "Capture trace"],
+  [`o`], [#code("ScopeScreen")], [channel and trigger form, Retrieve / Apply / Acquire & save],
+  [`r`], [#code("RbScreen")], [static rubidium D1/D2 reference from `Rb_transitions`],
+  [`t` / F3], [#code("ResultsScreen")], [browse saved sweep and scope recordings; derived waveforms and PNG export],
+  [`i` / F4], [#code("ConsoleScreen")], [embedded IPython (@sec-console)],
+  [`l`], [#code("LogScreen")], [live application log, level filter, rotated history],
+)
 
-- *ConnectScreen* — a `DataTable`, one row per `InstrumentSpec`. Pressing Enter connects or disconnects the selected row in a background thread (`@work(thread=True)`), since every device call is blocking I/O and must never run on the UI thread. Disconnecting asks for a second Enter (and is refused while a sweep runs), and a row that is still connecting ignores Enter, so a device is never opened twice.
-- *SweepScreen* — picks a bandwidth or frequency sweep, builds the `Step` list and `AnalyzerConfig` from the on-screen fields, and calls `run_sequence(steps, ctx, on_step=...)` in a background thread, updating a progress bar and a live `textual-plotext` trace as each step completes. Every point is also written to disk as it arrives (one archive, overwritten atomically), so an interrupted run keeps what it had, and the page shows which instrument still needs connecting.
-- *ScopeScreen* — form, settings synchronization, and durable capture: one panel per analog channel, a "Trigger & timebase" section (trigger fields plus time/div, which is acquisition-wide and so lives in `TriggerSettings.time_per_div`), a "Retrieve current settings" action, Apply actions, and an "Acquire & save" button. A newly connected scope is read once automatically; the page exposes synchronization state and highlights fields that differ from the known baseline. Apply actions only write changed fields, and a default UI value cannot overwrite an unrelated instrument setting. After a channel apply the scope is read back: the values it reports become the new baseline (so a V/div the scope rounded is shown as rounded, and logged), a setting the scope ignored is reported as an error with the user's edit kept, and only verified values are recorded as "applied". Acquisition is enabled only when the scope is fully synchronized and the form has no pending edits. The reusable read/apply/acquire/persistence operations live in `iyzee.scope_workflows`; the screen contains only TUI state handling, plotting, and reporting. See @sec-convention.
-- *ResultsScreen* — lists and previews persisted Sweep and Scope recordings (one browser for both; scope runs add channel selection, derived waveforms and PNG export) from `create_dirs()`'s output directory. Sweep records use the existing `save_step_results()` schema; Scope records use `save_scope_acquisition()` with the same numeric-NPZ + JSON-manifest storage primitive.
-- *ConsoleScreen* — hosts IPython's own terminal UI; see @sec-console.
-- *LogScreen* — the app's own logging (`tui/logging_support.py`), live by default, with a level filter and a way to browse older rotated log files.
+The registry is #code("PAGE_SPECS"); the nav rail, the content switcher and the `:` commands all derive from it, so adding a
+page cannot leave them out of step. F1–F4 reach only Connect/Sweep/Results/Console because the console's embedded terminal lets
+exactly those four through; Scope, Rb and Log are letter-only.
+
+The shared #code("Page") base owns mechanics that are not domain-specific: scrolling without stealing initial focus, labeled fields, the finite/positive
+validators, validation marking, the safe worker-to-UI callback #code("Page._ui"), and the no-op
+#code("Page.refresh_readiness") hook that #code("IyzeeApp.instruments_changed") calls on every page.
+
+*Sweep.* #code("SweepScreen") builds the `Step` list and `AnalyzerConfig` from its form, then runs #code("run_sequence") in a worker holding the MXA's lock
+(and the shutter's, for a frequency sweep) for the whole run. It deliberately composes the building blocks instead of calling
+`run_bandwidth_sweep`, because those wrappers take no progress callback. Every recorded point is written to disk immediately (one file pair,
+replaced atomically), so an interrupted run keeps what it had; an abort takes effect at the next step boundary, since a step is one
+averaging run and cannot be interrupted. Point counts are capped at #fact("tui.max_points") so a stray extra zero cannot freeze the UI.
+
+*Scope.* #code("ScopeScreen") has three background operations. *Retrieve* reads the scope into the form (it also runs once on connect). *Apply* writes only what
+differs from the last-reported state and then refreshes the form from the read-back, so a value the scope rounded or ignored is shown as it really is.
+*Acquire & save* needs a successful Retrieve and a form with no pending edits, and writes the recording (@sec-scope-recording). The operations themselves live in
+`scope_workflows` (@sec-convention).
 
 == Instrument registry and locking <sec-locking>
 
-`devices/handles.py` is the single place that knows how to build a uniform `InstrumentHandle` (`connect()` / `disconnect()` / `probe()` / `.device`) around each heterogeneous driver — VISA (`_VisaHandle`, wrapping `KeysightMXA`), the PSU-backed shutter (`ShutterHandle`), the scope's raw socket (`ScopeHandle`), and the wavemeter's stateless HTTP calls (`WavemeterHandle`). `lab.py` holds the `InstrumentSpec` registry and `Lab`, which owns the connected handles (connect, disconnect, dead-link detection, close-all) for the TUI, the console and scripts alike; adding a new instrument means one handle and one `InstrumentSpec` — no screen code changes. Addresses and the data directory come from `config.py` (environment variables or a `config.toml`).
+#code("INSTRUMENTS") is the registry of #code("InstrumentSpec") rows:
 
-Each handle inherits `_LockedHandle`, which owns one re-entrant `threading.RLock` exposed by the `InstrumentHandle` protocol (`ScopeHandle` overrides it to return the `LeCroy` driver's own transaction lock, so the handle, the console proxy, workflow batches and the driver's multi-command transfers all share a single lock). The lock therefore stays on the handle rather than `IyzeeApp` keeping a separate `dict[str, threading.Lock]` alongside `handles`. `LockedProxy`, in the same module, wraps a live device so that *every method call* acquires a given lock for its duration — `ConnectScreen` and `SweepScreen` pass `handle.lock` when they hold it around their own hardware calls, and the console's `LabProxy` passes the same one. This is what stops a console command and a running sweep from issuing overlapping commands to the same physical instrument from two different threads at once. It's a coarse, call-level lock, not a queue — a long-running call (e.g. a slow sweep step) will make a concurrent caller wait for the whole call, not just contend briefly.
+#table(
+  columns: (auto, 1fr, auto),
+  stroke: 0.5pt + hairline,
+  inset: 5pt,
+  [*Key*], [*Label*], [*Short*],
+  ..range(4).map(i => ([`#fact("instruments." + str(i) + ".key")`], [#fact("instruments." + str(i) + ".label")], [#fact("instruments." + str(i) + ".short")])).flatten(),
+)
 
-Because the lock lives on the handle, not on `IyzeeApp`, a handle built and connected entirely outside a running app — a script's own `ScopeHandle`, say — gets the same synchronization guarantee for free. This is what makes @sec-convention below possible: the extracted operation functions take the lock as an optional argument rather than reaching for an app-owned table that may not exist. Because the lock is re-entrant, passing it through a `LockedProxy` over the same handle does not deadlock, and scope batches also enter the driver's own `transaction_lock` so a batch is atomic even against a thread that never saw the explicit lock.
+#code("Lab") holds the connected handles and implements connect (build, open, probe, register; nothing is registered on failure and the half-open link is closed),
+disconnect, dead-link detection and bounded close-all for the TUI, the console and scripts alike. Adding an instrument means one handle and one #code("InstrumentSpec"); no screen changes.
 
-Handles that expose a live instrument use the same `.device` property regardless of whether the underlying driver is VISA, a PSU-backed shutter, or the scope socket. Console and screen code therefore use one adapter-facing property instead of reaching through instrument-specific aliases.
+Each handle inherits #code("_LockedHandle"), which owns one re-entrant `threading.RLock`; `ScopeHandle` instead returns the driver's own transaction lock, so the handle, the console proxy, workflow batches and the driver's multi-command transfers share
+a single lock. #code("LockedProxy") wraps a live device so every method call takes that lock; `ConnectScreen`, `SweepScreen` and the console's #code("LabProxy") all use the handle's lock. A concurrent console command and a running sweep therefore cannot interleave on one instrument. It is a coarse call-level lock, not a queue: a long call makes a concurrent caller wait for the whole call.
+
+Because the lock lives on the handle, a handle built entirely outside the app (a script's own `ScopeHandle`) gets the same guarantee. Because it is re-entrant, passing a `LockedProxy` over a handle whose lock is already held does not deadlock.
+
+#tested-by("test_locked_proxy_serializes_calls_across_threads", "test_drop_dead_links_unregisters_only_the_dead_ones_and_releases_them", "test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument", "test_a_failed_connect_closes_the_half_open_link_and_registers_nothing", "test_scope_handle_alive_follows_the_drivers_connected_state")
 
 == Design convention: screens display and control, they don't implement <sec-convention>
 
-A page's job is the form, the buttons, the plot, and reporting a result — not the operation itself. `iyzee.scope_workflows` is the template: it holds `ChannelSettings`/`TriggerSettings` (plain frozen dataclasses), read/apply helpers (including `apply_and_verify_channel_settings()`, which reads back and reports what the scope holds), `acquire_scope_recording()`, and `save_scope_acquisition()` (plain functions taking the driver directly, with no Textual import and an optional `lock=` parameter). When a baseline is supplied, the apply helpers are intentionally field-granular: channel writes compare each V/div, offset, coupling, and trace-display value; trigger writes compare mode, source, slope, coupling, level, and time/div, and the trigger mode is always written last so an arming mode never fires against a half-written configuration. If the connection is lost mid-batch the loops stop and mark the remaining channels as not attempted rather than reading a stale reply as their answer. Without a baseline, the legacy full-write behavior remains available to explicit standalone callers. `ScopeScreen` reads and validates the form, then calls these operations; the acquisition record is built first and persisted before the completed result is reported in the UI.
+A page's job is the form, the buttons, the plot and the report. `iyzee.scope_workflows` is the template: plain frozen dataclasses (#code("ChannelSettings"), #code("TriggerSettings")) and plain functions that take the driver directly and import no Textual:
 
-== Navigation
+#table(
+  columns: (1.7fr, 3fr),
+  stroke: 0.5pt + hairline,
+  inset: 5pt,
+  [*Function*], [*What it guarantees*],
+  [#code("read_channel_settings"), #code("read_trigger_settings")], [turn the scope's current state into the same dataclasses the apply functions take, so a caller can read, change one field and apply],
+  [#code("apply_channel_settings")], [writes (only changed fields when given a baseline), then *returns the read-back*, which, not the request, is what was applied; refuses before writing if a channel has no baseline],
+  [#code("apply_trigger_settings")], [field-granular against a baseline; the mode is written last so an arming mode never fires against a half-written configuration],
+  [#code("acquire_scope_recording")], [freezes a running acquisition for a consistent multi-channel capture and restores it; raises on the first failure],
+  [#code("save_scope_acquisition")], [persists the arrays and manifest through the shared recording primitive],
+)
 
-Key handling relies entirely on Textual's own focus and binding-priority system, with no app-specific policy layer on top: a focused widget's own bindings (an `Input`'s text-entry keys, the console terminal's own keys) are offered the key first, and it only falls through to `IyzeeApp.BINDINGS` if the widget doesn't handle it. Those are `c`/`s`/`o`/`r`/`t`/`i`/`l` (switch page; the page you are already on is not offered) and `F1`–`F4`, which reach only Connect/Sweep/Results/Console — Textual's own key handling reserves those four specifically to escape the console's embedded terminal, so Scope, Rb and Log are letter-only (`o`, `r`, `l`) rather than extending that set — plus `:` (vim-style command mode: page switching, `:connect scope`, and page-specific commands such as `:tdiv 2u`; see `tui/commands.py`), `Ctrl+Q` (quit at once) and `q` (quit on a second press within a few seconds, so a stray key can't close an app holding live instruments), `j`/`k` (move focus) and `Escape` (leave a text field). There is no hand-maintained "am I in insert mode" flag to keep in sync with what's actually focused — Textual's dispatch order is the single source of truth for that. `Ctrl+\` opens Textual's built-in Command Palette rather than a hand-rolled command bar or parser; it is a priority binding, checked before the focus chain, and is deliberately not `Ctrl+P`, which IPython's history recall uses.
+Every batch holds the driver's `transaction_lock`, so a screen worker, the console and a script can call them at the same time. `ScopeScreen` reads and validates the form, calls these, and persists the recording before reporting success. The parsing of replies (`_parse_volts`, `_parse_seconds`) follows LeCroy's remote-control manuals but, as the module docstring says, has not been exercised against every model; verify against your instrument before relying on it for anything safety-critical.
+
+== Navigation and commands <sec-navigation>
+
+Key handling relies on Textual's own focus and binding priority, with no app-specific "mode" flag: a focused widget's own bindings see the key first and it falls through to the app's bindings only if the widget does not handle it.
+
+#table(
+  columns: (auto, 1fr),
+  stroke: 0.5pt + hairline,
+  inset: 5pt,
+  [*Key*], [*Action*],
+  [`c s o r t i l`], [switch page (the page you are on is not offered)],
+  [`F1`–`F4`], [Connect / Sweep / Results / Console, even from inside the console],
+  [`:`], [vim-style command line; `:help` lists what the current page offers],
+  [`Ctrl+Q`], [quit at once],
+  [`q`], [quit on a second press within #fact("tui.quit_confirm_s") s, so a stray key cannot close an app holding live instruments],
+  [`j` / `k`, `Escape`], [move focus; leave a text field],
+  [`Ctrl+\\`], [Textual's command palette (not `Ctrl+P`, which IPython uses for history)],
+)
+
+Commands (#code("CommandRegistry")) are parsed without Textual: an exact name or alias wins, otherwise a unique prefix does (`:conn`); a page's commands shadow the global ones. Values accept SI suffixes (`:tdiv 2u`; #code("parse_si")).
+
+The layout reflows at #fact("tui.breakpoints.1.0") and #fact("tui.breakpoints.2.0") columns (#code("IyzeeApp.HORIZONTAL_BREAKPOINTS")), declaratively in `app.tcss`.
 
 #callout(
   "Concurrency invariant",
   [
-    One physical instrument has one serialization boundary. Console calls,
-    screen workers and workflow batches therefore cannot interleave protocol
-    commands accidentally. Long-running hardware calls still occupy that
-    boundary for their full duration.
+    One physical instrument has one serialization boundary. Console calls, screen workers and workflow batches cannot interleave protocol commands accidentally. Long-running calls still occupy that boundary for their full duration.
   ],
   tone: "result",
 )
 
 = The console in practice <sec-console>
 
-The Console screen (`i`) runs IPython's own terminal UI — prompt_toolkit's prompt, with its editing modes (vi by default; emacs via `IyzeeApp(console_editing_mode=...)` or `IYZEE_EDITING_MODE`), completion menu, history search, auto-suggestions, `%magics`, `?` help and `%debug` — inside the application process, so `lab.mx` is the live instrument rather than a copy across a process boundary. prompt_toolkit is a terminal application, so it is given virtual terminals (`tui/ipython_session.py`): keystrokes are encoded by `tui/termkeys.py` into a pipe input, and its output is interpreted by a `pyte`-based screen (`tui/vterm.py`) that `tui/terminal_view.py` paints, with scrollback. The shell runs in its own thread, so a slow cell can't freeze the UI: `print()` is routed to the console by thread, `input()` prompts on the virtual terminal, and Ctrl+C interrupts the running cell (or clears the line at a prompt). While the terminal has focus only `F1`–`F4`, `Ctrl+Q` and `Ctrl+\` reach the app; Ctrl+Z is never forwarded, because IPython binds it to "suspend", which would stop the whole TUI. See the top-level README for the known limits.
+The Console page runs IPython's own terminal UI (prompt_toolkit's prompt with vi or emacs editing, completion, history search, `%magics`, `?` help and `%debug`) inside the application process, so `lab.mx` is the live instrument rather than a copy. prompt_toolkit is a terminal application, so it is given virtual terminals (#code("IPythonSession")): keystrokes are encoded by `termkeys.py` into a pipe input, and its output is interpreted by a `pyte`-based screen (`vterm.py`) painted by `terminal_view.py`. The shell runs in its own thread, so a slow cell cannot freeze the UI; Ctrl+C interrupts the running cell. While the terminal has focus only `F1`–`F4`, `Ctrl+Q` and `Ctrl+\\` reach the app; Ctrl+Z is never forwarded because IPython binds it to "suspend".
 
-Connected instruments and the last sweep are reachable through one object, `lab` (`tui/ipython.py`'s `LabProxy`), set once when the console is created and never refreshed — every attribute access re-reads the app's actual current state:
+#callout(
+  "Two different things are called lab",
+  [
+    In the console, `lab` is a #code("LabProxy") (a live, read-only view for typing at). In code, `Lab` is the session object (#code("Lab")) that owns the handles. The proxy reads the session's handles on every access; it never caches a device.
+  ],
+)
 
 ```python
-# connect the MXA and shutter on the Connect screen first, then:
+# connect the MXA and shutter on the Connect page first, then:
 lab.mx.set_center_freq(1.5e6)
 lab.mx.set_rbw(24e3)
 lab.mx.single_sweep_wait()
@@ -231,45 +363,40 @@ trace = lab.mx.get_trace_data(1)
 lab.shutter.open()
 lab.results[-1].traces["squeezing"]   # last completed sweep, if any
 lab.connected                          # e.g. ("mx", "shutter")
+lab.wavemeter.read_frequency(4)        # works before (or without) Connect: stateless HTTP
 ```
 
-`lab.mx` calls go through the same `LockedProxy` the Connect/Sweep screens use, so they're serialized against a running sweep automatically. Disconnect the MXA on the Connect screen and the very next `lab.mx` access raises a clear `AttributeError` — there is nothing cached to go stale, because nothing was ever copied out of `app.handles` in the first place.
+The names are `mx`, `shutter`, `scope` and `wavemeter` (the proxy maps `mx` to the `mxa` handle); `results`, `last_run`, `handles` and `connected` complete the set. Device calls go through the same #code("LockedProxy") the pages use. Disconnect the MXA and the next `lab.mx` raises a clear `AttributeError`; nothing is cached to go stale. The console is a full-power Python session: it writes to real instruments, so treat it like direct hardware control.
 
-= Scope waveform recording
+= Scope waveform recording <sec-scope-recording>
 
-The Scope page's *Acquire & save* is a measurement-recording operation, not just a plotting convenience. One click acquires the selected analog channels from the scope's `DAT1` waveform block and creates a new file pair under `data/YYYY-MM/` (a fresh random suffix means a normal acquisition never overwrites an earlier one):
+*Acquire & save* is a measurement-recording operation, not a plotting convenience. One click acquires the enabled channels' `DAT1` block and creates a new file pair under `data/YYYY-MM/` (a fresh random suffix means a normal acquisition never overwrites an earlier one). The complete field-by-field description, rendered from the real files, is in @part-data; in summary:
 
-- the `.npz` contains numeric arrays only — one `time_<channel>` array, one calibrated `value_<channel>` array, and, for the real LeCroy driver, the exact signed 16-bit `raw_<channel>` samples returned by the scope;
-- the `.json` manifest identifies the recording (`measurement_id`, UTC start/end timestamps, software/Python versions, VICP address/port/timeout, and the instrument's `*IDN?` identity), records the requested TUI configuration and the configuration the scope reported after the last read-back, and describes every returned waveform; `schema_version` is 2;
-- an `acquisition` block states whether a running acquisition (trigger mode AUTO or NORMAL) was stopped for the download and restored afterwards (`freeze=True`, the default of `acquire_scope_recording()`), the prior trigger mode, and any non-fatal warnings (could not freeze or restore, identity unavailable), so channels can be trusted to come from one capture; SINGLE and STOP are left alone, and `freeze=False` opts out;
-- per-channel metadata (each channel's own timebase is read, not channel 1's) includes the scope-reported engineering unit, horizontal offset and sample interval, vertical gain and vertical offset, sample/finite counts, minimum/maximum value and sample/time index, peak-to-peak, RMS, standard deviation and maximum absolute value;
-- partial acquisition is preserved: channels that fail are listed under `errors` while successfully returned channels are still saved;
-- the NPZ is SHA-256 hashed after writing and the digest is recorded in the manifest, so a copied or archived data file can be checked for accidental modification.
+- the `.npz` holds numbers only: `time_<ch>`, calibrated `value_<ch>` and the exact signed 16-bit `raw_<ch>` codes;
+- the `.json` manifest identifies the recording (`measurement_id`, UTC start/end, software and Python versions, transport `VISA (VXI-11)`, address, timeout and the `*IDN?` identity), records the requested and the read-back configuration, and describes every waveform with its own timebase, gain, offset and statistics;
+- an `acquisition` block says whether a running acquisition was stopped for the download (trigger mode AUTO or NORMAL; SINGLE and STOP are left alone), the prior mode, and non-fatal warnings;
+- the NPZ is SHA-256 hashed after writing and the digest is stored in the manifest.
 
-The calibrated values are derived from the scope's own reported `VERTICAL_GAIN` and `VERTICAL_OFFSET` (equivalently, `values = gain * raw_codes - offset`); the TUI's V/div and offset fields are recorded as configuration provenance, not silently treated as instrument readback. The raw signed 16-bit arrays are the preserved sample data when available; each waveform also records its own horizontal setup (`time_unit`, `time_offset` = first sample relative to the trigger, `time_interval`), and the requested/applied trigger settings carry `time_per_div`; the Results page shows time/div, the time window, sample count, interval and sample rate, and both the Scope and Results plots scale the time axis to a readable unit (ns/µs/ms). The scalar statistics in the manifest are convenience summaries derived from those calibrated arrays. This distinction matters because the legacy LeCroy driver cannot currently verify every vertical/trigger setting after it is written.
+Calibrated values come from the scope's own `VERTICAL_GAIN`/`VERTICAL_OFFSET` (`value = gain × code − offset`); the form's V/div and offset are recorded as configuration provenance, never mistaken for readback. The time axis is `time_offset + index × time_interval`. Statistics are convenience summaries of the calibrated arrays, with non-finite samples excluded. The storage layer is shared with sweeps through #code("save_numeric_recording") (atomic `.part` replacement, pickle-free numeric archives, manifest, checksum), so there is one persistence implementation.
 
-The storage layer is shared with experiment sweeps through `experiment.io.save_numeric_recording()`, so atomic `.part` replacement, pickle-free numeric archives, JSON manifests and checksum handling remain one implementation rather than two persistence systems. The SHA-256 digest covers the completed NPZ itself; it lets a later analysis/archive step verify that the numeric payload has not changed since it was written.
+= Typical session, start to finish <sec-session>
 
-= Typical session, start to finish
-
-1. `uv run iyzee-tui`. The Connect screen is shown first.
-2. Move to the MXA row, press Enter. `ConnectScreen._connect()` builds an `InstrumentSpec`'s handle in a background thread, calls `handle.connect()` (opens the VISA resource) then `handle.probe()` (`*IDN?`), and on success stores the handle in `app.handles["mxa"]`.
-3. Press `s` for the Sweep screen. Pick bandwidth or frequency, adjust the RBW range (or laser offsets), press *Run sweep*. `SweepScreen._run()` holds `app.handles["mxa"].lock` for the whole run, calls `prepare_analyzer()`, then `run_sequence(steps, ctx, on_step=...)` — each step's result updates the progress bar and the live trace plot.
-4. As each point completes it is saved via `save_step_results()` (one archive, overwritten atomically), and on completion the run is stashed on `app.last_run`.
-5. Press `o` for Scope. Apply the channel and trigger settings you intend to use, then press *Acquire & save*. The selected `DAT1` waveforms are captured, written as the NPZ/JSON recording pair, and then plotted; a partial acquisition is still preserved with per-channel errors (channel, exception type and message) in the manifest. A running acquisition is paused for the download and resumed afterwards.
-6. Press `t` for Results to browse the saved Sweep or Scope recordings, or `i` for the Console to inspect live instruments and analysis results.
+1. `uv run iyzee-tui`. The Connect page is shown first.
+2. Move to the MXA row and press Enter. #code("Lab.connect") builds the handle, calls `connect()` then `probe()` (`*IDN?`) in a worker, and registers it only on success.
+3. Press `s`. Pick bandwidth or frequency, adjust the range, press *Run sweep*. #code("SweepScreen._run") holds the instrument locks for the whole run, calls #code("prepare_analyzer"), then #code("run_sequence") with a progress callback.
+4. Each point is checkpointed through #code("save_step_results"); on completion the run is stored as `last_run` for the console, and `run_metadata.status` is rewritten from `running` to its final value.
+5. Press `o`. Retrieve, edit, Apply (the form is refreshed from the read-back), then *Acquire & save*.
+6. Press `t` to browse saved recordings, or `i` to inspect live instruments and the last sweep.
 
 = References
 
-- Repository implementation: `src/iyzee/devices/base.py`, `src/iyzee/devices/power.py`, `src/iyzee/devices/scope.py`, `src/iyzee/scope_workflows.py`, `src/iyzee/devices/wavemeter.py`, `src/iyzee/tui/`, and the associated tests.
-- #link(<part-mxa>)[MXA and measurement guide] — MXA SCPI reference, measurement physics, and the squeezing/shot-noise workflow.
-- Rohde & Schwarz, *HMP Series Power Supply User Manual*: `INST:NSEL`, `INST OUTn`, `OUTP:SEL`, `OUTP:GEN` selection and output semantics.
-- LeCroy, *Remote Control Manual*: VICP protocol framing, `WF?`/`INSPECT?` waveform transfer, and (for the channel/trigger/math control added on top of that) the `<channel>:VOLT_DIV`/`OFFSET`/`COUPLING`/`ATTENUATION`/`BANDWIDTH_LIMIT`/`TRACE`/`INVERT_SET`, `TRIG_SELECT`/`TRIG_LEVEL`/`TRIG_SLOPE`/`TRIG_COUPLING`/`TRIG_MODE`/`TRIG_DELAY`, and `DEFINE EQN` command families.
+- Repository implementation: #file("src/iyzee/devices/base.py"), #file("src/iyzee/devices/power.py"), #file("src/iyzee/devices/scope.py"), #file("src/iyzee/scope_workflows.py"), #file("src/iyzee/devices/wavemeter.py"), #file("src/iyzee/tui/app.py"), and the associated tests.
+- #link(<part-mxa>)[MXA and measurement guide] — SCPI reference, measurement physics and the squeezing/shot-noise workflow.
+- Rohde & Schwarz, *HMP Series Power Supply User Manual*: `INST:NSEL`, `INST OUTn`, `OUTP:SEL`, `OUTP:GEN`.
+- Teledyne LeCroy, *Remote Control Manual* for your model family: `WF?`, `INSPECT?`, `CFMT`, `CORD`, `<channel>:VOLT_DIV`/`OFFSET`/`COUPLING`/`TRACE`, `TRIG_SELECT`/`TRIG_LEVEL`/`TRIG_SLOPE`/`TRIG_COUPLING`/`TRIG_MODE`, `TIME_DIV`.
 - PyVISA documentation, resource strings and `query_binary_values()`: #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
-- Textual documentation, workers and focus: #link("https://textual.textualize.io/guide/workers/")[Workers guide]
-- prompt_toolkit and pyte, which host IPython's terminal UI in the console: #link("https://python-prompt-toolkit.readthedocs.io/")[prompt_toolkit documentation], #link("https://pyte.readthedocs.io/")[pyte documentation]
+- Textual workers and focus: #link("https://textual.textualize.io/guide/workers/")[Workers guide]; prompt_toolkit and pyte host the console: #link("https://python-prompt-toolkit.readthedocs.io/")[prompt_toolkit], #link("https://pyte.readthedocs.io/")[pyte]
 
 = Maintenance rule
 
-Keep this guide tied to the implementation. When a driver's commands, the instrument registry, a screen's behavior, or the console's namespace changes, update the corresponding section here in the same change — don't let this fade into a description of an earlier version of the code. Avoid documenting historical designs that no longer exist (an earlier revision of this codebase copied live objects into the console's namespace and had to track and clean them up again on disconnect; `lab`'s live-lookup design replaced that entirely, and this guide should never again describe the older mechanism as current).
-
+Keep this guide tied to the implementation. Prefer `#sym` and `#fact` over prose that repeats a name, a line number or a value: the build checks them. When a driver's commands, the instrument registry, a screen's behavior or the console's namespace changes, update the section in the same change, and do not describe a design that no longer exists as current.

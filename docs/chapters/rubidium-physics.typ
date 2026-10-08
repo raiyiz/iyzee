@@ -25,7 +25,7 @@
 
 *Where the numbers come from.* Every figure and table of transition data in
 this part is generated from the same `Rb_transitions` table the application
-uses (#src-link("src/iyzee/devices/wavemeter.py")), through
+uses (#file("src/iyzee/devices/wavemeter.py", label: "source")), through
 `docs/data/rubidium.json`; a test fails if the two disagree. Atomic constants
 are D. A. Steck's _Alkali D Line Data_ (refs. 1 and 2); the table was checked
 against them line by line.
@@ -187,7 +187,7 @@ strengths, is generated from the code:
 #transition-table()
 
 The parser behind the static TUI page is `rb_lines()` in
-#src-link("src/iyzee/tui/screens/rb.py", line: 56).
+#code("rb_lines", label: "source").
 
 = Reference frequencies and detuning
 
@@ -209,7 +209,7 @@ D-line data compiled by Daniel A. Steck. The source representation is THz.
 
 Individual hyperfine transition frequencies are assembled from these centres
 and the ground- and excited-state offsets embedded in the `Rb_transitions`
-table (#src-link("src/iyzee/devices/wavemeter.py")).
+table (#file("src/iyzee/devices/wavemeter.py", label: "source")).
 
 #diagram(
   ```mermaid
@@ -240,7 +240,7 @@ is red of the reference.
       fill: none,
       inset: (x: 3pt, y: 3pt),
       [*Where*], [*Quantity*], [*Positive means*],
-      [`monitoring_frequencies`, in #src-link("src/iyzee/devices/wavemeter.py", line: 197)], [ν#sub[laser] − ν#sub[transition], × 10³ for GHz], [laser above the line],
+      [`monitoring_frequencies`, in #code("monitoring_frequencies", label: "source")], [ν#sub[laser] − ν#sub[transition], × 10³ for GHz], [laser above the line],
       [Rb page of the TUI, “From centre”], [ν#sub[transition] − ν#sub[centre of that isotope]], [line above its centre],
       [spectra in this part], [ν#sub[transition] − ν#sub[centre of #iso-name("85")]], [line above the #iso-name("85") centre; one axis for both isotopes],
     )
@@ -253,7 +253,7 @@ is red of the reference.
 
 The experiment's default laser-frequency centre, 377.1052067 THz
 (`frequency_sweep_steps` in
-#src-link("src/iyzee/experiment/procedures.py", line: 159)), is #fmt((377.1052067 - rb-data.centers_thz.at("85").D1) * 1e3, 3) GHz from the
+#code("frequency_sweep_steps", label: "source")), is #fmt((377.1052067 - rb-data.centers_thz.at("85").D1) * 1e3, 3) GHz from the
 #iso-name("85") D1 centre. Compared with the table it coincides — to the 40 kHz
 rounding of the stored seven decimals — with the #iso-name("87") D1
 F = 2 → F′ = 2 line. The default scan is two points, offsets of −10 MHz and 0
@@ -506,7 +506,7 @@ shutter open, close the shutter, and acquire the shot-noise reference.
 )
 
 The implementation is `FrequencyStep` in
-#src-link("src/iyzee/experiment/procedures.py", line: 102).
+#code("FrequencyStep", label: "source").
 
 #figure(
   table(
@@ -558,11 +558,11 @@ The current implementation exposes a compact set of experimental controls:
 )
 
 The sequence runner is `run_sequence` in
-#src-link("src/iyzee/experiment/core.py", line: 152).
+#code("run_sequence", label: "source").
 The analyzer configuration is `AnalyzerConfig` in
-#src-link("src/iyzee/experiment/procedures.py", line: 26),
+#code("AnalyzerConfig", label: "source"),
 and the standard frequency-sweep analyzer setup is `frequency_sweep_config` in
-#src-link("src/iyzee/experiment/procedures.py", line: 192).
+#code("frequency_sweep_config", label: "source").
 
 = What the software does not infer
 

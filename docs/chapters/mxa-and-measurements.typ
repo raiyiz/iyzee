@@ -32,7 +32,7 @@ and the data path is
 
 $ "MXA" -> "SCPI response" -> "PyVISA" -> "KeysightMXA" -> "Python" $
 
-`KeysightMXA` inherits the shared `BaseDevice` lifecycle. The base class owns the VISA resource manager, address, timeout, terminations, connection, close operation, and context-manager behavior. The MXA driver owns analyzer-specific operations: frequency, amplitude, bandwidth, sweep control, traces, markers, and triggering.
+#code("KeysightMXA") inherits the shared #code("BaseDevice") lifecycle. The base class owns the VISA resource manager, address, timeout, terminations, connection, close operation, and context-manager behavior. The MXA driver owns analyzer-specific operations: frequency, amplitude, bandwidth, sweep control, traces, markers, and triggering.
 
 The driver deliberately keeps the SCPI boundary thin. For example, `set_center_freq(freq_hz)` writes `FREQ:CENT`, `set_rbw(rbw_hz)` writes `BWID`, and `get_trace_data()` selects ASCII or binary transfer before reading the trace. Units are explicit at the Python boundary: frequencies are in Hz, sweep duration in ms, RF reference and marker powers in dBm where applicable, and counts are dimensionless.
 
@@ -57,7 +57,33 @@ An MXA trace is the result of a configured signal-processing chain, not a direct
 
 $ "input" -> "attenuation / preamp" -> "mixer / IF" -> "RBW" -> "detector" -> "VBW / averaging" -> "trace" $
 
-`AnalyzerConfig` collects the experiment-level settings used by `prepare_analyzer()`: center frequency, span, RBW, sweep duration, average count and type, and trigger source. The current bandwidth procedure uses 1.5 MHz center frequency, 100 kHz span, 24 kHz initial RBW, 10 ms sweep duration, 300 averages, and the configured trigger source.
+#code("AnalyzerConfig") collects the experiment-level settings used by #code("prepare_analyzer"): center frequency, span, RBW, sweep duration, average count and type, and trigger source. The values below are read from the code, not typed here:
+
+#table(
+  columns: (1.6fr, 1fr, 1fr, 1fr),
+  stroke: 0.5pt + hairline,
+  inset: 5pt,
+  align: (left, right, right, right),
+  [*Setting*], [*`AnalyzerConfig()` default*], [*Bandwidth sweep*], [*Frequency sweep*],
+  [Center frequency], [#fact-si("sweeps.analyzer_defaults.center_hz", "Hz")], [#fact-si("sweeps.bandwidth.center_hz", "Hz")], [#fact-si("sweeps.frequency.center_hz", "Hz")],
+  [Span], [#fact-si("sweeps.analyzer_defaults.span_hz", "Hz")], [#fact-si("sweeps.bandwidth.span_hz", "Hz")], [#fact-si("sweeps.frequency.span_hz", "Hz")],
+  [RBW (initial)], [#fact-si("sweeps.analyzer_defaults.res_bw_hz", "Hz")], [#fact-si("sweeps.bandwidth.res_bw_hz", "Hz")], [#fact-si("sweeps.frequency.res_bw_hz", "Hz")],
+  [Sweep duration], [#fact("sweeps.analyzer_defaults.sweep_duration_ms") ms], [#fact("sweeps.bandwidth.sweep_duration_ms") ms], [#fact("sweeps.frequency.sweep_duration_ms") ms],
+  [Averages], [#fact("sweeps.analyzer_defaults.avg_count")], [#fact("sweeps.bandwidth.avg_count")], [#fact("sweeps.frequency.avg_count")],
+  [Average type], [#fact("sweeps.analyzer_defaults.avg_type")], [#fact("sweeps.bandwidth.avg_type")], [#fact("sweeps.frequency.avg_type")],
+  [Trigger source], [#fact("sweeps.analyzer_defaults.trig_source")], [#fact("sweeps.bandwidth.trig_source")], [#fact("sweeps.frequency.trig_source")],
+)
+
+The Sweep page uses these presets but sets the bandwidth sweep's duration to 10 ms itself (#code("SweepScreen._build_bandwidth_run")), so a TUI run and the script entry point differ in that one setting.
+
+#callout(
+  "Zero span: the trace is time, not frequency",
+  [
+    Both standard procedures run with span 0. The analyzer then sits at the center frequency (the RF analysis frequency of the squeezing measurement) and the trace is power against *time* across the sweep duration, which is why plots are labelled "Trace point". The frequency axis of such a trace is degenerate (#code("KeysightMXA.get_frequency_axis") returns equal start and stop). The scientific coordinate of a sweep point is the *scan* variable, `x_values`: RBW for a bandwidth sweep, laser frequency for a frequency sweep. The Sweep page's separate "Capture trace" button shows whatever the analyzer currently displays, without reconfiguring it.
+  ],
+)
+
+The averaging type deserves attention: the default is #fact("sweeps.analyzer_defaults.avg_type"), logarithmic. As the next section explains, averaging in the log domain is not averaging power, so the averaging domain is a recorded part of every run (`run_metadata.config.avg_type`). Both traces of a point are taken with the same setting, so their *difference* is the comparison the analysis relies on; absolute levels should not be read as linear-power means without accounting for it.
 
 RBW and point spacing are different quantities. For a linear sweep with start frequency `f_1`, stop frequency `f_2`, and `N` points,
 
@@ -112,7 +138,7 @@ $ "configure" -> "INIT:CONT OFF" -> "INIT:IMM" -> "*OPC?" -> "read trace" $
 
 `wait_for_trigger_ready()` uses the Operation Status Register rather than a fixed delay to detect the analyzer's armed state. Trigger readiness and acquisition completion are different states, and neither one proves that an external physical source emitted the intended event.
 
-Fixed `sleep()` calls belong only where they represent characterized physical settling. This matters in `FrequencyStep`: the laser frequency setpoint is changed, the procedure waits `relax_time_s` (default 0.5 s, `SETTLE_TIME_S`), reads the wavemeter and stores that reading with the step, the shutter is opened only for the squeezing acquisition, the shutter is closed in a `finally` block, and the shot-noise reference is acquired afterward.
+Fixed `sleep()` calls belong only where they represent characterized physical settling. This matters in #code("FrequencyStep"): the laser frequency setpoint is changed, the procedure waits `relax_time_s` (default #fact("sweeps.settle_time_s") s, #code("SETTLE_TIME_S")), reads the wavemeter and stores that reading with the step, the shutter is opened only for the squeezing acquisition, the shutter is closed in a `finally` block, and the shot-noise reference is acquired afterward.
 
 The software ordering is therefore explicit, but its scientific validity still depends on the physical system being sufficiently stationary during the sequence.
 
@@ -131,9 +157,9 @@ flowchart TD
   width: 94%,
 )
 
-Trace data can be transferred as ASCII values or IEEE 488.2 binary floating-point data. The binary path explicitly selects 32-bit floats and big-endian decoding. Transport format does not define the physical units; interpretation still depends on the analyzer mode and measurement configuration.
+Trace data can be transferred as ASCII values or IEEE 488.2 binary floating-point data (#code("KeysightMXA.get_trace_data")). The binary path explicitly selects 32-bit floats and big-endian decoding and is what you get by default from the console; the experiment layer's #code("acquire_trace") asks for ASCII (`binary=False`), which is slower but trivially inspectable. Transport format does not define the physical units; interpretation still depends on the analyzer mode and measurement configuration.
 
-An exported `StepResult` contains an x value and unit, named traces, and metadata. `save_step_results()` writes those results to a compressed NumPy archive and stores per-point metadata together with optional run-level metadata. The saved data therefore retains the experimental context alongside the numerical arrays instead of relying on a filename or an undocumented convention.
+An exported `StepResult` contains an x value and unit, named traces, and metadata. #code("save_step_results") writes those results to a compressed NumPy archive and stores per-point metadata together with optional run-level metadata. The saved data therefore retains the experimental context alongside the numerical arrays instead of relying on a filename or an undocumented convention.
 
 The minimum useful record includes the frequency coordinate and unit, analyzer configuration, RBW/VBW, detector and averaging settings, sweep duration, trigger state, trace identity, attenuation/reference information when relevant, and physical scan state such as laser setpoint and shutter state.
 
@@ -161,7 +187,7 @@ shutter, and then acquires the shot-noise reference.
 
 `run_bandwidth_sweep()` builds a sequence of `BandwidthStep` objects. Each step sets RBW, uses `VBW = 2 * RBW`, acquires squeezing and shot-noise traces, and records the RBW/VBW values as metadata. This scan is useful because the measured noise should approximately follow effective bandwidth for a white-noise region; deviations can reveal non-flat DUT noise, analyzer noise, effective-bandwidth differences, or estimator bias.
 
-`run_frequency_sweep()` builds `FrequencyStep` objects around a laser-frequency center value. Its settling interval is a fixed 0.5 s for the laser to settle on the new setpoint, after which the wavemeter is read and stored with the step. It is independent of sweep duration and average count, because each acquisition restarts the analyzer's averaging (`INIT:IMM`). It is a chosen value, not a measured settling constant; `build_frequency_sweep(relax_time_s=...)` overrides it.
+`run_frequency_sweep()` builds `FrequencyStep` objects around a laser-frequency center value. Its settling interval is a fixed #fact("sweeps.settle_time_s") s for the laser to settle on the new setpoint, after which the wavemeter is read and stored with the step. It is independent of sweep duration and average count, because each acquisition restarts the analyzer's averaging (`INIT:IMM`). It is a chosen value, not a measured settling constant; `build_frequency_sweep(relax_time_s=...)` overrides it.
 
 The key comparison in that workflow is squeezing versus shot noise. A difference between two dBm traces is a power ratio. A residual power requires linear-domain subtraction. Documentation and downstream analysis should keep those quantities distinct.
 
@@ -194,7 +220,7 @@ The key comparison in that workflow is squeezing versus shot noise. A difference
 - Keysight, *Noise Measurements*: detector choice, trace averaging, VBW/RBW behavior, and averaging domains. #link("https://helpfiles.keysight.com/csg/89600B/Webhelp/Subsystems/powerspectrum/content/ps_noisemeasurements.htm")[Noise measurements]
 - NIST, *Spectrum Amplitude Definition, Generation, and Measurement*, Technical Note 699: bandwidth and equivalent-bandwidth concepts. #link("https://www.nist.gov/system/files/documents/calibrations/tn699.pdf")[Technical Note 699]
 - PyVISA documentation, `query_binary_values()`: binary transfer, datatype, endianness, and containers. #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
-- Repository implementation: `src/iyzee/base.py`, `src/iyzee/mxa.py`, `src/iyzee/experiment/`, and the associated tests.
+- Repository implementation: #file("src/iyzee/devices/base.py"), #file("src/iyzee/devices/mxa.py"), #file("src/iyzee/experiment/procedures.py"), and the associated tests.
 
 = Maintenance rule
 

@@ -18,22 +18,145 @@
 #let warm = rgb("#F7F1E8")
 #let warm-ink = rgb("#7A4B12")
 #let green-soft = rgb("#EDF5EF")
+#let green-edge = rgb("#2F6B45")
 // Isotope colours, shared by every Rubidium figure (and the TUI page).
 #let rb85 = rgb("#1B7F9E")
 #let rb87 = rgb("#C4601A")
 
-// -- source links ----------------------------------------------------------
-// One place decides which ref the "source" links point at. `scripts/
-// check_doc_links.py` validates the anchors against the working tree.
-#let repo-url = "https://github.com/raiyiz/iyzee/blob/"
-// The branch the guide describes; every linked path exists there. Switch to "main"
-// once the current layout is merged.
-#let repo-ref = "flirr"
+// -- code links ------------------------------------------------------------
+// The guide never hard-codes a line number, a default value or a file layout.
+// `scripts/docs_index.py` reads the code and writes `data/code-index.json`
+// (run by `scripts/ci.sh docs` before compiling); everything below asks it.
+// A name that no longer exists, or became ambiguous, stops the build with the
+// reference that broke instead of silently linking to the wrong line.
+#let index = json("../data/code-index.json")
 
-#let src-link(path, line: none) = {
-  let anchor = if line == none { "" } else { "#L" + str(line) }
-  link(repo-url + repo-ref + "/" + path + anchor)[source]
+// Where "source" links point. CI passes the commit being built, so every link
+// in a PDF lands on the exact lines of the code that PDF describes:
+//   typst compile --input ref=<commit> docs/main.typ ...
+#let repo-url = sys.inputs.at("repo", default: "https://github.com/raiyiz/iyzee")
+#let repo-ref = sys.inputs.at("ref", default: "main")
+
+#let blob(path, start: none, end: none) = {
+  let anchor = if start == none { "" } else if end == none or end == start {
+    "#L" + str(start)
+  } else { "#L" + str(start) + "-L" + str(end) }
+  repo-url + "/blob/" + repo-ref + "/" + path + anchor
 }
+
+// `name` is a dotted suffix of a qualified symbol: `Lab.connect`,
+// `scope_workflows.apply_channel_settings`, or just `LockedProxy` when unique.
+#let resolve(name) = {
+  let hits = index.lookup.at(name, default: ())
+  if hits.len() > 1 {
+    let source = hits.filter(h => not h.starts-with("tests."))
+    if source.len() == 1 { hits = source }
+  }
+  if hits.len() == 0 { panic("unknown code symbol `" + name + "`: it was renamed or removed") }
+  if hits.len() > 1 {
+    panic("ambiguous code symbol `" + name + "`: " + hits.join(", ") + " (qualify it)")
+  }
+  (hits.first(), index.symbols.at(hits.first()))
+}
+
+#let sym-url(name) = {
+  let (_, s) = resolve(name)
+  blob(s.path, start: s.start, end: s.end)
+}
+
+// A link to the exact lines that define a symbol, rendered as code. (Named `code`, not
+// `sym`, which would shadow Typst's built-in symbol module used by the physics part.)
+#let code(name, label: none) = {
+  let (_, s) = resolve(name)
+  let shown = if label != none { label } else if s.kind in ("function", "method", "test") {
+    name + "()"
+  } else { name }
+  link(blob(s.path, start: s.start, end: s.end))[#raw(shown)]
+}
+
+// A link to a whole file (existence is checked by `scripts/check_doc_links.py`).
+#let file(path, label: none) = link(blob(path))[#raw(if label != none { label } else { path })]
+
+// "Where this lives": the symbols a section is about, with the first line of each
+// docstring pulled from the code, so the guide shows what the code claims.
+#let anchors(..names, title: "Where this lives in the code") = {
+  let rows = ()
+  for name in names.pos() {
+    let (qualified, s) = resolve(name)
+    rows.push(code(name))
+    rows.push(text(size: 8pt, fill: muted)[#s.kind])
+    rows.push(if s.summary == "" { text(fill: muted)[—] } else { [#s.summary.] })
+    rows.push(text(size: 8pt, fill: muted)[#raw(s.path.split("/").last()), L#s.start–#s.end])
+  }
+  block(width: 100%, breakable: false, above: 1em, below: 1em)[
+    #text(size: 8pt, weight: "bold", fill: navy, tracking: 0.06em)[#upper(title)]
+    #v(0.2em)
+    #table(
+      columns: (auto, auto, 1fr, auto),
+      stroke: (x, y) => (bottom: 0.4pt + hairline),
+      inset: (x: 5pt, y: 3.5pt),
+      fill: none,
+      align: (left + top, left + top, left + top, left + top),
+      ..rows,
+    )
+  ]
+}
+
+// "Pinned by tests": the tests that fail if the behavior described stops being true.
+#let tested-by(..names) = {
+  let items = names.pos().map(name => {
+    let (_, s) = resolve(name)
+    let words = s.path.split("/").last().replace(".py", "")
+    [#link(blob(s.path, start: s.start, end: s.end))[#raw(name)]]
+  })
+  block(width: 100%, above: 0.8em, below: 1em, inset: (left: 9pt, y: 2pt), stroke: (left: 1.5pt + green-edge))[
+    #text(size: 8pt, weight: "bold", fill: green-edge, tracking: 0.06em)[PINNED BY TESTS]
+    #v(0.15em)
+    #text(size: 8.5pt)[#items.join([ · ])]
+  ]
+}
+
+// -- facts read from the imported code -------------------------------------
+#let fact-raw(path) = {
+  let node = index.facts
+  for key in path.split(".") {
+    if type(node) == dictionary and key in node { node = node.at(key) } else if (
+      type(node) == array and key.match(regex("^\\d+$")) != none
+    ) { node = node.at(int(key)) } else {
+      panic("unknown fact `" + path + "` (no `" + key + "`): the code changed shape")
+    }
+  }
+  node
+}
+
+#let number-text(x) = {
+  if type(x) == int { str(x) } else if x == calc.round(x) and calc.abs(x) < 1e15 {
+    str(int(x))
+  } else { str(x) }
+}
+
+// `fact("sweeps.bandwidth.avg_count")` -> 200, as it is in the code today.
+#let fact(path) = {
+  let v = fact-raw(path)
+  if type(v) in (int, float) { number-text(v) } else { str(v) }
+}
+
+// Value with an SI prefix: `fact-si("sweeps.bandwidth.res_bw_hz", "Hz")` -> 24 kHz.
+#let si(value, unit) = {
+  let v = float(value)
+  let a = calc.abs(v)
+  let (scale, prefix) = if a == 0 { (1, "") } else if a >= 1e9 { (1e9, "G") } else if a >= 1e6 {
+    (1e6, "M")
+  } else if a >= 1e3 { (1e3, "k") } else if a >= 1 { (1, "") } else if a >= 1e-3 { (1e-3, "m") } else if (
+    a >= 1e-6
+  ) { (1e-6, "µ") } else { (1e-9, "n") }
+  let scaled = v / scale
+  let rounded = calc.round(scaled, digits: 4)
+  [#number-text(rounded)\u{a0}#prefix#unit]
+}
+#let fact-si(path, unit) = si(fact-raw(path), unit)
+// Milliseconds stored as an integer in the code, shown in seconds.
+#let fact-ms(path) = si(fact-raw(path) / 1000, "s")
 
 // -- structure -------------------------------------------------------------
 // A "part" is one chapter file: a banner on a fresh page plus a level-1
