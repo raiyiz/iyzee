@@ -17,7 +17,16 @@ typecheck:
 doc-links:
   script: [scripts/ci.sh doc-links]
 
+docs-index:
+  script: [scripts/ci.sh docs-index]
+  artifacts:
+    paths: [docs/data/code-index.json]
+    expire_in: 1 day
+
 docs:
+  needs: [docs-index]
+  variables:
+    DOCS_INDEX_PREBUILT: "1"
   image:
     name: ghcr.io/typst/typst:0.15.1
     entrypoint: [""]

@@ -1,20 +1,34 @@
 #!/bin/sh
-# One entry point for CI and local checks: scripts/ci.sh {test|lint|typecheck|doc-links|docs|all|update}
+# One entry point for CI and local checks: scripts/ci.sh {test|lint|typecheck|doc-links|docs-index|docs|all|update}
 set -eu
 
 cd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/.."
 
 sync() { uv sync --locked --group dev; }
 
+# The guide asks the code for names, line numbers, defaults and the on-disk schema;
+# this writes that index (docs/data/code-index.json, not committed).
+docs_index() {
+    uv run --locked scripts/docs_index.py
+}
+
 docs() {
+    # DOCS_INDEX_PREBUILT=1: the index was produced by an earlier job (GitLab builds it
+    # in a Python image and compiles in the Typst image).
+    if [ "${DOCS_INDEX_PREBUILT:-}" != 1 ]; then
+        sync
+        docs_index
+    fi
     rm -rf build/docs
     mkdir -p build/docs
+    # Every code link in the PDF points at the commit it was built from.
+    ref="${DOCS_REF:-${GITHUB_SHA:-${CI_COMMIT_SHA:-$(git rev-parse HEAD 2>/dev/null || echo main)}}}"
     # One book: docs/main.typ includes every chapter in docs/chapters/.
-    typst compile docs/main.typ build/docs/iyzee-guide.pdf
+    typst compile --input "ref=$ref" docs/main.typ build/docs/iyzee-guide.pdf
 }
 
 doc_links() {
-    uv run scripts/check_doc_links.py --fix
+    uv run --locked scripts/check_doc_links.py
 }
 
 all() {
@@ -23,7 +37,7 @@ all() {
     uv run --locked ruff check .
     uv run --locked ruff format --check .
     uv run --locked mypy src tests
-    uv run scripts/check_doc_links.py
+    uv run --locked scripts/check_doc_links.py
     docs
 }
 
@@ -64,9 +78,10 @@ case "${1:-}" in
     test)      sync; uv run --locked pytest --durations=25 ;;
     lint)      sync; uv run --locked ruff check .; uv run --locked ruff format --check . ;;
     typecheck) sync; uv run --locked mypy src tests ;;
-    doc-links) doc_links ;;
+    doc-links) sync; doc_links ;;
+    docs-index) sync; docs_index ;;
     docs)      docs ;;
     all)       all ;;
     update)    update ;;
-    *)         echo "usage: $0 {test|lint|typecheck|doc-links|docs|all|update}" >&2; exit 2 ;;
+    *)         echo "usage: $0 {test|lint|typecheck|doc-links|docs-index|docs|all|update}" >&2; exit 2 ;;
 esac
