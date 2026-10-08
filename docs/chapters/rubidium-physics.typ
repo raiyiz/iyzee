@@ -632,7 +632,7 @@ $sigma approx 5.57 slash sqrt(N_"eff")$ dB, and of the difference of two indepen
     columns: (1.7fr, 1fr, 1fr, 1fr, 1fr, 1fr),
     align: (left, right, right, right, right, right),
     table.header([*Preset*], [*n#sub[avg]*], [*B*], [*T*], [*N#sub[eff]*], [*σ of difference*]),
-    ..for (name, key) in (("Frequency sweep", "frequency"), ("Bandwidth sweep (script)", "bandwidth")) {
+    ..for (name, key) in (("Frequency sweep", "frequency"), ("Bandwidth sweep (library default)", "bandwidth")) {
       let c = fact-raw("sweeps." + key)
       (
         [#name],

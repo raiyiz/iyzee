@@ -537,7 +537,7 @@ class IyzeeApp(App):
 
 
 def run() -> None:
-    """Console-script entry point (``iyzee-tui``).
+    """Console-script entry point (``iyz``).
 
     The only place that opts into persistent console history — see
     `IyzeeApp.__init__` and `default_history_file`'s docstrings for why

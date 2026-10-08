@@ -110,3 +110,35 @@ def test_detuning_example_reports_distance_to_the_nearest_rubidium_line(data_dir
     assert f"from {label}" in out
     assert "+5.0 MHz" in out
     assert "-3.00 dB" in out
+
+
+def test_the_readme_library_snippet_runs(tmp_path, monkeypatch):
+    """The 'Use it as a library' block in the README is real: run it with a fake analyzer."""
+    import re
+
+    import iyzee.devices.mxa as mxa_module
+    import iyzee.experiment as experiment
+    import iyzee.experiment.io as io_module
+
+    readme = (EXAMPLES.parent.parent / "README.md").read_text(encoding="utf-8")
+    section = readme.split("### Use it as a library", 1)[1]
+    block = re.search(r"~~~python\n(.*?)~~~", section, re.S)
+    assert block, "README lost its library example"
+
+    results = [StepResult("rbw=1Hz", 1.0, "Hz", {"squeezing": [-61.0], "shot_noise": [-58.0]})]
+
+    class FakeMXA:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(mxa_module, "KeysightMXA", FakeMXA)
+    monkeypatch.setattr(experiment, "run_bandwidth_sweep", lambda mx: results)
+    monkeypatch.setattr(io_module, "DATA_ROOT", tmp_path)
+
+    namespace: dict[str, object] = {}
+    exec(block.group(1), namespace)  # noqa: S102 - our own README, run against fakes
+    assert namespace["results"] == results
+    assert list(tmp_path.rglob("*.npz")), "the snippet did not save a recording"

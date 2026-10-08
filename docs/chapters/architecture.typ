@@ -54,18 +54,18 @@ several implementations of the underlying measurement machinery.
     columns: (1fr, 18pt, 1fr, 18pt, 1fr),
     gutter: 5pt,
     align: center,
-    node("iyzee script", "reusable experiment and device code"),
+    node("your script", "imports the library directly"),
     arrow(),
     node("shared machinery", "experiments and workflows"),
     arrow(),
     node("live session", "Lab and instrument handles"),
-    node("iyzee-tui", "interaction and presentation"),
+    node("iyz (TUI)", "interaction and presentation"),
     arrow(dir: "↓"),
     node("same implementation", "no second hardware-control path"),
     arrow(dir: "↓"),
     node("same resources", "console and TUI share live state"),
   ),
-  caption: [Multiple entry points converge on one reusable machinery layer and one live session state.],
+  caption: [The TUI and a script that imports the library converge on one reusable machinery layer and one live session state.],
 )
 
 The important architectural distinction is between *composition* and
@@ -993,7 +993,7 @@ for the abstraction.
 == History is deliberately owned by the application
 
 The shell configuration defaults to in-memory history for direct construction
-and tests. The real `iyzee-tui` entry point opts into a persistent application
+and tests. The real `iyz` entry point opts into a persistent application
 history file.
 
 The distinction matters because many tests create many independent IPython

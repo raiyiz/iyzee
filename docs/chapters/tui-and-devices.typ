@@ -22,38 +22,36 @@
 
 *Status:* documentation of the current implementation. This guide explains how the terminal UI, the experiment layer, and the instrument drivers fit together, and gives a working reference for talking to each instrument directly. For MXA-specific SCPI detail and the measurement physics, see the companion #link(<part-mxa>)[MXA and measurement guide].
 
-= One foundation, two entry points
+= One foundation, two ways to work <sec-two-ways>
 
-The script and interactive application share the same lower layers:
+There is one command, `iyz`, which starts the terminal UI. Everything else is the package itself: you import it from your own script or notebook. Both ways use the same lower layers:
 
 #diagram(
   ```mermaid
 flowchart LR
-  A["iyzee script"] --> C["experiment layer"]
-  B["iyzee-tui"] --> C
+  A["your script / notebook"] --> C["experiment layer"]
+  B["iyz (TUI)"] --> C
   D["embedded IPython"] --> E["Lab / live handles"]
   E --> C
   C --> F["device drivers"]
   F --> G["physical instruments"]```.text,
-  caption: [Interactive presentation sits above reusable experiment and device operations.],
+  caption: [Interactive presentation sits above reusable experiment and device operations; a script uses the same operations directly.],
   width: 94%,
 )
 
-= Two entry points, one foundation
-
-`iyzee` (a script, `main.py`) and `iyzee-tui` (an interactive terminal app, `tui/app.py`) are both callers of the same `experiment/` layer — neither one duplicates measurement logic. The difference is entirely about *who owns the hardware lifecycle and how progress is observed*:
+The TUI (`tui/app.py`) and a script that imports the library are both callers of the same `experiment/` layer, so neither duplicates measurement logic. The difference is entirely about *who owns the hardware lifecycle and how progress is observed*:
 
 #table(
   columns: (1fr, 1.7fr, 1.7fr),
   stroke: 0.5pt + hairline,
   inset: 6pt,
   align: (left, left, left),
-  [*Concern*], [`iyzee` (script)], [`iyzee-tui` (interactive)],
-  [Connect hardware], [`with KeysightMXA() as mx:`], [Connect screen, one row per instrument, Enter to connect],
-  [Configure + run a sweep], [`run_bandwidth_sweep(mx)` in `procedures.py`], [`SweepScreen` composes `AnalyzerConfig` / `prepare_analyzer()` / `run_sequence()` directly],
-  [Progress], [log lines only], [live progress bar + trace plot via `run_sequence(on_step=...)`],
-  [After the run], [`multiplot()` (blocking `plt.show()`)], [trace stays on screen; `build_figure()` if a static image is wanted],
-  [Ad hoc device access], [write a new script], [the embedded IPython console, live in the same process],
+  [*Concern*], [TUI (`iyz`)], [Library (your script or notebook)],
+  [Connect hardware], [Connect page, one row per instrument, Enter to connect], [`with KeysightMXA() as mx:`, or a #code("Lab") for several instruments],
+  [Configure + run a sweep], [#code("SweepScreen") composes `AnalyzerConfig` / #code("prepare_analyzer") / #code("run_sequence") directly], [#code("run_bandwidth_sweep")`(mx)`, or build `Step` objects and call #code("run_sequence") yourself],
+  [Progress], [live progress bar and trace plot via `run_sequence(on_step=...)`], [your own `on_step` callback, or none],
+  [After the run], [trace stays on screen; the Results page browses it later], [#code("save_step_results"); #code("build_figure") for a static image or #code("multiplot") to show it],
+  [Ad hoc device access], [the embedded IPython console, live in the same process], [your own Python session],
 )
 
 Both paths build a list of `Step` objects and hand them to `run_sequence()`; nothing about `experiment/` needed to change to support the TUI, and nothing about the TUI needed to know how a `BandwidthStep` or `FrequencyStep` actually talks to the MXA.
@@ -381,7 +379,7 @@ Calibrated values come from the scope's own `VERTICAL_GAIN`/`VERTICAL_OFFSET` (`
 
 = Typical session, start to finish <sec-session>
 
-1. `uv run iyzee-tui`. The Connect page is shown first.
+1. `uv run iyz`. The Connect page is shown first.
 2. Move to the MXA row and press Enter. #code("Lab.connect") builds the handle, calls `connect()` then `probe()` (`*IDN?`) in a worker, and registers it only on success.
 3. Press `s`. Pick bandwidth or frequency, adjust the range, press *Run sweep*. #code("SweepScreen._run") holds the instrument locks for the whole run, calls #code("prepare_analyzer"), then #code("run_sequence") with a progress callback.
 4. Each point is checkpointed through #code("save_step_results"); on completion the run is stored as `last_run` for the console, and `run_metadata.status` is rewritten from `running` to its final value.

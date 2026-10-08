@@ -1,7 +1,7 @@
 """MXA setup and the concrete experiment procedures built from it.
 
 These used to be the hand-written ``record_bw_seq()``/``record_freq_seq()``
-functions in ``main.py``. Each is now a small ``Step`` describing one
+functions of the old command-line script. Each is now a small ``Step`` describing one
 measurement point, plus a factory function that builds the scan and a
 ``run_*`` procedure that operates on devices owned by the caller.
 """

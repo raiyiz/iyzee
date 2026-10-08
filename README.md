@@ -19,10 +19,10 @@ uv sync
 ### Run the interactive lab
 
 ~~~sh
-uv run iyzee-tui
+uv run iyz
 ~~~
 
-The TUI is the normal entry point for interactive measurements:
+The TUI is the way to run interactive measurements:
 
 ~~~text
 ┌─────────┬──────────────────────────────────────────────┐
@@ -38,13 +38,21 @@ The TUI is the normal entry point for interactive measurements:
 
 Navigate with the letter keys (<code>c s o r t i l</code>) or the navigation rail. <code>F1</code>–<code>F4</code> provide quick access to Connect, Sweep, Results, and Console.
 
-### Run the script interface
+### Use it as a library
 
-~~~sh
-uv run iyzee
+There is no separate command-line script: you use either the TUI or the package directly. Everything the TUI does goes through plain functions that import no Textual and are safe to call from your own script or notebook:
+
+~~~python
+from iyzee.devices.mxa import KeysightMXA
+from iyzee.experiment import create_dirs, run_bandwidth_sweep, save_step_results
+
+with KeysightMXA() as mx:  # connects on entry, closes on exit
+    results = run_bandwidth_sweep(mx)  # a list of StepResult, one per RBW
+
+save_step_results(results, create_dirs())  # the same .npz + .json pair the TUI writes
 ~~~
 
-The script entry point is useful for a straightforward measurement run. The same lower-level device and experiment code is available to Python code without the TUI.
+The [guide](docs/chapters/tui-and-devices.typ) compares the two ways of working, and `docs/examples/` has scripts for loading and checking saved recordings.
 
 ---
 
@@ -240,4 +248,4 @@ This software controls real laboratory hardware.
 
 ---
 
-**For the quick path:** <code>uv sync</code> → <code>uv run iyzee-tui</code> → **Connect** → **Sweep / Scope / Console**.
+**For the quick path:** <code>uv sync</code> → <code>uv run iyz</code> → **Connect** → **Sweep / Scope / Console**.

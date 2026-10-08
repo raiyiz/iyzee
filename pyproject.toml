@@ -25,8 +25,7 @@ dependencies = [
 ]
 
 [project.scripts]
-iyzee = "iyzee.main:main"
-iyzee-tui = "iyzee.tui.app:run"
+iyz = "iyzee.tui.app:run"
 
 [build-system]
 requires = ["uv_build>=0.12.6,<0.13.0"]
