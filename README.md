@@ -174,7 +174,7 @@ A present but invalid configuration file is an error; iyzee does not silently fa
 
 ## Data
 
-Measurements are written below <code>data/YYYY-MM/</code> by default.
+Measurements are written below <code>data/YYYY-MM/</code> by default, as a `.npz` (numbers) plus a `.json` manifest (meaning and provenance). The [Data & analysis](docs/chapters/data-and-analysis.typ) part describes every field.
 
 Sweep results contain the acquired traces together with the analyzer/scan metadata needed to interpret each point. Scope acquisitions store numeric waveform data plus a JSON manifest containing the requested and read-back configuration, instrument identity, calibration and derived quantities.
 
@@ -184,15 +184,18 @@ The Results page can browse these recordings without reconnecting to the instrum
 
 ## Documentation
 
-The README is the **quick-start and orientation layer**. The full technical guide goes deeper and is compiled to PDF in CI.
+The README is the **quick-start and orientation layer**. The technical guide goes deeper, is compiled to PDF in CI, and is wired to the code in both directions.
 
-| Guide | Covers |
+| Part | Read it to |
 | --- | --- |
-| [Architecture](docs/chapters/architecture.typ) | ownership, locking, layering, and design decisions |
-| [MXA & measurements](docs/chapters/mxa-and-measurements.typ) | analyzer state, SCPI, RBW/VBW, noise density, squeezing and shot-noise measurements |
-| [TUI & devices](docs/chapters/tui-and-devices.typ) | TUI structure, device interaction, connection details, navigation and console internals |
-| [Rubidium physics](docs/chapters/rubidium-physics.typ) | D1/D2 structure, spectroscopy, polarization self-rotation and quantum-noise measurements |
-| [TUI/device architecture decision](docs/adr_0001_tui_vs_devices_separation.md) | why hardware machinery stays outside the TUI |
+| [Architecture](docs/chapters/architecture.typ) | understand ownership, locking, layering, the scope transport and why the code is shaped this way |
+| [MXA & measurements](docs/chapters/mxa-and-measurements.typ) | know what the analyzer is programmed to do: RBW/VBW, averaging, zero span, the two standard sweeps |
+| [TUI & devices](docs/chapters/tui-and-devices.typ) | connect and debug instruments, learn the pages, keys and console |
+| [Data & analysis](docs/chapters/data-and-analysis.typ) | know what every saved file contains, load it, and judge whether to trust it |
+| [Rubidium physics](docs/chapters/rubidium-physics.typ) | follow the D1/D2 structure, spectroscopy and polarization self-rotation |
+| [Code map](docs/chapters/code-map.typ) | find where any module is explained (generated from the code) |
+
+**How the guide and the code stay in step.** The guide never hard-codes a line number, a default or a file layout. `scripts/docs_index.py` reads the code and writes an index that the guide queries while it is built: `#code("Lab.connect")` links to the exact lines of the commit being built, sweep presets and addresses come from the imported code, and the data dictionary is rendered from files written by the real save functions. A renamed function, an undocumented manifest field or an import that points up the layers fails the build instead of rotting. Module docstrings point back at the guide with `:guide:` labels, and `docs/examples/*.py`, the scripts the guide prints, are run by the test suite.
 
 The compiled guide is published by CI as the <code>iyzee-documentation</code> artifact.
 
@@ -206,8 +209,8 @@ uv sync
 scripts/ci.sh test        # pytest
 scripts/ci.sh lint        # ruff
 scripts/ci.sh typecheck   # mypy
-scripts/ci.sh doc-links   # validate documentation links
-scripts/ci.sh docs        # compile the Typst guide
+scripts/ci.sh doc-links   # guide <-> code references still resolve
+scripts/ci.sh docs        # build the code index and compile the Typst guide
 scripts/ci.sh all         # run everything
 ~~~
 
