@@ -300,14 +300,14 @@ def scan_typst(lookup: dict[str, list[str]]) -> tuple[dict[str, Any], dict[str, 
 
 
 def build_facts() -> dict[str, Any]:
+    from textual.binding import Binding
+
     from iyzee import config
     from iyzee.devices import scope, wavemeter
     from iyzee.devices.handles import ScopeHandle
     from iyzee.devices.mxa import KeysightMXA
     from iyzee.experiment import io, procedures
     from iyzee.lab import INSTRUMENTS
-    from textual.binding import Binding
-
     from iyzee.tui import app
     from iyzee.tui.screens import sweep
 
