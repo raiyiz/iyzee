@@ -135,11 +135,11 @@ functions, so they cannot silently rot.
 
 #raw(read("../examples/load_scope.py"), lang: "python", block: true)
 
-Both end up as ordinary NumPy arrays. For waveform arithmetic (subtracting traces, baseline correction, rescaling) the pure functions in
+Both end up as ordinary NumPy arrays. To ask what a recording *means* instead of reading arrays yourself, #code("summarize_sweep") returns one #code("SweepPoint") per point (requested and measured setpoint, and the point's relative noise in dB: squeezing minus shot noise, negative below shot noise) and #code("summarize_scope") returns the channel statistics and timebase; the Results page shows exactly these. For waveform arithmetic (subtracting traces, baseline correction, rescaling) the pure functions in
 `waveform_math` take and return #code("Trace") objects with no Textual or hardware import (#code("subtract_traces"), #code("subtract_background"), #code("scale_trace"));
 the Results page calls the same ones.
 
-#tested-by("test_load_sweep_example_reads_what_save_step_results_wrote", "test_load_scope_example_reads_what_save_scope_acquisition_wrote")
+#tested-by("test_load_sweep_example_reads_what_save_step_results_wrote", "test_load_scope_example_reads_what_save_scope_acquisition_wrote", "test_a_bandwidth_sweep_reports_requested_setpoints_and_relative_noise")
 
 = Deciding whether to trust a recording <data-trust>
 

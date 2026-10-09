@@ -48,12 +48,10 @@ coverage.xml
 .pytest_cache/
 cover/
 
-
 # Environments
 .env
 .envrc
 .venv
-
 
 # mypy
 .mypy_cache/
