@@ -16,7 +16,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, NamedTuple
 
 import numpy as np
 from textual import work
@@ -38,7 +37,15 @@ from textual.widgets import (
 )
 from textual_plotext import PlotextPlot
 
-from ...experiment import difference_values_many
+from ...analysis import (
+    STATISTICS,
+    ScopeSummary,
+    Statistic,
+    SweepPoint,
+    SweepSummary,
+    summarize_scope,
+    summarize_sweep,
+)
 from ...experiment.io import DATA_ROOT, STEM_PATTERN, Recording, load_recording
 from ...waveform_math import (
     Trace,
@@ -54,10 +61,14 @@ from .page import FieldError, Page, _field, _finite_float
 
 _DATA_ROOT = DATA_ROOT
 
+# What the Select offers, and the one name each statistic carries everywhere it is
+# shown (plot axis, table column, point summary). "Relative noise" is squeezing minus
+# shot noise in dB; see the vocabulary in iyzee.analysis.
 _STATISTICS = (
-    ("Mean delta", "mean"),
-    ("Minimum delta", "minimum"),
+    ("Mean relative noise", "mean"),
+    ("Minimum relative noise", "minimum"),
 )
+_STATISTIC_NAMES = {value: label for label, value in _STATISTICS}
 
 _OPERATIONS = [
     ("Subtract: A - B", "subtract"),
@@ -83,75 +94,46 @@ class _PreparedView:
     scope_traces: tuple[Trace, ...] = ()
 
 
-def _timebase_lines(metadata: dict[str, Any], waveforms: list[Any]) -> list[str]:
+def _timebase_lines(summary: ScopeSummary) -> list[str]:
     """Horizontal setup of a recorded scope run: time/div, window, sample interval and rate."""
     lines: list[str] = []
-    config = metadata.get("configuration")
-    trigger = None
-    if isinstance(config, dict):
-        trigger = config.get("applied_trigger_settings") or config.get("requested_trigger_settings")
-    tdiv = trigger.get("time_per_div") if isinstance(trigger, dict) else None
-    if isinstance(tdiv, int | float):
-        lines.append(f"Time/div: {format_si(tdiv, 's')}")
-
-    groups: dict[tuple[Any, Any, Any, Any], list[str]] = {}
-    for waveform in waveforms:
-        if not isinstance(waveform, dict):
-            continue
-        stats = waveform.get("stats")
-        count = stats.get("sample_count") if isinstance(stats, dict) else None
-        key = (
-            waveform.get("time_offset"),
-            waveform.get("time_interval"),
-            count,
-            waveform.get("time_unit", "S"),
+    if summary.time_per_div is not None:
+        lines.append(f"Time/div: {format_si(summary.time_per_div, 's')}")
+    for timebase in summary.timebases:
+        prefix = f"{', '.join(timebase.channels)}: " if len(summary.timebases) > 1 else ""
+        first, *rest = describe_timebase(
+            timebase.offset, timebase.interval, timebase.samples, timebase.unit
         )
-        groups.setdefault(key, []).append(str(waveform.get("channel")))
-    for (offset, interval, count, unit), channels in groups.items():
-        if not (isinstance(offset, int | float) and isinstance(interval, int | float)):
-            continue
-        if not (isinstance(count, int) and count > 0 and interval > 0):
-            continue
-        prefix = f"{', '.join(channels)}: " if len(groups) > 1 else ""
-        first, *rest = describe_timebase(offset, interval, count, str(unit))
         lines.append(escape(prefix + first))
         lines.extend(escape(line) for line in rest)
     return lines
 
 
-def _scope_summary(path: Path, recording: Recording, traces: Sequence[Trace]) -> str:
-    metadata = recording.metadata
-    lines = [f"[b]{escape(path.name)}[/b]", "Scope acquisition"]
-    if metadata.get("measurement_id"):
-        lines.append(f"Measurement: {escape(str(metadata['measurement_id']))}")
-    if metadata.get("started_at_utc"):
-        lines.append(f"Started: {escape(str(metadata['started_at_utc']))}")
-    instrument = metadata.get("instrument")
-    if isinstance(instrument, dict):
-        lines.append("Instrument: " + escape(str(instrument.get("address") or "address unknown")))
+def _unknown(value: float | int | None) -> str:
+    return "?" if value is None else str(value)
 
-    waveforms = metadata.get("waveforms", [])
-    if not isinstance(waveforms, list):
-        waveforms = []
-    stats_by_channel = {
-        str(waveform.get("channel")): waveform.get("stats")
-        for waveform in waveforms
-        if isinstance(waveform, dict)
-    }
-    for trace in traces:
-        stats = stats_by_channel.get(trace.label)
-        if isinstance(stats, dict):
-            lines.append(
-                f"{escape(trace.label)}: n={stats.get('sample_count', '?')}, "
-                f"min={stats.get('min', '?')} {escape(trace.value_unit)}, "
-                f"max={stats.get('max', '?')} {escape(trace.value_unit)}, "
-                f"p-p={stats.get('peak_to_peak', '?')} {escape(trace.value_unit)}, "
-                f"rms={stats.get('rms', '?')} {escape(trace.value_unit)}"
-            )
-    lines.extend(_timebase_lines(metadata, waveforms))
-    errors = metadata.get("errors")
-    if errors:
-        lines.append(f"Errors: {escape(str(errors))}")
+
+def _scope_summary(path: Path, recording: Recording, traces: Sequence[Trace]) -> str:
+    summary = summarize_scope(recording, traces)
+    lines = [f"[b]{escape(path.name)}[/b]", "Scope acquisition"]
+    if summary.measurement_id:
+        lines.append(f"Measurement: {escape(summary.measurement_id)}")
+    if summary.started_at_utc:
+        lines.append(f"Started: {escape(summary.started_at_utc)}")
+    if summary.instrument_address is not None:
+        lines.append("Instrument: " + escape(summary.instrument_address or "address unknown"))
+    for stats in summary.channels:
+        unit = escape(stats.value_unit)
+        lines.append(
+            f"{escape(stats.channel)}: n={_unknown(stats.sample_count)}, "
+            f"min={_unknown(stats.minimum)} {unit}, "
+            f"max={_unknown(stats.maximum)} {unit}, "
+            f"p-p={_unknown(stats.peak_to_peak)} {unit}, "
+            f"rms={_unknown(stats.rms)} {unit}"
+        )
+    lines.extend(_timebase_lines(summary))
+    if summary.errors:
+        lines.append(f"Errors: {escape(str(summary.errors))}")
     if not traces:
         lines.append("\n[yellow]No channel data in this recording.[/yellow]")
     return "\n".join(lines)
@@ -188,65 +170,20 @@ def _prepare_view(path: Path) -> _PreparedView:
     return _PreparedView(summary="\n".join(lines), recording=recording)
 
 
-def _is_frequency_run(points: Sequence[dict]) -> bool:
-    return any(
-        "wavemeter_channel" in point or "measured_frequency_thz" in point for point in points
-    )
-
-
-def _finite(value: Any) -> float | None:
-    try:
-        number = float(value)
-    except TypeError, ValueError:
-        return None
-    return number if np.isfinite(number) else None
+def _as_statistic(value: str) -> Statistic:
+    """Narrow the Select's text to a known statistic; the Select only offers known ones."""
+    for statistic in STATISTICS:
+        if statistic == value:
+            return statistic
+    raise ValueError(f"unknown statistic {value!r}")
 
 
 def _format_value(value: float | None, digits: int = 3) -> str:
     return "—" if value is None else f"{value:.{digits}f}"
 
 
-class _SweepData(NamedTuple):
-    frequency: bool
-    plot_x: list[float]
-    requested: list[float]
-    measured: list[float | None]
-    labels: list[str]
-    values: list[float | None]
-
-
-def _sweep_data(recording: Recording, statistic: str) -> _SweepData:
-    arrays = recording.arrays
-    x_values = np.asarray(arrays.get("x_values", []), dtype=np.float64)
-    points = recording.metadata.get("points", [])
-    if not isinstance(points, list):
-        points = []
-    points = [point if isinstance(point, dict) else {} for point in points]
-    rows = len(x_values)
-    labels = [
-        str(points[index].get("label") or f"pt {index}") if index < len(points) else f"pt {index}"
-        for index in range(rows)
-    ]
-    squeezing = arrays.get("trace_squeezing")
-    shot_noise = arrays.get("trace_shot_noise")
-    values = difference_values_many(
-        squeezing if squeezing is not None else [None] * rows,
-        shot_noise if shot_noise is not None else [None] * rows,
-        statistic,
-    )
-    frequency = _is_frequency_run(points)
-    measured = [
-        _finite(points[index].get("measured_frequency_thz"))
-        if frequency and index < len(points)
-        else None
-        for index in range(rows)
-    ]
-    requested = [float(value) for value in x_values]
-    plot_x = [
-        measured_x if measured_x is not None else requested[index]
-        for index, measured_x in enumerate(measured)
-    ]
-    return _SweepData(frequency, plot_x, requested, measured, labels, values)
+def _format_db(value: float | None) -> str:
+    return "—" if value is None else f"{value:.3f} dB"
 
 
 # Width of the run list as a percent of the page; the detail pane takes the rest.
@@ -582,17 +519,25 @@ class ResultsScreen(Page):
         elif event.select.id == "results-op":
             self._set_operation_fields(str(event.select.value))
 
-    def _render_sweep(self) -> None:
+    def _sweep_summary(self) -> SweepSummary | None:
         recording = self._recording
         if recording is None:
-            return
+            return None
         statistic = str(self.query_one("#results-statistic", Select).value)
-        frequency, plot_x, requested, measured, labels, values = _sweep_data(recording, statistic)
+        return summarize_sweep(recording, _as_statistic(statistic))
+
+    def _render_sweep(self) -> None:
+        recording = self._recording
+        sweep = self._sweep_summary()
+        if recording is None or sweep is None:
+            return
+        frequency = sweep.axis == "frequency"
+        statistic_name = _STATISTIC_NAMES[sweep.statistic]
 
         valid = [
-            (plot_x[index], value)
-            for index, value in enumerate(values)
-            if value is not None and np.isfinite(plot_x[index])
+            (point.x, point.relative_noise_db)
+            for point in sweep.points
+            if point.relative_noise_db is not None and np.isfinite(point.x)
         ]
         plot = self.query_one("#results-plot", PlotextPlot)
         draw_series(
@@ -600,35 +545,37 @@ class ResultsScreen(Page):
             [([x for x, _ in valid], [value for _, value in valid], None)] if valid else [],
             title=recording.path.name,
             xlabel="Frequency (THz)" if frequency else "RBW (Hz)",
-            ylabel=f"{'Mean' if statistic == 'mean' else 'Minimum'} delta",
+            ylabel=f"{statistic_name} (dB)",
         )
 
         table = self.query_one("#results-points", DataTable)
-        selected = min(self._selected_point, max(len(requested) - 1, 0))
+        selected = min(self._selected_point, max(len(sweep.points) - 1, 0))
         self._suppress_events = True
         try:
             table.clear(columns=True)
             rows: list[tuple[str, ...]]
             if frequency:
-                table.add_columns("Point", "Requested (THz)", "Measured (THz)", "delta")
+                table.add_columns(
+                    "Point", "Requested (THz)", "Measured (THz)", "Relative noise (dB)"
+                )
                 rows = [
                     (
-                        str(index),
-                        _format_value(requested[index], 9),
-                        _format_value(measured[index], 9),
-                        _format_value(values[index]),
+                        str(point.index),
+                        _format_value(point.requested, 9),
+                        _format_value(point.measured, 9),
+                        _format_value(point.relative_noise_db),
                     )
-                    for index in range(len(requested))
+                    for point in sweep.points
                 ]
             else:
-                table.add_columns("Point", "RBW (Hz)", "delta")
+                table.add_columns("Point", "RBW (Hz)", "Relative noise (dB)")
                 rows = [
                     (
-                        str(index),
-                        _format_value(requested[index]),
-                        _format_value(values[index]),
+                        str(point.index),
+                        _format_value(point.requested),
+                        _format_value(point.relative_noise_db),
                     )
-                    for index in range(len(requested))
+                    for point in sweep.points
                 ]
             table.add_rows(rows)
             if rows:
@@ -637,7 +584,7 @@ class ResultsScreen(Page):
             self._suppress_events = False
 
         self._selected_point = selected
-        self._render_point(labels, requested, measured, values, frequency)
+        self._render_point(sweep)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if self._suppress_events or event.data_table.id != "results-points":
@@ -646,41 +593,25 @@ class ResultsScreen(Page):
         self._render_current_point()
 
     def _render_current_point(self) -> None:
-        recording = self._recording
-        if recording is None:
-            return
-        frequency, _, requested, measured, labels, values = _sweep_data(
-            recording, str(self.query_one("#results-statistic", Select).value)
-        )
-        self._render_point(labels, requested, measured, values, frequency)
+        sweep = self._sweep_summary()
+        if sweep is not None:
+            self._render_point(sweep)
 
-    def _render_point(
-        self,
-        labels: Sequence[str],
-        requested: Sequence[float],
-        measured: Sequence[float | None],
-        values: Sequence[float | None],
-        frequency: bool,
-    ) -> None:
+    def _render_point(self, sweep: SweepSummary) -> None:
         recording = self._recording
         summary = self.query_one("#results-point-summary", Static)
-        if recording is None or not labels:
+        if recording is None or not sweep.points:
             summary.update("")
             return
-        index = min(self._selected_point, len(labels) - 1)
-        request = requested[index]
-        actual = measured[index] if index < len(measured) else None
-        metric = values[index] if index < len(values) else None
-        lines = [f"[b]Point {index}[/b] · {escape(labels[index])}"]
-        if frequency:
-            lines.append(f"Requested: {_format_value(request, 9)} THz")
-            lines.append(f"Measured: {_format_value(actual, 9)} THz")
+        point: SweepPoint = sweep.points[min(self._selected_point, len(sweep.points) - 1)]
+        index = point.index
+        lines = [f"[b]Point {index}[/b] · {escape(point.label)}"]
+        if sweep.axis == "frequency":
+            lines.append(f"Requested: {_format_value(point.requested, 9)} THz")
+            lines.append(f"Measured: {_format_value(point.measured, 9)} THz")
         else:
-            lines.append(f"RBW: {_format_value(request)} Hz")
-        statistic = str(self.query_one("#results-statistic", Select).value)
-        lines.append(
-            f"{'Mean' if statistic == 'mean' else 'Minimum'} delta: {_format_value(metric)}"
-        )
+            lines.append(f"RBW: {_format_value(point.requested)} Hz")
+        lines.append(f"{_STATISTIC_NAMES[sweep.statistic]}: {_format_db(point.relative_noise_db)}")
         summary.update("\n".join(lines))
 
         rows_for_worker: list[tuple[str, np.ndarray]] = []

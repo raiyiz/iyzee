@@ -230,6 +230,7 @@ The codebase is intentionally layered:
 src/iyzee/
 ├── devices/             hardware drivers
 ├── experiment/          measurement procedures + result handling
+├── analysis.py          what a saved sweep or scope recording means
 ├── lab.py               connected-instrument session
 ├── scope_workflows.py   reusable scope operations
 └── tui/                 interactive presentation/control
