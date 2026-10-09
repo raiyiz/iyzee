@@ -92,7 +92,7 @@ class Wavemeter:
     def read_frequency(self, channel: int = DEFAULT_CHANNEL) -> float:
         """Read the frequency of one wavemeter channel in THz."""
         response = requests.get(
-            f"{self.base_url}{channel}/",
+            f"{self.base_url}frequency/{channel}/",
             timeout=READ_TIMEOUT_S,
         )
         response.raise_for_status()

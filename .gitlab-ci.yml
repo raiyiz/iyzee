@@ -20,7 +20,7 @@ doc-links:
 docs-index:
   script: [scripts/ci.sh docs-index]
   artifacts:
-    paths: [docs/data/code-index.json]
+    paths: [docs/code-index.json]
     expire_in: 1 day
 
 docs:
