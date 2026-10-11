@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import replace
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import pytest
@@ -426,7 +426,7 @@ class StatefulScope(FakeScope):
 
 
 class TimebaseScope(FakeScope):
-    INTERVALS = {Channel.C1: 1e-6, Channel.C2: 5e-6}
+    INTERVALS: ClassVar[dict[Channel, float]] = {Channel.C1: 1e-6, Channel.C2: 5e-6}
 
     def getHorProperties(self, channel):
         self.calls.append(("getHorProperties", channel))
