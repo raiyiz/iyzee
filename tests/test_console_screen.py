@@ -65,7 +65,7 @@ async def test_console_lab_reflects_running_app_state() -> None:
         # without any stale-name cleanup or explicit console refresh.
         del app.handles["mxa"]
         try:
-            lab.mx
+            _ = lab.mx
         except AttributeError as exc:
             assert "not connected" in str(exc)
         else:
