@@ -296,7 +296,7 @@ class ResultsScreen(Page):
             id="results-body",
         )
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("left_square_bracket", "list_narrower", "List narrower"),
         Binding("right_square_bracket", "list_wider", "List wider"),
     ]
