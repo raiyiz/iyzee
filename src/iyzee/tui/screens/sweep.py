@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Sequence
 from dataclasses import asdict
 from functools import partial
 from threading import Event
@@ -39,13 +38,14 @@ from textual.widgets import (
 from textual_plotext import PlotextPlot
 
 from ...experiment import (
+    SWEEP_KINDS,
     TRACE_SHOT,
     TRACE_SQZ,
-    AnalyzerConfig,
     ExperimentContext,
     RunRecord,
     Step,
     StepResult,
+    Sweep,
     acquire_trace,
     build_bandwidth_sweep,
     build_frequency_sweep,
@@ -73,6 +73,9 @@ log = logging.getLogger("iyzee.tui")
 # of a frozen UI and gigabytes of linspace.
 MAX_POINTS = 1000
 LIVE_PLOT_INTERVAL_S = 0.1
+
+# How each instrument key a sweep ``requires`` is named in "connect the ..." messages.
+_INSTRUMENT_NAMES = {"mxa": "MXA", "shutter": "shutter", "wavemeter": "wavemeter"}
 
 
 class SweepAborted(Exception):
@@ -154,18 +157,14 @@ class SweepScreen(Page):
     # -- readiness ---------------------------------------------------------
 
     def _missing_instruments(self, kind: object) -> list[str]:
-        """Names of the instruments the given sweep needs that aren't connected."""
+        """Instrument keys the given sweep needs that aren't connected, in the
+        order the sweep lists them (so the first is the one to connect first)."""
         handles = self.iyzee_app.handles
-        missing: list[str] = []
-        if "mxa" not in handles:
-            missing.append("MXA")
-        if kind == "frequency":
-            shutter = handles.get("shutter")
-            if shutter is None or shutter.device is None:
-                missing.append("shutter")
-            if "wavemeter" not in handles:
-                missing.append("wavemeter")
-        return missing
+        return [
+            key
+            for key in SWEEP_KINDS[str(kind)].requires
+            if (handle := handles.get(key)) is None or handle.device is None
+        ]
 
     def refresh_readiness(self) -> None:
         """Show, at the top of the page, why Run/Capture won't work yet.
@@ -183,7 +182,7 @@ class SweepScreen(Page):
         if missing:
             status.update(
                 "Not ready: connect the "
-                + " and the ".join(missing)
+                + " and the ".join(_INSTRUMENT_NAMES[key] for key in missing)
                 + " first — press F1 for the Connect page."
             )
         status.display = bool(missing)
@@ -229,38 +228,20 @@ class SweepScreen(Page):
     # -- kicking off the run -------------------------------------------------
 
     def _start_sweep(self) -> None:
-        mx_handle = self.iyzee_app.handles.get("mxa")
-        if mx_handle is None:
-            self.notify("Connect the MXA first — press F1 for the Connect page.", severity="error")
+        kind = str(self.query_one("#sweep-type", Select).value)
+        # The Connect screen builds each handle from its own adapter (see
+        # lab.INSTRUMENTS); what this screen needs from them is the live
+        # ``.device`` of each instrument the sweep ``requires``.
+        missing = self._missing_instruments(kind)
+        if missing:
+            self.notify(
+                f"Connect the {_INSTRUMENT_NAMES[missing[0]]} first — press F1 for the Connect page.",
+                severity="error",
+            )
             return
-        # The Connect screen always builds "mxa" from a _VisaHandle and
-        # "shutter" from a ShutterHandle (see lab.INSTRUMENTS) —
-        # handles is typed dict[str, InstrumentHandle] because that's all
-        # the Connect screen itself needs, but this screen needs the
-        # concrete wrapper's .device/.shutter, which aren't on that
-        # narrower Protocol.
 
-        kind = self.query_one("#sweep-type", Select).value
         try:
-            if kind == "bandwidth":
-                steps, config = self._build_bandwidth_run()
-                shutter = None
-            else:
-                shutter_handle = self.iyzee_app.handles.get("shutter")
-                if shutter_handle is None or shutter_handle.device is None:
-                    self.notify(
-                        "Connect the shutter first — press F1 for the Connect page.",
-                        severity="error",
-                    )
-                    return
-                if "wavemeter" not in self.iyzee_app.handles:
-                    self.notify(
-                        "Connect the wavemeter first — press F1 for the Connect page.",
-                        severity="error",
-                    )
-                    return
-                steps, config = self._build_frequency_run()
-                shutter = shutter_handle.device
+            sweep = self._build_sweep(kind)
         except FieldError as exc:
             self._flag_invalid(exc.field_id)
             self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
@@ -268,6 +249,10 @@ class SweepScreen(Page):
         except ValueError as exc:
             self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
             return
+
+        handles = self.iyzee_app.handles
+        mx = handles["mxa"].device
+        shutter = handles["shutter"].device if "shutter" in sweep.requires else None
 
         self._abort_event = Event()
         self._collected = []
@@ -288,22 +273,30 @@ class SweepScreen(Page):
             ylabel="Squeezing - shot noise",
         )
         progress = self.query_one("#sweep-progress", ProgressBar)
-        progress.update(total=len(steps), progress=0)
+        progress.update(total=len(sweep.steps), progress=0)
 
         self.query_one("#run-sweep", Button).disabled = True
         self.query_one("#abort-sweep", Button).disabled = False
         self.query_one("#capture-trace", Button).disabled = True
         self.iyzee_app.sweep_running = True
-        self._run(mx_handle.device, shutter, steps, config, kind)
+        self._run(mx, shutter, sweep)
 
-    def _build_bandwidth_run(self):
+    def _build_sweep(self, kind: str) -> Sweep:
+        """Read the form fields of the selected sweep into a ready-to-run plan."""
+        builders = {
+            "bandwidth": self._build_bandwidth_run,
+            "frequency": self._build_frequency_run,
+        }
+        return builders[kind]()
+
+    def _build_bandwidth_run(self) -> Sweep:
         start = self._read("rbw-start", _positive_float, "RBW start")
         stop = self._read("rbw-stop", _positive_float, "RBW stop")
         count = self._read("rbw-steps", _positive_int, "Steps", maximum=MAX_POINTS)
         rbw_values = list(np.linspace(start, stop, count))
         return build_bandwidth_sweep(rbw_values, sweep_duration_ms=10, res_bw_hz=rbw_values[0])
 
-    def _build_frequency_run(self):
+    def _build_frequency_run(self) -> Sweep:
         center = self._read("freq-center", _positive_float, "Laser center")
         channel = self._read("freq-channel", _positive_int, "Wavemeter channel")
         points = self._read("freq-points", _positive_int, "Points", maximum=MAX_POINTS)
@@ -320,7 +313,8 @@ class SweepScreen(Page):
     # -- the run itself, off the UI thread -----------------------------------
 
     @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
-    def _run(self, mx, shutter, steps: Sequence[Step], config: AnalyzerConfig, kind: str) -> None:
+    def _run(self, mx, shutter, sweep: Sweep) -> None:
+        kind, steps, config = sweep.kind, sweep.steps, sweep.config
         # Hold the MXA's lock (and the shutter's, for a frequency sweep) for
         # the whole run, not just individual calls — a sweep is one logical
         # operation, and interleaving a console cell's commands partway

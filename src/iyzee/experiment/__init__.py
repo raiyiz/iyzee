@@ -30,11 +30,15 @@ from .io import (
     save_step_results,
 )
 from .procedures import (
+    SWEEP_KINDS,
     TRACE_SHOT,
     TRACE_SQZ,
     AnalyzerConfig,
     BandwidthStep,
     FrequencyStep,
+    Sweep,
+    SweepStep,
+    acquire_pair,
     acquire_trace,
     bandwidth_sweep_steps,
     build_bandwidth_sweep,
@@ -43,9 +47,11 @@ from .procedures import (
     prepare_analyzer,
     run_bandwidth_sweep,
     run_frequency_sweep,
+    run_sweep,
 )
 
 __all__ = [
+    "SWEEP_KINDS",
     "AnalyzerConfig",
     "BandwidthStep",
     "ExperimentContext",
@@ -56,8 +62,11 @@ __all__ = [
     "StepCallback",
     "StepFailure",
     "StepResult",
+    "Sweep",
+    "SweepStep",
     "TRACE_SHOT",
     "TRACE_SQZ",
+    "acquire_pair",
     "acquire_trace",
     "bandwidth_sweep_steps",
     "build_bandwidth_sweep",
@@ -75,5 +84,6 @@ __all__ = [
     "run_bandwidth_sweep",
     "run_frequency_sweep",
     "run_sequence",
+    "run_sweep",
     "save_step_results",
 ]

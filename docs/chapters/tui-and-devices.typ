@@ -54,7 +54,7 @@ The TUI (`tui/app.py`) and a script that imports the library are both callers of
   [Ad hoc device access], [the embedded IPython console, live in the same process], [your own Python session],
 )
 
-Both paths build a list of `Step` objects and hand them to `run_sequence()`; nothing about `experiment/` needed to change to support the TUI, and nothing about the TUI needed to know how a `BandwidthStep` or `FrequencyStep` actually talks to the MXA.
+Both paths build the same sweep plan (`build_bandwidth_sweep()` / `build_frequency_sweep()`) and hand its steps to `run_sequence()`; the Sweep page asks the step type which instruments it `requires` rather than branching on the sweep's name; nothing about `experiment/` needed to change to support the TUI, and nothing about the TUI needed to know how a `BandwidthStep` or `FrequencyStep` actually talks to the MXA.
 
 = Device layer <sec-devices>
 

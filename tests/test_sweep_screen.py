@@ -84,11 +84,10 @@ async def _open_sweep_screen(pilot: Pilot[Any]) -> SweepScreen:
 async def test_form_defaults_build_the_documented_runs() -> None:
     async with IyzeeApp().run_test() as pilot:
         screen = await _open_sweep_screen(pilot)
-        steps, config = screen._build_bandwidth_run()
-        assert len(steps) == 19
-        assert config.res_bw_hz == pytest.approx(20000.0)
-        steps, _config = screen._build_frequency_run()
-        assert len(steps) == 5
+        bandwidth = screen._build_bandwidth_run()
+        assert len(bandwidth.steps) == 19
+        assert bandwidth.config.res_bw_hz == pytest.approx(20000.0)
+        assert len(screen._build_frequency_run().steps) == 5
 
 
 @pytest.mark.parametrize(

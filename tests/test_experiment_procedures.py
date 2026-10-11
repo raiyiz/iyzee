@@ -3,13 +3,21 @@ import pytest
 from iyzee.devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
 from iyzee.experiment.core import ExperimentContext
 from iyzee.experiment.procedures import (
+    SWEEP_KINDS,
     BandwidthStep,
     FrequencyStep,
+    Sweep,
+    SweepStep,
+    acquire_pair,
     acquire_trace,
+    bandwidth_sweep_config,
     bandwidth_sweep_steps,
     build_bandwidth_sweep,
     build_frequency_sweep,
+    frequency_sweep_config,
     run_bandwidth_sweep,
+    run_frequency_sweep,
+    run_sweep,
 )
 
 
@@ -80,9 +88,11 @@ def test_bandwidth_sweep_steps_defaults_match_20khz_scan():
 
 
 def test_bandwidth_sweep_builder_uses_shared_config():
-    steps, config = build_bandwidth_sweep([20e3, 40e3], sweep_duration_ms=10)
+    sweep = build_bandwidth_sweep([20e3, 40e3], sweep_duration_ms=10)
+    config = sweep.config
 
-    assert [step.rbw_hz for step in steps] == [20e3, 40e3]
+    assert sweep.kind == "bandwidth"
+    assert [step.rbw_hz for step in sweep.steps] == [20e3, 40e3]
     assert config.avg_count == 200
     assert config.sweep_duration_ms == 10
     assert config.res_bw_hz == 24e3
@@ -90,13 +100,15 @@ def test_bandwidth_sweep_builder_uses_shared_config():
 
 
 def test_frequency_sweep_builder_uses_the_laser_settle_time_not_the_analyzer_workload():
-    steps, config = build_frequency_sweep(
+    sweep = build_frequency_sweep(
         laser_center_thz=377.1,
         wavemeter_channel=4,
         offsets_thz=[-1e-9, 0.0, 1e-9],
         sweep_duration_ms=10,
     )
+    steps, config = sweep.steps, sweep.config
 
+    assert sweep.kind == "frequency"
     assert [step.frequency_thz for step in steps] == pytest.approx(
         [377.099999999, 377.1, 377.100000001]
     )
@@ -104,8 +116,8 @@ def test_frequency_sweep_builder_uses_the_laser_settle_time_not_the_analyzer_wor
     assert config.avg_count == 150
     assert config.sweep_duration_ms == 10
 
-    steps, _ = build_frequency_sweep(offsets_thz=[0.0], relax_time_s=2.0)
-    assert [step.relax_time_s for step in steps] == [2.0]
+    sweep = build_frequency_sweep(offsets_thz=[0.0], relax_time_s=2.0)
+    assert [step.relax_time_s for step in sweep.steps] == [2.0]
 
 
 def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
@@ -226,3 +238,87 @@ def test_acquire_trace_disables_trace_after_failure():
         acquire_trace(mx, 1)
 
     assert mx.update_states == [(1, True), (1, False)]
+
+
+# -- the two sweeps share one structure ----------------------------------------------------
+
+
+def test_every_sweep_kind_is_a_sweep_step_that_names_itself():
+    assert set(SWEEP_KINDS) == {"bandwidth", "frequency"}
+    for kind, step_type in SWEEP_KINDS.items():
+        assert issubclass(step_type, SweepStep)
+        assert step_type.kind == kind
+        assert "mxa" in step_type.requires
+
+
+def test_the_instruments_a_sweep_requires_are_declared_on_its_step():
+    assert BandwidthStep.requires == ("mxa",)
+    assert FrequencyStep.requires == ("mxa", "shutter", "wavemeter")
+    assert build_bandwidth_sweep().requires == ("mxa",)
+    assert build_frequency_sweep().requires == ("mxa", "shutter", "wavemeter")
+
+
+def test_both_builders_return_a_sweep_with_matching_steps_and_config():
+    for sweep in (build_bandwidth_sweep(), build_frequency_sweep()):
+        assert isinstance(sweep, Sweep)
+        assert sweep.steps and all(isinstance(s, SWEEP_KINDS[sweep.kind]) for s in sweep.steps)
+
+
+def test_both_analyzer_presets_take_the_same_options():
+    for config_for in (bandwidth_sweep_config, frequency_sweep_config):
+        config = config_for(sweep_duration_ms=7, res_bw_hz=1e3)
+        assert (config.sweep_duration_ms, config.res_bw_hz) == (7, 1e3)
+
+
+def test_acquire_pair_without_a_shutter_takes_both_traces(monkeypatch):
+    monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
+    mx = FakeMXA()
+
+    assert acquire_pair(mx) == {"squeezing": [1], "shot_noise": [2]}
+    assert mx.trace_calls == [1, 2]
+
+
+def test_acquire_pair_closes_the_shutter_even_if_the_squeezing_trace_fails(monkeypatch):
+    def failing(mx, trace_num):
+        raise RuntimeError("sweep failed")
+
+    monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", failing)
+    shutter = FakeShutterControl()
+
+    with pytest.raises(RuntimeError, match="sweep failed"):
+        acquire_pair(FakeMXA(), shutter)
+
+    assert shutter.events == ["open", "close"]
+
+
+def test_a_bandwidth_step_ignores_a_shutter_in_the_context(monkeypatch):
+    monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
+    shutter = FakeShutterControl()
+    ctx = ExperimentContext(mx=FakeMXA(), run_id="t", shutter=shutter)
+
+    BandwidthStep(rbw_hz=1000).run(ctx)
+
+    assert shutter.events == []
+
+
+def test_run_sweep_runs_any_sweep_with_the_caller_owned_devices(monkeypatch):
+    monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
+    monkeypatch.setattr("iyzee.experiment.procedures.time.sleep", lambda s: None)
+    monkeypatch.setattr(Wavemeter, "set_pid_setpoint", lambda self, freq, channel=1: None)
+    monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=1: 377.1)
+    prepared = []
+    monkeypatch.setattr(
+        "iyzee.experiment.procedures.prepare_analyzer",
+        lambda analyzer, traces, config: prepared.append((analyzer, config)),
+    )
+    mx, shutter = FakeMXA(), FakeShutterControl()
+
+    bandwidth = run_sweep(mx, build_bandwidth_sweep([1e3, 2e3]))
+    frequency = run_frequency_sweep(
+        mx, shutter, laser_center_thz=377.1, offsets_thz=[0.0], relax_time_s=0.0
+    )
+
+    assert [r.x_unit for r in bandwidth] == ["Hz", "Hz"]
+    assert [r.x_unit for r in frequency] == ["THz"]
+    assert shutter.events == ["open", "close"]
+    assert [config.center_hz for _, config in prepared] == [1e6, 1.5e6]
