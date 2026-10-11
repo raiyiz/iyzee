@@ -27,7 +27,7 @@ _COMMIT_CACHE: dict[tuple[str, str], str] = {}
 
 def get_json(url: str) -> object:
     if not url.startswith(f"{GITHUB_API}/"):
-        raise ValueError(f"refusing unexpected dependency-update URL: {url!r}")
+        raise RuntimeError(f"refusing unexpected dependency-update URL: {url!r}")
 
     headers = {"User-Agent": USER_AGENT}
     if url.startswith(GITHUB_API):
