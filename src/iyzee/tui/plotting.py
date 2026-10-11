@@ -17,6 +17,7 @@ and belongs with the rest of the TUI instead.
 from __future__ import annotations
 
 import math
+from itertools import pairwise
 from collections.abc import Sequence
 from typing import Any
 
@@ -62,17 +63,14 @@ def prepare_series(
         else:
             finite = np.isfinite(interior)
             candidates = np.flatnonzero(finite)
-            if len(candidates):
-                local = candidates[np.argmax(np.abs(interior[finite]))]
-            else:
-                local = 0
+            local = candidates[np.argmax(np.abs(interior[finite]))] if len(candidates) else 0
             indices = [0, int(local) + 1, length - 1]
         return x_values[indices].tolist(), y_values[indices].tolist(), label
 
     bucket_count = max(1, (max_points - 2) // 2)
     edges = np.linspace(1, length - 1, bucket_count + 1, dtype=np.intp)
     indices = [0]
-    for start, end in zip(edges[:-1], edges[1:]):
+    for start, end in pairwise(edges):
         if end <= start:
             continue
         bucket = y_values[start:end]
