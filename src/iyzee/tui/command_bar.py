@@ -12,7 +12,7 @@ from textual.widgets import Input, Static
 
 
 class CommandInput(Input):
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("escape", "cancel", show=False, priority=True),
         Binding("tab", "complete", show=False, priority=True),
         Binding("up", "history(-1)", show=False),
