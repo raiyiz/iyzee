@@ -475,7 +475,8 @@ class SweepScreen(Page):
             self.notify(f"Capture failed: {one_line(error)}", severity="error", markup=False)
             return
 
-        assert freq is not None and power is not None  # error is None guarantees both are set
+        if freq is None or power is None:
+            raise RuntimeError("successful trace capture returned no frequency or power data")
         plot = self.query_one("#sweep-plot", PlotextPlot)
         draw_series(
             plot,
