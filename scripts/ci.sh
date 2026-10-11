@@ -1,5 +1,5 @@
 #!/bin/sh
-# One entry point for CI and local checks: scripts/ci.sh {test|lint|typecheck|doc-links|docs-index|docs|all|update}
+# One entry point for CI and local checks: scripts/ci.sh {test|hardware|lint|typecheck|doc-links|docs-index|docs|all|update}
 set -eu
 
 cd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/.."
@@ -76,6 +76,9 @@ update() {
 
 case "${1:-}" in
     test)      sync; uv run --locked pytest --durations=25 ;;
+    # Real instruments; never part of `all`. Extra arguments go to pytest:
+    #   scripts/ci.sh hardware --hardware-actuate -m 'not scope'
+    hardware)  sync; shift; uv run --locked pytest tests/hardware --hardware "$@" ;;
     lint)      sync; uv run --locked ruff check .; uv run --locked ruff format --check . ;;
     typecheck) sync; uv run --locked mypy src tests ;;
     doc-links) sync; doc_links ;;
@@ -83,5 +86,5 @@ case "${1:-}" in
     docs)      docs ;;
     all)       all ;;
     update)    update ;;
-    *)         echo "usage: $0 {test|lint|typecheck|doc-links|docs-index|docs|all|update}" >&2; exit 2 ;;
+    *)         echo "usage: $0 {test|hardware|lint|typecheck|doc-links|docs-index|docs|all|update}" >&2; exit 2 ;;
 esac
