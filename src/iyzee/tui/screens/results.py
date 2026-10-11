@@ -13,6 +13,7 @@ Textual dependency.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import ClassVar
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -295,7 +296,7 @@ class ResultsScreen(Page):
             id="results-body",
         )
 
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding]] = [
         Binding("left_square_bracket", "list_narrower", "List narrower"),
         Binding("right_square_bracket", "list_wider", "List wider"),
     ]
