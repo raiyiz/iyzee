@@ -229,9 +229,6 @@ class SweepScreen(Page):
 
     def _start_sweep(self) -> None:
         kind = str(self.query_one("#sweep-type", Select).value)
-        # The Connect screen builds each handle from its own adapter (see
-        # lab.INSTRUMENTS); what this screen needs from them is the live
-        # ``.device`` of each instrument the sweep ``requires``.
         missing = self._missing_instruments(kind)
         if missing:
             self.notify(
@@ -240,13 +237,12 @@ class SweepScreen(Page):
             )
             return
 
+        build = {"bandwidth": self._build_bandwidth_run, "frequency": self._build_frequency_run}
         try:
-            sweep = self._build_sweep(kind)
-        except FieldError as exc:
-            self._flag_invalid(exc.field_id)
-            self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
-            return
-        except ValueError as exc:
+            sweep = build[kind]()
+        except ValueError as exc:  # includes FieldError: a form field that didn't parse
+            if isinstance(exc, FieldError):
+                self._flag_invalid(exc.field_id)
             self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
             return
 
@@ -280,14 +276,6 @@ class SweepScreen(Page):
         self.query_one("#capture-trace", Button).disabled = True
         self.iyzee_app.sweep_running = True
         self._run(mx, shutter, sweep)
-
-    def _build_sweep(self, kind: str) -> Sweep:
-        """Read the form fields of the selected sweep into a ready-to-run plan."""
-        builders = {
-            "bandwidth": self._build_bandwidth_run,
-            "frequency": self._build_frequency_run,
-        }
-        return builders[kind]()
 
     def _build_bandwidth_run(self) -> Sweep:
         start = self._read("rbw-start", _positive_float, "RBW start")
