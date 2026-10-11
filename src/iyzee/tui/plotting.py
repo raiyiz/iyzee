@@ -17,8 +17,8 @@ and belongs with the rest of the TUI instead.
 from __future__ import annotations
 
 import math
-from itertools import pairwise
 from collections.abc import Sequence
+from itertools import pairwise
 from typing import Any
 
 import numpy as np
