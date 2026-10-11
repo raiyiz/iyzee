@@ -194,7 +194,7 @@ class ConnectScreen(Page):
             self._ui(self._set_row, spec.key, "connecting...", "-")
             try:
                 detail = self.iyzee_app.lab.connect(spec)
-            except Exception as exc:  # noqa: BLE001 - surfacing to the UI, not swallowing
+            except Exception as exc:  # surfacing to the UI, not swallowing
                 log.exception("failed to connect %s", spec.key)
                 self._ui(self._set_row, spec.key, "error", one_line(exc))
                 self._ui(
@@ -216,7 +216,7 @@ class ConnectScreen(Page):
             self._ui(self._set_row, spec.key, "disconnecting...", "-")
             try:
                 self.iyzee_app.lab.disconnect(spec.key)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  
                 log.exception("error closing %s", spec.key)
                 self._ui(
                     self.notify,
