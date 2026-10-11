@@ -23,7 +23,7 @@ def _pytest(*args: str) -> subprocess.CompletedProcess[str]:
         "IYZEE_POWER_SUPPLY_IP": UNROUTABLE,
         "IYZEE_WAVEMETER_IP": UNROUTABLE,
     }
-    return subprocess.run(
+    return subprocess.run(  # noqa: S603 - fixed argv and TEST-NET addresses isolate this test
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-rs", *args],
         cwd=ROOT,
         env=env,

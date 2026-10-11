@@ -218,7 +218,7 @@ class LeCroy(BaseDevice):
     def _drop(self) -> None:
         try:
             self.close()
-        except Exception:  # the link is already broken; closing is best effort
+        except Exception:  # noqa: BLE001 - disconnect is best effort after transport failure
             self.instrument = None
 
     def _translate(self, exc: pyvisa.errors.VisaIOError) -> Exception:

@@ -134,7 +134,8 @@ class IyzeeConsole(Vertical):
         # text/plain (a real terminal can't show the rest). This console can
         # at least turn HTML into text and note images, so let those through.
         formatter = shell.display_formatter
-        assert formatter is not None  # always set by InteractiveShell.init_display_formatter
+        if formatter is None:
+            raise RuntimeError("IPython display formatter was not initialized")
         formatter.active_types = list(formatter.format_types)
         self._install_figure_plotting()
         self.refresh_status()
@@ -212,7 +213,8 @@ class IyzeeConsole(Vertical):
         from matplotlib.figure import Figure
 
         display_formatter = self.session.shell.display_formatter
-        assert display_formatter is not None
+        if display_formatter is None:
+            raise RuntimeError("IPython display formatter was not initialized")
         display_formatter.formatters["text/plain"].for_type(Figure, self._render_figure)
 
     def _render_figure(self, fig: Any, p: Any, cycle: bool) -> None:

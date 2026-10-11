@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 from textual import work
@@ -295,7 +296,7 @@ class ResultsScreen(Page):
             id="results-body",
         )
 
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("left_square_bracket", "list_narrower", "List narrower"),
         Binding("right_square_bracket", "list_wider", "List wider"),
     ]

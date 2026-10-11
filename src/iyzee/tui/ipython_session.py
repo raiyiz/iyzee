@@ -318,10 +318,9 @@ class IPythonSession:
         self._closing = True
         thread = self._thread
         if thread is not None and thread.is_alive():
-            if self._prompt_depth == 0 and self._started_prompting:
+            if self._prompt_depth == 0 and self._started_prompting and self._thread_id is not None:
                 # Mid-cell: interrupt it so the shell can reach its next prompt.
-                if self._thread_id is not None:
-                    _raise_in_thread(self._thread_id, KeyboardInterrupt)
+                _raise_in_thread(self._thread_id, KeyboardInterrupt)
             self._exit_prompt()
             thread.join(timeout)
         self._restore_streams()

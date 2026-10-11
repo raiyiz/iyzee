@@ -7,8 +7,9 @@ Guide: :guide:`arch-labproxy`
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping, Protocol
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from platformdirs import user_data_dir
 from traitlets.config import Config
@@ -104,7 +105,7 @@ class LabProxy:
     ``device`` property — nothing else in the proxy needs to change.
     """
 
-    _INSTRUMENT_KEYS = {
+    _INSTRUMENT_KEYS: ClassVar[dict[str, str]] = {
         "mx": "mxa",
         "psu": "psu",
         "shutter": "shutter",

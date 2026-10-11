@@ -354,7 +354,7 @@ class SweepScreen(Page):
 
             try:
                 prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.exception("sweep: failed to configure analyzer")
                 self._ui(self._finish, kind, aborted=False, setup_error=exc)
                 return
@@ -408,7 +408,7 @@ class SweepScreen(Page):
                 run_sequence(steps, ctx, on_error="skip", on_step=on_step)
             except SweepAborted:
                 aborted = True
-            except Exception:  # noqa: BLE001 - last-resort net; specific errors are
+            except Exception:  # last-resort net; specific errors are
                 # already handled per-step by run_sequence(on_error="skip") plus
                 # on_step above, so anything reaching here is unexpected.
                 log.exception("sweep: run_sequence raised unexpectedly")
@@ -481,7 +481,7 @@ class SweepScreen(Page):
             try:
                 power = acquire_trace(mx, TRACE_SQZ)
                 freq = mx.get_frequency_axis()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.exception("capture: failed to read a trace from the MXA")
                 self._ui(self._finish_capture, error=exc, freq=None, power=None)
                 return
@@ -500,7 +500,8 @@ class SweepScreen(Page):
             self.notify(f"Capture failed: {one_line(error)}", severity="error", markup=False)
             return
 
-        assert freq is not None and power is not None  # error is None guarantees both are set
+        if freq is None or power is None:
+            raise RuntimeError("successful trace capture returned no frequency or power data")
         plot = self.query_one("#sweep-plot", PlotextPlot)
         draw_series(
             plot,
@@ -544,7 +545,7 @@ class SweepScreen(Page):
                 name=kind,
                 path=self._save_path,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.exception("sweep: could not save results")
             if not self._save_warned:
                 self._save_warned = True

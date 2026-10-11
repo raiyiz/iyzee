@@ -66,7 +66,7 @@ def test_an_exact_alias_beats_prefix_matching_and_blank_lines_do_nothing():
 
 def test_ambiguous_and_unknown_commands_are_user_errors():
     registry = make_registry([])
-    with pytest.raises(CommandError, match="ambiguous :con.*connect, console"):
+    with pytest.raises(CommandError, match=r"ambiguous :con.*connect, console"):
         registry.execute("con")
     with pytest.raises(CommandError, match="unknown command :zap"):
         registry.execute("zap")

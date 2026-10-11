@@ -216,7 +216,7 @@ class Lab:
         try:
             with handle.lock:
                 handle.disconnect()
-        except Exception:  # noqa: BLE001 - the link is already dead; just don't leak
+        except Exception:  # the link is already dead; just don't leak
             log.debug("releasing dead link %s failed", key, exc_info=True)
 
     def close_all(self, timeout: float = 5.0) -> None:
@@ -249,7 +249,7 @@ class Lab:
                 return
             try:
                 handle.disconnect()
-            except Exception:  # noqa: BLE001 - one bad instrument mustn't stop the rest
+            except Exception:  # one bad instrument mustn't stop the rest
                 log.exception("shutdown: error closing %s", key)
             finally:
                 lock.release()

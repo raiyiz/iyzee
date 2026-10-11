@@ -54,7 +54,7 @@ class TerminalView(Widget, can_focus=True):
     }
     """
 
-    def __init__(self, *, id: str | None = None) -> None:  # noqa: A002 - Textual's own name
+    def __init__(self, *, id: str | None = None) -> None:  # Textual's own parameter name
         super().__init__(id=id)
         self.vterm = VTermScreen(80, 24)
         self._backend: TerminalBackend | None = None

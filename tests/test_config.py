@@ -38,7 +38,7 @@ def test_environment_beats_the_config_file(monkeypatch: pytest.MonkeyPatch, tmp_
 
 def test_a_broken_config_file_is_an_error_not_a_silent_default(tmp_path: Path):
     (tmp_path / "config.toml").write_text("[addresses\nscope = ")
-    with pytest.raises(ConfigError, match="config.toml"):
+    with pytest.raises(ConfigError, match=r"config\.toml"):
         address(IP.SCOPE)
 
 

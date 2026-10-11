@@ -67,7 +67,8 @@ def test_figure_series_extracts_lines_and_axis_labels() -> None:
             return "y"
 
     class _Figure:
-        axes = [_Axis()]
+        def __init__(self) -> None:
+            self.axes = [_Axis()]
 
     lines, labels = figure_series(_Figure())
 

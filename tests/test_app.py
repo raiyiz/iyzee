@@ -90,7 +90,7 @@ async def test_nav_rail_and_sweep_banner_update_the_moment_a_connect_finishes(
     async with app.run_test() as pilot:
         nav = app.query_one("#nav-instruments", Static)
         assert "○ Fk" in plain(nav)
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")
         await pilot.pause()
         assert "● Fk" in plain(nav), plain(nav)  # no page switch in between
@@ -211,7 +211,7 @@ async def test_a_lost_link_is_reported_once_released_and_reconnectable(
     dead, fresh = FakeHandle(), FakeHandle(probe="back")
     app = connect_app(monkeypatch, dead, fresh, key="mxa")
     async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")
         nav = app.query_one("#nav-instruments", Static)
         lab = LabProxy(app)
@@ -236,7 +236,7 @@ async def test_a_lost_link_is_reported_once_released_and_reconnectable(
         assert "reconnect Fake" in plain(app.query_one("#connect-hint", Static))
         assert lab.connected == ()
         with pytest.raises(AttributeError, match="not connected"):
-            lab.mx
+            _ = lab.mx
 
         await pilot.press("enter")
         await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")

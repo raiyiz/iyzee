@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -10,7 +12,7 @@ from textual.widgets import Input, Static
 
 
 class CommandInput(Input):
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("escape", "cancel", show=False, priority=True),
         Binding("tab", "complete", show=False, priority=True),
         Binding("up", "history(-1)", show=False),
@@ -20,7 +22,8 @@ class CommandInput(Input):
     @property
     def bar(self) -> CommandBar:
         parent = self.parent
-        assert isinstance(parent, CommandBar)
+        if not isinstance(parent, CommandBar):
+            raise RuntimeError("CommandInput must be mounted inside CommandBar")
         return parent
 
     def action_cancel(self) -> None:
