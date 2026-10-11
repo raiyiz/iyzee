@@ -187,7 +187,7 @@ def update_python_lock() -> None:
     uv = shutil.which("uv")
     if uv is None:
         raise RuntimeError("uv is required to update the Python lockfile")
-    subprocess.run([uv, "lock", "--upgrade"], cwd=ROOT, check=True)
+    subprocess.run([uv, "lock", "--upgrade"], cwd=ROOT, check=True)  # noqa: S603 - fixed args
 
 
 def main() -> None:
