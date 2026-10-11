@@ -9,7 +9,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import ClassVar, cast
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -127,7 +127,7 @@ class IyzeeApp(App):
     # by side from ``-medium`` up, four form fields per row at ``-wide``.
     # At ``-narrow`` everything stacks into a single column, and whatever
     # still doesn't fit is reached with the pages' scrollbars.
-    HORIZONTAL_BREAKPOINTS = [
+    HORIZONTAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [
         (0, "-narrow"),
         (76, "-medium"),
         (116, "-wide"),
@@ -172,7 +172,7 @@ class IyzeeApp(App):
     # reachable everywhere via "o", the nav rail, and the command palette,
     # just without a dedicated function key. "l" for the Log page (added
     # later) follows the same reasoning.
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding]] = [
         Binding("c", "show_page('connect')", "Connect"),
         Binding("s", "show_page('sweep')", "Sweep"),
         Binding("o", "show_page('scope')", "Scope"),
@@ -206,7 +206,9 @@ class IyzeeApp(App):
     # Mount every page once; navigation labels come from the same registry
     # used by NavRail.PAGES above. Key bindings remain explicit because F1-F4
     # intentionally cover only four pages.
-    PAGES = {page_id: screen for page_id, _label, screen in PAGE_SPECS}
+    PAGES: ClassVar[dict[str, type[Page]]] = {
+        page_id: screen for page_id, _label, screen in PAGE_SPECS
+    }
     DEFAULT_PAGE = "connect"
 
     def __init__(
