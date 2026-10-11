@@ -48,7 +48,18 @@ target-version = "py314"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I"]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF", "S", "BLE", "T20"]
+
+# Assert statements are appropriate in tests and examples; production invariants are
+# explicit checks. These files intentionally use print for example/CLI/console output.
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+"docs/examples/*.py" = ["S101", "T201"]
+"scripts/*.py" = ["T201"]
+"src/iyzee/devices/wavemeter.py" = ["T201"]
+"src/iyzee/tui/ipython_session.py" = ["T201"]
+"src/iyzee/tui/screens/console.py" = ["T201"]
 
 [tool.mypy]
 python_version = "3.14"

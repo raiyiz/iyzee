@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,13 +26,16 @@ _COMMIT_CACHE: dict[tuple[str, str], str] = {}
 
 
 def get_json(url: str) -> object:
+    if not url.startswith(f"{GITHUB_API}/"):
+        raise RuntimeError(f"refusing unexpected dependency-update URL: {url!r}")
+
     headers = {"User-Agent": USER_AGENT}
     if url.startswith(GITHUB_API):
         headers["Accept"] = "application/vnd.github+json"
 
-    request = Request(url, headers=headers)
+    request = Request(url, headers=headers)  # noqa: S310 - URL is constrained to the GitHub API above
     try:
-        with urlopen(request, timeout=30) as response:
+        with urlopen(request, timeout=30) as response:  # noqa: S310 - URL is constrained above
             return json.load(response)
     except (HTTPError, URLError, TimeoutError) as exc:
         raise RuntimeError(f"failed to fetch {url}: {exc}") from exc
@@ -180,7 +184,10 @@ def update_tool_versions() -> bool:
 
 
 def update_python_lock() -> None:
-    subprocess.run(["uv", "lock", "--upgrade"], cwd=ROOT, check=True)
+    uv = shutil.which("uv")
+    if uv is None:
+        raise RuntimeError("uv is required to update the Python lockfile")
+    subprocess.run([uv, "lock", "--upgrade"], cwd=ROOT, check=True)  # noqa: S603 - fixed args
 
 
 def main() -> None:
@@ -194,4 +201,4 @@ if __name__ == "__main__":
         main()
     except (RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"update failed: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from None

@@ -123,7 +123,7 @@ def test_visa_handle_disconnect_closes_device() -> None:
 
 
 class _FakeShutterControl:
-    def __init__(self, chan, ip) -> None:  # noqa: ANN001 - mirrors real signature
+    def __init__(self, chan, ip) -> None:  # mirrors real signature
         self.chan = chan
         self.ip = ip
         self.psu = _FakePsu()

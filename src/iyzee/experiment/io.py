@@ -15,6 +15,7 @@ Guide: :guide:`data-where`
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -131,10 +132,8 @@ def load_recording(path: Path) -> Recording:
     with np.load(path, allow_pickle=False) as archive:
         arrays = {key: archive[key] for key in archive.files}
     metadata: dict[str, Any] = {}
-    try:
+    with contextlib.suppress(OSError, ValueError):
         metadata = json.loads(path.with_suffix(".json").read_text())
-    except OSError, ValueError:
-        pass
     return Recording(path=path, arrays=arrays, metadata=metadata)
 
 

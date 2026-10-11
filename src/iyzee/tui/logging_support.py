@@ -14,6 +14,7 @@ already exists.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import logging.handlers
 from collections import deque
@@ -106,14 +107,12 @@ class TuiLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             entry = LogEntry.from_record(record, self.format(record))
-        except Exception:
+        except Exception:  # noqa: BLE001 - a logging handler must contain formatting failures
             self.handleError(record)
             return
         self.records.append(entry)
-        try:
-            self._on_record(entry)
-        except Exception:
-            pass  # no app/event loop yet, or it's shutting down — buffer still has it
+        with contextlib.suppress(Exception):
+            self._on_record(entry)  # no app/event loop yet, or it's shutting down
 
 
 def _mark_owned(handler: logging.Handler) -> None:

@@ -45,7 +45,7 @@ async def test_connecting_a_row_updates_table_handles_hint_and_detail(
         hint = app.query_one("#connect-hint", Static)
         assert "connect Fake" in plain(hint) and "disconnect" not in plain(hint)
 
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "connected")
         await pilot.pause()
         assert app.handles["fake"] is handle and handle.connected
@@ -70,7 +70,7 @@ async def test_connect_error_is_shown_verbatim_and_leaves_no_handle(
 ) -> None:
     app = connect_app(monkeypatch, FakeHandle(connect_error=message))
     async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "error")
         app.export_screenshot()  # force a real render of the table
         # DataTable parses str cells as markup; what it would display is
@@ -90,7 +90,7 @@ async def test_a_failed_probe_closes_the_half_open_link(monkeypatch: pytest.Monk
     handle = FakeHandle(probe_error="no answer")
     app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "error")
         assert (handle.connect_calls, handle.disconnect_calls) == (1, 1)
         assert "fake" not in app.handles
@@ -104,7 +104,7 @@ async def test_enter_on_a_connecting_row_does_not_open_the_device_twice(
     first, second = FakeHandle(connect_delay=0.4), FakeHandle(connect_delay=0.4)
     app = connect_app(monkeypatch, first, second)
     async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "connecting...")
         await pilot.press("enter")  # impatient second press
         await _row_is(pilot, table, "connected")
@@ -149,7 +149,7 @@ async def test_disconnect_is_refused_while_a_sweep_is_running(
     handle = FakeHandle()
     app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "connected")
         app.sweep_running = True
 
