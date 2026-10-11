@@ -16,6 +16,6 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-from .app import IyzeeApp, run  # noqa: E402 - see matplotlib.use() above
+from .app import IyzeeApp, run  # delayed until after matplotlib.use("Agg")
 
 __all__ = ["IyzeeApp", "run"]
