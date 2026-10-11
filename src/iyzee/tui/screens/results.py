@@ -13,10 +13,10 @@ Textual dependency.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import ClassVar
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 from textual import work
