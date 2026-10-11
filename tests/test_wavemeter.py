@@ -39,8 +39,8 @@ def test_read_frequency_uses_the_requested_and_default_channel(
     assert client.read_frequency() == pytest.approx(377.123456)
     timeout = {"timeout": wavemeter.READ_TIMEOUT_S}
     assert seen == [
-        (f"{client.base_url}7/", timeout),
-        (f"{client.base_url}{wavemeter.DEFAULT_CHANNEL}/", timeout),
+        (f"{client.base_url}frequency/7/", timeout),
+        (f"{client.base_url}frequency/{wavemeter.DEFAULT_CHANNEL}/", timeout),
     ]
 
 
