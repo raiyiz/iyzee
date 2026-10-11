@@ -29,10 +29,7 @@ from iyzee.tui.screens import connect as connect_mod
 from iyzee.tui.screens.connect import ConnectScreen
 from iyzee.tui.workers import LastRun
 
-P = ParamSpec("P")
-
-
-def async_test(fn: Callable[P, Awaitable[None]]) -> Callable[P, None]:
+def async_test[**P](fn: Callable[P, Awaitable[None]]) -> Callable[P, None]:
     """Run an ``async def`` test to completion.
 
     Replaces the ``async def scenario(): ...`` / ``asyncio.run(scenario())``
