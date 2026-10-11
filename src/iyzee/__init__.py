@@ -3,4 +3,4 @@
 from .config import IP
 from .devices.base import SHUTTER_CHANNEL_DEFAULT, BaseDevice
 
-__all__ = ["BaseDevice", "IP", "SHUTTER_CHANNEL_DEFAULT"]
+__all__ = ["IP", "SHUTTER_CHANNEL_DEFAULT", "BaseDevice"]
