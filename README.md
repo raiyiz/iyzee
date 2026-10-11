@@ -229,10 +229,10 @@ GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. Hardw
 <code>tests/hardware/</code> checks the drivers and procedures against the real instruments. A plain <code>pytest</code> never runs them: they are skipped unless you pass <code>--hardware</code>, and everything in that directory is marked <code>hardware</code> automatically. Addresses come from the same <code>IYZEE_*_IP</code> / <code>config.toml</code> the app uses, and the first line of a run lists them.
 
 ~~~sh
-uv run pytest --hardware                    # read-only: identity, error queues, settings, readings
-uv run pytest --hardware --hardware-actuate # also: configure/sweep the MXA, open the shutter, acquire on the scope
-uv run pytest --hardware -m "not scope"     # leave out an instrument that is not on the bench
-uv run pytest --hardware -m "mxa and not actuates"
+uv run pytest tests/hardware --hardware                    # read-only: identity, error queues, settings, readings
+uv run pytest tests/hardware --hardware --hardware-actuate # also: configure/sweep the MXA, open the shutter, acquire on the scope
+uv run pytest tests/hardware --hardware -m "not scope"     # leave out an instrument that is not on the bench
+uv run pytest tests/hardware --hardware -m "mxa and not actuates"
 ~~~
 
 - Tests that change instrument state are marked <code>actuates</code> and need <code>--hardware-actuate</code> as well. Each one restores what it changed (MXA settings, scope trigger mode) and the shutter is closed afterwards and confirmed closed by the supply. A shutter that is already open is left alone and its tests are skipped.
