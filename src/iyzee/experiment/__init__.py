@@ -46,6 +46,8 @@ from .procedures import (
 )
 
 __all__ = [
+    "TRACE_SHOT",
+    "TRACE_SQZ",
     "AnalyzerConfig",
     "BandwidthStep",
     "ExperimentContext",
@@ -56,8 +58,6 @@ __all__ = [
     "StepCallback",
     "StepFailure",
     "StepResult",
-    "TRACE_SHOT",
-    "TRACE_SQZ",
     "acquire_trace",
     "bandwidth_sweep_steps",
     "build_bandwidth_sweep",
