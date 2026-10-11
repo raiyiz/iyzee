@@ -31,6 +31,18 @@ iyz = "iyzee.tui.app:run"
 requires = ["uv_build>=0.12.6,<0.13.0"]
 build-backend = "uv_build"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "hardware: talks to real instruments; skipped unless --hardware is passed (everything under tests/hardware is marked automatically)",
+    "actuates: also changes instrument state (opens the shutter, runs sweeps, moves the laser); needs --hardware-actuate as well",
+    "mxa: needs the Keysight MXA",
+    "scope: needs the LeCroy oscilloscope",
+    "shutter: needs the PSU / optical shutter",
+    "wavemeter: needs the wavemeter server",
+]
+
 [tool.ruff]
 target-version = "py314"
 line-length = 100
