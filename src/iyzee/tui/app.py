@@ -405,7 +405,7 @@ class IyzeeApp(App):
         except CommandError as exc:
             self.notify(str(exc), severity="error", timeout=5, markup=False)
             return
-        except Exception as exc:  # noqa: BLE001 - a bad command must never take the app down
+        except Exception as exc:  # a bad command must never take the app down
             log.exception("command failed: %s", line)
             self.notify(f"command failed: {exc}", severity="error", timeout=6, markup=False)
             return
