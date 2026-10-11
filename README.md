@@ -215,7 +215,6 @@ The compiled guide is published by CI as the <code>iyzee-documentation</code> ar
 uv sync
 
 scripts/ci.sh test        # pytest (no instruments are touched)
-scripts/ci.sh hardware    # tests/hardware against the real instruments, read-only
 scripts/ci.sh lint        # ruff
 scripts/ci.sh typecheck   # mypy
 scripts/ci.sh doc-links   # guide <-> code references still resolve
@@ -223,17 +222,17 @@ scripts/ci.sh docs        # build the code index and compile the Typst guide
 scripts/ci.sh all         # run everything
 ~~~
 
-GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. <code>hardware</code> is deliberately not part of <code>all</code> or CI.
+GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. Hardware tests are not a <code>ci.sh</code> target and are never run by CI; invoke them manually with pytest.
 
 ### Hardware tests
 
 <code>tests/hardware/</code> checks the drivers and procedures against the real instruments. A plain <code>pytest</code> never runs them: they are skipped unless you pass <code>--hardware</code>, and everything in that directory is marked <code>hardware</code> automatically. Addresses come from the same <code>IYZEE_*_IP</code> / <code>config.toml</code> the app uses, and the first line of a run lists them.
 
 ~~~sh
-pytest --hardware                          # read-only: identity, error queues, settings, readings
-pytest --hardware --hardware-actuate       # also: configure and sweep the MXA, open the shutter, acquire on the scope
-pytest --hardware -m "not scope"           # leave out an instrument that is not on the bench
-pytest --hardware -m "mxa and not actuates"
+uv run pytest --hardware                    # read-only: identity, error queues, settings, readings
+uv run pytest --hardware --hardware-actuate # also: configure/sweep the MXA, open the shutter, acquire on the scope
+uv run pytest --hardware -m "not scope"     # leave out an instrument that is not on the bench
+uv run pytest --hardware -m "mxa and not actuates"
 ~~~
 
 - Tests that change instrument state are marked <code>actuates</code> and need <code>--hardware-actuate</code> as well. Each one restores what it changed (MXA settings, scope trigger mode) and the shutter is closed afterwards and confirmed closed by the supply. A shutter that is already open is left alone and its tests are skipped.
