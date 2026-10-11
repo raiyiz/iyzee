@@ -127,7 +127,7 @@ class IyzeeApp(App):
     # by side from ``-medium`` up, four form fields per row at ``-wide``.
     # At ``-narrow`` everything stacks into a single column, and whatever
     # still doesn't fit is reached with the pages' scrollbars.
-    HORIZONTAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] = [
+    HORIZONTAL_BREAKPOINTS: list[tuple[int, str]] = [  # noqa: RUF012 - Textual class configuration
         (0, "-narrow"),
         (76, "-medium"),
         (116, "-wide"),
@@ -172,7 +172,7 @@ class IyzeeApp(App):
     # reachable everywhere via "o", the nav rail, and the command palette,
     # just without a dedicated function key. "l" for the Log page (added
     # later) follows the same reasoning.
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("c", "show_page('connect')", "Connect"),
         Binding("s", "show_page('sweep')", "Sweep"),
         Binding("o", "show_page('scope')", "Scope"),
@@ -207,7 +207,7 @@ class IyzeeApp(App):
     # used by NavRail.PAGES above. Key bindings remain explicit because F1-F4
     # intentionally cover only four pages.
     PAGES: ClassVar[dict[str, type[Page]]] = {
-        page_id: screen for page_id, _label, screen in PAGE_SPECS
+        page_id: cast(type[Page], screen) for page_id, _label, screen in PAGE_SPECS
     }
     DEFAULT_PAGE = "connect"
 
