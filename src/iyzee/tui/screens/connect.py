@@ -216,7 +216,7 @@ class ConnectScreen(Page):
             self._ui(self._set_row, spec.key, "disconnecting...", "-")
             try:
                 self.iyzee_app.lab.disconnect(spec.key)
-            except Exception as exc:  
+            except Exception as exc:
                 log.exception("error closing %s", spec.key)
                 self._ui(
                     self.notify,
