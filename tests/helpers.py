@@ -29,6 +29,7 @@ from iyzee.tui.screens import connect as connect_mod
 from iyzee.tui.screens.connect import ConnectScreen
 from iyzee.tui.workers import LastRun
 
+
 def async_test[**P](fn: Callable[P, Awaitable[None]]) -> Callable[P, None]:
     """Run an ``async def`` test to completion.
 
