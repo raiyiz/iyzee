@@ -20,7 +20,7 @@ from dataclasses import asdict
 from functools import partial
 from threading import Event
 from time import monotonic
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from rich.markup import escape
@@ -38,6 +38,8 @@ from textual.widgets import (
 from textual_plotext import PlotextPlot
 
 from ...experiment import (
+    DEFAULT_SWEEP_DURATION_MS,
+    FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
     TRACE_SHOT,
     TRACE_SQZ,
@@ -104,16 +106,21 @@ class SweepScreen(Page):
         # connected; see refresh_readiness().
         yield Static("", id="sweep-status")
         with Vertical(id="sweep-form"):
-            yield _field(
-                "Sweep type",
-                Select(
-                    [("Bandwidth sweep", "bandwidth"), ("Frequency sweep", "frequency")],
-                    value="bandwidth",
-                    allow_blank=False,
-                    id="sweep-type",
-                ),
-                id="sweep-type-field",
-            )
+            with Grid(id="sweep-common", classes="field-grid"):
+                yield _field(
+                    "Sweep type",
+                    Select(
+                        [("Bandwidth sweep", "bandwidth"), ("Frequency sweep", "frequency")],
+                        value="bandwidth",
+                        allow_blank=False,
+                        id="sweep-type",
+                    ),
+                    id="sweep-type-field",
+                )
+                yield _field(
+                    "Sweep duration (ms)",
+                    Input(value=str(DEFAULT_SWEEP_DURATION_MS), id="sweep-duration"),
+                )
             with Grid(id="bw-fields", classes="field-grid"):
                 yield _field("RBW start (Hz)", Input(value="20000", id="rbw-start"))
                 yield _field("RBW stop (Hz)", Input(value="380000", id="rbw-stop"))
@@ -122,7 +129,10 @@ class SweepScreen(Page):
                 yield _field("Laser center (THz)", Input(value="377.1052067", id="freq-center"))
                 yield _field("Wavemeter channel", Input(value="4", id="freq-channel"))
                 yield _field("Points", Input(value="5", id="freq-points"))
-                yield _field("Offset step (kHz)", Input(value="10", id="freq-offset-khz"))
+                yield _field(
+                    "Offset step (kHz)",
+                    Input(value=f"{FREQUENCY_STEP_THZ * 1e9:g}", id="freq-offset-khz"),
+                )
         with Grid(id="sweep-controls"):
             yield Button("Run sweep", id="run-sweep", variant="success")
             yield Button("Abort", id="abort-sweep", variant="error", disabled=True)
@@ -247,8 +257,7 @@ class SweepScreen(Page):
             return
 
         handles = self.iyzee_app.handles
-        mx = handles["mxa"].device
-        shutter = handles["shutter"].device if "shutter" in sweep.requires else None
+        devices = {key: handles[key].device for key in sweep.requires}
 
         self._abort_event = Event()
         self._collected = []
@@ -275,14 +284,16 @@ class SweepScreen(Page):
         self.query_one("#abort-sweep", Button).disabled = False
         self.query_one("#capture-trace", Button).disabled = True
         self.iyzee_app.sweep_running = True
-        self._run(mx, shutter, sweep)
+        self._run(sweep, devices)
 
     def _build_bandwidth_run(self) -> Sweep:
         start = self._read("rbw-start", _positive_float, "RBW start")
         stop = self._read("rbw-stop", _positive_float, "RBW stop")
         count = self._read("rbw-steps", _positive_int, "Steps", maximum=MAX_POINTS)
         rbw_values = list(np.linspace(start, stop, count))
-        return build_bandwidth_sweep(rbw_values, sweep_duration_ms=10, res_bw_hz=rbw_values[0])
+        return build_bandwidth_sweep(
+            rbw_values, sweep_duration_ms=self._read_duration(), res_bw_hz=rbw_values[0]
+        )
 
     def _build_frequency_run(self) -> Sweep:
         center = self._read("freq-center", _positive_float, "Laser center")
@@ -295,15 +306,19 @@ class SweepScreen(Page):
             laser_center_thz=center,
             wavemeter_channel=channel,
             offsets_thz=offsets,
-            sweep_duration_ms=10,
+            sweep_duration_ms=self._read_duration(),
         )
+
+    def _read_duration(self) -> int:
+        return self._read("sweep-duration", _positive_int, "Sweep duration")
 
     # -- the run itself, off the UI thread -----------------------------------
 
     @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
-    def _run(self, mx, shutter, sweep: Sweep) -> None:
+    def _run(self, sweep: Sweep, devices: dict[str, Any]) -> None:
         kind, steps, config = sweep.kind, sweep.steps, sweep.config
-        # Hold the MXA's lock (and the shutter's, for a frequency sweep) for
+        mx = devices["mxa"]
+        # Hold the lock of every instrument the sweep requires for
         # the whole run, not just individual calls — a sweep is one logical
         # operation, and interleaving a console cell's commands partway
         # through it would be just as broken as interleaving two sweeps.
@@ -311,9 +326,7 @@ class SweepScreen(Page):
         # for console code, and ConnectScreen acquires around connect/
         # disconnect — each handle's own .lock (see InstrumentHandle.lock),
         # not a table IyzeeApp used to keep separately.
-        locks = [self.iyzee_app.handles["mxa"].lock]
-        if shutter is not None:
-            locks.append(self.iyzee_app.handles["shutter"].lock)
+        locks = [self.iyzee_app.handles[key].lock for key in sweep.requires]
 
         with contextlib.ExitStack() as stack:
             for lock in locks:
@@ -331,7 +344,8 @@ class SweepScreen(Page):
             ctx = ExperimentContext(
                 mx=mx,
                 run_id=record.run_id,
-                shutter=shutter,
+                shutter=devices.get("shutter"),
+                wavemeter=devices.get("wavemeter"),
                 config=record.config,
             )
 

@@ -538,8 +538,8 @@ coordinate in a frequency sweep.
 
 `ExperimentContext` carries the already-connected hardware and the metadata
 shared by all steps in one run. This is a deliberate boundary: a step may use
-the MXA, the shutter, and run metadata, but it does not decide who owns those
-resources.
+the MXA, the shutter, the wavemeter, and run metadata, but it does not decide who
+owns those resources.
 
 == `StepResult` is the measurement contract
 

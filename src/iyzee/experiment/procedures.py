@@ -25,6 +25,11 @@ from .core import ExperimentContext, StepResult, run_sequence
 TRACE_SQZ = 1
 TRACE_SHOT = 2
 
+#: Analyzer sweep time per point; every preset starts here and every caller can override it.
+DEFAULT_SWEEP_DURATION_MS = 10
+#: Default spacing of a frequency scan: 10 MHz, in THz (the unit the laser is set in).
+FREQUENCY_STEP_THZ = 10e-6
+
 
 @dataclass(slots=True)
 class AnalyzerConfig:
@@ -33,7 +38,7 @@ class AnalyzerConfig:
     center_hz: float = 1e6
     span_hz: float = 0
     avg_count: int = 100
-    sweep_duration_ms: int = 10
+    sweep_duration_ms: int = DEFAULT_SWEEP_DURATION_MS
     res_bw_hz: float = 10e4
     avg_type: str = "LOG"
     trig_source: str = "IMM"
@@ -123,9 +128,12 @@ class SweepStep:
         raise NotImplementedError
 
     def run(self, ctx: ExperimentContext) -> StepResult:
+        missing = [key for key in self.requires if key != "mxa" and getattr(ctx, key) is None]
+        if missing:
+            raise ValueError(
+                f"{type(self).__name__} requires ctx.{', ctx.'.join(missing)} to be set"
+            )
         uses_shutter = "shutter" in self.requires
-        if uses_shutter and ctx.shutter is None:
-            raise ValueError(f"{type(self).__name__} requires ctx.shutter to be set")
         meta = self.apply(ctx)
         traces = acquire_pair(ctx.mx, ctx.shutter if uses_shutter else None)
         return StepResult(self.label, self.x_value, self.x_unit, traces, meta)
@@ -156,8 +164,9 @@ class BandwidthStep(SweepStep):
 class FrequencyStep(SweepStep):
     """Set the laser setpoint, wait to settle, read the wavemeter, then acquire.
 
-    The wavemeter reading is taken after the settle time, right before the traces, and kept
-    as ``meta["measured_frequency_thz"]``. The shutter opens only around the squeezing
+    Uses the context's ``wavemeter`` (the connected, lock-protected one in the app). The
+    reading is taken after the settle time, right before the traces, and kept as
+    ``meta["measured_frequency_thz"]``. The shutter opens only around the squeezing
     acquisition (see :func:`acquire_pair`).
     """
 
@@ -172,7 +181,7 @@ class FrequencyStep(SweepStep):
     requires: ClassVar[tuple[str, ...]] = ("mxa", "shutter", "wavemeter")
 
     def apply(self, ctx: ExperimentContext) -> dict[str, Any]:
-        wavemeter = Wavemeter()
+        wavemeter = ctx.wavemeter
         wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
         time.sleep(self.relax_time_s)
         return {
@@ -222,7 +231,7 @@ def frequency_sweep_steps(
 ) -> list[FrequencyStep]:
     """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
-        offsets_thz = [i * 10e-6 for i in range(-1, 1)]
+        offsets_thz = [i * FREQUENCY_STEP_THZ for i in range(-1, 1)]
     return [
         FrequencyStep(laser_center_thz + offset, wavemeter_channel, relax_time_s)
         for offset in offsets_thz
@@ -230,14 +239,14 @@ def frequency_sweep_steps(
 
 
 def bandwidth_sweep_config(
-    *, sweep_duration_ms: int = 5, res_bw_hz: float = 24e3
+    *, sweep_duration_ms: int = DEFAULT_SWEEP_DURATION_MS, res_bw_hz: float = 24e3
 ) -> AnalyzerConfig:
     """Return the standard analyzer configuration for an RBW sweep."""
     return AnalyzerConfig(1e6, 0, 200, sweep_duration_ms, res_bw_hz)
 
 
 def frequency_sweep_config(
-    *, sweep_duration_ms: int = 10, res_bw_hz: float = 24e3
+    *, sweep_duration_ms: int = DEFAULT_SWEEP_DURATION_MS, res_bw_hz: float = 24e3
 ) -> AnalyzerConfig:
     """Return the standard analyzer configuration for a frequency sweep."""
     return AnalyzerConfig(1.5e6, 0, 150, sweep_duration_ms, res_bw_hz)
@@ -268,12 +277,21 @@ def build_frequency_sweep(
 
 
 def run_sweep(
-    mx, sweep: Sweep, *, shutter: ShutterControl | None = None, on_error: str = "raise"
+    mx,
+    sweep: Sweep,
+    *,
+    shutter: ShutterControl | None = None,
+    wavemeter: Wavemeter | None = None,
+    on_error: str = "raise",
 ) -> list[StepResult]:
     """Configure the caller-owned MXA, build one run context, and run ``sweep``."""
     prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), sweep.config)
     ctx = ExperimentContext(
-        mx=mx, run_id=uuid.uuid4().hex[:8], shutter=shutter, config=asdict(sweep.config)
+        mx=mx,
+        run_id=uuid.uuid4().hex[:8],
+        shutter=shutter,
+        config=asdict(sweep.config),
+        wavemeter=wavemeter,
     )
     return run_sequence(sweep.steps, ctx, on_error=on_error)
 
@@ -286,11 +304,19 @@ def run_bandwidth_sweep(
 
 
 def run_frequency_sweep(
-    mx, shutter: ShutterControl, *args: Any, on_error: str = "raise", **kwargs: Any
+    mx,
+    shutter: ShutterControl,
+    *args: Any,
+    wavemeter: Wavemeter | None = None,
+    on_error: str = "raise",
+    **kwargs: Any,
 ) -> list[StepResult]:
     """Measure squeezing/shot-noise traces using caller-owned devices.
 
-    Everything after ``shutter`` is :func:`build_frequency_sweep`'s arguments.
+    ``wavemeter`` defaults to a client for the configured server; everything else after
+    ``shutter`` is :func:`build_frequency_sweep`'s arguments.
     """
+    if wavemeter is None:
+        wavemeter = Wavemeter()
     sweep = build_frequency_sweep(*args, **kwargs)
-    return run_sweep(mx, sweep, shutter=shutter, on_error=on_error)
+    return run_sweep(mx, sweep, shutter=shutter, wavemeter=wavemeter, on_error=on_error)

@@ -1,9 +1,14 @@
+from types import SimpleNamespace
+
 import pytest
 
-from iyzee.devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
+from iyzee.devices.wavemeter import Wavemeter
 from iyzee.experiment.core import ExperimentContext
 from iyzee.experiment.procedures import (
+    DEFAULT_SWEEP_DURATION_MS,
+    FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
+    AnalyzerConfig,
     BandwidthStep,
     FrequencyStep,
     Sweep,
@@ -15,6 +20,7 @@ from iyzee.experiment.procedures import (
     build_bandwidth_sweep,
     build_frequency_sweep,
     frequency_sweep_config,
+    frequency_sweep_steps,
     run_bandwidth_sweep,
     run_frequency_sweep,
     run_sweep,
@@ -127,17 +133,11 @@ def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
     mx = FakeMXA()
     shutter = FakeShutterControl()
     events = []
-    monkeypatch.setattr(
-        Wavemeter,
-        "set_pid_setpoint",
-        lambda self, freq, channel=DEFAULT_CHANNEL: events.append(("set", freq, channel)),
+    wavemeter = SimpleNamespace(
+        set_pid_setpoint=lambda freq, channel: events.append(("set", freq, channel)),
+        read_frequency=lambda channel: events.append(("read", channel)) or 377.100001,
     )
-    monkeypatch.setattr(
-        Wavemeter,
-        "read_frequency",
-        lambda self, channel=DEFAULT_CHANNEL: events.append(("read", channel)) or 377.100001,
-    )
-    ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter)
+    ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter, wavemeter=wavemeter)
 
     result = FrequencyStep(frequency_thz=377.1, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
 
@@ -152,24 +152,20 @@ def test_frequency_step_opens_shutter_only_for_squeezing(monkeypatch):
 def test_frequency_step_sets_settles_half_a_second_reads_then_records(monkeypatch):
     """Per step: go to the frequency, settle, read it, only then take the traces."""
     events = []
-    monkeypatch.setattr(
-        Wavemeter,
-        "set_pid_setpoint",
-        lambda self, freq, channel=DEFAULT_CHANNEL: events.append(("set", freq, channel)),
+    wavemeter = SimpleNamespace(
+        set_pid_setpoint=lambda freq, channel: events.append(("set", freq, channel)),
+        read_frequency=lambda channel: events.append(("read", channel)) or 377.100002,
     )
     monkeypatch.setattr(
         "iyzee.experiment.procedures.time.sleep", lambda s: events.append(("sleep", s))
     )
     monkeypatch.setattr(
-        Wavemeter,
-        "read_frequency",
-        lambda self, channel=DEFAULT_CHANNEL: events.append(("read", channel)) or 377.100002,
-    )
-    monkeypatch.setattr(
         "iyzee.experiment.procedures.acquire_trace",
         lambda mx, trace_num: events.append(("acquire", trace_num)) or [trace_num],
     )
-    ctx = ExperimentContext(mx=FakeMXA(), run_id="t", shutter=FakeShutterControl())
+    ctx = ExperimentContext(
+        mx=FakeMXA(), run_id="t", shutter=FakeShutterControl(), wavemeter=wavemeter
+    )
 
     result = FrequencyStep(frequency_thz=377.1, wavemeter_channel=4).run(ctx)
 
@@ -188,6 +184,87 @@ def test_frequency_step_requires_shutter():
 
     with pytest.raises(ValueError, match="shutter"):
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
+
+
+def test_frequency_step_requires_the_wavemeter_and_touches_nothing_without_it():
+    mx = FakeMXA()
+    shutter = FakeShutterControl()
+    ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter)
+
+    with pytest.raises(ValueError, match=r"ctx\.wavemeter"):
+        FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
+
+    assert shutter.events == [] and mx.trace_calls == []
+
+
+def test_frequency_step_names_everything_the_context_lacks():
+    ctx = ExperimentContext(mx=FakeMXA(), run_id="t")
+
+    with pytest.raises(ValueError, match=r"ctx\.shutter, ctx\.wavemeter"):
+        FrequencyStep(frequency_thz=1.0, wavemeter_channel=1).run(ctx)
+
+
+def test_frequency_step_never_builds_a_wavemeter_of_its_own(monkeypatch):
+    monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
+    monkeypatch.setattr("iyzee.experiment.procedures.time.sleep", lambda s: None)
+    monkeypatch.setattr(
+        "iyzee.experiment.procedures.Wavemeter",
+        lambda *a, **k: pytest.fail("a step must use ctx.wavemeter"),
+        raising=False,
+    )
+    wavemeter = SimpleNamespace(
+        set_pid_setpoint=lambda freq, channel: None, read_frequency=lambda channel: 377.1
+    )
+    ctx = ExperimentContext(
+        mx=FakeMXA(), run_id="t", shutter=FakeShutterControl(), wavemeter=wavemeter
+    )
+
+    FrequencyStep(frequency_thz=377.1, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
+
+
+def test_run_frequency_sweep_uses_the_wavemeter_it_is_given(monkeypatch):
+    monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
+    monkeypatch.setattr("iyzee.experiment.procedures.time.sleep", lambda s: None)
+    monkeypatch.setattr("iyzee.experiment.procedures.prepare_analyzer", lambda *a: None)
+    monkeypatch.setattr(
+        "iyzee.experiment.procedures.Wavemeter",
+        lambda *a, **k: pytest.fail("a client was built although one was passed"),
+        raising=False,
+    )
+    calls = []
+    wavemeter = SimpleNamespace(
+        set_pid_setpoint=lambda freq, channel: calls.append(("set", freq, channel)),
+        read_frequency=lambda channel: calls.append(("read", channel)) or 377.1,
+    )
+
+    results = run_frequency_sweep(
+        FakeMXA(),
+        FakeShutterControl(),
+        offsets_thz=[0.0],
+        relax_time_s=0.0,
+        wavemeter=wavemeter,
+    )
+
+    assert [c[0] for c in calls] == ["set", "read"]
+    assert results[0].meta["measured_frequency_thz"] == 377.1
+
+
+def test_the_sweep_duration_defaults_to_10_ms_everywhere_and_is_overridable():
+    assert DEFAULT_SWEEP_DURATION_MS == 10
+    for config in (AnalyzerConfig(), bandwidth_sweep_config(), frequency_sweep_config()):
+        assert config.sweep_duration_ms == 10
+    assert build_bandwidth_sweep().config.sweep_duration_ms == 10
+    assert build_frequency_sweep().config.sweep_duration_ms == 10
+    assert build_bandwidth_sweep(sweep_duration_ms=25).config.sweep_duration_ms == 25
+    assert build_frequency_sweep(sweep_duration_ms=25).config.sweep_duration_ms == 25
+
+
+def test_a_frequency_scan_defaults_to_10_mhz_steps():
+    assert FREQUENCY_STEP_THZ * 1e6 == pytest.approx(10)  # THz -> MHz
+    steps = frequency_sweep_steps(laser_center_thz=377.0)
+    gaps = [b.frequency_thz - a.frequency_thz for a, b in zip(steps, steps[1:], strict=False)]
+    assert gaps and all(gap == pytest.approx(10e-6) for gap in gaps)
+    assert 377.0 in [pytest.approx(s.frequency_thz) for s in steps]  # still scans from the centre
 
 
 def test_run_bandwidth_sweep_uses_caller_owned_mxa(monkeypatch):

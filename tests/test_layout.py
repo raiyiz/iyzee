@@ -24,9 +24,10 @@ from iyzee.tui.app import IyzeeApp
 SIZES = [(140, 50), (60, 14)]
 
 CONTROLS = {
-    "bandwidth": ["#sweep-type", "#rbw-start", "#rbw-stop", "#rbw-steps"],
+    "bandwidth": ["#sweep-type", "#sweep-duration", "#rbw-start", "#rbw-stop", "#rbw-steps"],
     "frequency": [
         "#sweep-type",
+        "#sweep-duration",
         "#freq-center",
         "#freq-channel",
         "#freq-points",

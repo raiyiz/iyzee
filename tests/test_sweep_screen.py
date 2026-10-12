@@ -87,7 +87,22 @@ async def test_form_defaults_build_the_documented_runs() -> None:
         bandwidth = screen._build_bandwidth_run()
         assert len(bandwidth.steps) == 19
         assert bandwidth.config.res_bw_hz == pytest.approx(20000.0)
-        assert len(screen._build_frequency_run().steps) == 5
+        frequency = screen._build_frequency_run()
+        assert len(frequency.steps) == 5
+        # The defaults the issue asked for: 10 ms sweeps, 10 MHz between laser points.
+        assert bandwidth.config.sweep_duration_ms == frequency.config.sweep_duration_ms == 10
+        gaps = [b.x_value - a.x_value for a, b in zip(frequency.steps, frequency.steps[1:])]
+        assert all(gap == pytest.approx(10e-6) for gap in gaps)  # 10 MHz, in THz
+
+
+@async_test
+async def test_the_sweep_duration_field_is_honoured_by_both_sweeps() -> None:
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open_sweep_screen(pilot)
+        screen.query_one("#sweep-duration", Input).value = "25"
+        await pilot.pause()
+        assert screen._build_bandwidth_run().config.sweep_duration_ms == 25
+        assert screen._build_frequency_run().config.sweep_duration_ms == 25
 
 
 @pytest.mark.parametrize(
@@ -96,6 +111,8 @@ async def test_form_defaults_build_the_documented_runs() -> None:
         ("rbw-stop", "RBW stop", "abc", "bandwidth"),
         ("rbw-steps", "Steps", "0", "bandwidth"),
         ("freq-points", "Points", "5000", "frequency"),
+        ("sweep-duration", "Sweep duration", "0", "bandwidth"),
+        ("sweep-duration", "Sweep duration", "abc", "frequency"),
     ],
 )
 @async_test
@@ -230,6 +247,51 @@ def _points_on_disk(directory: Path) -> int:
 
 def _result(index: int) -> Any:
     return make_result(f"pt{index}", float(index))
+
+
+def _locked_by_someone_else(lock: Any) -> bool:
+    """Whether ``lock`` is held by another thread (an RLock is re-entrant for its owner)."""
+    got: list[bool] = []
+    thread = threading.Thread(target=lambda: got.append(lock.acquire(blocking=False)))
+    thread.start()
+    thread.join()
+    if got[0]:
+        lock.release()
+    return not got[0]
+
+
+@pytest.mark.parametrize(
+    "kind,needed",
+    [("bandwidth", {"mxa"}), ("frequency", {"mxa", "shutter", "wavemeter"})],
+)
+@async_test
+async def test_a_run_gets_the_connected_devices_and_holds_every_lock_it_needs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, needed: set[str]
+) -> None:
+    devices = {key: object() for key in ("mxa", "shutter", "wavemeter")}
+    seen: dict[str, Any] = {}
+
+    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+        seen["ctx"] = ctx
+        seen["held"] = {k for k in devices if _locked_by_someone_else(app.handles[k].lock)}
+
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    for key, device in devices.items():
+        app.handles[key] = FakeHandle(device=device)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await pilot.pause()
+        app.query_one("#sweep-type", Select).value = kind
+        await pilot.pause()
+        await pilot.click("#run-sweep")
+        # No points are recorded, so there is no last_run: wait for the run itself to end.
+        await wait_until(pilot, lambda: "held" in seen and not app.sweep_running)
+
+    ctx = seen["ctx"]
+    assert ctx.mx is devices["mxa"]
+    assert ctx.shutter is (devices["shutter"] if "shutter" in needed else None)
+    assert ctx.wavemeter is (devices["wavemeter"] if "wavemeter" in needed else None)
+    assert seen["held"] == needed  # no more, no fewer
 
 
 @async_test

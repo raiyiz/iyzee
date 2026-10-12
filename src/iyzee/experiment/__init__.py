@@ -30,6 +30,8 @@ from .io import (
     save_step_results,
 )
 from .procedures import (
+    DEFAULT_SWEEP_DURATION_MS,
+    FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
     TRACE_SHOT,
     TRACE_SQZ,
@@ -51,6 +53,8 @@ from .procedures import (
 )
 
 __all__ = [
+    "DEFAULT_SWEEP_DURATION_MS",
+    "FREQUENCY_STEP_THZ",
     "SWEEP_KINDS",
     "AnalyzerConfig",
     "BandwidthStep",
