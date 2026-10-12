@@ -135,14 +135,19 @@ every operation as a plain method that writes or queries one SCPI command, with 
   [`disable_output(ch)`], [`INST OUT<ch>` then `OUTP:SEL 0`], [],
   [`enable_global_output()`], [`OUTP:GEN 1`], [master output switch, independent of per-channel `OUTP:SEL`],
   [`disable_global_output()`], [`OUTP:GEN 0`], [],
+  [`retrieve_state(channels)`], [`OUTP:GEN?`, then per channel `INST:NSEL <ch>`, `VOLT?`, `CURR?`, `MEAS:VOLT?`, `MEAS:CURR?`, `OUTP:SEL?`], [the supply's own report as a #code("PSUState"): setpoints, measurements, what is armed, and the master output. Puts the channel selection back afterwards. A reply that is not a finite number (or 0/1 for a switch) raises `ValueError` naming the command],
 )
+
+A channel is powered only when it is armed (`OUTP:SEL`) *and* the master output is on, which is why
+#code("PSUState") carries both and #code("PSUState.is_live") combines them. The socket has no message
+framing, so #code("PSU.open") sets a read termination; without it a query would wait for the VISA timeout.
 
 #code("ShutterControl") is a thin wrapper that owns a #code("PSU"). Like every other device it
 does *not* connect when constructed: #code("ShutterControl.connect") connects the PSU and sets the
 shutter channel to 1.7 V and 10 mA (the shutter's trigger levels, hard-coded rather than
 configurable), and closing the PSU on a failed connect so nothing is left half-open.
 #code("ShutterControl.disconnect") closes the shutter before releasing the PSU, so a disconnect
-never leaves the beam path open. The shutter is channel 3 (`CH.THREE`) by default.
+never leaves the beam path open. #code("ShutterControl.is_open") asks the supply whether the shutter's channel is powered instead of trusting what we last sent. The shutter is channel 3 (`CH.THREE`) by default.
 
 == LeCroy oscilloscope <sec-scope>
 
