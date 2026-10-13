@@ -284,6 +284,7 @@ class SweepScreen(Page):
         self.query_one("#abort-sweep", Button).disabled = False
         self.query_one("#capture-trace", Button).disabled = True
         self.iyzee_app.sweep_running = True
+        self.iyzee_app.session_note(f"{kind} sweep running ({len(sweep.steps)} points)")
         self._run(sweep, devices)
 
     def _build_bandwidth_run(self) -> Sweep:
@@ -316,6 +317,25 @@ class SweepScreen(Page):
 
     @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
     def _run(self, sweep: Sweep, devices: dict[str, Any]) -> None:
+        # Nothing may leave a worker thread. Textual handles Exception (and cancellation) from a
+        # worker but not a KeyboardInterrupt or SystemExit: those unwind the event loop and end
+        # the whole app with no message, and a swallowed cancellation leaves the page stuck in
+        # "running". Whatever it was, it becomes a failed run that is logged and shown.
+        try:
+            self._run_sweep(sweep, devices)
+        except BaseException as exc:  # noqa: BLE001
+            self._worker_died(sweep.kind, exc)
+
+    def _worker_died(self, kind: str, exc: BaseException) -> None:
+        log.critical("sweep: the worker thread died with %s", type(exc).__name__, exc_info=exc)
+        if self._record is not None:  # leave "failed" on disk, not "running"
+            with contextlib.suppress(Exception):
+                self._record.finish(aborted=False, failed=True)
+                if self._collected:
+                    self._checkpoint(kind)
+        self._ui(self._finish, kind, aborted=False, setup_error=None, died=exc)
+
+    def _run_sweep(self, sweep: Sweep, devices: dict[str, Any]) -> None:
         kind, steps, config = sweep.kind, sweep.steps, sweep.config
         mx = devices["mxa"]
         # Hold the lock of every instrument the sweep requires for
@@ -441,6 +461,15 @@ class SweepScreen(Page):
 
     @work(thread=True, exclusive=True, group="capture", exit_on_error=False)
     def _capture(self, mx) -> None:
+        try:
+            self._capture_trace(mx)
+        except BaseException as exc:  # noqa: BLE001 - see _run: nothing may leave a worker
+            log.critical(
+                "capture: the worker thread died with %s", type(exc).__name__, exc_info=exc
+            )
+            self._ui(self._finish_capture, error=exc, freq=None, power=None)
+
+    def _capture_trace(self, mx) -> None:
         # Deliberately does *not* call prepare_analyzer() first, unlike a
         # sweep — this captures whatever the analyzer is currently showing
         # (RBW, center freq, etc. left exactly as they are), not a
@@ -459,7 +488,7 @@ class SweepScreen(Page):
         self._ui(self._finish_capture, error=None, freq=freq, power=power)
 
     def _finish_capture(
-        self, *, error: Exception | None, freq: list[float] | None, power: list[float] | None
+        self, *, error: BaseException | None, freq: list[float] | None, power: list[float] | None
     ) -> None:
         self.iyzee_app.sweep_running = False
         self.query_one("#run-sweep", Button).disabled = False
@@ -527,8 +556,16 @@ class SweepScreen(Page):
                     markup=False,
                 )
 
-    def _finish(self, kind: str, *, aborted: bool, setup_error: Exception | None) -> None:
+    def _finish(
+        self,
+        kind: str,
+        *,
+        aborted: bool,
+        setup_error: Exception | None,
+        died: BaseException | None = None,
+    ) -> None:
         self.iyzee_app.sweep_running = False
+        self.iyzee_app.session_note("idle")
         self.query_one("#run-sweep", Button).disabled = False
         self.query_one("#abort-sweep", Button).disabled = True
         self.query_one("#abort-sweep", Button).label = "Abort"
@@ -544,6 +581,15 @@ class SweepScreen(Page):
             )
             return
 
+        if died is not None:
+            reason = type(died).__name__ + (f": {one_line(died)}" if str(died) else "")
+            log.write(
+                f"[red]The sweep stopped unexpectedly ({escape(reason)}). See the Log page.[/red]"
+            )
+            self.notify(
+                f"Sweep stopped unexpectedly: {reason}", severity="error", timeout=15, markup=False
+            )
+
         if not self._collected:
             log.write("[yellow]No points recorded.[/yellow]")
             return
@@ -554,7 +600,7 @@ class SweepScreen(Page):
             self._checkpoint(kind, on_ui_thread=True)
         path = self._save_path
         self.iyzee_app.last_run = LastRun(kind=kind, results=list(self._collected), path=path)
-        status = "aborted" if aborted else "finished"
+        status = "aborted" if aborted else "stopped early" if died is not None else "finished"
         if path is None:
             log.write(
                 f"[red]Sweep {status}: {len(self._collected)} point(s) recorded but "

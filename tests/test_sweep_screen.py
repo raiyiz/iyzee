@@ -8,6 +8,7 @@ around it.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from pathlib import Path
 from typing import Any
@@ -479,3 +480,68 @@ async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
 
     assert _saved_run_metadata(tmp_path)["status"] == "failed"
     assert _points_on_disk(tmp_path) == 1
+
+
+# -- a worker that dies with something that is not an Exception ----------------------------------
+#
+# Textual handles Exception (and cancellation) from a worker thread, nothing else: a
+# KeyboardInterrupt or SystemExit escaping one ends the whole app with no message, and a
+# swallowed CancelledError leaves the page "running" for good.
+
+
+def _log_text(screen: SweepScreen) -> str:
+    return " ".join(
+        str(seg) for line in screen.query_one("#sweep-log", RichLog).lines for seg in line
+    )
+
+
+@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit, asyncio.CancelledError])
+@async_test
+async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exc_type: type[BaseException]
+) -> None:
+    def dying_run_sequence(steps, ctx, *, on_error, on_step):
+        for index in range(2):
+            on_step(index, 5, steps[index], _result(index), None)
+        raise exc_type()
+
+    app = _sweep_app(monkeypatch, tmp_path, dying_run_sequence)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await pilot.pause()
+        screen = app.query_one(SweepScreen)
+        await pilot.click("#run-sweep")
+        await wait_until(pilot, lambda: app.last_run is not None)
+
+        assert app.is_running, "the app must survive its worker"
+        assert app.sweep_running is False, "the page must not be left stuck in 'running'"
+        assert not screen.query_one("#run-sweep", Button).disabled
+        assert exc_type.__name__ in " ".join(notifications(app))
+        assert "stopped unexpectedly" in _log_text(screen)
+        # What was measured before it died is kept, and the file says the run failed.
+        last_run = app.last_run
+        assert last_run is not None and last_run.path is not None
+        assert len(last_run.results) == 2
+        assert _points_on_disk(tmp_path) == 2
+        assert '"failed"' in last_run.path.with_suffix(".json").read_text()
+
+
+@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit, asyncio.CancelledError])
+@async_test
+async def test_a_capture_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
+    monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
+) -> None:
+    def dying_acquire(mx, trace_num):
+        raise exc_type()
+
+    monkeypatch.setattr(sweep_mod, "acquire_trace", dying_acquire)
+    app = IyzeeApp()
+    app.handles["mxa"] = FakeHandle(device=object())
+    async with app.run_test() as pilot:
+        screen = await _open_sweep_screen(pilot)
+        screen._start_capture()
+        await wait_until(pilot, lambda: not screen.query_one("#capture-trace").disabled)
+
+        assert app.is_running
+        assert app.sweep_running is False
+        assert "Capture failed" in _log_text(screen)

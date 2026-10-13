@@ -1151,6 +1151,27 @@ The same principle appears in dead-link cleanup: remove a dead handle from the
 authoritative session inventory so the application can offer a clean reconnect,
 then release the underlying object without blocking the main UI path.
 
+== Nothing leaves a worker thread, and a vanished process leaves evidence
+
+Textual handles an `Exception` (or a cancellation) from a worker thread and nothing else. A
+`KeyboardInterrupt` or `SystemExit` escaping one unwinds the event loop and ends the whole app
+with no message, and a swallowed cancellation leaves the page stuck in "running". So the sweep
+and capture workers catch `BaseException` at their outer edge, log it, and report it as a failed
+run: the page is usable again, the points already measured are saved, and the run file says
+`failed` rather than `running`.
+
+For the deaths no code can catch, the real entry point (not the constructor, so tests are
+unaffected) arranges for something to read afterwards:
+
+- #code("iyzee.tui.diagnostics.install") logs uncaught exceptions from any thread and turns on `faulthandler`, so a hard crash
+  writes every thread's stack to `faulthandler.log` next to the application log.
+- SIGTERM and SIGHUP (a closed terminal, `kill`) are logged and become a normal shutdown, which
+  also closes the shutter and the instruments; without a handler the process simply stops.
+- #code("SessionMarker") keeps one small file per running session and removes it on a clean exit. A
+  marker whose process is gone means that session was killed (out of memory, `kill -9`), crashed
+  hard, or lost its terminal. The next start says so, and says what it was doing (for example
+  "frequency sweep running (200 points)").
+
 = Error philosophy
 
 The architecture has a few rules that are more important in laboratory

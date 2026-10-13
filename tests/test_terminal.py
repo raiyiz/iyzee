@@ -17,6 +17,7 @@ from helpers import FakeApp, async_test
 from prompt_toolkit.input.vt100_parser import Vt100Parser
 from textual.widgets import ContentSwitcher
 
+from iyzee.tui import ipython_session
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.ipython_session import IPythonSession
 from iyzee.tui.screens.console import IyzeeConsole
@@ -302,3 +303,52 @@ async def test_console_interrupt_scrollback_and_shutdown() -> None:
     assert session._thread is not None and not session._thread.is_alive(), (
         "leaving the app closes the shell"
     )
+
+
+# -- an interrupt must never be aimed at a thread that is not the shell ------------------------------
+#
+# The OS hands a finished thread's id to the next thread that starts (checked: every time, for
+# both a plain thread and an executor worker). interrupt() injects a KeyboardInterrupt by
+# thread id, so a stale id would hit whatever thread now owns it -- a sweep's worker, say, and
+# a KeyboardInterrupt in that ends the whole app.
+
+
+def _session_whose_shell_thread_ends_at_once(monkeypatch: pytest.MonkeyPatch):
+    session = IPythonSession(FakeApp(), rows=24, cols=90, on_output=VTermScreen(90, 24).feed)
+    monkeypatch.setattr(session.shell, "mainloop", lambda: None)
+    injected: list[int] = []
+    monkeypatch.setattr(ipython_session, "_raise_in_thread", lambda tid, exc: injected.append(tid))
+    session.start()
+    assert session._thread is not None
+    session._thread.join(10)
+    assert not session._thread.is_alive()
+    # What a running cell looks like to interrupt(): started prompting, not at a prompt now.
+    session._started_prompting = True
+    session._prompt_depth = 0
+    return session, injected
+
+
+@async_test
+async def test_the_shell_threads_id_is_forgotten_when_that_thread_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, injected = _session_whose_shell_thread_ends_at_once(monkeypatch)
+    try:
+        assert session._thread_id is None
+        session.interrupt()
+        assert injected == []
+    finally:
+        session.close()
+
+
+@async_test
+async def test_interrupt_checks_the_thread_is_alive_even_if_an_id_were_left_behind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, injected = _session_whose_shell_thread_ends_at_once(monkeypatch)
+    try:
+        session._thread_id = 123456  # a stale id, as before the fix
+        session.interrupt()
+        assert injected == [], "interrupt() aimed at a thread that is not the (dead) shell"
+    finally:
+        session.close()

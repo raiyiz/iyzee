@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import threading
 import time
 from collections.abc import Callable
@@ -20,8 +21,11 @@ from textual.widgets import ContentSwitcher, Footer, Header, Static
 
 from ..devices.handles import InstrumentHandle
 from ..lab import INSTRUMENTS, Lab
+from . import logging_support
 from .command_bar import CommandBar
 from .commands import Command, CommandError, CommandRegistry
+from .diagnostics import SessionMarker, describe
+from .diagnostics import install as install_crash_diagnostics
 from .ipython import default_history_file
 from .ipython_session import IPythonSession
 from .logging_support import LogEntry
@@ -215,8 +219,15 @@ class IyzeeApp(App):
         console_history_file: str | Path | None = None,
         console_editing_mode: str = "vi",
         prefs_file: str | Path | None = None,
+        session_dir: str | Path | None = None,
+        handle_signals: bool = False,
     ) -> None:
         super().__init__()
+        # Like the history and prefs files, only real runs opt in (see ``run()``): a marker per
+        # running session so the next start can say the last one did not end cleanly, and
+        # handlers that turn SIGTERM/SIGHUP into a logged, clean shutdown.
+        self.session_marker = SessionMarker(Path(session_dir)) if session_dir else None
+        self._handle_signals = handle_signals
         # Like the console history, persistent only for real runs (see ``run()``).
         self.prefs = Prefs(Path(prefs_file) if prefs_file else None)
         self._quit_armed_until = 0.0  # monotonic deadline for the second "q"
@@ -274,6 +285,40 @@ class IyzeeApp(App):
 
     def on_mount(self) -> None:
         self.set_interval(self.LINK_CHECK_INTERVAL, self._check_links)
+        if self.session_marker is not None:
+            for info in self.session_marker.start():
+                what = describe(info)
+                log.warning("the previous session did not end cleanly: %s", what)
+                self.notify(
+                    f"The previous iyzee session did not end cleanly ({what}). "
+                    "See the Log page, and faulthandler.log in the logs folder.",
+                    severity="warning",
+                    timeout=30,
+                    markup=False,
+                )
+        if self._handle_signals:
+            loop = asyncio.get_running_loop()
+            for name in ("SIGTERM", "SIGHUP"):
+                number = getattr(signal, name, None)
+                if number is not None:
+                    try:
+                        loop.add_signal_handler(number, self._on_signal, name)
+                    except NotImplementedError, RuntimeError, ValueError:
+                        pass  # not the main thread, or not a platform that supports it
+
+    def _on_signal(self, name: str) -> None:
+        """SIGTERM / SIGHUP (a closed terminal, ``kill``): say so, then shut down cleanly.
+
+        Without a handler the process just stops: no log line, and the shutter and the
+        instruments are left exactly as they were.
+        """
+        log.critical("received %s: shutting down cleanly", name)
+        self.exit()
+
+    def session_note(self, activity: str) -> None:
+        """Tell the session marker what is going on, for the report after a crash."""
+        if self.session_marker is not None:
+            self.session_marker.note(activity)
 
     def _check_links(self) -> None:
         """Notice links that died while nobody was talking to them (no instrument I/O)."""
@@ -367,7 +412,11 @@ class IyzeeApp(App):
         able to hang the quit.
         """
         self.shutdown_requested.set()
-        await asyncio.to_thread(self._close_console_and_instruments)
+        try:
+            await asyncio.to_thread(self._close_console_and_instruments)
+        finally:
+            if self.session_marker is not None:
+                self.session_marker.stop()  # reached: this session ended cleanly
 
     def _close_console_and_instruments(self) -> None:
         # The console first: a cell still running holds instrument locks, and
@@ -543,10 +592,13 @@ def run() -> None:
     `IyzeeApp.__init__` and `default_history_file`'s docstrings for why
     that's deliberately not the default.
     """
+    install_crash_diagnostics(logging_support.LOG_ROOT)
     IyzeeApp(
         console_history_file=default_history_file(),
         console_editing_mode=os.environ.get("IYZEE_EDITING_MODE", "vi"),
         prefs_file=default_prefs_file(),
+        session_dir=logging_support.LOG_ROOT,
+        handle_signals=True,
     ).run()
 
 
