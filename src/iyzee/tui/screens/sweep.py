@@ -229,38 +229,31 @@ class SweepScreen(Page):
     # -- kicking off the run -------------------------------------------------
 
     def _start_sweep(self) -> None:
-        mx_handle = self.iyzee_app.handles.get("mxa")
-        if mx_handle is None:
-            self.notify("Connect the MXA first — press F1 for the Connect page.", severity="error")
-            return
-        # The Connect screen always builds "mxa" from a _VisaHandle and
-        # "shutter" from a ShutterHandle (see lab.INSTRUMENTS) —
-        # handles is typed dict[str, InstrumentHandle] because that's all
-        # the Connect screen itself needs, but this screen needs the
-        # concrete wrapper's .device/.shutter, which aren't on that
-        # narrower Protocol.
-
         kind = self.query_one("#sweep-type", Select).value
+        missing = self._missing_instruments(kind)
+        if missing:
+            # Keep the banner and pre-flight check on the same source of truth.
+            # Report the first missing dependency, as before, so users can fix
+            # connection problems one at a time.
+            self.notify(
+                f"Connect the {missing[0]} first — press F1 for the Connect page.",
+                severity="error",
+            )
+            return
+
+        # The Connect screen builds "mxa" from a _VisaHandle and "shutter"
+        # from a ShutterHandle (see lab.INSTRUMENTS). The app's narrow handle
+        # protocol doesn't expose these concrete wrappers' device attributes.
+        mx_handle = self.iyzee_app.handles["mxa"]
+        shutter = (
+            self.iyzee_app.handles["shutter"].device if kind == "frequency" else None
+        )
+
         try:
             if kind == "bandwidth":
                 steps, config = self._build_bandwidth_run()
-                shutter = None
             else:
-                shutter_handle = self.iyzee_app.handles.get("shutter")
-                if shutter_handle is None or shutter_handle.device is None:
-                    self.notify(
-                        "Connect the shutter first — press F1 for the Connect page.",
-                        severity="error",
-                    )
-                    return
-                if "wavemeter" not in self.iyzee_app.handles:
-                    self.notify(
-                        "Connect the wavemeter first — press F1 for the Connect page.",
-                        severity="error",
-                    )
-                    return
                 steps, config = self._build_frequency_run()
-                shutter = shutter_handle.device
         except FieldError as exc:
             self._flag_invalid(exc.field_id)
             self.notify(f"Invalid sweep parameters: {exc}", severity="error", markup=False)
