@@ -245,9 +245,7 @@ class SweepScreen(Page):
         # from a ShutterHandle (see lab.INSTRUMENTS). The app's narrow handle
         # protocol doesn't expose these concrete wrappers' device attributes.
         mx_handle = self.iyzee_app.handles["mxa"]
-        shutter = (
-            self.iyzee_app.handles["shutter"].device if kind == "frequency" else None
-        )
+        shutter = self.iyzee_app.handles["shutter"].device if kind == "frequency" else None
 
         try:
             if kind == "bandwidth":
