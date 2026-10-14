@@ -29,6 +29,7 @@ The TUI is the way to run interactive measurements:
 │ Connect │  connect / disconnect instruments            │
 │ Sweep   │  configure and run MXA measurements          │
 │ Scope   │  configure and acquire oscilloscope traces   │
+│ Power   │  supply channels, global output and shutter  │
 │ Rb      │  browse rubidium D1/D2 transitions           │
 │ Results │  inspect and export saved measurements       │
 │ Console │  work directly with the live Python objects  │
@@ -36,7 +37,7 @@ The TUI is the way to run interactive measurements:
 └─────────┴──────────────────────────────────────────────┘
 ~~~
 
-Navigate with the letter keys (<code>c s o r t i l</code>) or the navigation rail. <code>F1</code>–<code>F4</code> provide quick access to Connect, Sweep, Results, and Console.
+Navigate with the letter keys (<code>c s o p r t i l</code>) or the navigation rail. <code>F1</code>–<code>F4</code> provide quick access to Connect, Sweep, Results, and Console.
 
 ### Use it as a library
 
@@ -92,6 +93,7 @@ Hardware is **not** connected merely by constructing a driver. Connections are e
 | <code>c</code> **Connect** | Connect and disconnect individual instruments |
 | <code>s</code> **Sweep** | Run bandwidth or frequency sweeps with live progress and traces |
 | <code>o</code> **Scope** | Synchronize scope settings, apply changes, acquire and save waveforms |
+| <code>p</code> **Power** | Read the power supply and shutter; switch global output and channels, set voltage and current limit |
 | <code>r</code> **Rb** | Inspect the rubidium D1/D2 hyperfine transition tables |
 | <code>t</code> **Results** | Browse saved sweep/scope recordings and export scope plots |
 | <code>i</code> **Console** | Use the live IPython session |

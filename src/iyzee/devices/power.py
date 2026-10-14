@@ -8,6 +8,11 @@ from .base import SHUTTER_CHANNEL_DEFAULT, BaseDevice
 #: The HMP4040 has four channels.
 CHANNELS = (1, 2, 3, 4)
 
+#: What one HMP4040 channel can be asked for (32 V, 10 A; not both at once). Callers that take
+#: numbers from a person use these to refuse a typo before it reaches the instrument.
+VOLTAGE_MAX = 32.0
+CURRENT_MAX = 10.0
+
 
 @dataclass(frozen=True)
 class ChannelState:

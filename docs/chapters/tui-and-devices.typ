@@ -250,6 +250,7 @@ can persist across switches.
   [`c` / F1], [#code("ConnectScreen")], [one row per instrument; Enter connects or disconnects (in a worker thread)],
   [`s` / F2], [#code("SweepScreen")], [bandwidth or frequency sweep with live progress and per-point checkpointing; also "Capture trace"],
   [`o`], [#code("ScopeScreen")], [channel and trigger form, Retrieve / Apply / Acquire & save],
+  [`p`], [#code("PowerScreen")], [the supply's four channels and the shutter, read back from the supply; global/channel/shutter switches and voltage/current setpoints],
   [`r`], [#code("RbScreen")], [static rubidium D1/D2 reference from `Rb_transitions`],
   [`t` / F3], [#code("ResultsScreen")], [browse saved sweep and scope recordings; derived waveforms and PNG export],
   [`i` / F4], [#code("ConsoleScreen")], [embedded IPython (@sec-console)],
@@ -258,7 +259,7 @@ can persist across switches.
 
 The registry is #code("PAGE_SPECS"); the nav rail, the content switcher and the `:` commands all derive from it, so adding a
 page cannot leave them out of step. F1–F4 reach only Connect/Sweep/Results/Console because the console's embedded terminal lets
-exactly those four through; Scope, Rb and Log are letter-only.
+exactly those four through; Scope, Power, Rb and Log are letter-only.
 
 The shared #code("Page") base owns mechanics that are not domain-specific: scrolling without stealing initial focus, labeled fields, the finite/positive
 validators, validation marking, the safe worker-to-UI callback #code("Page._ui"), and the no-op
