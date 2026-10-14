@@ -66,6 +66,21 @@ def acquire_trace(mx, trace_num):
         mx.set_trace_update(trace_num, False)
 
 
+def acquire_pair(mx, shutter=None):
+    """Acquire squeezing, then shot noise, closing the shutter between them."""
+    try:
+        if shutter is not None:
+            shutter.open()
+        squeezing = acquire_trace(mx, TRACE_SQZ)
+    finally:
+        if shutter is not None:
+            shutter.close()
+    return {
+        "squeezing": squeezing,
+        "shot_noise": acquire_trace(mx, TRACE_SHOT),
+    }
+
+
 @dataclass
 class BandwidthStep:
     """Acquire squeezing/shot-noise traces at one resolution bandwidth.
@@ -86,10 +101,7 @@ class BandwidthStep:
             label=self.label,
             x_value=self.rbw_hz,
             x_unit="Hz",
-            traces={
-                "squeezing": acquire_trace(ctx.mx, TRACE_SQZ),
-                "shot_noise": acquire_trace(ctx.mx, TRACE_SHOT),
-            },
+            traces=acquire_pair(ctx.mx),
             meta={"rbw_hz": self.rbw_hz, "vbw_hz": self.rbw_hz * 2},
         )
 
@@ -128,19 +140,11 @@ class FrequencyStep:
         time.sleep(self.relax_time_s)
         measured_frequency = wavemeter.read_frequency(self.wavemeter_channel)
 
-        try:
-            ctx.shutter.open()
-            squeezing = acquire_trace(ctx.mx, TRACE_SQZ)
-        finally:
-            ctx.shutter.close()
-
-        shot_noise = acquire_trace(ctx.mx, TRACE_SHOT)
-
         return StepResult(
             label=self.label,
             x_value=self.frequency_thz,
             x_unit="THz",
-            traces={"squeezing": squeezing, "shot_noise": shot_noise},
+            traces=acquire_pair(ctx.mx, ctx.shutter),
             meta={
                 "wavemeter_channel": self.wavemeter_channel,
                 "relax_time_s": self.relax_time_s,
