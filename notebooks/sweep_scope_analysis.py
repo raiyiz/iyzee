@@ -594,9 +594,7 @@ def _(catalog, mo, pl, scope_channels):
         [
             mo.md("## Compare runs"),
             mo.hstack([selected_sweeps, selected_statistic], gap=2, align="start"),
-            mo.hstack(
-                [selected_scope_runs, selected_scope_channel], gap=2, align="start"
-            ),
+            mo.hstack([selected_scope_runs, selected_scope_channel], gap=2, align="start"),
         ]
     )
     return (
