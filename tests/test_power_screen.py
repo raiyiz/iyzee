@@ -30,6 +30,10 @@ class FakePSU:
         self.calls: list[tuple[str, Any]] = []
         self.fail_on = fail_on
         self.lock_probe: threading.Lock | None = None
+        self.reads = 0
+        self.reads = 0  # how many times the state has been read
+        self.read_gate: threading.Event | None = None  # when set (an Event), reads wait for it
+        self.fail_reads = False
 
     def _do(self, name: str, *args: Any) -> None:
         self.calls.append((name, args))
@@ -37,6 +41,11 @@ class FakePSU:
             raise ConnectionError(f"{name} refused [by test]")
 
     def retrieve_state(self) -> PSUState:
+        self.reads += 1
+        if self.read_gate is not None:  # a slow supply: a full read is ~22 round-trips
+            self.read_gate.wait(10)
+        if self.fail_reads:
+            raise TimeoutError("the supply did not answer [by test]")
         return PSUState(
             general_output=self.general,
             channels=tuple(
@@ -282,8 +291,8 @@ async def test_controls_are_locked_while_a_sweep_runs() -> None:
         await pilot.pause()
         assert psu.writes() == []
 
-        app.sweep_running = False
-        screen._refresh_ui()
+        app.sweep_running = False  # ends with a read of the supply, then the controls return
+        await wait_until(pilot, lambda: not screen._busy)
         assert not _button(screen, "power-global").disabled
 
 
@@ -302,25 +311,6 @@ async def test_losing_the_connection_clears_the_page() -> None:
         assert screen.query_one("#power-status", Static).display
         assert _text(screen, "power-readout1") == "-"
         assert _button(screen, "power-global").disabled
-
-
-@async_test
-async def test_the_page_polls_the_supply_while_shown() -> None:
-    psu = FakePSU()
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, psu)
-
-        psu.general = True  # changed on the front panel
-        psu.selected[1] = True
-        screen._poll()
-        await wait_until(pilot, lambda: "Global output: ON" in _text(screen, "power-summary"))
-        assert "ON" in _text(screen, "power-readout1")
-        # The form is left alone by a poll (the person may be typing in it).
-        psu.voltage[1] = 7.0
-        _set(screen, "power-v1", "6")
-        screen._poll()
-        await wait_until(pilot, lambda: "7.000 V" in _text(screen, "power-readout1"))
-        assert screen.query_one("#power-v1", Input).value == "6"
 
 
 @async_test
@@ -363,3 +353,62 @@ async def test_the_shutters_channel_is_claimed_while_the_shutter_is_connected() 
         await pilot.pause()
         assert not _button(screen, "power-toggle3").disabled
         assert "use the Shutter button" not in _text(screen, "power-title3")
+
+
+@async_test
+async def test_the_page_never_polls_the_supply_in_the_background() -> None:
+    """Regression: a timer-driven read kept the page 'working' with its controls off."""
+    psu = FakePSU()
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open(pilot, psu)
+        reads = psu.reads
+        assert reads >= 1
+
+        await pilot.pause(0.6)  # far longer than any plausible refresh rate in a test
+
+        assert psu.reads == reads
+        assert not screen._busy
+        assert not _button(screen, "power-global").disabled
+        assert not _button(screen, "power-toggle1").disabled
+
+
+@async_test
+async def test_opening_the_page_again_reads_what_the_console_changed_meanwhile() -> None:
+    psu = FakePSU()
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open(pilot, psu)
+        assert "Global output: off" in _text(screen, "power-summary")
+        _set(screen, "power-v1", "6")  # a half-typed edit
+
+        await pilot.press("s")  # away ...
+        await pilot.pause()
+        psu.general = True  # ... the supply is changed from the console
+        psu.selected[1] = True
+        await pilot.press("p")  # ... and back
+        await wait_until(pilot, lambda: "Global output: ON" in _text(screen, "power-summary"))
+
+        assert "ON" in _text(screen, "power-readout1")
+        assert screen.query_one("#power-v1", Input).value == "6"  # typing is never overwritten
+
+
+@async_test
+async def test_a_finished_sweep_is_followed_by_a_read_and_the_controls_come_back() -> None:
+    psu = FakePSU()
+    async with IyzeeApp().run_test() as pilot:
+        app = pilot.app
+        assert isinstance(app, IyzeeApp)
+        screen = await _open(pilot, psu)
+
+        app.sweep_running = True
+        await pilot.pause()
+        assert _button(screen, "power-global").disabled
+        assert "a sweep is running" in _text(screen, "power-summary")
+        reads = psu.reads
+
+        psu.selected[3] = True  # the sweep left things moved
+        app.sweep_running = False
+        await wait_until(pilot, lambda: psu.reads > reads and not screen._busy)
+
+        assert not _button(screen, "power-global").disabled
+        assert "a sweep is running" not in _text(screen, "power-summary")
+        assert "armed" in _text(screen, "power-readout3")

@@ -266,7 +266,7 @@ class IyzeeApp(App):
         # True while a sweep or a trace capture is running. ConnectScreen
         # refuses to disconnect instruments meanwhile (the run holds the
         # instrument locks, so a disconnect could only stall behind it).
-        self.sweep_running = False
+        self._sweep_running = False
         # Passed straight through to IPythonSession (see ConsoleScreen.compose)
         # as its `history_file`. Defaults to `None` — `:memory:`, private,
         # nothing persisted — quite deliberately: every test in this
@@ -376,6 +376,19 @@ class IyzeeApp(App):
             if switcher and parameters[0] == switcher.first().current:
                 return False
         return True
+
+    @property
+    def sweep_running(self) -> bool:
+        return self._sweep_running
+
+    @sweep_running.setter
+    def sweep_running(self, running: bool) -> None:
+        """Set by the Sweep page; the Power page follows it (a sweep moves the shutter)."""
+        changed = running != self._sweep_running
+        self._sweep_running = running
+        if changed and self.is_running:
+            for page in self.query(PowerScreen):
+                page.sweep_state_changed()
 
     def instruments_changed(self) -> None:
         """Refresh every mounted view whose state depends on connections."""

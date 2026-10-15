@@ -11,6 +11,13 @@ Everything shown is what the supply reports (``PSU.retrieve_state``), never what
 asked for. After every change the page reads the state back, so a value the supply
 rounded, clamped or refused is displayed as it really is.
 
+There is deliberately **no background polling**. The supply is under our control and only
+changes when we command it, so the page reads it exactly when something may have changed:
+on connect, after each of its own actions, when the page is opened (the console may have
+changed things), when a sweep finishes (it moved the shutter), and on Refresh. A full read
+is about 22 round-trips to the supply and can take seconds; doing that on a timer kept the
+page permanently "working" with its controls disabled.
+
 Reading while a sweep runs is skipped: the run holds the shutter's lock for its whole
 duration, and a manual change in the middle of it would corrupt the measurement.
 """
@@ -19,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from collections.abc import Callable
 from typing import cast
 
@@ -35,9 +43,6 @@ from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float
 
 log = logging.getLogger("iyzee.tui")
-
-#: Seconds between background reads while the page is shown and idle.
-POLL_INTERVAL_S = 2.0
 
 #: A change to make, run with the PSU's lock held; the state is read back afterwards.
 Action = Callable[[PSU], None]
@@ -80,14 +85,27 @@ class PowerScreen(Page):
         yield RichLog(id="power-log", wrap=True, markup=True)
 
     def on_mount(self) -> None:
-        self._busy = False
+        self._busy = False  # talking to the supply: the controls are off until it answers
         self._synced = False  # the inputs have been filled from the supply for this connection
         self._state: PSUState | None = None
-        self.set_interval(POLL_INTERVAL_S, self._poll)
+        self._read_took_s: float | None = None
         self._refresh_ui()
 
     def on_show(self) -> None:
+        """Opening the page re-reads the supply: the console may have changed it meanwhile."""
         self.refresh_readiness()
+        self._read_supply()
+
+    def sweep_state_changed(self) -> None:
+        """A sweep started (controls off) or finished (it moved the shutter: read again)."""
+        self._refresh_ui()
+        if not self._sweep_running():
+            self._read_supply()
+
+    def _read_supply(self) -> None:
+        """Read the supply if the page is shown and nothing else is using the link."""
+        if self.display and self._psu() is not None and not self._sweep_running():
+            self._start(None, "read the supply", silent=True, fill_inputs=not self._synced)
 
     # -- connection ----------------------------------------------------------------------
 
@@ -118,8 +136,8 @@ class PowerScreen(Page):
             self._state = None
             self._synced = False
             self._busy = False
-        elif not self._synced and not self._busy and not self._sweep_running():
-            self._start(None, "read the supply", silent=True, fill_inputs=True)
+        elif not self._synced:
+            self._read_supply()  # first read after connecting
         self._refresh_ui()
 
     # -- display -------------------------------------------------------------------------
@@ -166,6 +184,8 @@ class PowerScreen(Page):
                 shutter_button.label = "Close shutter" if state.is_live(chan) else "Open shutter"
             if self._busy:
                 text += "   [dim]working…[/dim]"
+            elif self._read_took_s is not None:
+                text += f"   [dim]read in {self._read_took_s:.1f} s[/dim]"
             if self._sweep_running():
                 text += "   [dim]a sweep is running: controls are locked[/dim]"
             summary.update(text)
@@ -223,13 +243,18 @@ class PowerScreen(Page):
         silent: bool = False,
         fill_inputs: bool = False,
         fill_channels: tuple[int, ...] = (),
-    ) -> None:
+    ) -> bool:
+        """Run ``action`` (if any) and then read the supply back, in a worker thread.
+
+        The controls are off until the supply has answered; the UI itself never blocks.
+        """
         handle, psu = self._handle(), self._psu()
         if handle is None or psu is None or self._busy:
-            return
+            return False
         self._busy = True
         self._refresh_ui()
         self._operate(handle, psu, action, what, silent, fill_inputs, fill_channels)
+        return True
 
     @work(thread=True, group="power", exit_on_error=False)
     def _operate(
@@ -244,8 +269,10 @@ class PowerScreen(Page):
     ) -> None:
         state: PSUState | None = None
         error: Exception | None = None
+        took = 0.0
         try:
-            with handle.lock:
+            with handle.lock:  # waits for a sweep or the console if either has the link
+                started = time.monotonic()
                 try:
                     if action is not None:
                         action(psu)
@@ -258,15 +285,18 @@ class PowerScreen(Page):
                 except Exception as exc:  # noqa: BLE001 - never leave the page busy
                     log.exception("power: reading the supply failed")
                     error = error or exc
+                took = time.monotonic() - started
         except Exception as exc:  # noqa: BLE001 - e.g. the lock itself
             error = error or exc
-        self._ui(self._finish, handle, what, state, error, silent, fill_inputs, fill_channels)
+        log.info("power: %s took %.2f s", what, took)
+        self._ui(self._finish, handle, what, state, took, error, silent, fill_inputs, fill_channels)
 
     def _finish(
         self,
         handle: InstrumentHandle,
         what: str,
         state: PSUState | None,
+        took: float,
         error: Exception | None,
         silent: bool,
         fill_inputs: bool,
@@ -278,6 +308,7 @@ class PowerScreen(Page):
             return
         if state is not None:
             self._state = state
+            self._read_took_s = took
             if fill_inputs:
                 self._fill_inputs(state)
                 self._synced = True
@@ -290,17 +321,6 @@ class PowerScreen(Page):
         elif not silent:
             self._write_log(f"Done: {what}.")
         self._refresh_ui()
-
-    def _poll(self) -> None:
-        """Keep the readings live while the page is shown, idle and nothing else is using the link."""
-        if (
-            self.display
-            and self._psu() is not None
-            and self._synced
-            and not self._busy
-            and not self._sweep_running()
-        ):
-            self._start(None, "read the supply", silent=True)
 
     # -- buttons -------------------------------------------------------------------------
 
