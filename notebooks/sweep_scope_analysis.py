@@ -17,8 +17,8 @@ def _():
     import hashlib
     from pathlib import Path
 
-    import matplotlib.pyplot as plt
     import marimo as mo
+    import matplotlib.pyplot as plt
     import numpy as np
 
     from iyzee.analysis import summarize_sweep
