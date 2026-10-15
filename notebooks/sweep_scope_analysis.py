@@ -186,9 +186,7 @@ def _(arrays, kind, mo, recording, traces_from_scope_recording):
         disabled=count < 2,
         label="Sweep point (zero-based index)",
     )
-    channels = {trace.label: trace.label for trace in traces} or {
-        "No scope channels": ""
-    }
+    channels = {trace.label: trace.label for trace in traces} or {"No scope channels": ""}
     channel = mo.ui.dropdown(
         options=channels,
         value=next(iter(channels.values())),
@@ -199,9 +197,7 @@ def _(arrays, kind, mo, recording, traces_from_scope_recording):
     elif kind == "scope-acquisition":
         controls = channel
     else:
-        controls = mo.md(
-            "Select a sweep or scope recording to display analysis controls."
-        )
+        controls = mo.md("Select a sweep or scope recording to display analysis controls.")
     controls
     return channel, point, statistic, traces
 
@@ -232,16 +228,10 @@ def _(
             x = [p.requested / 1e3 for p in usable]
             xlabel = "Resolution bandwidth (kHz)"
         else:
-            frequencies = [
-                p.measured if p.measured is not None else p.requested for p in points
-            ]
+            frequencies = [p.measured if p.measured is not None else p.requested for p in points]
             reference = float(np.median(frequencies)) if frequencies else 0.0
             x = [
-                (
-                    (p.measured if p.measured is not None else p.requested)
-                    - reference
-                )
-                * 1e6
+                ((p.measured if p.measured is not None else p.requested) - reference) * 1e6
                 for p in usable
             ]
             xlabel = "Frequency offset from median scan frequency (MHz)"
@@ -341,9 +331,7 @@ def _(
     elif kind == "scope-acquisition":
         trace = next((t for t in traces if t.label == channel.value), None)
         if trace is None:
-            analysis = mo.md(
-                "## Scope analysis\nNo usable channel arrays were found."
-            )
+            analysis = mo.md("## Scope analysis\nNo usable channel arrays were found.")
         else:
             values = np.asarray(trace.values, float)
             times = np.asarray(trace.time, float)
@@ -399,8 +387,7 @@ def _(
                     (
                         waveform
                         for waveform in manifest.get("waveforms", [])
-                        if isinstance(waveform, dict)
-                        and waveform.get("channel") == trace.label
+                        if isinstance(waveform, dict) and waveform.get("channel") == trace.label
                     ),
                     {},
                 )
@@ -424,9 +411,9 @@ def _(
                 analysis = mo.vstack(
                     [
                         fig,
-                        mo.md(
-                            "No finite samples are available for statistics."
-                        ).callout(kind="warn"),
+                        mo.md("No finite samples are available for statistics.").callout(
+                            kind="warn"
+                        ),
                     ]
                 )
     else:
