@@ -610,7 +610,6 @@ def _(catalog, mo, pl, scope_channels):
 
 @app.cell
 def _(
-    load_run,
     mo,
     plot_scope_comparison,
     plot_sweep_comparison,
@@ -682,12 +681,18 @@ def _(mo):
         recording = load_run(run_id)
         print(run_id, recording.arrays.keys())
 
-    # Compose the plotting helpers into your own figure.
+    # Compose the sweep helper into your own figure.
     fig, ax = plt.subplots(figsize=(10, 4), layout="constrained")
     plot_sweep_comparison(sweep_points, selected_sweeps.value, ax=ax)
 
     # Compare one channel across several saved scope runs.
-    plot_scope_comparison(selected_scope_runs.value, channel="C1", ax=ax)
+    fig_scope, ax_scope = plt.subplots(figsize=(10, 4), layout="constrained")
+    plot_scope_comparison(selected_scope_runs.value, channel="C1", ax=ax_scope)
+
+    # Or plot a single channel from any loaded recording.
+    recording = load_run(selected_scope_runs.value[0])
+    trace = traces_from_scope_recording(recording)[0]
+    plot_trace(trace)
     ~~~
     """)
     return
