@@ -90,7 +90,7 @@ def _(
         """Read the JSON sidecar; return an empty mapping if it is absent or invalid."""
         try:
             value = json.loads(path.with_suffix(".json").read_text())
-        except (OSError, json.JSONDecodeError):
+        except OSError, json.JSONDecodeError:
             return {}
         return value if isinstance(value, dict) else {}
 
@@ -98,11 +98,14 @@ def _(
         if manifest.get("kind") == "scope-acquisition" or "_scope_" in path.name:
             return "scope"
         points = manifest.get("points") or []
-        if any(
-            isinstance(point, dict)
-            and ("wavemeter_channel" in point or "measured_frequency_thz" in point)
-            for point in points
-        ) or "_frequency_" in path.name:
+        if (
+            any(
+                isinstance(point, dict)
+                and ("wavemeter_channel" in point or "measured_frequency_thz" in point)
+                for point in points
+            )
+            or "_frequency_" in path.name
+        ):
             return "frequency"
         if points or manifest.get("run_metadata") or "_bandwidth_" in path.name:
             return "bandwidth"
@@ -132,7 +135,9 @@ def _(
                     "kind": kind,
                     "modified_at": modified.isoformat(timespec="seconds") if modified else None,
                     "size_mib": size_mib,
-                    "status": str(run.get("status") or ("acquired" if kind == "scope" else "unknown")),
+                    "status": str(
+                        run.get("status") or ("acquired" if kind == "scope" else "unknown")
+                    ),
                     "n_points": len(points) if kind in ("frequency", "bandwidth") else None,
                     "n_channels": len(waveforms) if kind == "scope" else None,
                     "instrument": str(instrument.get("identity") or ""),
@@ -270,8 +275,7 @@ def _(
             if kind == "frequency":
                 center = float(np.median(x_values))
                 x_values = [
-                    (value - center) * 1e6 if frequency_offset_mhz else value
-                    for value in x_values
+                    (value - center) * 1e6 if frequency_offset_mhz else value for value in x_values
                 ]
             else:
                 x_values = [value / 1e3 for value in x_values]
@@ -317,10 +321,12 @@ def _(
 
 @app.cell
 def _(DATA_ROOT, catalog, mo):
-    mo.vstack([
-        mo.md(f"## Run catalog\n**Data root:** {DATA_ROOT}"),
-        catalog.sort("modified_at", descending=True),
-    ])
+    mo.vstack(
+        [
+            mo.md(f"## Run catalog\n**Data root:** {DATA_ROOT}"),
+            catalog.sort("modified_at", descending=True),
+        ]
+    )
     return
 
 
@@ -330,29 +336,31 @@ def _(Path, catalog, load_run, pl, read_manifest, summarize_sweep):
     scope_rows = []
     read_errors = []
 
-    for run in catalog.filter(pl.col("kind").is_in(["bandwidth", "frequency"])).iter_rows(named=True):
+    for run in catalog.filter(pl.col("kind").is_in(["bandwidth", "frequency"])).iter_rows(
+        named=True
+    ):
         run_id = run["run_id"]
         try:
             recording = load_run(run_id)
             mean_summary = summarize_sweep(recording, "mean")
             min_summary = summarize_sweep(recording, "minimum")
-            for mean_point, min_point in zip(
-                mean_summary.points, min_summary.points, strict=True
-            ):
+            for mean_point, min_point in zip(mean_summary.points, min_summary.points, strict=True):
                 measured = mean_point.measured
-                sweep_rows.append({
-                    "run_id": run_id,
-                    "path": run["path"],
-                    "kind": mean_summary.axis,
-                    "point_index": mean_point.index,
-                    "label": mean_point.label,
-                    "requested": mean_point.requested,
-                    "x_unit": mean_summary.x_unit,
-                    "measured_frequency_thz": measured,
-                    "axis_value": measured if measured is not None else mean_point.requested,
-                    "relative_noise_mean_db": mean_point.relative_noise_db,
-                    "relative_noise_min_db": min_point.relative_noise_db,
-                })
+                sweep_rows.append(
+                    {
+                        "run_id": run_id,
+                        "path": run["path"],
+                        "kind": mean_summary.axis,
+                        "point_index": mean_point.index,
+                        "label": mean_point.label,
+                        "requested": mean_point.requested,
+                        "x_unit": mean_summary.x_unit,
+                        "measured_frequency_thz": measured,
+                        "axis_value": measured if measured is not None else mean_point.requested,
+                        "relative_noise_mean_db": mean_point.relative_noise_db,
+                        "relative_noise_min_db": min_point.relative_noise_db,
+                    }
+                )
         except Exception as exc:  # noqa: BLE001 - isolate a broken recording and keep the rest usable
             read_errors.append({"run_id": run_id, "stage": "sweep summary", "error": str(exc)})
 
@@ -360,7 +368,9 @@ def _(Path, catalog, load_run, pl, read_manifest, summarize_sweep):
         manifest = read_manifest(Path(run["path"]))
         settings_by_channel = {
             str(item.get("channel")): item
-            for item in ((manifest.get("configuration") or {}).get("applied_channel_settings") or [])
+            for item in (
+                (manifest.get("configuration") or {}).get("applied_channel_settings") or []
+            )
             if isinstance(item, dict)
         }
         for waveform in manifest.get("waveforms") or []:
@@ -369,29 +379,31 @@ def _(Path, catalog, load_run, pl, read_manifest, summarize_sweep):
             channel = str(waveform.get("channel", "?"))
             stats = waveform.get("stats") or {}
             settings = settings_by_channel.get(channel, {})
-            scope_rows.append({
-                "run_id": run["run_id"],
-                "path": run["path"],
-                "modified_at": run["modified_at"],
-                "channel": channel,
-                "instrument": run["instrument"],
-                "address": run["address"],
-                "value_unit": waveform.get("value_unit"),
-                "time_unit": waveform.get("time_unit"),
-                "samples": stats.get("sample_count"),
-                "minimum": stats.get("min"),
-                "maximum": stats.get("max"),
-                "peak_to_peak": stats.get("peak_to_peak"),
-                "mean": stats.get("mean"),
-                "rms": stats.get("rms"),
-                "stddev": stats.get("stddev"),
-                "time_offset": waveform.get("time_offset"),
-                "time_interval": waveform.get("time_interval"),
-                "volts_per_div": settings.get("volts_per_div"),
-                "coupling": settings.get("coupling"),
-                "frozen": run["frozen"],
-                "warnings": run["warnings"],
-            })
+            scope_rows.append(
+                {
+                    "run_id": run["run_id"],
+                    "path": run["path"],
+                    "modified_at": run["modified_at"],
+                    "channel": channel,
+                    "instrument": run["instrument"],
+                    "address": run["address"],
+                    "value_unit": waveform.get("value_unit"),
+                    "time_unit": waveform.get("time_unit"),
+                    "samples": stats.get("sample_count"),
+                    "minimum": stats.get("min"),
+                    "maximum": stats.get("max"),
+                    "peak_to_peak": stats.get("peak_to_peak"),
+                    "mean": stats.get("mean"),
+                    "rms": stats.get("rms"),
+                    "stddev": stats.get("stddev"),
+                    "time_offset": waveform.get("time_offset"),
+                    "time_interval": waveform.get("time_interval"),
+                    "volts_per_div": settings.get("volts_per_div"),
+                    "coupling": settings.get("coupling"),
+                    "frozen": run["frozen"],
+                    "warnings": run["warnings"],
+                }
+            )
 
     sweep_schema = {
         "run_id": pl.String,
@@ -440,14 +452,20 @@ def _(Path, catalog, load_run, pl, read_manifest, summarize_sweep):
 
 @app.cell
 def _(errors, mo, scope_channels, sweep_points):
-    mo.vstack([
-        mo.md("## Sweep points\nOne row per point; requested and measured setpoints stay separate."),
-        sweep_points.sort(["run_id", "point_index"]),
-        mo.md("## Scope channel summaries\nOne row per run and channel; values come from the saved manifest."),
-        scope_channels.sort(["modified_at", "channel"], descending=[True, False]),
-        mo.md("## Read problems"),
-        errors if not errors.is_empty() else mo.md("No sweep files failed to load."),
-    ])
+    mo.vstack(
+        [
+            mo.md(
+                "## Sweep points\nOne row per point; requested and measured setpoints stay separate."
+            ),
+            sweep_points.sort(["run_id", "point_index"]),
+            mo.md(
+                "## Scope channel summaries\nOne row per run and channel; values come from the saved manifest."
+            ),
+            scope_channels.sort(["modified_at", "channel"], descending=[True, False]),
+            mo.md("## Read problems"),
+            errors if not errors.is_empty() else mo.md("No sweep files failed to load."),
+        ]
+    )
     return
 
 
@@ -455,7 +473,8 @@ def _(errors, mo, scope_channels, sweep_points):
 def _(catalog, mo, pl, scope_channels):
     sweep_ids = (
         catalog.filter(pl.col("kind").is_in(["bandwidth", "frequency"]))
-        .get_column("run_id").to_list()
+        .get_column("run_id")
+        .to_list()
     )
     scope_ids = catalog.filter(pl.col("kind") == "scope").get_column("run_id").to_list()
     selected_sweeps = mo.ui.multiselect(
@@ -475,7 +494,8 @@ def _(catalog, mo, pl, scope_channels):
     )
     channels_for_run = (
         scope_channels.filter(pl.col("run_id") == selected_scope.value)
-        .get_column("channel").to_list()
+        .get_column("channel")
+        .to_list()
         if selected_scope.value
         else []
     )
@@ -484,11 +504,13 @@ def _(catalog, mo, pl, scope_channels):
         value=channels_for_run,
         label="Scope channels to plot",
     )
-    mo.vstack([
-        mo.md("## Compare runs"),
-        mo.hstack([selected_sweeps, selected_statistic], gap=2, align="start"),
-        mo.hstack([selected_scope, selected_channels], gap=2, align="start"),
-    ])
+    mo.vstack(
+        [
+            mo.md("## Compare runs"),
+            mo.hstack([selected_sweeps, selected_statistic], gap=2, align="start"),
+            mo.hstack([selected_scope, selected_channels], gap=2, align="start"),
+        ]
+    )
     return selected_channels, selected_scope, selected_statistic, selected_sweeps
 
 
