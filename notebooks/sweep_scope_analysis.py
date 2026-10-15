@@ -344,7 +344,6 @@ def _(
     catalog = build_catalog(files)
     return (
         DATA_ROOT,
-        Path,
         build_catalog,
         catalog,
         files,
