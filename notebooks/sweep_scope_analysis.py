@@ -81,7 +81,6 @@ def _(
     np,
     pl,
     plt,
-    summarize_sweep,
     traces_from_scope_recording,
 ):
     DATA_ROOT = data_root()
@@ -324,7 +323,7 @@ def _(DATA_ROOT, catalog, mo):
     mo.vstack(
         [
             mo.md(f"## Run catalog\n**Data root:** {DATA_ROOT}"),
-            catalog.sort("modified_at", descending=True),
+            mo.ui.table(catalog.sort("modified_at", descending=True), selection=None, page_size=20),
         ]
     )
     return
@@ -457,13 +456,23 @@ def _(errors, mo, scope_channels, sweep_points):
             mo.md(
                 "## Sweep points\nOne row per point; requested and measured setpoints stay separate."
             ),
-            sweep_points.sort(["run_id", "point_index"]),
+            mo.ui.table(
+                sweep_points.sort(["run_id", "point_index"]),
+                selection=None,
+                page_size=20,
+            ),
             mo.md(
                 "## Scope channel summaries\nOne row per run and channel; values come from the saved manifest."
             ),
-            scope_channels.sort(["modified_at", "channel"], descending=[True, False]),
+            mo.ui.table(
+                scope_channels.sort(["modified_at", "channel"], descending=[True, False]),
+                selection=None,
+                page_size=20,
+            ),
             mo.md("## Read problems"),
-            errors if not errors.is_empty() else mo.md("No sweep files failed to load."),
+            mo.ui.table(errors, selection=None, page_size=10)
+            if not errors.is_empty()
+            else mo.md("No sweep files failed to load."),
         ]
     )
     return
