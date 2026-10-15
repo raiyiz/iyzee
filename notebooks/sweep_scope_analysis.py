@@ -1,9 +1,9 @@
-"""Explore saved iyzee sweeps and LeCroy scope traces with marimo.
+"""Explore and compare iyzee recordings with Polars and reusable Matplotlib helpers.
 
 From the iyzee checkout:
-    uv run --with marimo marimo edit notebooks/sweep_scope_analysis.py
+    uv run --with marimo --with polars marimo edit notebooks/sweep_scope_analysis.py
 
-Read-only: this notebook opens saved recordings and never connects to hardware.
+Read-only: this notebook loads saved recordings and never connects to hardware.
 """
 
 import marimo
@@ -15,24 +15,32 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import hashlib
+    import json
+    from datetime import datetime
     from pathlib import Path
 
     import marimo as mo
     import matplotlib.pyplot as plt
     import numpy as np
+    import polars as pl
 
     from iyzee.analysis import summarize_sweep
     from iyzee.config import data_root
-    from iyzee.experiment import load_recording
-    from iyzee.waveform_math import traces_from_scope_recording
+    from iyzee.experiment import Recording, load_recording
+    from iyzee.waveform_math import Trace, traces_from_scope_recording
 
     return (
         Path,
+        Recording,
+        Trace,
         data_root,
+        datetime,
         hashlib,
+        json,
         load_recording,
         mo,
         np,
+        pl,
         plt,
         summarize_sweep,
         traces_from_scope_recording,
@@ -42,405 +50,528 @@ def _():
 @app.cell
 def _(mo):
     mo.md("""
-    # iyzee · Measurement explorer
+    # iyzee · Run analysis workbench
 
-    A small, read-only workbench for **saved sweeps** and **scope waveforms**.
-    Pick a recording, check its manifest, then inspect the data with iyzee's
-    existing analysis routines.
+    The data-first notebook: **one catalog row per recording**, one row per sweep
+    point, and one row per scope channel. Use the Polars frames for filtering,
+    grouping, joins, list comprehensions, and quick comparisons. Load waveform
+    arrays only when you need to inspect a particular run.
 
-    - **Sweeps:** relative noise (squeezing minus shot noise), selected trace pairs,
-      requested and measured frequency.
-    - **Scope:** waveform plot, RMS / peak-to-peak / spread, acquisition warnings.
+    The plotting functions below are reusable outside this notebook:
+    **plot_sweep_comparison(...)**, **plot_scope(...)**, and **plot_trace(...)**.
+    They accept an existing Matplotlib ax, so you can compose them into
+    publication figures without changing their internals.
 
-    Negative relative noise means squeezing is below the shot-noise reference.
-    This notebook reads saved files only; it does not talk to laboratory hardware.
+    All access is read-only. No instrument connection or acquisition is performed.
+    Negative relative noise means the squeezing trace is below its shot-noise reference.
     """)
     return
 
 
 @app.cell
-def _(Path, data_root, mo):
-    root = data_root()
-    browser_root = root if root.is_dir() else Path.cwd()
-    files = (
-        sorted(
-            root.rglob("*.npz"),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        if root.is_dir()
-        else []
-    )
-    browser = mo.ui.file_browser(
-        initial_path=browser_root,
-        filetypes=[".npz"],
-        selection_mode="file",
-        multiple=False,
-        value=files[0] if files else None,
-        label="Recording (.npz; the matching .json manifest is loaded automatically)",
-    )
-    mo.vstack([mo.md(f"**Data root:** {root}"), browser])
-    return (browser,)
+def _(
+    Path,
+    Recording,
+    Trace,
+    data_root,
+    datetime,
+    hashlib,
+    json,
+    load_recording,
+    np,
+    pl,
+    plt,
+    summarize_sweep,
+    traces_from_scope_recording,
+):
+    DATA_ROOT = data_root()
 
+    def read_manifest(path: Path) -> dict:
+        """Read the JSON sidecar; return an empty mapping if it is absent or invalid."""
+        try:
+            value = json.loads(path.with_suffix(".json").read_text())
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
 
-@app.cell
-def _(hashlib):
-    def sha256(path):
-        """Hash the recording incrementally without copying it all into RAM."""
+    def _run_kind(path: Path, manifest: dict) -> str:
+        if manifest.get("kind") == "scope-acquisition" or "_scope_" in path.name:
+            return "scope"
+        points = manifest.get("points") or []
+        if any(
+            isinstance(point, dict)
+            and ("wavemeter_channel" in point or "measured_frequency_thz" in point)
+            for point in points
+        ) or "_frequency_" in path.name:
+            return "frequency"
+        if points or manifest.get("run_metadata") or "_bandwidth_" in path.name:
+            return "bandwidth"
+        return "unknown"
+
+    def build_catalog(paths: list[Path]) -> pl.DataFrame:
+        """Build a lightweight index from sidecars without loading waveform arrays."""
+        rows = []
+        for path in paths:
+            manifest = read_manifest(path)
+            kind = _run_kind(path, manifest)
+            run = manifest.get("run_metadata") or {}
+            instrument = manifest.get("instrument") or {}
+            acquisition = manifest.get("acquisition") or {}
+            points = manifest.get("points") or []
+            waveforms = manifest.get("waveforms") or []
+            try:
+                modified = datetime.fromtimestamp(path.stat().st_mtime).astimezone()
+                size_mib = path.stat().st_size / (1024**2)
+            except OSError:
+                modified = None
+                size_mib = None
+            rows.append(
+                {
+                    "run_id": path.stem,
+                    "path": str(path.resolve()),
+                    "kind": kind,
+                    "modified_at": modified.isoformat(timespec="seconds") if modified else None,
+                    "size_mib": size_mib,
+                    "status": str(run.get("status") or ("acquired" if kind == "scope" else "unknown")),
+                    "n_points": len(points) if kind in ("frequency", "bandwidth") else None,
+                    "n_channels": len(waveforms) if kind == "scope" else None,
+                    "instrument": str(instrument.get("identity") or ""),
+                    "address": str(instrument.get("address") or ""),
+                    "frozen": acquisition.get("frozen") if kind == "scope" else None,
+                    "warnings": len(acquisition.get("warnings") or []) if kind == "scope" else 0,
+                    "checksum_recorded": bool(manifest.get("data_sha256")),
+                }
+            )
+        schema = {
+            "run_id": pl.String,
+            "path": pl.String,
+            "kind": pl.String,
+            "modified_at": pl.String,
+            "size_mib": pl.Float64,
+            "status": pl.String,
+            "n_points": pl.Int64,
+            "n_channels": pl.Int64,
+            "instrument": pl.String,
+            "address": pl.String,
+            "frozen": pl.Boolean,
+            "warnings": pl.Int64,
+            "checksum_recorded": pl.Boolean,
+        }
+        return pl.DataFrame(rows, schema=schema)
+
+    def load_run(run_id: str) -> Recording:
+        """Load one archive by its catalog run_id; arrays are loaded on demand."""
+        matches = catalog.filter(pl.col("run_id") == run_id)
+        if matches.is_empty():
+            raise KeyError(f"No recording with run_id={run_id!r}")
+        return load_recording(Path(matches.item(0, "path")))
+
+    def verify_run(run_id: str) -> dict[str, str | bool]:
+        """Compare one NPZ's SHA-256 with the digest stored in its sidecar."""
+        matches = catalog.filter(pl.col("run_id") == run_id)
+        if matches.is_empty():
+            raise KeyError(f"No recording with run_id={run_id!r}")
+        path = Path(matches.item(0, "path"))
+        manifest = read_manifest(path)
+        expected = manifest.get("data_sha256")
+        if not expected:
+            return {"run_id": run_id, "ok": False, "state": "no digest in manifest"}
         digest = hashlib.sha256()
         with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        ok = digest.hexdigest() == expected
+        return {
+            "run_id": run_id,
+            "ok": ok,
+            "state": "matches manifest" if ok else "MISMATCH",
+        }
 
-    return (sha256,)
+    def _styled_axes(ax, *, title=None, xlabel=None, ylabel=None):
+        """Apply the shared house style to any Matplotlib axes."""
+        if title is not None:
+            ax.set_title(title, loc="left", pad=10)
+        if xlabel is not None:
+            ax.set_xlabel(xlabel)
+        if ylabel is not None:
+            ax.set_ylabel(ylabel)
+        ax.grid(True, which="major", alpha=0.25)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        return ax.figure, ax
 
-
-@app.cell
-def _(browser, load_recording, mo, sha256, summarize_sweep):
-    path = browser.path(index=0) if browser.value else None
-    recording = load_recording(path) if path is not None else None
-    arrays = recording.arrays if recording is not None else {}
-    manifest = recording.metadata if recording is not None else {}
-    kind = str(manifest.get("kind", "unknown"))
-    if recording is not None and kind != "scope-acquisition" and "x_values" in arrays:
-        # Sweep manifests have run_metadata/points but no top-level kind field.
-        kind = summarize_sweep(recording).axis
-    digest = manifest.get("data_sha256")
-    if not digest:
-        checksum = "not recorded"
-    elif sha256(path) == digest:
-        checksum = "matches manifest"
-    else:
-        checksum = "MISMATCH"
-
-    run = manifest.get("run_metadata") or {}
-    instrument = manifest.get("instrument") or {}
-    acquisition = manifest.get("acquisition") or {}
-    warnings = acquisition.get("warnings") or []
-
-    if recording is None:
-        overview = mo.md(
-            "Choose a saved .npz recording above. The newest file under iyzee's "
-            "configured data root is preselected when available."
-        ).callout(kind="info")
-    else:
-        lines = [
-            f"**File:** {path.name}",
-            f"**Kind:** {kind}",
-            f"**Checksum:** {checksum}",
-        ]
-        if kind == "scope-acquisition":
-            lines.extend(
-                [
-                    f"**Instrument:** {instrument.get('identity') or 'identity not recorded'}",
-                    f"**Frozen acquisition:** {acquisition.get('frozen', 'not recorded')}",
-                ]
-            )
-            if warnings:
-                lines.append("**Warnings:**\n" + "\n".join(f"- {w}" for w in warnings))
-        else:
-            lines.extend(
-                [
-                    f"**Run status:** {run.get('status', 'not recorded')}",
-                    f"**Points:** {len(arrays.get('x_values', []))}",
-                ]
-            )
-            failed = run.get("failed_steps") or []
-            if failed:
-                lines.append(f"**Failed steps:** {len(failed)}")
-        overview = mo.md("\n\n".join(lines)).callout(
-            kind="danger" if checksum == "MISMATCH" else "success"
+    def plot_trace(trace: Trace, *, ax=None, title=None, label=None, linewidth=1.2):
+        """Plot one iyzee Trace; pass ax to compose it into an existing figure."""
+        if ax is None:
+            _, ax = plt.subplots(figsize=(8.5, 4), layout="constrained")
+        ax.plot(trace.time, trace.values, label=label or trace.label, linewidth=linewidth)
+        _styled_axes(
+            ax,
+            title=title or trace.label,
+            xlabel=f"Time ({trace.time_unit})",
+            ylabel=f"Signal ({trace.value_unit})",
         )
-    overview
-    return arrays, kind, manifest, path, recording
+        ax.legend(frameon=False)
+        return ax.figure, ax
 
+    def plot_scope(recording: Recording, *, channels=None, ax=None, title=None):
+        """Overlay selected scope channels that share a value unit."""
+        traces = traces_from_scope_recording(recording)
+        selected = set(channels) if channels is not None else None
+        traces = [trace for trace in traces if selected is None or trace.label in selected]
+        if not traces:
+            raise ValueError("No matching scope channels have waveform data")
+        units = {trace.value_unit for trace in traces}
+        if len(units) > 1:
+            raise ValueError(
+                "Selected channels use different units; plot them on separate axes instead"
+            )
+        if ax is None:
+            _, ax = plt.subplots(figsize=(8.5, 4), layout="constrained")
+        for trace in traces:
+            ax.plot(trace.time, trace.values, label=trace.label, linewidth=1.0)
+        _styled_axes(
+            ax,
+            title=title or f"Scope capture · {recording.path.stem}",
+            xlabel=f"Time ({traces[0].time_unit})",
+            ylabel=f"Signal ({traces[0].value_unit})",
+        )
+        ax.legend(frameon=False, ncols=min(len(traces), 4))
+        return ax.figure, ax
 
-@app.cell
-def _(arrays, manifest, path, recording):
-    arrays, recording, path, manifest
-    return
+    def plot_sweep_comparison(
+        points: pl.DataFrame,
+        run_ids: list[str],
+        *,
+        statistic="mean",
+        ax=None,
+        frequency_offset_mhz=True,
+    ):
+        """Compare sweep runs on a shared axis using the normalized point table."""
+        if statistic not in ("mean", "minimum"):
+            raise ValueError("statistic must be 'mean' or 'minimum'")
+        selected = points.filter(pl.col("run_id").is_in(run_ids))
+        kinds = selected.get_column("kind").unique().to_list() if not selected.is_empty() else []
+        if len(kinds) > 1:
+            raise ValueError("Choose bandwidth sweeps or frequency sweeps, not both")
+        kind = kinds[0] if kinds else "bandwidth"
+        y_column = "relative_noise_mean_db" if statistic == "mean" else "relative_noise_min_db"
+        if ax is None:
+            _, ax = plt.subplots(figsize=(8.5, 4.5), layout="constrained")
+        for run_id in run_ids:
+            subset = selected.filter(pl.col("run_id") == run_id).sort("point_index")
+            xs = subset.get_column("axis_value").to_list()
+            ys = subset.get_column(y_column).to_list()
+            pairs = [(x, y) for x, y in zip(xs, ys, strict=True) if x is not None and y is not None]
+            if not pairs:
+                continue
+            x_values = [pair[0] for pair in pairs]
+            y_values = [pair[1] for pair in pairs]
+            if kind == "frequency":
+                center = float(np.median(x_values))
+                x_values = [
+                    (value - center) * 1e6 if frequency_offset_mhz else value
+                    for value in x_values
+                ]
+            else:
+                x_values = [value / 1e3 for value in x_values]
+            ax.plot(x_values, y_values, marker="o", markersize=3.5, label=run_id)
+        xlabel = (
+            "Frequency offset (MHz)"
+            if kind == "frequency" and frequency_offset_mhz
+            else "Frequency (THz)"
+            if kind == "frequency"
+            else "Resolution bandwidth (kHz)"
+        )
+        _styled_axes(
+            ax,
+            title=f"Sweep comparison · {statistic} relative noise",
+            xlabel=xlabel,
+            ylabel="Squeezing − shot noise (dB)",
+        )
+        ax.axhline(0, linestyle="--", linewidth=1, alpha=0.75)
+        if any(line.get_label() in run_ids for line in ax.lines):
+            ax.legend(frameon=False, fontsize="small")
+        return ax.figure, ax
 
-
-@app.cell
-def _(plt, recording):
-    print(recording.metadata.keys())
-    print(recording.metadata['data_sha256'])
-
-    [plt.plot(arr) for arr in recording.arrays]
-    return
-
-
-@app.cell(hide_code=True)
-def _(arrays, kind, mo, recording, traces_from_scope_recording):
-    count = (
-        len(arrays.get("x_values", []))
-        if recording is not None and kind != "scope-acquisition"
-        else 0
-    )
-    traces = (
-        traces_from_scope_recording(recording)
-        if recording is not None and kind == "scope-acquisition"
+    files = (
+        sorted(DATA_ROOT.rglob("*.npz"), key=lambda path: path.stat().st_mtime, reverse=True)
+        if DATA_ROOT.is_dir()
         else []
     )
-    statistic = mo.ui.dropdown(
-        options={
-            "Mean relative noise": "mean",
-            "Minimum relative noise": "minimum",
-        },
-        # value="mean",
-        value="Mean relative noise",
-    
-        label="Sweep statistic",
+    catalog = build_catalog(files)
+    return (
+        DATA_ROOT,
+        Path,
+        build_catalog,
+        catalog,
+        files,
+        load_run,
+        plot_scope,
+        plot_sweep_comparison,
+        plot_trace,
+        read_manifest,
+        verify_run,
     )
-    point = mo.ui.slider(
-        start=0,
-        stop=max(count - 1, 0),
-        step=1,
-        value=0,
-        disabled=count < 2,
-        label="Sweep point (zero-based index)",
-    )
-    channels = {trace.label: trace.label for trace in traces} or {"No scope channels": ""}
-    channel = mo.ui.dropdown(
-        options=channels,
-        value=next(iter(channels.values())) or "No scope channels",
-        label="Scope channel",
-    )
-    if kind in ("bandwidth", "frequency"):
-        controls = mo.vstack([statistic, point])
-    elif kind == "scope-acquisition":
-        controls = channel
-    else:
-        controls = mo.md("Select a sweep or scope recording to display analysis controls.")
-    controls
-    return channel, point, statistic, traces
 
 
-@app.cell(hide_code=True)
-def _(
-    arrays,
-    channel,
-    kind,
-    manifest,
-    mo,
-    np,
-    plt,
-    point,
-    recording,
-    statistic,
-    summarize_sweep,
-    traces,
-):
-    if recording is None:
-        analysis = mo.md("## Analysis\nSelect a recording to get started.")
-    elif kind in ("bandwidth", "frequency"):
-        summary = summarize_sweep(recording, statistic.value)
-        points = summary.points
-        usable = [p for p in points if p.relative_noise_db is not None]
-
-        if summary.axis == "bandwidth":
-            x = [p.requested / 1e3 for p in usable]
-            xlabel = "Resolution bandwidth (kHz)"
-        else:
-            frequencies = [p.measured if p.measured is not None else p.requested for p in points]
-            reference = float(np.median(frequencies)) if frequencies else 0.0
-            x = [
-                ((p.measured if p.measured is not None else p.requested) - reference) * 1e6
-                for p in usable
-            ]
-            xlabel = "Frequency offset from median scan frequency (MHz)"
-
-        fig, ax = plt.subplots(figsize=(9, 4), constrained_layout=True)
-        if usable:
-            ax.plot(x, [p.relative_noise_db for p in usable], marker="o")
-            ax.axhline(0, linestyle="--", linewidth=1)
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel(f"{statistic.value.title()} relative noise (dB)")
-            ax.grid(True, alpha=0.25)
-        else:
-            ax.text(
-                0.5,
-                0.5,
-                "No finite trace pairs in this recording",
-                ha="center",
-                va="center",
-            )
-            ax.set_axis_off()
-        ax.set_title("Sweep response - negative is below shot noise")
-
-        rows = [
-            {
-                "point": p.index,
-                "label": p.label,
-                f"requested ({summary.x_unit})": p.requested,
-                "measured frequency (THz)": p.measured,
-                f"relative noise ({statistic.value}, dB)": p.relative_noise_db,
-            }
-            for p in points
-        ]
-        table = mo.ui.table(rows, selection=None, page_size=12)
-
-        i = int(point.value)
-        squeezing_rows = arrays.get("trace_squeezing")
-        shot_rows = arrays.get("trace_shot_noise")
-        trace_fig, (a, b) = plt.subplots(
-            2,
-            1,
-            figsize=(9, 5.5),
-            sharex=True,
-            constrained_layout=True,
-        )
-        has_pair = (
-            squeezing_rows is not None
-            and shot_rows is not None
-            and i < len(squeezing_rows)
-            and i < len(shot_rows)
-            and np.shape(squeezing_rows[i]) == np.shape(shot_rows[i])
-            and np.isfinite(squeezing_rows[i]).any()
-            and np.isfinite(shot_rows[i]).any()
-        )
-        if has_pair:
-            sq = np.asarray(squeezing_rows[i], float)
-            shot = np.asarray(shot_rows[i], float)
-            samples = np.arange(sq.size)
-            a.plot(samples, sq, label="Squeezing")
-            a.plot(samples, shot, label="Shot noise")
-            a.set_ylabel("Power (dBm)")
-            a.legend(frameon=False, ncols=2)
-            a.set_title(f"Point {i}: analyzer traces")
-            b.plot(samples, sq - shot)
-            b.axhline(0, linestyle="--", linewidth=1)
-            b.set_ylabel("Difference (dB)")
-            b.set_xlabel("Trace sample")
-        else:
-            a.text(
-                0.5,
-                0.5,
-                "No usable trace pair at this point",
-                ha="center",
-                va="center",
-            )
-            a.set_axis_off()
-            b.set_axis_off()
-        for axis in (a, b):
-            axis.grid(True, alpha=0.2)
-
-        analysis = mo.vstack(
-            [
-                mo.md(
-                    "## Sweep analysis\n"
-                    "The upper plot reduces each trace pair to one value; "
-                    "choose mean or minimum above."
-                ),
-                fig,
-                table,
-                mo.md(
-                    "### Inspect an individual point\n"
-                    "Trace samples are plotted as saved; no smoothing or "
-                    "resampling is applied."
-                ),
-                trace_fig,
-            ]
-        )
-    elif kind == "scope-acquisition":
-        trace = next((t for t in traces if t.label == channel.value), None)
-        if trace is None:
-            analysis = mo.md("## Scope analysis\nNo usable channel arrays were found.")
-        else:
-            values = np.asarray(trace.values, float)
-            times = np.asarray(trace.time, float)
-            clean = values[np.isfinite(values)]
-            fig, ax = plt.subplots(figsize=(9, 4), constrained_layout=True)
-            ax.plot(times, values, linewidth=1)
-            ax.set(
-                xlabel=f"Time ({trace.time_unit})",
-                ylabel=f"Voltage ({trace.value_unit})",
-                title=f"Scope waveform - {trace.label}",
-            )
-            ax.grid(True, alpha=0.25)
-            if clean.size:
-                stats = [
-                    {"metric": "Samples", "value": values.size, "unit": "samples"},
-                    {
-                        "metric": "Finite samples",
-                        "value": clean.size,
-                        "unit": "samples",
-                    },
-                    {
-                        "metric": "Minimum",
-                        "value": float(np.min(clean)),
-                        "unit": trace.value_unit,
-                    },
-                    {
-                        "metric": "Maximum",
-                        "value": float(np.max(clean)),
-                        "unit": trace.value_unit,
-                    },
-                    {
-                        "metric": "Peak-to-peak",
-                        "value": float(np.ptp(clean)),
-                        "unit": trace.value_unit,
-                    },
-                    {
-                        "metric": "Mean",
-                        "value": float(np.mean(clean)),
-                        "unit": trace.value_unit,
-                    },
-                    {
-                        "metric": "RMS (includes DC offset)",
-                        "value": float(np.sqrt(np.mean(clean**2))),
-                        "unit": trace.value_unit,
-                    },
-                    {
-                        "metric": "Standard deviation",
-                        "value": float(np.std(clean)),
-                        "unit": trace.value_unit,
-                    },
-                ]
-                meta = next(
-                    (
-                        waveform
-                        for waveform in manifest.get("waveforms", [])
-                        if isinstance(waveform, dict) and waveform.get("channel") == trace.label
-                    ),
-                    {},
-                )
-                note = (
-                    f"Time offset: {meta.get('time_offset', 'not recorded')} s; "
-                    f"sample interval: {meta.get('time_interval', 'not recorded')} s"
-                )
-                analysis = mo.vstack(
-                    [
-                        mo.md(
-                            "## Scope analysis\n"
-                            "Statistics ignore non-finite samples; the waveform "
-                            "plot shows recorded samples."
-                        ),
-                        fig,
-                        mo.md(note),
-                        mo.ui.table(stats, selection=None, page_size=10),
-                    ]
-                )
-            else:
-                analysis = mo.vstack(
-                    [
-                        fig,
-                        mo.md("No finite samples are available for statistics.").callout(
-                            kind="warn"
-                        ),
-                    ]
-                )
-    else:
-        analysis = mo.md(
-            f"## Analysis unavailable\nManifest kind {kind!r} is not a sweep or scope recording."
-        ).callout(kind="warn")
-    analysis
+@app.cell
+def _(DATA_ROOT, catalog, mo):
+    mo.vstack([
+        mo.md(f"## Run catalog\n**Data root:** {DATA_ROOT}"),
+        catalog.sort("modified_at", descending=True),
+    ])
     return
 
 
 @app.cell
-def _():
+def _(Path, catalog, load_run, pl, read_manifest, summarize_sweep):
+    sweep_rows = []
+    scope_rows = []
+    read_errors = []
+
+    for run in catalog.filter(pl.col("kind").is_in(["bandwidth", "frequency"])).iter_rows(named=True):
+        run_id = run["run_id"]
+        try:
+            recording = load_run(run_id)
+            mean_summary = summarize_sweep(recording, "mean")
+            min_summary = summarize_sweep(recording, "minimum")
+            for mean_point, min_point in zip(
+                mean_summary.points, min_summary.points, strict=True
+            ):
+                measured = mean_point.measured
+                sweep_rows.append({
+                    "run_id": run_id,
+                    "path": run["path"],
+                    "kind": mean_summary.axis,
+                    "point_index": mean_point.index,
+                    "label": mean_point.label,
+                    "requested": mean_point.requested,
+                    "x_unit": mean_summary.x_unit,
+                    "measured_frequency_thz": measured,
+                    "axis_value": measured if measured is not None else mean_point.requested,
+                    "relative_noise_mean_db": mean_point.relative_noise_db,
+                    "relative_noise_min_db": min_point.relative_noise_db,
+                })
+        except Exception as exc:
+            read_errors.append({"run_id": run_id, "stage": "sweep summary", "error": str(exc)})
+
+    for run in catalog.filter(pl.col("kind") == "scope").iter_rows(named=True):
+        manifest = read_manifest(Path(run["path"]))
+        settings_by_channel = {
+            str(item.get("channel")): item
+            for item in ((manifest.get("configuration") or {}).get("applied_channel_settings") or [])
+            if isinstance(item, dict)
+        }
+        for waveform in manifest.get("waveforms") or []:
+            if not isinstance(waveform, dict):
+                continue
+            channel = str(waveform.get("channel", "?"))
+            stats = waveform.get("stats") or {}
+            settings = settings_by_channel.get(channel, {})
+            scope_rows.append({
+                "run_id": run["run_id"],
+                "path": run["path"],
+                "modified_at": run["modified_at"],
+                "channel": channel,
+                "instrument": run["instrument"],
+                "address": run["address"],
+                "value_unit": waveform.get("value_unit"),
+                "time_unit": waveform.get("time_unit"),
+                "samples": stats.get("sample_count"),
+                "minimum": stats.get("min"),
+                "maximum": stats.get("max"),
+                "peak_to_peak": stats.get("peak_to_peak"),
+                "mean": stats.get("mean"),
+                "rms": stats.get("rms"),
+                "stddev": stats.get("stddev"),
+                "time_offset": waveform.get("time_offset"),
+                "time_interval": waveform.get("time_interval"),
+                "volts_per_div": settings.get("volts_per_div"),
+                "coupling": settings.get("coupling"),
+                "frozen": run["frozen"],
+                "warnings": run["warnings"],
+            })
+
+    sweep_schema = {
+        "run_id": pl.String,
+        "path": pl.String,
+        "kind": pl.String,
+        "point_index": pl.Int64,
+        "label": pl.String,
+        "requested": pl.Float64,
+        "x_unit": pl.String,
+        "measured_frequency_thz": pl.Float64,
+        "axis_value": pl.Float64,
+        "relative_noise_mean_db": pl.Float64,
+        "relative_noise_min_db": pl.Float64,
+    }
+    scope_schema = {
+        "run_id": pl.String,
+        "path": pl.String,
+        "modified_at": pl.String,
+        "channel": pl.String,
+        "instrument": pl.String,
+        "address": pl.String,
+        "value_unit": pl.String,
+        "time_unit": pl.String,
+        "samples": pl.Int64,
+        "minimum": pl.Float64,
+        "maximum": pl.Float64,
+        "peak_to_peak": pl.Float64,
+        "mean": pl.Float64,
+        "rms": pl.Float64,
+        "stddev": pl.Float64,
+        "time_offset": pl.Float64,
+        "time_interval": pl.Float64,
+        "volts_per_div": pl.Float64,
+        "coupling": pl.String,
+        "frozen": pl.Boolean,
+        "warnings": pl.Int64,
+    }
+    sweep_points = pl.DataFrame(sweep_rows, schema=sweep_schema)
+    scope_channels = pl.DataFrame(scope_rows, schema=scope_schema)
+    errors = pl.DataFrame(
+        read_errors,
+        schema={"run_id": pl.String, "stage": pl.String, "error": pl.String},
+    )
+    return errors, scope_channels, sweep_points
+
+
+@app.cell
+def _(errors, mo, scope_channels, sweep_points):
+    mo.vstack([
+        mo.md("## Sweep points\nOne row per point; requested and measured setpoints stay separate."),
+        sweep_points.sort(["run_id", "point_index"]),
+        mo.md("## Scope channel summaries\nOne row per run and channel; values come from the saved manifest."),
+        scope_channels.sort(["modified_at", "channel"], descending=[True, False]),
+        mo.md("## Read problems"),
+        errors if not errors.is_empty() else mo.md("No sweep files failed to load."),
+    ])
+    return
+
+
+@app.cell
+def _(catalog, mo, pl, scope_channels):
+    sweep_ids = (
+        catalog.filter(pl.col("kind").is_in(["bandwidth", "frequency"]))
+        .get_column("run_id").to_list()
+    )
+    scope_ids = catalog.filter(pl.col("kind") == "scope").get_column("run_id").to_list()
+    selected_sweeps = mo.ui.multiselect(
+        options=sweep_ids,
+        value=sweep_ids[:5],
+        label="Sweep runs to compare (select only one sweep kind)",
+    )
+    selected_statistic = mo.ui.dropdown(
+        options=["mean", "minimum"],
+        value="mean",
+        label="Relative-noise statistic",
+    )
+    selected_scope = mo.ui.dropdown(
+        options=scope_ids,
+        value=scope_ids[0] if scope_ids else None,
+        label="Scope run",
+    )
+    channels_for_run = (
+        scope_channels.filter(pl.col("run_id") == selected_scope.value)
+        .get_column("channel").to_list()
+        if selected_scope.value
+        else []
+    )
+    selected_channels = mo.ui.multiselect(
+        options=channels_for_run,
+        value=channels_for_run,
+        label="Scope channels to plot",
+    )
+    mo.vstack([
+        mo.md("## Compare runs"),
+        mo.hstack([selected_sweeps, selected_statistic], gap=2, align="start"),
+        mo.hstack([selected_scope, selected_channels], gap=2, align="start"),
+    ])
+    return selected_channels, selected_scope, selected_statistic, selected_sweeps
+
+
+@app.cell
+def _(
+    load_run,
+    mo,
+    plot_scope,
+    plot_sweep_comparison,
+    selected_channels,
+    selected_scope,
+    selected_statistic,
+    selected_sweeps,
+    sweep_points,
+):
+    plots = []
+    if selected_sweeps.value:
+        try:
+            sweep_fig, _ = plot_sweep_comparison(
+                sweep_points,
+                list(selected_sweeps.value),
+                statistic=selected_statistic.value,
+            )
+            plots.append(sweep_fig)
+        except ValueError as exc:
+            plots.append(mo.md(f"**Sweep plot:** {exc}").callout(kind="warn"))
+    else:
+        plots.append(mo.md("Select one or more sweep runs to compare."))
+
+    if selected_scope.value and selected_channels.value:
+        try:
+            scope_recording = load_run(selected_scope.value)
+            scope_fig, _ = plot_scope(
+                scope_recording,
+                channels=list(selected_channels.value),
+            )
+            plots.append(scope_fig)
+        except (ValueError, OSError, KeyError) as exc:
+            plots.append(mo.md(f"**Scope plot:** {exc}").callout(kind="warn"))
+    else:
+        plots.append(mo.md("Select a scope run and at least one channel."))
+
+    mo.vstack([mo.md("## Plots"), *plots])
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Handy patterns
+
+    The frames are ordinary Polars dataframes; use filter, select, group_by, and
+    sort before converting a small result to Python rows with iter_rows(named=True).
+    """)
+
+    mo.md("""
+    ~~~python
+    # All sweep points below shot noise, sorted from strongest to weakest.
+    below_shot_noise = (
+        sweep_points
+        .filter(pl.col("relative_noise_mean_db") < 0)
+        .sort("relative_noise_mean_db")
+    )
+
+    # The best mean point for each run.
+    best_point_per_run = (
+        sweep_points
+        .filter(pl.col("relative_noise_mean_db").is_not_null())
+        .sort("relative_noise_mean_db")
+        .group_by("run_id", maintain_order=True)
+        .first()
+    )
+
+    # Small loops remain natural; arrays stay on the recording object.
+    for run_id in selected_sweeps.value:
+        recording = load_run(run_id)
+        print(run_id, recording.arrays.keys())
+
+    # Compose the plotting helpers into your own figure.
+    fig, ax = plt.subplots(figsize=(10, 4), layout="constrained")
+    plot_sweep_comparison(sweep_points, selected_sweeps.value, ax=ax)
+    ~~~
+    """)
     return
 
 
