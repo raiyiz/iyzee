@@ -287,7 +287,7 @@ def _(
             ax,
             title=f"Sweep comparison · {statistic} relative noise",
             xlabel=xlabel,
-            ylabel="Squeezing − shot noise (dB)",
+            ylabel="Squeezing - shot noise (dB)",
         )
         ax.axhline(0, linestyle="--", linewidth=1, alpha=0.75)
         if any(line.get_label() in run_ids for line in ax.lines):
@@ -353,7 +353,7 @@ def _(Path, catalog, load_run, pl, read_manifest, summarize_sweep):
                     "relative_noise_mean_db": mean_point.relative_noise_db,
                     "relative_noise_min_db": min_point.relative_noise_db,
                 })
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - isolate a broken recording and keep the rest usable
             read_errors.append({"run_id": run_id, "stage": "sweep summary", "error": str(exc)})
 
     for run in catalog.filter(pl.col("kind") == "scope").iter_rows(named=True):
