@@ -49,6 +49,13 @@ class PSUState:
 class PSU(BaseDevice):
     """Rohde & Schwarz HMP4040 power-supply controller."""
 
+    def __init__(self, ip: str | None = None, resource_manager=None, timeout_ms: int = 10_000):
+        super().__init__(
+            ip=ip or address(IP.POWER_SUPPLY),
+            resource_manager=resource_manager,
+            timeout_ms=timeout_ms,
+        )
+
     def open(self):
         port = 5025
         resource = self.rm.open_resource(f"TCPIP::{self.ip}::{port}::SOCKET")
@@ -59,6 +66,10 @@ class PSU(BaseDevice):
 
     def _query(self, command: str) -> str:
         return str(self.instrument.query(command)).strip()
+
+    def idn(self) -> str:
+        """The supply's identification string (also proves it answers)."""
+        return self._query("*IDN?")
 
     def _number(self, command: str) -> float:
         reply = self._query(command)
@@ -130,46 +141,40 @@ class PSU(BaseDevice):
 
 
 class ShutterControl:
-    """Control the optical shutter connected to a PSU channel."""
+    """The optical shutter: one channel of a :class:`PSU`, which it borrows.
 
-    def __init__(
-        self,
-        chan: int = SHUTTER_CHANNEL_DEFAULT,
-        ip: str | None = None,
-        resource_manager=None,
-    ):
-        self.psu = PSU(ip=ip or address(IP.POWER_SUPPLY), resource_manager=resource_manager)
+    The supply is the instrument; the shutter is what is plugged into one of its channels.
+    So this class neither opens nor closes the PSU's connection and holds no lock of its
+    own: whoever owns the PSU (the lab session, a ``with PSU() as psu:`` block) decides
+    when it connects, and the shutter's operations are just channel operations on it.
+    Constructing a ``ShutterControl`` sends nothing; :meth:`configure` sets the channel up.
+
+    ::
+
+        with PSU() as psu:
+            shutter = ShutterControl(psu)
+            shutter.configure()
+            shutter.open()
+            ...
+            shutter.close()
+    """
+
+    #: The shutter's trigger levels, hard-coded rather than configurable.
+    VOLTAGE = 1.7  # V
+    CURRENT_LIMIT = 0.01  # A
+
+    def __init__(self, psu: PSU, chan: int = SHUTTER_CHANNEL_DEFAULT):
+        if chan not in CHANNELS:
+            raise ValueError(f"the shutter channel must be in {CHANNELS}, got {chan}")
+        self.psu = psu
         self.chan = chan
 
-    def connect(self):
-        """Connect the PSU and configure the shutter channel."""
-        if self.psu.instrument is not None:
-            return
-        try:
-            self.psu.connect()
-            self.psu.set_voltage(1.7, self.chan)
-            self.psu.set_current(0.01, self.chan)
-        except Exception:
-            self.psu.close()
-            raise
-
-    def disconnect(self):
-        """Close the shutter, then release the PSU connection."""
-        try:
-            if self.psu.instrument is not None:
-                self.close()
-        finally:
-            self.psu.close()
-
-    def __enter__(self):
-        """Connect and return the shutter controller for use in a managed context."""
-        self.connect()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Close the shutter and release the underlying PSU connection."""
-        self.disconnect()
-        return False
+    def configure(self) -> None:
+        """Set the shutter's channel to its trigger levels. The PSU must be connected."""
+        if self.psu.instrument is None:
+            raise ConnectionError("the shutter is a channel of the PSU, which is not connected")
+        self.psu.set_voltage(self.VOLTAGE, self.chan)
+        self.psu.set_current(self.CURRENT_LIMIT, self.chan)
 
     def retrieve_state(self) -> PSUState:
         """The supply's own report, limited to the shutter's channel."""

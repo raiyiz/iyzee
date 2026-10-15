@@ -25,7 +25,10 @@ from rich.text import Text
 from textual.pilot import Pilot
 from textual.widgets import DataTable, Static
 
-from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL
+from iyzee.lab import InstrumentSpec
+from iyzee.tui import app as app_mod
+from iyzee.tui.screens import connect as connect_mod
+from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL, ConnectScreen
 
 
 async def _row_is(pilot: Pilot, table: DataTable, status: str) -> None:
@@ -156,3 +159,37 @@ async def test_disconnect_is_refused_while_a_sweep_is_running(
         await pilot.press("enter", "enter")
         assert handle.disconnect_calls == 0 and "fake" in app.handles
         assert any("sweep is running" in m for m in notifications(app))
+
+
+@async_test
+async def test_a_part_and_its_parent_keep_each_others_rows_in_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Connecting the shutter connects the PSU it is a channel of; disconnecting the PSU
+    takes the shutter with it. The rows of both must say so, not just the one acted on."""
+    parent, part = FakeHandle(probe="supply ready"), FakeHandle(probe="shutter ready")
+    specs = [
+        InstrumentSpec("psu", "PSU", lambda: parent, short="PSU"),
+        InstrumentSpec("shutter", "Shutter", lambda _psu: part, short="Sh", parent="psu"),
+    ]
+    monkeypatch.setattr(connect_mod, "INSTRUMENTS", specs)
+    monkeypatch.setattr(app_mod, "INSTRUMENTS", specs)
+    app = app_mod.IyzeeApp()
+    app.lab.specs = specs
+    async with app.run_test() as pilot:
+        screen = app.query_one(ConnectScreen)
+        table = screen.query_one(DataTable)
+
+        def status(key: str) -> str:
+            return str(table.get_cell(key, "status"))
+
+        screen.request_connect("shutter")
+        await wait_until(pilot, lambda: status("shutter") == "connected")
+        await wait_until(pilot, lambda: status("psu") == "connected")
+        assert str(table.get_cell("psu", "detail")) == "supply ready"
+        assert set(app.handles) == {"psu", "shutter"} and parent.connect_calls == 1
+
+        screen.request_disconnect("psu")
+        await wait_until(pilot, lambda: status("psu") == "disconnected")
+        await wait_until(pilot, lambda: status("shutter") == "disconnected")
+        assert app.handles == {} and part.disconnected and parent.disconnected

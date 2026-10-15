@@ -82,9 +82,7 @@ class FakePSU:
 
 def _shutter(psu: FakePSU) -> ShutterControl:
     """A real ``ShutterControl`` (so open()/close() are the real ones) on the fake supply."""
-    shutter = ShutterControl(chan=3, ip="192.0.2.1", resource_manager=object())
-    shutter.psu = psu  # type: ignore[assignment]
-    return shutter
+    return ShutterControl(psu, chan=3)  # type: ignore[arg-type]
 
 
 def _text(screen: PowerScreen, widget_id: str) -> str:
@@ -103,11 +101,16 @@ def _set(screen: PowerScreen, widget_id: str, value: str) -> None:
     screen.query_one(f"#{widget_id}", Input).value = value
 
 
-async def _open(pilot: Pilot[Any], psu: FakePSU | None = None) -> PowerScreen:
+async def _open(
+    pilot: Pilot[Any], psu: FakePSU | None = None, *, shutter: bool = True
+) -> PowerScreen:
+    """Open the page on a connected PSU; the shutter (a part of it) is connected too by default."""
     app = pilot.app
     assert isinstance(app, IyzeeApp)
     if psu is not None:
-        app.handles["shutter"] = FakeHandle(device=_shutter(psu))
+        app.handles["psu"] = FakeHandle(device=psu)
+        if shutter:
+            app.handles["shutter"] = FakeHandle(device=_shutter(psu))
     await pilot.press("p")
     await pilot.pause()
     screen = app.query_one(PowerScreen)
@@ -117,12 +120,12 @@ async def _open(pilot: Pilot[Any], psu: FakePSU | None = None) -> PowerScreen:
 
 
 @async_test
-async def test_without_a_shutter_connection_the_page_says_so_and_offers_no_controls() -> None:
+async def test_without_a_psu_connection_the_page_says_so_and_offers_no_controls() -> None:
     async with IyzeeApp().run_test() as pilot:
         screen = await _open(pilot)
 
         assert screen.query_one("#power-status", Static).display
-        assert "connect the Shutter" in _text(screen, "power-status")
+        assert "connect the PSU" in _text(screen, "power-status")
         for widget_id in ("power-global", "power-shutter", "power-refresh", "power-apply1"):
             assert _button(screen, widget_id).disabled
 
@@ -292,7 +295,7 @@ async def test_losing_the_connection_clears_the_page() -> None:
         assert isinstance(app, IyzeeApp)
         screen = await _open(pilot, psu)
 
-        del app.handles["shutter"]
+        del app.handles["psu"]
         app.instruments_changed()
         await pilot.pause()
 
@@ -318,3 +321,45 @@ async def test_the_page_polls_the_supply_while_shown() -> None:
         screen._poll()
         await wait_until(pilot, lambda: "7.000 V" in _text(screen, "power-readout1"))
         assert screen.query_one("#power-v1", Input).value == "6"
+
+
+@async_test
+async def test_the_page_works_on_the_psu_alone_and_all_four_channels_are_free() -> None:
+    psu = FakePSU()
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open(pilot, psu, shutter=False)
+
+        assert "Shutter: not connected" in _text(screen, "power-summary")
+        assert _button(screen, "power-shutter").disabled
+        assert not _button(screen, "power-toggle3").disabled
+        assert not screen.query_one("#power-v3", Input).disabled
+
+        _button(screen, "power-toggle3").press()
+        await wait_until(pilot, lambda: psu.selected[3] and not screen._busy)
+
+
+@async_test
+async def test_the_shutters_channel_is_claimed_while_the_shutter_is_connected() -> None:
+    psu = FakePSU()
+    async with IyzeeApp().run_test() as pilot:
+        app = pilot.app
+        assert isinstance(app, IyzeeApp)
+        screen = await _open(pilot, psu)
+
+        assert "use the Shutter button" in _text(screen, "power-title3")
+        assert _button(screen, "power-toggle3").disabled
+        assert _button(screen, "power-apply3").disabled
+        assert screen.query_one("#power-v3", Input).disabled
+        assert not _button(screen, "power-toggle1").disabled  # the other channels are untouched
+
+        screen._toggle_channel(3)  # even if something reaches the handler directly
+        screen._apply_channel(3)
+        await pilot.pause()
+        assert psu.writes() == []
+
+        # Disconnecting the shutter frees its channel again; the page stays up on the PSU.
+        del app.handles["shutter"]
+        app.instruments_changed()
+        await pilot.pause()
+        assert not _button(screen, "power-toggle3").disabled
+        assert "use the Shutter button" not in _text(screen, "power-title3")

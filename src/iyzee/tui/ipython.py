@@ -72,7 +72,7 @@ class LabProxy:
     """Live view of the app's connected instruments and last sweep.
 
     Exposed to the console as a single ``lab`` variable
-    (``lab.mx``, ``lab.shutter``, ``lab.scope``, ``lab.results``,
+    (``lab.mx``, ``lab.psu``, ``lab.shutter``, ``lab.scope``, ``lab.results``,
     ``lab.last_run``) rather than as separate top-level globals. Every
     attribute access does a fresh lookup against the running app's
     current state; nothing is ever copied or cached here, which is what
@@ -106,6 +106,7 @@ class LabProxy:
 
     _INSTRUMENT_KEYS = {
         "mx": "mxa",
+        "psu": "psu",
         "shutter": "shutter",
         "scope": "scope",
         "wavemeter": "wavemeter",
@@ -149,7 +150,7 @@ class LabProxy:
     def __dir__(self) -> list[str]:
         # Always lists the full set regardless of what's connected right
         # now, so `lab.<Tab>` in the console shows what's *possible*
-        # (mx/shutter/scope), not just what happens to be connected at
+        # (mx/psu/shutter/scope), not just what happens to be connected at
         # this exact moment.
         return sorted({*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected"})
 

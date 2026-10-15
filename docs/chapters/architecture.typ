@@ -406,7 +406,8 @@ IyzeeApp
 ├── Lab
 │    ├── mx → InstrumentHandle
 │    ├── scope → InstrumentHandle
-│    ├── shutter → InstrumentHandle
+│    ├── psu → InstrumentHandle
+│    ├── shutter → InstrumentHandle   (a part of psu: shares its link and lock)
 │    └── wavemeter → InstrumentHandle
 │
 ├── last_run
@@ -445,7 +446,8 @@ forcing every device into one command model.
   align: (left, left, left),
   [*Instrument*], [*Client/driver*], [*Transport*],
   [Keysight MXA], [`KeysightMXA`], [VISA / SCPI],
-  [PSU / shutter], [`PSU` / `ShutterControl`], [VISA raw socket, port 5025],
+  [PSU], [`PSU`], [VISA raw socket, port 5025],
+  [Shutter], [`ShutterControl`], [a channel of the PSU (no link of its own)],
   [LeCroy scope], [`LeCroy`], [VISA / VXI-11 (`TCPIP0::<ip>::inst0::INSTR`)],
   [Wavemeter], [`Wavemeter`], [HTTP],
 )

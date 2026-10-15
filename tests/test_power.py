@@ -1,6 +1,7 @@
 import pytest
 
 from iyzee import IP, SHUTTER_CHANNEL_DEFAULT
+from iyzee.config import address
 from iyzee.devices.power import PSU, ChannelState, PSUState, ShutterControl
 
 
@@ -71,51 +72,46 @@ def test_psu_context_manager_closes_injected_transport():
     assert instrument.close_calls == 1
 
 
-def test_shutter_control_has_explicit_connection_lifecycle():
+def test_psu_defaults_to_the_labs_supply_address():
+    assert PSU(resource_manager=FakeResourceManager()).ip == address(IP.POWER_SUPPLY)
+
+
+def test_the_shutter_is_a_channel_of_a_psu_it_borrows():
     resource_manager = FakeResourceManager()
-    shutter = ShutterControl(resource_manager=resource_manager)
+    psu = PSU(resource_manager=resource_manager)
+    shutter = ShutterControl(psu)
 
-    assert resource_manager.opened == []
-    assert shutter.psu.instrument is None
+    # Constructing it sends nothing and opens nothing.
+    assert shutter.psu is psu and shutter.chan == SHUTTER_CHANNEL_DEFAULT
+    assert resource_manager.opened == [] and psu.instrument is None
 
-    shutter.connect()
-    shutter.connect()
-    instrument = shutter.psu.instrument
+    with pytest.raises(ConnectionError, match="not connected"):
+        shutter.configure()
+
+    psu.connect()
+    instrument = psu.instrument
     assert instrument is not None
-    assert len(resource_manager.opened) == 1
-    assert resource_manager.opened[0][1] is instrument
+    shutter.configure()
+    shutter.open()
+    shutter.close()
+
     assert instrument.commands == [
         "INST:NSEL 3",
         "VOLT 1.7",
         "INST:NSEL 3",
         "CURR 0.01",
-    ]
-
-    shutter.open()
-    shutter.disconnect()
-    shutter.disconnect()
-
-    assert instrument.commands[-4:] == [
         "INST OUT3",
         "OUTP:SEL 1",
         "INST OUT3",
         "OUTP:SEL 0",
     ]
-    assert instrument.close_calls == 1
-    assert shutter.psu.instrument is None
+    # The shutter never closes the supply it borrowed.
+    assert instrument.close_calls == 0 and psu.instrument is instrument
 
 
-def test_shutter_control_context_manager_disconnects_the_psu():
-    resource_manager = FakeResourceManager()
-
-    with ShutterControl(resource_manager=resource_manager) as shutter:
-        instrument = shutter.psu.instrument
-        assert instrument is not None
-        shutter.open()
-
-    assert shutter.psu.instrument is None
-    assert instrument.close_calls == 1
-    assert instrument.commands[-2:] == ["INST OUT3", "OUTP:SEL 0"]
+def test_the_shutter_channel_must_exist():
+    with pytest.raises(ValueError, match="channel"):
+        ShutterControl(PSU(resource_manager=FakeResourceManager()), chan=5)
 
 
 class FakeHMP:
@@ -315,8 +311,9 @@ def test_the_selection_is_restored_even_when_a_reply_is_bad_midway():
 
 def test_the_shutter_reports_open_only_when_the_supply_says_it_is_powered():
     supply = FakeHMP()
-    shutter = ShutterControl(ip="192.0.2.1", resource_manager=FakeHMPResourceManager(supply))
-    shutter.connect()
+    psu = _connected_psu(supply)
+    shutter = ShutterControl(psu)
+    shutter.configure()
     shutter.psu.enable_global_output()
 
     assert shutter.is_open() is False
@@ -332,9 +329,7 @@ def test_the_shutter_reports_open_only_when_the_supply_says_it_is_powered():
 
 def test_the_shutter_state_covers_its_own_channel_only():
     supply = FakeHMP()
-    shutter = ShutterControl(
-        chan=2, ip="192.0.2.1", resource_manager=FakeHMPResourceManager(supply)
-    )
-    shutter.connect()
+    shutter = ShutterControl(_connected_psu(supply), chan=2)
+    shutter.configure()
 
     assert [c.channel for c in shutter.retrieve_state().channels] == [2]

@@ -81,7 +81,8 @@ For the architecture and the reasoning behind this split, see the [architecture 
 | --- | --- | --- |
 | **Keysight MXA** | VISA / SCPI | noise spectra and automated sweeps |
 | **LeCroy scope** | VISA / VXI-11 | waveform acquisition and channel/trigger control |
-| **Power supply / shutter** | VISA | supply control and optical shutter |
+| **Power supply (HMP4040)** | VISA (raw socket) | channel setpoints and outputs |
+| **Shutter** | a channel of the supply | the optical shutter, opened around squeezing acquisitions |
 | **Wavemeter** | HTTP | frequency readout and PID setpoints |
 
 Hardware is **not** connected merely by constructing a driver. Connections are explicit and owned by the application/session, which keeps experiment code testable and makes failure handling visible.

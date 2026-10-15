@@ -13,6 +13,12 @@ implemented once, without Textual::
 Adding an instrument: write a handle in ``devices/handles.py`` and add one
 :class:`InstrumentSpec` to ``INSTRUMENTS`` below. No screen code changes.
 
+Some "instruments" are really a part of another: the shutter is one channel of the power
+supply. Such a spec names its ``parent``; its handle is built from the parent's handle (and
+shares its link and lock), connecting it connects the parent first if needed, disconnecting
+the parent disconnects it first, and on exit it is closed before the parent, so the
+shutter is never left open by the supply going away.
+
 Guide: :guide:`arch-lab`
 """
 
@@ -34,25 +40,39 @@ from .devices.handles import (
     _VisaHandle,
 )
 from .devices.mxa import KeysightMXA
+from .devices.power import PSU
 
 log = logging.getLogger("iyzee.lab")
 
 
 @dataclass(frozen=True)
 class InstrumentSpec:
-    """One row in the Connect screen: a name plus how to build its handle."""
+    """One row in the Connect screen: a name plus how to build its handle.
+
+    ``make()`` builds the handle; for a spec with a ``parent`` it is called with the
+    parent's connected handle instead (``make(parent_handle)``).
+    """
 
     key: str
     label: str
-    make: Callable[[], InstrumentHandle]
+    make: Callable[..., InstrumentHandle]
     # Compact name for the narrow nav rail, where the full label wraps and
     # strands the status dot on a line of its own. Defaults to ``label``.
     short: str = ""
+    # Key of the instrument this one is a part of (see the module docstring).
+    parent: str = ""
 
 
 INSTRUMENTS: list[InstrumentSpec] = [
     InstrumentSpec("mxa", "Keysight MXA", lambda: _VisaHandle(KeysightMXA()), short="MXA"),
-    InstrumentSpec("shutter", "Shutter (PSU CH3)", lambda: ShutterHandle(), short="Shutter"),
+    InstrumentSpec("psu", "Power supply (HMP4040)", lambda: _VisaHandle(PSU()), short="PSU"),
+    InstrumentSpec(
+        "shutter",
+        "Shutter (PSU CH3)",
+        lambda psu: ShutterHandle(psu),
+        short="Shutter",
+        parent="psu",
+    ),
     InstrumentSpec("wavemeter", "Wavemeter (WS-7)", lambda: WavemeterHandle(), short="Wavemeter"),
     InstrumentSpec("scope", "LeCroy scope [legacy]", lambda: ScopeHandle(), short="Scope"),
 ]
@@ -69,6 +89,23 @@ class Lab:
         self.specs = specs if specs is not None else INSTRUMENTS
         #: key -> handle. "In here" means "connected and usable".
         self.handles: dict[str, InstrumentHandle] = {}
+        #: key -> the probe's status string from when it connected (for display).
+        self.details: dict[str, str] = {}
+        self._key_locks: dict[str, threading.RLock] = {}
+        self._key_locks_guard = threading.Lock()
+
+    def _key_lock(self, key: str) -> threading.RLock:
+        """One re-entrant lock per instrument key: a connect of it, and of anything that
+        needs it as a parent, never run twice at once (two sockets to one supply)."""
+        with self._key_locks_guard:
+            return self._key_locks.setdefault(key, threading.RLock())
+
+    def _parent_of(self, key: str) -> str:
+        return next((spec.parent for spec in self.specs if spec.key == key), "")
+
+    def dependents(self, key: str) -> list[str]:
+        """Keys of the connected instruments that are parts of ``key``."""
+        return [s.key for s in self.specs if s.parent == key and s.key in self.handles]
 
     # -- lookup -----------------------------------------------------------
 
@@ -101,27 +138,50 @@ class Lab:
         """Build, open and probe an instrument, then register it.
 
         Returns the probe's status string. On any failure the half-open link is
-        closed and the exception propagates; nothing is registered.
+        closed and the exception propagates; nothing is registered. An instrument that
+        is a part of another (``spec.parent``) connects that one first if it is not.
+        Connecting what is already connected (say the supply, which connecting the shutter
+        just did) opens nothing a second time and returns the status it connected with.
         """
         spec = self.spec(spec) if isinstance(spec, str) else spec
-        handle = spec.make()
-        with handle.lock:
-            try:
-                handle.connect()
-                detail = handle.probe()
-            except Exception:
-                # connect() may have half-succeeded (or probe() failed after it
-                # did): close rather than leak a link nothing references.
-                with contextlib.suppress(Exception):
-                    handle.disconnect()
-                raise
-        self.handles[spec.key] = handle
+        with self._key_lock(spec.key):
+            if spec.key in self.handles:
+                return self.details.get(spec.key, "")
+            parent: InstrumentHandle | None = None
+            if spec.parent:
+                with self._key_lock(spec.parent):
+                    if spec.parent not in self.handles:
+                        self.connect(spec.parent)
+                parent = self[spec.parent]
+            handle = spec.make(parent) if parent is not None else spec.make()
+            with handle.lock:
+                try:
+                    handle.connect()
+                    detail = handle.probe()
+                except Exception:
+                    # connect() may have half-succeeded (or probe() failed after it
+                    # did): close rather than leak a link nothing references.
+                    with contextlib.suppress(Exception):
+                        handle.disconnect()
+                    raise
+            self.handles[spec.key] = handle
+            self.details[spec.key] = detail
         log.info("connected %s (%s)", spec.key, detail)
         return detail
 
     def disconnect(self, key: str) -> None:
-        """Unregister and close one instrument (a no-op if it isn't connected)."""
+        """Unregister and close one instrument (a no-op if it isn't connected).
+
+        Instruments that are parts of it go first (the shutter is closed before the
+        supply is released). A failure closing one of them does not stop the rest.
+        """
+        for child in self.dependents(key):
+            try:
+                self.disconnect(child)
+            except Exception:  # noqa: BLE001 - the parent must still be released
+                log.exception("error closing %s", child)
         handle = self.handles.pop(key, None)
+        self.details.pop(key, None)
         if handle is not None:
             with handle.lock:
                 handle.disconnect()
@@ -140,6 +200,7 @@ class Lab:
                 continue
             if self.handles.get(key) is handle:
                 del self.handles[key]
+                self.details.pop(key, None)
                 lost.append(key)
                 log.warning("%s: connection lost; dropped it so it can be reconnected", key)
                 threading.Thread(
@@ -159,19 +220,27 @@ class Lab:
             log.debug("releasing dead link %s failed", key, exc_info=True)
 
     def close_all(self, timeout: float = 5.0) -> None:
-        """Disconnect every instrument, in parallel, within ``timeout``.
+        """Disconnect every instrument within ``timeout``, parts before their parents.
 
-        Each disconnect takes that instrument's lock first, so it waits for an
-        in-flight sweep step or console call instead of tearing the link down
-        under it. An instrument still busy at the deadline is skipped (and
-        logged) rather than blocking the exit; the OS reclaims its sockets when
-        the process ends anyway.
+        Instruments at the same level close in parallel. Each disconnect takes that
+        instrument's lock first, so it waits for an in-flight sweep step or console call
+        instead of tearing the link down under it. An instrument still busy at the
+        deadline is skipped (and logged) rather than blocking the exit; the OS reclaims
+        its sockets when the process ends anyway. Parts go first because closing the
+        shutter needs the supply's link, and must not be skipped by the supply closing.
         """
         handles = dict(self.handles)
         self.handles.clear()
+        self.details.clear()
         if not handles:
             return
         deadline = time.monotonic() + timeout
+
+        def depth(key: str) -> int:
+            level, parent = 0, self._parent_of(key)
+            while parent and level < 8:
+                level, parent = level + 1, self._parent_of(parent)
+            return level
 
         def close(key: str, handle: InstrumentHandle) -> None:
             lock = handle.lock
@@ -185,11 +254,13 @@ class Lab:
             finally:
                 lock.release()
 
-        threads = [
-            threading.Thread(target=close, args=item, name=f"close-{item[0]}", daemon=True)
-            for item in handles.items()
-        ]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(max(0.0, deadline - time.monotonic()))
+        for level in sorted({depth(key) for key in handles}, reverse=True):
+            threads = [
+                threading.Thread(target=close, args=item, name=f"close-{item[0]}", daemon=True)
+                for item in handles.items()
+                if depth(item[0]) == level
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(max(0.0, deadline - time.monotonic()))

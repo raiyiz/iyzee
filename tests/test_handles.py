@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -122,48 +122,78 @@ def test_visa_handle_disconnect_closes_device() -> None:
 # -- ShutterHandle ----------------------------------------------------------
 
 
-class _FakeShutterControl:
-    def __init__(self, chan, ip) -> None:  # noqa: ANN001 - mirrors real signature
-        self.chan = chan
-        self.ip = ip
-        self.psu = _FakePsu()
-        self.connected = False
+class _FakePsuDevice:
+    """A connected PSU that records what the shutter does to its channel."""
 
-    def connect(self) -> None:
-        self.connected = True
+    def __init__(self, *, connected: bool = True) -> None:
+        self.instrument: object | None = object() if connected else None
+        self.commands: list[tuple[str, tuple[object, ...]]] = []
 
-    def disconnect(self) -> None:
-        self.psu.close()
-        self.connected = False
+    def set_voltage(self, voltage: float, channel: int) -> None:
+        self.commands.append(("volt", (channel, voltage)))
 
+    def set_current(self, current: float, channel: int) -> None:
+        self.commands.append(("curr", (channel, current)))
 
-class _FakePsu:
-    def __init__(self) -> None:
-        self.closed = False
+    def enable_output(self, channel: int) -> None:
+        self.commands.append(("on", (channel,)))
 
-    def close(self) -> None:
-        self.closed = True
+    def disable_output(self, channel: int) -> None:
+        self.commands.append(("off", (channel,)))
 
 
-def test_shutter_handle_connect_and_disconnect_is_safe(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(instruments_mod, "ShutterControl", _FakeShutterControl)
+class _FakePsuHandle:
+    def __init__(self, device: _FakePsuDevice | None) -> None:
+        self.device = device
+        self.lock = threading.RLock()
+        self.alive = True
 
-    handle = ShutterHandle()
+
+def test_shutter_handle_is_a_channel_of_the_psu_it_is_built_on() -> None:
+    psu = _FakePsuDevice()
+    psu_handle = _FakePsuHandle(psu)
+
+    handle = ShutterHandle(cast(Any, psu_handle), chan=3)
     handle.disconnect()  # disconnect before connect is a no-op
+    assert psu.commands == []
 
     handle.connect()
+    assert "CH3" in handle.probe()
+    assert psu.commands == [("volt", (3, 1.7)), ("curr", (3, 0.01))]
     assert handle.device is not None
-    assert "CH" in handle.probe()
 
-    # The real attribute is typed as ShutterControl | None; the fake only changes
-    # the runtime constructor, so narrow it explicitly for the test-only fake.
-    shutter = cast(_FakeShutterControl, handle.device)
-    psu = shutter.psu
-    assert shutter.connected is True
+    # One link, one lock: the shutter is serialized with everything else on the supply.
+    assert handle.lock is psu_handle.lock
+
+    handle.disconnect()  # closes the shutter, leaves the supply connected
+    assert psu.commands[-1] == ("off", (3,))
+    assert psu.instrument is not None and handle.device is None
+
+
+def test_shutter_handle_needs_a_connected_psu() -> None:
+    for psu_handle in (_FakePsuHandle(None), _FakePsuHandle(_FakePsuDevice(connected=False))):
+        with pytest.raises(ConnectionError, match="PSU"):
+            ShutterHandle(cast(Any, psu_handle)).connect()
+
+
+def test_shutter_handle_follows_the_psus_liveness() -> None:
+    psu_handle = _FakePsuHandle(_FakePsuDevice())
+    handle = ShutterHandle(cast(Any, psu_handle))
+    assert handle.alive
+    psu_handle.alive = False
+    assert not handle.alive
+
+
+def test_shutter_disconnect_does_not_touch_a_psu_that_is_already_closed() -> None:
+    psu = _FakePsuDevice()
+    handle = ShutterHandle(cast(Any, _FakePsuHandle(psu)))
+    handle.connect()
+    psu.instrument = None
+    psu.commands.clear()
+
     handle.disconnect()
-    assert shutter.connected is False
-    assert psu.closed is True
-    assert handle.device is None
+
+    assert psu.commands == []
 
 
 # -- WavemeterHandle ----------------------------------------------------------
@@ -264,6 +294,15 @@ def test_instrument_registry_has_unique_nonempty_specs() -> None:
     keys = [spec.key for spec in INSTRUMENTS]
     assert len(keys) == len(set(keys))
     assert all(spec.label for spec in INSTRUMENTS)
+
+
+def test_the_shutter_is_registered_as_a_part_of_the_psu() -> None:
+    specs = {spec.key: spec for spec in INSTRUMENTS}
+    assert specs["shutter"].parent == "psu" and not specs["psu"].parent
+    # Every parent exists and comes first, so ``connect all`` and the Connect page list it above.
+    keys = [spec.key for spec in INSTRUMENTS]
+    for spec in INSTRUMENTS:
+        assert not spec.parent or keys.index(spec.parent) < keys.index(spec.key)
 
 
 def test_scope_handle_alive_follows_the_drivers_connected_state(

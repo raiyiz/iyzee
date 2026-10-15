@@ -39,7 +39,7 @@ class ConsoleScreen(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static(
-            "Embedded IPython • same process • lab.mx / lab.shutter / lab.scope",
+            "Embedded IPython • same process • lab.mx / lab.psu / lab.shutter / lab.scope",
             classes="panel-title",
         )
         # Constructed once — this only runs on this page's first mount, not
