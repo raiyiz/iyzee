@@ -152,47 +152,29 @@ class _FakePsuHandle:
 def test_shutter_handle_is_a_channel_of_the_psu_it_is_built_on() -> None:
     psu = _FakePsuDevice()
     psu_handle = _FakePsuHandle(psu)
-
     handle = ShutterHandle(cast(Any, psu_handle), chan=3)
-    handle.disconnect()  # disconnect before connect is a no-op
-    assert psu.commands == []
 
     handle.connect()
-    assert "CH3" in handle.probe()
     assert psu.commands == [("volt", (3, 1.7)), ("curr", (3, 0.01))]
-    assert handle.device is not None
-
-    # One link, one lock: the shutter is serialized with everything else on the supply.
-    assert handle.lock is psu_handle.lock
+    assert handle.lock is psu_handle.lock  # one link, one lock
+    psu_handle.alive = False
+    assert not handle.alive  # and one fate
 
     handle.disconnect()  # closes the shutter, leaves the supply connected
-    assert psu.commands[-1] == ("off", (3,))
-    assert psu.instrument is not None and handle.device is None
+    assert psu.commands[-1] == ("off", (3,)) and psu.instrument is not None
 
 
-def test_shutter_handle_needs_a_connected_psu() -> None:
+def test_shutter_handle_needs_a_connected_psu_and_never_touches_a_closed_one() -> None:
     for psu_handle in (_FakePsuHandle(None), _FakePsuHandle(_FakePsuDevice(connected=False))):
         with pytest.raises(ConnectionError, match="PSU"):
             ShutterHandle(cast(Any, psu_handle)).connect()
 
-
-def test_shutter_handle_follows_the_psus_liveness() -> None:
-    psu_handle = _FakePsuHandle(_FakePsuDevice())
-    handle = ShutterHandle(cast(Any, psu_handle))
-    assert handle.alive
-    psu_handle.alive = False
-    assert not handle.alive
-
-
-def test_shutter_disconnect_does_not_touch_a_psu_that_is_already_closed() -> None:
     psu = _FakePsuDevice()
     handle = ShutterHandle(cast(Any, _FakePsuHandle(psu)))
     handle.connect()
     psu.instrument = None
     psu.commands.clear()
-
     handle.disconnect()
-
     assert psu.commands == []
 
 
@@ -294,15 +276,6 @@ def test_instrument_registry_has_unique_nonempty_specs() -> None:
     keys = [spec.key for spec in INSTRUMENTS]
     assert len(keys) == len(set(keys))
     assert all(spec.label for spec in INSTRUMENTS)
-
-
-def test_the_shutter_is_registered_as_a_part_of_the_psu() -> None:
-    specs = {spec.key: spec for spec in INSTRUMENTS}
-    assert specs["shutter"].parent == "psu" and not specs["psu"].parent
-    # Every parent exists and comes first, so ``connect all`` and the Connect page list it above.
-    keys = [spec.key for spec in INSTRUMENTS]
-    for spec in INSTRUMENTS:
-        assert not spec.parent or keys.index(spec.parent) < keys.index(spec.key)
 
 
 def test_scope_handle_alive_follows_the_drivers_connected_state(

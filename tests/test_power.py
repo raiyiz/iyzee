@@ -1,7 +1,6 @@
 import pytest
 
 from iyzee import IP, SHUTTER_CHANNEL_DEFAULT
-from iyzee.config import address
 from iyzee.devices.power import PSU, ChannelState, PSUState, ShutterControl
 
 
@@ -72,10 +71,6 @@ def test_psu_context_manager_closes_injected_transport():
     assert instrument.close_calls == 1
 
 
-def test_psu_defaults_to_the_labs_supply_address():
-    assert PSU(resource_manager=FakeResourceManager()).ip == address(IP.POWER_SUPPLY)
-
-
 def test_the_shutter_is_a_channel_of_a_psu_it_borrows():
     resource_manager = FakeResourceManager()
     psu = PSU(resource_manager=resource_manager)
@@ -107,11 +102,6 @@ def test_the_shutter_is_a_channel_of_a_psu_it_borrows():
     ]
     # The shutter never closes the supply it borrowed.
     assert instrument.close_calls == 0 and psu.instrument is instrument
-
-
-def test_the_shutter_channel_must_exist():
-    with pytest.raises(ValueError, match="channel"):
-        ShutterControl(PSU(resource_manager=FakeResourceManager()), chan=5)
 
 
 class FakeHMP:

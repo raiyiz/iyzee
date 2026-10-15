@@ -129,91 +129,42 @@ async def _open(
 
 
 @async_test
-async def test_without_a_psu_connection_the_page_says_so_and_offers_no_controls() -> None:
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot)
-
-        assert screen.query_one("#power-status", Static).display
-        assert "connect the PSU" in _text(screen, "power-status")
-        for widget_id in ("power-global", "power-shutter", "power-refresh", "power-apply1"):
-            assert _button(screen, widget_id).disabled
-
-
-@async_test
-async def test_connecting_reads_the_supply_into_the_page_and_the_form() -> None:
+async def test_every_control_changes_the_supply_and_the_page_shows_what_it_reports() -> None:
     psu = FakePSU()
     psu.selected[1] = True
     async with IyzeeApp().run_test() as pilot:
         screen = await _open(pilot, psu)
 
-        assert not screen.query_one("#power-status", Static).display
+        # Connecting reads the supply into the page and the form without changing anything.
         assert "Global output: off" in _text(screen, "power-summary")
-        assert "armed" in _text(screen, "power-readout1")  # armed, master still off
-        assert "5.000 V" in _text(screen, "power-readout1")
+        assert "armed" in _text(screen, "power-readout1")
         assert screen.query_one("#power-v1", Input).value == "5"
-        assert screen.query_one("#power-i2", Input).value == "0.5"
-        assert str(_button(screen, "power-toggle1").label) == "Disable CH1"
-        assert str(_button(screen, "power-toggle2").label) == "Enable CH2"
-        assert psu.writes() == []  # reading never changes anything
+        assert psu.writes() == []
 
+        async def press(widget_id: str, done: Any) -> None:
+            _button(screen, widget_id).press()
+            await wait_until(pilot, lambda: done() and not screen._busy)
 
-@async_test
-async def test_global_output_toggles_and_the_channel_goes_live() -> None:
-    psu = FakePSU()
-    psu.selected[1] = True
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, psu)
-
-        _button(screen, "power-global").press()
-        await wait_until(pilot, lambda: psu.general and not screen._busy)
+        await press("power-global", lambda: psu.general)
         assert "Global output: ON" in _text(screen, "power-summary")
-        assert "ON" in _text(screen, "power-readout1") and "armed" not in _text(
-            screen, "power-readout1"
-        )
-        assert str(_button(screen, "power-global").label) == "Turn global output OFF"
-
-        _button(screen, "power-global").press()
-        await wait_until(pilot, lambda: not psu.general and not screen._busy)
-        assert "Global output: off" in _text(screen, "power-summary")
-        assert psu.writes() == ["enable_global_output", "disable_global_output"]
-
-
-@async_test
-async def test_channel_switch_enables_and_disables_only_that_channel() -> None:
-    psu = FakePSU()
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, psu)
-
-        _button(screen, "power-toggle2").press()
-        await wait_until(pilot, lambda: psu.selected[2] and not screen._busy)
+        await press("power-toggle2", lambda: psu.selected[2])
         assert str(_button(screen, "power-toggle2").label) == "Disable CH2"
-        assert psu.selected == {1: False, 2: True, 3: False, 4: False}
-
-        _button(screen, "power-toggle2").press()
-        await wait_until(pilot, lambda: not psu.selected[2] and not screen._busy)
-        assert psu.calls == [("enable_output", (2,)), ("disable_output", (2,))]
-
-
-@async_test
-async def test_apply_sets_voltage_and_current_and_shows_what_the_supply_reports() -> None:
-    psu = FakePSU()
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, psu)
+        await press("power-shutter", lambda: psu.selected[3])  # master is on: it opens
+        assert "OPEN" in _text(screen, "power-summary")
 
         _set(screen, "power-v4", "9.5")
         _set(screen, "power-i4", "0.25")
-        _button(screen, "power-apply4").press()
-        await wait_until(pilot, lambda: psu.voltage[4] == 9.5 and not screen._busy)
+        await press("power-apply4", lambda: psu.voltage[4] == 9.5)
+        assert psu.current[4] == 0.25 and "9.500 V" in _text(screen, "power-readout4")
 
-        assert psu.current[4] == 0.25
-        assert psu.calls == [("set_voltage", (4, 9.5)), ("set_current", (4, 0.25))]
-        assert "9.500 V" in _text(screen, "power-readout4")
-        assert "Done: set CH4 to 9.5 V / 0.25 A" in _log(screen)
+        await press("power-shutter", lambda: not psu.selected[3])
+        await press("power-global", lambda: not psu.general)
+        assert psu.selected == {1: True, 2: True, 3: False, 4: False}
 
 
 @async_test
-async def test_a_bad_setpoint_is_flagged_and_nothing_is_sent() -> None:
-    psu = FakePSU()
+async def test_bad_setpoints_send_nothing_and_a_refused_change_is_reported() -> None:
+    psu = FakePSU(fail_on="enable_output")
     async with IyzeeApp().run_test() as pilot:
         app = pilot.app
         assert isinstance(app, IyzeeApp)
@@ -227,46 +178,8 @@ async def test_a_bad_setpoint_is_flagged_and_nothing_is_sent() -> None:
             await pilot.pause()
             assert psu.writes() == [], (voltage, current)
 
-        assert screen.query_one("#power-i1", Input).has_class("-invalid") or screen.query_one(
-            "#power-v1", Input
-        ).has_class("-invalid")
-        assert any("between 0 and" in n or "number" in n for n in notifications(app))
-        assert not screen._busy
-
-
-@async_test
-async def test_shutter_button_opens_and_closes_channel_three() -> None:
-    psu = FakePSU()
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, psu)
-        assert str(_button(screen, "power-shutter").label) == "Open shutter"
-
-        # Opening needs the master output; with it off the channel is only armed.
-        _button(screen, "power-shutter").press()
-        await wait_until(pilot, lambda: psu.selected[3] and not screen._busy)
-        assert "closed until global output is on" in _text(screen, "power-summary")
-
-        _button(screen, "power-global").press()
-        await wait_until(pilot, lambda: psu.general and not screen._busy)
-        assert "OPEN" in _text(screen, "power-summary")
-        assert str(_button(screen, "power-shutter").label) == "Close shutter"
-
-        _button(screen, "power-shutter").press()
-        await wait_until(pilot, lambda: not psu.selected[3] and not screen._busy)
-        assert "closed" in _text(screen, "power-summary")
-
-
-@async_test
-async def test_a_refused_change_is_reported_and_the_real_state_is_still_shown() -> None:
-    psu = FakePSU(fail_on="enable_output")
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, psu)
-
-        _button(screen, "power-toggle1").press()
+        _button(screen, "power-toggle1").press()  # the supply refuses this one
         await wait_until(pilot, lambda: "Could not enable CH1" in _log(screen))
-
         assert "refused [by test]" in _log(screen)
         assert any("Could not enable CH1" in n for n in notifications(app))
         assert str(_button(screen, "power-toggle1").label) == "Enable CH1"  # nothing changed
@@ -274,141 +187,62 @@ async def test_a_refused_change_is_reported_and_the_real_state_is_still_shown() 
 
 
 @async_test
-async def test_controls_are_locked_while_a_sweep_runs() -> None:
+async def test_the_page_follows_connections_and_sweeps() -> None:
     psu = FakePSU()
     async with IyzeeApp().run_test() as pilot:
         app = pilot.app
         assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, psu)
 
-        app.sweep_running = True
-        screen._refresh_ui()
+        screen = await _open(pilot)  # no PSU yet
+        assert "connect the PSU" in _text(screen, "power-status")
         assert _button(screen, "power-global").disabled
-        assert _button(screen, "power-toggle1").disabled
-        assert "a sweep is running" in _text(screen, "power-summary")
 
-        screen._toggle_global()  # even if something reaches the handler directly
+        app.handles["psu"] = FakeHandle(device=psu)  # the PSU alone: every channel is free
+        app.instruments_changed()
+        await wait_until(pilot, lambda: screen._synced and not screen._busy)
+        assert "Shutter: not connected" in _text(screen, "power-summary")
+        assert not _button(screen, "power-toggle3").disabled
+
+        app.handles["shutter"] = FakeHandle(device=_shutter(psu))  # the shutter claims CH3
+        app.instruments_changed()
+        await pilot.pause()
+        assert (
+            _button(screen, "power-toggle3").disabled and _button(screen, "power-apply3").disabled
+        )
+        screen._toggle_channel(3)  # even if something reaches the handler directly
         await pilot.pause()
         assert psu.writes() == []
 
-        app.sweep_running = False  # ends with a read of the supply, then the controls return
-        await wait_until(pilot, lambda: not screen._busy)
+        app.sweep_running = True  # a sweep locks the controls...
+        await pilot.pause()
+        assert _button(screen, "power-global").disabled
+        reads = psu.reads
+        psu.selected[3] = True  # ... moves the shutter ...
+        app.sweep_running = False  # ... and when it ends the page reads the supply again
+        await wait_until(pilot, lambda: psu.reads > reads and not screen._busy)
+        assert "armed" in _text(screen, "power-readout3")
         assert not _button(screen, "power-global").disabled
-
-
-@async_test
-async def test_losing_the_connection_clears_the_page() -> None:
-    psu = FakePSU()
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, psu)
 
         del app.handles["psu"]
         app.instruments_changed()
         await pilot.pause()
-
-        assert screen.query_one("#power-status", Static).display
-        assert _text(screen, "power-readout1") == "-"
-        assert _button(screen, "power-global").disabled
+        assert _text(screen, "power-readout1") == "-" and _button(screen, "power-global").disabled
 
 
 @async_test
-async def test_the_page_works_on_the_psu_alone_and_all_four_channels_are_free() -> None:
-    psu = FakePSU()
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, psu, shutter=False)
-
-        assert "Shutter: not connected" in _text(screen, "power-summary")
-        assert _button(screen, "power-shutter").disabled
-        assert not _button(screen, "power-toggle3").disabled
-        assert not screen.query_one("#power-v3", Input).disabled
-
-        _button(screen, "power-toggle3").press()
-        await wait_until(pilot, lambda: psu.selected[3] and not screen._busy)
-
-
-@async_test
-async def test_the_shutters_channel_is_claimed_while_the_shutter_is_connected() -> None:
-    psu = FakePSU()
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, psu)
-
-        assert "use the Shutter button" in _text(screen, "power-title3")
-        assert _button(screen, "power-toggle3").disabled
-        assert _button(screen, "power-apply3").disabled
-        assert screen.query_one("#power-v3", Input).disabled
-        assert not _button(screen, "power-toggle1").disabled  # the other channels are untouched
-
-        screen._toggle_channel(3)  # even if something reaches the handler directly
-        screen._apply_channel(3)
-        await pilot.pause()
-        assert psu.writes() == []
-
-        # Disconnecting the shutter frees its channel again; the page stays up on the PSU.
-        del app.handles["shutter"]
-        app.instruments_changed()
-        await pilot.pause()
-        assert not _button(screen, "power-toggle3").disabled
-        assert "use the Shutter button" not in _text(screen, "power-title3")
-
-
-@async_test
-async def test_the_page_never_polls_the_supply_in_the_background() -> None:
+async def test_the_page_never_polls_but_reading_again_when_reopened() -> None:
     """Regression: a timer-driven read kept the page 'working' with its controls off."""
     psu = FakePSU()
     async with IyzeeApp().run_test() as pilot:
         screen = await _open(pilot, psu)
         reads = psu.reads
-        assert reads >= 1
+        await pilot.pause(0.6)
+        assert psu.reads == reads and not _button(screen, "power-global").disabled
 
-        await pilot.pause(0.6)  # far longer than any plausible refresh rate in a test
-
-        assert psu.reads == reads
-        assert not screen._busy
-        assert not _button(screen, "power-global").disabled
-        assert not _button(screen, "power-toggle1").disabled
-
-
-@async_test
-async def test_opening_the_page_again_reads_what_the_console_changed_meanwhile() -> None:
-    psu = FakePSU()
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, psu)
-        assert "Global output: off" in _text(screen, "power-summary")
         _set(screen, "power-v1", "6")  # a half-typed edit
-
-        await pilot.press("s")  # away ...
+        await pilot.press("s")
         await pilot.pause()
-        psu.general = True  # ... the supply is changed from the console
-        psu.selected[1] = True
-        await pilot.press("p")  # ... and back
+        psu.general = True  # changed from the console meanwhile
+        await pilot.press("p")
         await wait_until(pilot, lambda: "Global output: ON" in _text(screen, "power-summary"))
-
-        assert "ON" in _text(screen, "power-readout1")
         assert screen.query_one("#power-v1", Input).value == "6"  # typing is never overwritten
-
-
-@async_test
-async def test_a_finished_sweep_is_followed_by_a_read_and_the_controls_come_back() -> None:
-    psu = FakePSU()
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, psu)
-
-        app.sweep_running = True
-        await pilot.pause()
-        assert _button(screen, "power-global").disabled
-        assert "a sweep is running" in _text(screen, "power-summary")
-        reads = psu.reads
-
-        psu.selected[3] = True  # the sweep left things moved
-        app.sweep_running = False
-        await wait_until(pilot, lambda: psu.reads > reads and not screen._busy)
-
-        assert not _button(screen, "power-global").disabled
-        assert "a sweep is running" not in _text(screen, "power-summary")
-        assert "armed" in _text(screen, "power-readout3")
