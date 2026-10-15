@@ -55,6 +55,7 @@ select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF", "S", "BLE", "T20"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101"]
+"notebooks/*.py" = ["B018"]
 "docs/examples/*.py" = ["S101", "T201"]
 "scripts/*.py" = ["T201"]
 "src/iyzee/devices/wavemeter.py" = ["T201"]
