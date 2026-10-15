@@ -99,12 +99,15 @@ def _(hashlib):
 
 
 @app.cell
-def _(browser, load_recording, mo, sha256):
+def _(browser, load_recording, mo, sha256, summarize_sweep):
     path = browser.path(index=0) if browser.value else None
     recording = load_recording(path) if path is not None else None
     arrays = recording.arrays if recording is not None else {}
     manifest = recording.metadata if recording is not None else {}
     kind = str(manifest.get("kind", "unknown"))
+    if recording is not None and kind != "scope-acquisition" and "x_values" in arrays:
+        # Sweep manifests have run_metadata/points but no top-level kind field.
+        kind = summarize_sweep(recording).axis
     digest = manifest.get("data_sha256")
     if not digest:
         checksum = "not recorded"
