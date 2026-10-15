@@ -243,6 +243,45 @@ def _(
         ax.legend(frameon=False, ncols=min(len(traces), 4))
         return ax.figure, ax
 
+    def plot_scope_comparison(
+        run_ids: list[str],
+        *,
+        channel: str,
+        ax=None,
+        title=None,
+    ):
+        """Overlay one channel across runs; all selected traces must share units."""
+        traces = []
+        for run_id in run_ids:
+            recording = load_run(run_id)
+            trace = next(
+                (
+                    trace
+                    for trace in traces_from_scope_recording(recording)
+                    if trace.label == channel
+                ),
+                None,
+            )
+            if trace is not None:
+                traces.append((run_id, trace))
+        if not traces:
+            raise ValueError(f"No saved data for channel {channel!r} in the selected runs")
+        units = {(trace.time_unit, trace.value_unit) for _, trace in traces}
+        if len(units) > 1:
+            raise ValueError("Selected runs use different units; compare like-for-like traces")
+        if ax is None:
+            _, ax = plt.subplots(figsize=(8.5, 4), layout="constrained")
+        for run_id, trace in traces:
+            ax.plot(trace.time, trace.values, label=run_id, linewidth=1.0)
+        _styled_axes(
+            ax,
+            title=title or f"Scope comparison · {channel}",
+            xlabel=f"Time ({traces[0][1].time_unit})",
+            ylabel=f"Signal ({traces[0][1].value_unit})",
+        )
+        ax.legend(frameon=False, fontsize="small")
+        return ax.figure, ax
+
     def plot_sweep_comparison(
         points: pl.DataFrame,
         run_ids: list[str],
@@ -311,6 +350,7 @@ def _(
         files,
         load_run,
         plot_scope,
+        plot_scope_comparison,
         plot_sweep_comparison,
         plot_trace,
         read_manifest,
@@ -442,17 +482,51 @@ def _(Path, catalog, load_run, pl, read_manifest, summarize_sweep):
     }
     sweep_points = pl.DataFrame(sweep_rows, schema=sweep_schema)
     scope_channels = pl.DataFrame(scope_rows, schema=scope_schema)
+    sweep_run_schema = {
+        "run_id": pl.String,
+        "path": pl.String,
+        "kind": pl.String,
+        "n_points": pl.Int64,
+        "n_usable": pl.Int64,
+        "best_mean_relative_noise_db": pl.Float64,
+        "average_mean_relative_noise_db": pl.Float64,
+        "best_min_relative_noise_db": pl.Float64,
+        "axis_min": pl.Float64,
+        "axis_max": pl.Float64,
+        "modified_at": pl.String,
+        "status": pl.String,
+    }
+    sweep_runs = (
+        sweep_points.group_by("run_id")
+        .agg(
+            pl.col("path").first(),
+            pl.col("kind").first(),
+            pl.len().cast(pl.Int64).alias("n_points"),
+            pl.col("relative_noise_mean_db").count().cast(pl.Int64).alias("n_usable"),
+            pl.col("relative_noise_mean_db").min().alias("best_mean_relative_noise_db"),
+            pl.col("relative_noise_mean_db").mean().alias("average_mean_relative_noise_db"),
+            pl.col("relative_noise_min_db").min().alias("best_min_relative_noise_db"),
+            pl.col("axis_value").min().alias("axis_min"),
+            pl.col("axis_value").max().alias("axis_max"),
+        )
+        .join(catalog.select("run_id", "modified_at", "status"), on="run_id", how="left")
+        .sort("modified_at", descending=True)
+        if not sweep_points.is_empty()
+        else pl.DataFrame(schema=sweep_run_schema)
+    )
     errors = pl.DataFrame(
         read_errors,
         schema={"run_id": pl.String, "stage": pl.String, "error": pl.String},
     )
-    return errors, scope_channels, sweep_points
+    return errors, scope_channels, sweep_points, sweep_runs
 
 
 @app.cell
-def _(errors, mo, scope_channels, sweep_points):
+def _(errors, mo, scope_channels, sweep_points, sweep_runs):
     mo.vstack(
         [
+            mo.md("## Sweep run summary\nOne row per run for quick comparisons."),
+            mo.ui.table(sweep_runs, selection=None, page_size=20),
             mo.md(
                 "## Sweep points\nOne row per point; requested and measured setpoints stay separate."
             ),
@@ -496,41 +570,52 @@ def _(catalog, mo, pl, scope_channels):
         value="mean",
         label="Relative-noise statistic",
     )
-    selected_scope = mo.ui.dropdown(
+    selected_scope_runs = mo.ui.multiselect(
         options=scope_ids,
-        value=scope_ids[0] if scope_ids else None,
-        label="Scope run",
+        value=scope_ids[:3],
+        label="Scope runs to compare",
     )
-    channels_for_run = (
-        scope_channels.filter(pl.col("run_id") == selected_scope.value)
+    channels_for_runs = (
+        scope_channels.filter(pl.col("run_id").is_in(selected_scope_runs.value))
+        .group_by("channel")
+        .agg(pl.col("run_id").n_unique().alias("n_runs"))
+        .filter(pl.col("n_runs") == len(selected_scope_runs.value))
+        .sort("channel")
         .get_column("channel")
         .to_list()
-        if selected_scope.value
+        if selected_scope_runs.value
         else []
     )
-    selected_channels = mo.ui.multiselect(
-        options=channels_for_run,
-        value=channels_for_run,
-        label="Scope channels to plot",
+    selected_scope_channel = mo.ui.dropdown(
+        options=channels_for_runs,
+        value=channels_for_runs[0] if channels_for_runs else None,
+        label="Common scope channel",
     )
     mo.vstack(
         [
             mo.md("## Compare runs"),
             mo.hstack([selected_sweeps, selected_statistic], gap=2, align="start"),
-            mo.hstack([selected_scope, selected_channels], gap=2, align="start"),
+            mo.hstack(
+                [selected_scope_runs, selected_scope_channel], gap=2, align="start"
+            ),
         ]
     )
-    return selected_channels, selected_scope, selected_statistic, selected_sweeps
+    return (
+        selected_scope_channel,
+        selected_scope_runs,
+        selected_statistic,
+        selected_sweeps,
+    )
 
 
 @app.cell
 def _(
     load_run,
     mo,
-    plot_scope,
+    plot_scope_comparison,
     plot_sweep_comparison,
-    selected_channels,
-    selected_scope,
+    selected_scope_channel,
+    selected_scope_runs,
     selected_statistic,
     selected_sweeps,
     sweep_points,
@@ -549,18 +634,17 @@ def _(
     else:
         plots.append(mo.md("Select one or more sweep runs to compare."))
 
-    if selected_scope.value and selected_channels.value:
+    if selected_scope_runs.value and selected_scope_channel.value:
         try:
-            scope_recording = load_run(selected_scope.value)
-            scope_fig, _ = plot_scope(
-                scope_recording,
-                channels=list(selected_channels.value),
+            scope_fig, _ = plot_scope_comparison(
+                list(selected_scope_runs.value),
+                channel=selected_scope_channel.value,
             )
             plots.append(scope_fig)
         except (ValueError, OSError, KeyError) as exc:
             plots.append(mo.md(f"**Scope plot:** {exc}").callout(kind="warn"))
     else:
-        plots.append(mo.md("Select a scope run and at least one channel."))
+        plots.append(mo.md("Select scope runs and a common channel to overlay."))
 
     mo.vstack([mo.md("## Plots"), *plots])
     return
@@ -601,6 +685,9 @@ def _(mo):
     # Compose the plotting helpers into your own figure.
     fig, ax = plt.subplots(figsize=(10, 4), layout="constrained")
     plot_sweep_comparison(sweep_points, selected_sweeps.value, ax=ax)
+
+    # Compare one channel across several saved scope runs.
+    plot_scope_comparison(selected_scope_runs.value, channel="C1", ax=ax)
     ~~~
     """)
     return
