@@ -8,7 +8,7 @@ Read-only: this notebook opens saved recordings and never connects to hardware.
 
 import marimo
 
-__generated_with = "0.19.7"
+__generated_with = "0.25.1"
 app = marimo.App(width="medium")
 
 
@@ -41,22 +41,20 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        # iyzee · Measurement explorer
+    mo.md("""
+    # iyzee · Measurement explorer
 
-        A small, read-only workbench for **saved sweeps** and **scope waveforms**.
-        Pick a recording, check its manifest, then inspect the data with iyzee's
-        existing analysis routines.
+    A small, read-only workbench for **saved sweeps** and **scope waveforms**.
+    Pick a recording, check its manifest, then inspect the data with iyzee's
+    existing analysis routines.
 
-        - **Sweeps:** relative noise (squeezing minus shot noise), selected trace pairs,
-          requested and measured frequency.
-        - **Scope:** waveform plot, RMS / peak-to-peak / spread, acquisition warnings.
+    - **Sweeps:** relative noise (squeezing minus shot noise), selected trace pairs,
+      requested and measured frequency.
+    - **Scope:** waveform plot, RMS / peak-to-peak / spread, acquisition warnings.
 
-        Negative relative noise means squeezing is below the shot-noise reference.
-        This notebook reads saved files only; it does not talk to laboratory hardware.
-        """
-    )
+    Negative relative noise means squeezing is below the shot-noise reference.
+    This notebook reads saved files only; it does not talk to laboratory hardware.
+    """)
     return
 
 
@@ -159,6 +157,21 @@ def _(browser, load_recording, mo, sha256, summarize_sweep):
 
 
 @app.cell
+def _(arrays, manifest, path, recording):
+    arrays, recording, path, manifest
+    return
+
+
+@app.cell
+def _(plt, recording):
+    print(recording.metadata.keys())
+    print(recording.metadata['data_sha256'])
+
+    [plt.plot(arr) for arr in recording.arrays]
+    return
+
+
+@app.cell(hide_code=True)
 def _(arrays, kind, mo, recording, traces_from_scope_recording):
     count = (
         len(arrays.get("x_values", []))
@@ -175,7 +188,9 @@ def _(arrays, kind, mo, recording, traces_from_scope_recording):
             "Mean relative noise": "mean",
             "Minimum relative noise": "minimum",
         },
-        value="mean",
+        # value="mean",
+        value="Mean relative noise",
+    
         label="Sweep statistic",
     )
     point = mo.ui.slider(
@@ -189,7 +204,7 @@ def _(arrays, kind, mo, recording, traces_from_scope_recording):
     channels = {trace.label: trace.label for trace in traces} or {"No scope channels": ""}
     channel = mo.ui.dropdown(
         options=channels,
-        value=next(iter(channels.values())),
+        value=next(iter(channels.values())) or "No scope channels",
         label="Scope channel",
     )
     if kind in ("bandwidth", "frequency"):
@@ -202,7 +217,7 @@ def _(arrays, kind, mo, recording, traces_from_scope_recording):
     return channel, point, statistic, traces
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     arrays,
     channel,
@@ -421,6 +436,11 @@ def _(
             f"## Analysis unavailable\nManifest kind {kind!r} is not a sweep or scope recording."
         ).callout(kind="warn")
     analysis
+    return
+
+
+@app.cell
+def _():
     return
 
 
