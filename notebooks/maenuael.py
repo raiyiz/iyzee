@@ -12,47 +12,6 @@ def _():
     return mo, np
 
 
-@app.cell
-def _(np):
-
-    from dataclasses import asdict
-    from uuid import uuid4
-
-    from iyzee.experiment import (
-        ExperimentContext,
-        build_frequency_sweep,
-        prepare_analyzer,
-        run_sequence,
-    )
-
-    center = 377.1052067
-    channel = 4
-
-    steps, config = build_frequency_sweep(
-        laser_center_thz=center,
-        wavemeter_channel=channel,
-        offsets_thz=[i * 10e-9 for i in (-2, -1, 0, 1, 2)],
-        sweep_duration_ms=10,
-    )
-
-    # prepare_analyzer(lab.mx, (1, 2), config)
-
-    # ctx = ExperimentContext(
-    #     mx=lab.mx,
-    #     run_id=uuid4().hex[:8],
-    #     shutter=lab.shutter,
-    #     config=asdict(config),
-    # )
-
-    # results = run_sequence(steps, ctx)
-
-    fpath = "/home/gsec/sqz/repos/iyzee/data/2026-10/16T194451_frequency-manual_5cf579.npz"
-    results = np.load(fpath)
-
-
-    return
-
-
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -143,7 +102,7 @@ def _(lab):
                         name="frequency",
                         path=save_path,
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - saving must never interrupt acquisition
                     # Like the TUI, a save failure must not stop the measurement.
                     if not save_warned:
                         print(f"WARNING: could not save sweep: {exc!r}")
@@ -196,7 +155,7 @@ def _(lab):
         return collected
 
 
-    results = reproduce_tui_frequency_sweep()
+    reproduce_tui_frequency_sweep()
     return
 
 
@@ -375,8 +334,8 @@ def _(mo):
 
     | Point | Offset from center |
     | ----- | ------------------ |
-    | 1     | −20 kHz            |
-    | 2     | −10 kHz            |
+    | 1     | -20 kHz            |
+    | 2     | -10 kHz            |
     | 3     | 0 kHz              |
     | 4     | +10 kHz            |
     | 5     | +20 kHz            |

@@ -53,15 +53,15 @@ from .procedures import (
 )
 
 __all__ = [
-    "DEFAULT_SWEEP_DURATION_MS",
-    "FREQUENCY_STEP_THZ",
-    "SWEEP_KINDS",
     "AnalyzerConfig",
     "BandwidthStep",
+    "DEFAULT_SWEEP_DURATION_MS",
     "ExperimentContext",
+    "FREQUENCY_STEP_THZ",
     "FrequencyStep",
     "Recording",
     "RunRecord",
+    "SWEEP_KINDS",
     "Step",
     "StepCallback",
     "StepFailure",

@@ -293,7 +293,7 @@ class IPythonSession:
                 try:
                     self._welcome()
                     self.shell.mainloop()
-                except BaseException:  # noqa: BLE001 - the thread must never die silently
+                except BaseException:  # the thread must never die silently
                     log.exception("IPython session ended unexpectedly")
         finally:
             # The OS hands a finished thread's id to the next thread that starts (a sweep's

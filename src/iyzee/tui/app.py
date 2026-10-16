@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -306,10 +307,8 @@ class IyzeeApp(App):
             for name in ("SIGTERM", "SIGHUP"):
                 number = getattr(signal, name, None)
                 if number is not None:
-                    try:
+                    with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
                         loop.add_signal_handler(number, self._on_signal, name)
-                    except NotImplementedError, RuntimeError, ValueError:
-                        pass  # not the main thread, or not a platform that supports it
 
     def _on_signal(self, name: str) -> None:
         """SIGTERM / SIGHUP (a closed terminal, ``kill``): say so, then shut down cleanly.
