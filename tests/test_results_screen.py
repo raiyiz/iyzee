@@ -155,7 +155,7 @@ async def test_frequency_sweep_keeps_requested_and_measured_frequency_navigation
         point_summary = plain(screen.query_one("#results-point-summary", Static))
         assert "Requested: 377.100000000 THz" in point_summary
         assert "Measured: 377.100001000 THz" in point_summary
-        assert "Mean delta: 2.000" in point_summary
+        assert "Mean relative noise: 2.000 dB" in point_summary
 
         table.move_cursor(row=1, column=0)
         await wait_until(
@@ -168,7 +168,9 @@ async def test_frequency_sweep_keeps_requested_and_measured_frequency_navigation
 
         screen.query_one("#results-statistic", Select).value = "minimum"
         await pilot.pause()
-        assert "Minimum delta: 2.000" in plain(screen.query_one("#results-point-summary", Static))
+        assert "Minimum relative noise: 2.000 dB" in plain(
+            screen.query_one("#results-point-summary", Static)
+        )
 
 
 @async_test

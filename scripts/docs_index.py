@@ -181,7 +181,7 @@ def _layer(module: str) -> str:
         return "config"
     if module.startswith("iyzee.devices"):
         return "devices"
-    if module.startswith("iyzee.experiment") or module == "iyzee.waveform_math":
+    if module.startswith("iyzee.experiment") or module in ("iyzee.waveform_math", "iyzee.analysis"):
         return "experiment"
     if module in ("iyzee.lab", "iyzee.scope_workflows"):
         return "session"

@@ -125,7 +125,7 @@ def test_save_step_results_rejects_a_trace_whose_length_disagrees_across_points(
         _result(2.0, squeezing=[1.0, 2.0]),
     ]
 
-    with pytest.raises(ValueError, match="squeezing.*inconsistent lengths"):
+    with pytest.raises(ValueError, match=r"squeezing.*inconsistent lengths"):
         save_step_results(results, tmp_path)
 
 

@@ -65,7 +65,7 @@ def test_connect_timeout_is_a_lecroy_timeout():
 
     scope = LeCroy("10.0.0.1", resource_manager=Refusing())
 
-    with pytest.raises(LeCroyTimeoutError, match="10.0.0.1"):
+    with pytest.raises(LeCroyTimeoutError, match=r"10\.0\.0\.1"):
         scope.connect()
     assert not scope.connected
 

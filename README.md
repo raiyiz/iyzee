@@ -214,7 +214,8 @@ The compiled guide is published by CI as the <code>iyzee-documentation</code> ar
 ~~~sh
 uv sync
 
-scripts/ci.sh test        # pytest
+scripts/ci.sh test        # pytest (no instruments are touched)
+scripts/ci.sh hardware    # tests/hardware against the real instruments, read-only
 scripts/ci.sh lint        # ruff
 scripts/ci.sh typecheck   # mypy
 scripts/ci.sh doc-links   # guide <-> code references still resolve
@@ -222,7 +223,22 @@ scripts/ci.sh docs        # build the code index and compile the Typst guide
 scripts/ci.sh all         # run everything
 ~~~
 
-GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets.
+GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. <code>hardware</code> is deliberately not part of <code>all</code> or CI.
+
+### Hardware tests
+
+<code>tests/hardware/</code> checks the drivers and procedures against the real instruments. A plain <code>pytest</code> never runs them: they are skipped unless you pass <code>--hardware</code>, and everything in that directory is marked <code>hardware</code> automatically. Addresses come from the same <code>IYZEE_*_IP</code> / <code>config.toml</code> the app uses, and the first line of a run lists them.
+
+~~~sh
+pytest --hardware                          # read-only: identity, error queues, settings, readings
+pytest --hardware --hardware-actuate       # also: configure and sweep the MXA, open the shutter, acquire on the scope
+pytest --hardware -m "not scope"           # leave out an instrument that is not on the bench
+pytest --hardware -m "mxa and not actuates"
+~~~
+
+- Tests that change instrument state are marked <code>actuates</code> and need <code>--hardware-actuate</code> as well. Each one restores what it changed (MXA settings, scope trigger mode) and the shutter is closed afterwards and confirmed closed by the supply. A shutter that is already open is left alone and its tests are skipped.
+- An instrument that cannot be reached fails its tests; it is not skipped. Use <code>-m "not mxa"</code> (or <code>scope</code>, <code>shutter</code>, <code>wavemeter</code>) to leave one out.
+- Opening the shutter lets light through. The wavemeter setpoint test also needs <code>IYZEE_TEST_LASER_SETPOINT_THZ</code> (a frequency that is safe to lock to, ideally where the laser already is); see <code>tests/hardware/test_hw_wavemeter.py</code> for the other knobs.
 
 The codebase is intentionally layered:
 
@@ -230,6 +246,7 @@ The codebase is intentionally layered:
 src/iyzee/
 ├── devices/             hardware drivers
 ├── experiment/          measurement procedures + result handling
+├── analysis.py          what a saved sweep or scope recording means
 ├── lab.py               connected-instrument session
 ├── scope_workflows.py   reusable scope operations
 └── tui/                 interactive presentation/control

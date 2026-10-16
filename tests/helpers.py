@@ -16,7 +16,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ParamSpec, cast
+from typing import Any, cast
 
 import pytest
 from textual.pilot import Pilot
@@ -29,10 +29,8 @@ from iyzee.tui.screens import connect as connect_mod
 from iyzee.tui.screens.connect import ConnectScreen
 from iyzee.tui.workers import LastRun
 
-P = ParamSpec("P")
 
-
-def async_test(fn: Callable[P, Awaitable[None]]) -> Callable[P, None]:
+def async_test[**P](fn: Callable[P, Awaitable[None]]) -> Callable[P, None]:
     """Run an ``async def`` test to completion.
 
     Replaces the ``async def scenario(): ...`` / ``asyncio.run(scenario())``

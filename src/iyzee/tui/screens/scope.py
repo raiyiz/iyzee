@@ -370,7 +370,7 @@ class ScopeScreen(Page):
         try:
             channels = read_channel_settings(scope, CHANNELS)
             trigger = read_trigger_settings(scope)
-        except Exception as exc:  # noqa: BLE001 - never leave the page busy
+        except Exception as exc:  # never leave the page busy
             log.exception("scope: failed to read settings")
             error = exc
         self._ui(self._finish_retrieve, scope, channels, trigger, error, silent)
@@ -455,7 +455,7 @@ class ScopeScreen(Page):
             if trigger is not None:
                 apply_trigger_settings(scope, trigger, current_settings=trigger_baseline)
                 verified_trigger = read_trigger_settings(scope)
-        except Exception as exc:  # noqa: BLE001 - never leave the page busy
+        except Exception as exc:  # never leave the page busy
             log.exception("scope: applying settings failed")
             error = exc
         self._ui(
@@ -609,7 +609,7 @@ class ScopeScreen(Page):
                 applied_channel_settings=applied_channel_settings,
                 applied_trigger_settings=applied_trigger_settings,
             )
-        except Exception as exc:  # noqa: BLE001 - never leave the Acquire button disabled
+        except Exception as exc:  # never leave the Acquire button disabled
             log.exception("scope: acquisition failed")
             self._ui(self._acquire_failed, one_line(exc))
             return
@@ -619,7 +619,7 @@ class ScopeScreen(Page):
         save_error: Exception | None = None
         try:
             path = save_scope_acquisition(recording, create_dirs())
-        except Exception as exc:  # noqa: BLE001 - acquisition stays available in memory
+        except Exception as exc:  # acquisition stays available in memory
             log.exception("scope: failed to save acquisition")
             save_error = exc
         # Reduce to terminal-sized data before crossing back to the UI thread.

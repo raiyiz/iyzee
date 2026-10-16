@@ -180,7 +180,8 @@ def subtract_background(
         baseline: float | np.ndarray = _resample_onto(trace, reference)
         source = f"{trace.label} - background({reference.label})"
     else:
-        assert region is not None
+        if region is None:
+            raise ValueError("region is required when no reference trace is supplied")
         lo, hi = sorted(region)
         mask = (trace.time >= lo) & (trace.time <= hi)
         if not np.any(mask):

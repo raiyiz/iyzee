@@ -46,6 +46,8 @@ from .procedures import (
 )
 
 __all__ = [
+    "TRACE_SHOT",
+    "TRACE_SQZ",
     "AnalyzerConfig",
     "BandwidthStep",
     "ExperimentContext",
@@ -56,18 +58,16 @@ __all__ = [
     "StepCallback",
     "StepFailure",
     "StepResult",
-    "TRACE_SHOT",
-    "TRACE_SQZ",
     "acquire_trace",
     "bandwidth_sweep_steps",
     "build_bandwidth_sweep",
     "build_figure",
+    "build_frequency_sweep",
     "create_dirs",
     "difference_series",
     "difference_series_many",
     "difference_statistic",
     "difference_values_many",
-    "build_frequency_sweep",
     "frequency_sweep_steps",
     "load_recording",
     "multiplot",
