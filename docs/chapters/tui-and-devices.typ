@@ -314,7 +314,7 @@ a single lock. #code("LockedProxy") wraps a live device so every method call tak
 
 Because the lock lives on the handle, a handle built entirely outside the app (a script's own `ScopeHandle`) gets the same guarantee. Because it is re-entrant, passing a `LockedProxy` over a handle whose lock is already held does not deadlock.
 
-#tested-by("test_locked_proxy_serializes_calls_across_threads", "test_drop_dead_links_unregisters_only_the_dead_ones_and_releases_them", "test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument", "test_a_failed_connect_closes_the_half_open_link_and_registers_nothing", "test_scope_handle_alive_follows_the_drivers_connected_state")
+#tested-by("test_locked_proxy_serializes_calls_across_threads", "test_drop_dead_links_unregisters_only_the_dead_ones_and_releases_them", "test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument", "test_a_failed_connect_closes_the_half_open_link_and_registers_nothing", "test_scope_handle_identifies_the_scope_reports_a_silent_one_and_follows_its_state")
 
 == Design convention: screens display and control, they don't implement <sec-convention>
 
