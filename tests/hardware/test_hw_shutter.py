@@ -16,6 +16,7 @@ import pytest
 from iyzee.devices.base import SHUTTER_CHANNEL_DEFAULT
 from iyzee.devices.handles import ShutterHandle
 from iyzee.devices.power import PSU, ShutterControl
+from iyzee.lab import Lab
 
 from .hw_state import psu_output_is_on, psu_query
 
@@ -41,12 +42,14 @@ def test_open_and_close_are_confirmed_by_the_supply(shutter: ShutterControl, psu
 
 
 @pytest.mark.actuates
-def test_disconnecting_leaves_the_shutter_closed(shutter: ShutterControl, psu: PSU) -> None:
+def test_disconnecting_leaves_the_shutter_closed(
+    shutter: ShutterControl, psu: PSU, lab: Lab
+) -> None:
     """The shutter is closed on the way out, even from the open state.
 
     Uses its own handle so the session's connection is not disturbed.
     """
-    handle = ShutterHandle()
+    handle = ShutterHandle(lab["psu"])
     handle.connect()
     try:
         device = handle.device
