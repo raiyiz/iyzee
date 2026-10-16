@@ -54,10 +54,7 @@ def _(lab):
         step_khz = 10
 
         step_thz = step_khz * 1e-9
-        offsets_thz = [
-            (i - (points // 2)) * step_thz
-            for i in range(points)
-        ]
+        offsets_thz = [(i - (points // 2)) * step_thz for i in range(points)]
 
         steps, config = build_frequency_sweep(
             laser_center_thz=center,
@@ -112,10 +109,7 @@ def _(lab):
                 record.on_step(index, total, step, result, error)
 
                 if error is not None:
-                    print(
-                        f"[{index + 1}/{total}] "
-                        f"{step.label}: FAILED: {error!r}"
-                    )
+                    print(f"[{index + 1}/{total}] {step.label}: FAILED: {error!r}")
                     return
 
                 collected.append(result)
@@ -146,7 +140,6 @@ def _(lab):
                 # Rewrite the final checkpoint with the completed run status.
                 if collected:
                     checkpoint()
-
         print(f"\nRun ID: {record.run_id}")
         print(f"Status: {record.status}")
         print(f"Successful points: {len(collected)}/{len(steps)}")
