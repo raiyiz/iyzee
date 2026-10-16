@@ -15,20 +15,15 @@ def _():
 @app.cell
 def _(np):
 
-    from dataclasses import asdict
-    from uuid import uuid4
 
     from iyzee.experiment import (
-        ExperimentContext,
         build_frequency_sweep,
-        prepare_analyzer,
-        run_sequence,
     )
 
     center = 377.1052067
     channel = 4
 
-    steps, config = build_frequency_sweep(
+    _steps, _config = build_frequency_sweep(
         laser_center_thz=center,
         wavemeter_channel=channel,
         offsets_thz=[i * 10e-9 for i in (-2, -1, 0, 1, 2)],
@@ -47,7 +42,7 @@ def _(np):
     # results = run_sequence(steps, ctx)
 
     fpath = "/home/gsec/sqz/repos/iyzee/data/2026-10/16T194451_frequency-manual_5cf579.npz"
-    results = np.load(fpath)
+    np.load(fpath)
 
     return
 
@@ -188,7 +183,7 @@ def _(lab):
 
         return collected
 
-    results = reproduce_tui_frequency_sweep()
+    reproduce_tui_frequency_sweep()
     return
 
 

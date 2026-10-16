@@ -732,8 +732,8 @@ def _(data):
 
 @app.cell
 def _(data):
-    tsq = data["trace_squeezing"]
-    tsn = data["trace_shot_noise"]
+    data["trace_squeezing"]
+    data["trace_shot_noise"]
     it = list(data.items())
     print(it)
     return
@@ -741,7 +741,7 @@ def _(data):
 
 @app.cell
 def _(data):
-    zd = list(zip(data["trace_squeezing"], data["trace_shot_noise"]))
+    zd = list(zip(data["trace_squeezing"], data["trace_shot_noise"], strict=False))
 
     # plt.plot(accu[0][0])
     print(zd)
@@ -750,8 +750,8 @@ def _(data):
 
 @app.cell
 def _(plt, zd):
-    fig, ax = plt.subplots(figsize=(10, 4), layout="constrained")
-    for sqz, shn in zd:
+    _fig, ax = plt.subplots(figsize=(10, 4), layout="constrained")
+    for sqz, _shn in zd:
         # ax.plot(sqz)
         # ax.plot(shn)
         ax.plot(sqz)
