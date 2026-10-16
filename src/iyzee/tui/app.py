@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import faulthandler
 import logging
 import os
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import ClassVar, TextIO, cast
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -24,7 +25,7 @@ from .command_bar import CommandBar
 from .commands import Command, CommandError, CommandRegistry
 from .ipython import default_history_file
 from .ipython_session import IPythonSession
-from .logging_support import LogEntry
+from .logging_support import LOG_ROOT, LogEntry
 from .logging_support import install as install_logging
 from .prefs import Prefs, default_prefs_file
 from .screens.connect import ConnectScreen
@@ -38,6 +39,23 @@ from .screens.sweep import SweepScreen
 from .workers import LastRun
 
 log = logging.getLogger("iyzee.tui")
+
+# Keep this stream alive for the process lifetime. Fatal native signals bypass
+# Python logging, so faulthandler needs its own persistent destination.
+_FATAL_LOG_FILE: TextIO | None = None
+
+
+def _enable_fatal_tracebacks() -> None:
+    """Write all-thread Python stacks for fatal native signals to the log directory."""
+    global _FATAL_LOG_FILE
+    if _FATAL_LOG_FILE is not None:
+        return
+    try:
+        LOG_ROOT.mkdir(parents=True, exist_ok=True)
+        _FATAL_LOG_FILE = (LOG_ROOT / "fatal.log").open("a", buffering=1)
+        faulthandler.enable(file=_FATAL_LOG_FILE, all_threads=True)
+    except (OSError, RuntimeError, ValueError):
+        log.exception("could not enable fatal-signal traceback logging")
 
 
 PAGE_SPECS = (
@@ -231,6 +249,7 @@ class IyzeeApp(App):
         # own reference to a handler that (in tests) gets replaced every
         # time a new IyzeeApp() is constructed — see install()'s docstring.
         self.log_handler = install_logging(self._on_log_entry)
+        _enable_fatal_tracebacks()
         # The session's instruments live in the core ``Lab`` (no Textual in it);
         # ``handles`` is its connected-handles dict, shared rather than copied.
         self.lab = Lab()

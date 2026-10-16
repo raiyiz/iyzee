@@ -26,7 +26,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from ..config import data_root
@@ -389,6 +388,8 @@ def build_figure(results: list[StepResult]):
     ``textual-plotext`` — can get the figure without ``matplotlib`` trying
     to pop up a blocking GUI window.
     """
+    import matplotlib.pyplot as plt
+
     fig, ax = plt.subplots()
     series = difference_series_many(
         [result.traces.get("squeezing") for result in results],
@@ -409,6 +410,8 @@ def build_figure(results: list[StepResult]):
 
 
 def multiplot(results: list[StepResult]) -> None:
+    import matplotlib.pyplot as plt
+
     """Build and display the squeezing-minus-shot-noise figure.
 
     Kept for scripts and notebooks that want the one-call figure.

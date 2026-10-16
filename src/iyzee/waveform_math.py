@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 if TYPE_CHECKING:
@@ -274,6 +273,8 @@ def build_waveform_figure(traces: Sequence[Trace], *, title: str | None = None) 
     case — the per-line legend still carries each trace's own unit via
     ``meta``.
     """
+    import matplotlib.pyplot as plt
+
     fig, ax = plt.subplots()
     for trace in traces:
         ax.plot(trace.time, trace.values, label=_legend_label(trace))
@@ -304,6 +305,8 @@ def save_waveform_figure(traces: Sequence[Trace], path: Path, *, title: str | No
     until explicitly closed and a long session exporting one waveform plot
     after another would otherwise leak them.
     """
+    import matplotlib.pyplot as plt
+
     fig = build_waveform_figure(traces, title=title)
     try:
         fig.savefig(path)
