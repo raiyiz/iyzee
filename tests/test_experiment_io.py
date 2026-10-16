@@ -77,7 +77,7 @@ def test_save_step_results_aligns_traces_across_points(tmp_path):
     assert np.all(np.isnan(shot_noise[1]))  # filled, not dropped
 
     ragged = [_result(1.0, squeezing=[1.0, 2.0, 3.0]), _result(2.0, squeezing=[1.0, 2.0])]
-    with pytest.raises(ValueError, match="squeezing.*inconsistent lengths"):
+    with pytest.raises(ValueError, match=r"squeezing.*inconsistent lengths"):
         save_step_results(ragged, tmp_path)
 
 
