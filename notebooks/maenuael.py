@@ -147,7 +147,6 @@ def _(lab):
 
         return collected
 
-
     reproduce_tui_frequency_sweep()
     return
 
