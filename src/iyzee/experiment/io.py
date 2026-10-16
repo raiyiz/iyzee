@@ -410,12 +410,12 @@ def build_figure(results: list[StepResult]):
 
 
 def multiplot(results: list[StepResult]) -> None:
-    import matplotlib.pyplot as plt
-
     """Build and display the squeezing-minus-shot-noise figure.
 
     Kept for scripts and notebooks that want the one-call figure.
     Non-interactive callers should use :func:`build_figure` instead.
     """
+    import matplotlib.pyplot as plt
+
     build_figure(results)
     plt.show()
