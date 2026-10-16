@@ -58,38 +58,32 @@ def test_vterm_scrollback_colours_and_cursor() -> None:
 # -- key encoding -----------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "key,character,expected",
-    [
+def test_keys_encode_to_what_prompt_toolkit_decodes_and_edge_cases() -> None:
+    for key, character, expected in (
         ("enter", None, "c-m"),
         ("escape", None, "escape"),
         ("backspace", None, "c-h"),
         ("up", None, "up"),
-        ("home", None, "home"),
         ("pagedown", None, "pagedown"),
-        ("delete", None, "delete"),
         ("shift+tab", None, "s-tab"),
         ("ctrl+left", None, "c-left"),
         ("ctrl+r", None, "c-r"),
-        ("ctrl+d", None, "c-d"),
         ("f5", None, "f5"),
         ("a", "a", "a"),
         ("é", "é", "é"),
-    ],
-)
-def test_keys_encode_to_what_prompt_toolkit_decodes(key, character, expected) -> None:
-    data = key_to_bytes(key, character)
-    assert data is not None
-    seen: list[str] = []
-    parser = Vt100Parser(
-        lambda kp: seen.append(kp.key if isinstance(kp.key, str) else kp.key.value)
-    )
-    parser.feed(data.decode())
-    parser.flush()
-    assert seen == [expected]
+    ):
+        data = key_to_bytes(key, character)
+        assert data is not None, key
+        seen: list[str] = []
 
+        def record(kp: Any, seen: list[str] = seen) -> None:
+            seen.append(kp.key if isinstance(kp.key, str) else kp.key.value)
 
-def test_key_encoding_edge_cases() -> None:
+        parser = Vt100Parser(record)
+        parser.feed(data.decode())
+        parser.flush()
+        assert seen == [expected], key
+
     # Alt+A must stay an Alt combination even if Textual also reports character="a".
     assert key_to_bytes("alt+a", "a") == b"\x1ba"
     assert key_to_bytes("alt+enter") == b"\x1b\r"

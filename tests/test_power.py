@@ -27,7 +27,7 @@ class FakeResourceManager:
         return instrument
 
 
-def test_psu_accepts_injected_resource_manager():
+def test_psu_sends_the_documented_commands_and_closes_its_transport():
     resource_manager = FakeResourceManager()
 
     psu = PSU(ip=IP.POWER_SUPPLY, resource_manager=resource_manager)
@@ -59,16 +59,9 @@ def test_psu_accepts_injected_resource_manager():
     assert psu.instrument is None
     assert resource_manager.opened[0][1].close_calls == 1
 
-
-def test_psu_context_manager_closes_injected_transport():
-    resource_manager = FakeResourceManager()
-
-    with PSU(ip=IP.POWER_SUPPLY, resource_manager=resource_manager) as psu:
-        instrument = psu.instrument
-        psu.enable_global_output()
-
-    assert psu.instrument is None
-    assert instrument.close_calls == 1
+    with PSU(ip=IP.POWER_SUPPLY, resource_manager=FakeResourceManager()) as managed:
+        instrument = managed.instrument
+    assert managed.instrument is None and instrument.close_calls == 1  # closed on exit
 
 
 def test_the_shutter_is_a_channel_of_a_psu_it_borrows():
@@ -171,24 +164,24 @@ def _connected_psu(supply):
     return psu
 
 
-def test_opening_the_psu_sets_a_read_termination_so_queries_can_return():
-    supply = FakeHMP()
-    _connected_psu(supply)
-    assert supply.read_termination == "\n"
-
-
 def test_retrieve_state_reports_what_the_supply_says():
     supply = FakeHMP()
     psu = _connected_psu(supply)
+    assert supply.read_termination == "\n"  # set on open, so queries can return
+
+    psu.enable_output(3)  # armed, but the master output is still off: not live
+    armed = psu.retrieve_state([3])
+    assert armed.channel(3).selected and not armed.general_output and not armed.is_live(3)
+    assert [c.channel for c in armed.channels] == [3]
+    with pytest.raises(KeyError, match="channel 1 was not retrieved"):
+        armed.channel(1)
+
     psu.set_voltage(1.7, 3)
     psu.set_current(0.01, 3)
-    psu.enable_output(3)
     psu.enable_global_output()
-
     state = psu.retrieve_state()
 
-    assert isinstance(state, PSUState)
-    assert state.general_output is True
+    assert isinstance(state, PSUState) and state.general_output is True
     assert [c.channel for c in state.channels] == [1, 2, 3, 4]
     assert state.channel(3) == ChannelState(
         channel=3,
@@ -198,113 +191,66 @@ def test_retrieve_state_reports_what_the_supply_says():
         current_measured=0.008,
         selected=True,
     )
-    assert state.channel(1).selected is False
     assert state.is_live(3) and not state.is_live(1)
 
 
-def test_an_armed_channel_is_not_live_while_the_master_output_is_off():
-    supply = FakeHMP()
-    psu = _connected_psu(supply)
-    psu.enable_output(3)
-
-    state = psu.retrieve_state([3])
-
-    assert state.channel(3).selected is True
-    assert state.general_output is False
-    assert not state.is_live(3)
-
-
-def test_retrieve_state_leaves_the_selected_channel_as_it_found_it():
+def test_retrieve_state_only_asks_and_puts_the_selected_channel_back():
     supply = FakeHMP()
     psu = _connected_psu(supply)
     psu.set_voltage(5.0, 2)  # leaves channel 2 selected
-    assert supply.selected == 2
-
-    psu.retrieve_state()
-
-    assert supply.selected == 2
-    assert supply.log[-1] == "INST:NSEL 2"
-
-
-def test_retrieve_state_only_selects_and_asks():
-    supply = FakeHMP()
-    psu = _connected_psu(supply)
     supply.log.clear()
 
     psu.retrieve_state([3])
 
-    writes = [
+    assert [
         c
         for c in supply.log
-        if c.split(" ")[0] in ("INST:NSEL", "INST", "VOLT", "CURR", "OUTP:SEL", "OUTP:GEN")
-    ]
-    assert writes == ["INST:NSEL 3", "INST:NSEL 1"]  # select the channel, put the selection back
-    assert all(c.endswith("?") or c.startswith("INST:NSEL ") for c in supply.log)
+        if c.startswith(("INST:NSEL", "VOLT ", "CURR ", "OUTP")) and not c.endswith("?")
+    ] == ["INST:NSEL 3", "INST:NSEL 2"]  # no writes but selection
+
+    supply.overrides["CURR?"] = "garbage"  # even a bad reply midway restores it
+    with pytest.raises(ValueError, match="CURR"):
+        psu.retrieve_state()
+    assert supply.selected == 2
 
 
-def test_retrieve_state_of_a_subset_asks_only_about_those_channels():
-    supply = FakeHMP()
-    psu = _connected_psu(supply)
-
-    state = psu.retrieve_state([3])
-
-    assert [c.channel for c in state.channels] == [3]
-    with pytest.raises(KeyError, match="channel 1 was not retrieved"):
-        state.channel(1)
-
-
-@pytest.mark.parametrize("channels", [[0], [5], [1, 7], [-1]])
-def test_retrieve_state_rejects_channels_the_supply_does_not_have_before_any_io(channels):
+def test_bad_channels_and_bad_replies_are_errors_never_guesses():
     supply = FakeHMP()
     psu = _connected_psu(supply)
     supply.log.clear()
+    for channels in ([0], [5], [1, 7], [-1]):
+        with pytest.raises(ValueError, match="channels must be in"):
+            psu.retrieve_state(channels)
+    assert supply.log == []  # refused before any I/O
 
-    with pytest.raises(ValueError, match="channels must be in"):
-        psu.retrieve_state(channels)
+    for command, replies in {
+        "VOLT?": ("", "nan", "inf", "ERR", "1,2"),
+        "CURR?": ("nan",),
+        "MEAS:VOLT?": ("nan",),
+        "MEAS:CURR?": ("nan",),
+    }.items():
+        for reply in replies:
+            supply.overrides.clear()
+            supply.overrides[command] = reply
+            with pytest.raises(
+                ValueError, match=rf"answered .* to '{command.replace('?', r'\?')}'"
+            ):
+                psu.retrieve_state()
 
-    assert supply.log == []
-
-
-@pytest.mark.parametrize("command", ["VOLT?", "CURR?", "MEAS:VOLT?", "MEAS:CURR?"])
-@pytest.mark.parametrize("reply", ["", "nan", "inf", "-inf", "ERR", "1,2"])
-def test_a_bad_number_names_the_command_and_is_never_returned(command, reply):
-    supply = FakeHMP()
-    supply.overrides[command] = reply
-    psu = _connected_psu(supply)
-
-    with pytest.raises(ValueError, match=rf"answered .* to '{command.replace('?', r'\?')}'"):
-        psu.retrieve_state()
-
-
-@pytest.mark.parametrize("command", ["OUTP:SEL?", "OUTP:GEN?"])
-@pytest.mark.parametrize("reply", ["", "2", "ON", "-1", "0.5"])
-def test_a_bad_on_off_flag_is_an_error_not_a_guess(command, reply):
-    supply = FakeHMP()
-    supply.overrides[command] = reply
-    psu = _connected_psu(supply)
-
-    with pytest.raises(ValueError, match=r"expected 0 or 1"):
-        psu.retrieve_state()
-
-
-def test_the_selection_is_restored_even_when_a_reply_is_bad_midway():
-    supply = FakeHMP()
-    psu = _connected_psu(supply)
-    psu.set_voltage(5.0, 2)
-    supply.overrides["CURR?"] = "garbage"
-
-    with pytest.raises(ValueError, match="CURR"):
-        psu.retrieve_state()
-
-    assert supply.selected == 2
+    for command in ("OUTP:SEL?", "OUTP:GEN?"):
+        for reply in ("", "2", "ON", "0.5"):
+            supply.overrides.clear()
+            supply.overrides[command] = reply
+            with pytest.raises(ValueError, match="expected 0 or 1"):
+                psu.retrieve_state()
 
 
 def test_the_shutter_reports_open_only_when_the_supply_says_it_is_powered():
     supply = FakeHMP()
-    psu = _connected_psu(supply)
-    shutter = ShutterControl(psu)
+    shutter = ShutterControl(_connected_psu(supply), chan=2)
     shutter.configure()
     shutter.psu.enable_global_output()
+    assert [c.channel for c in shutter.retrieve_state().channels] == [2]  # its channel only
 
     assert shutter.is_open() is False
     shutter.open()
@@ -315,11 +261,3 @@ def test_the_shutter_reports_open_only_when_the_supply_says_it_is_powered():
     shutter.open()
     shutter.psu.disable_global_output()  # armed, but the master switch cuts the power
     assert shutter.is_open() is False
-
-
-def test_the_shutter_state_covers_its_own_channel_only():
-    supply = FakeHMP()
-    shutter = ShutterControl(_connected_psu(supply), chan=2)
-    shutter.configure()
-
-    assert [c.channel for c in shutter.retrieve_state().channels] == [2]

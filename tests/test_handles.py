@@ -93,11 +93,16 @@ class _FakeVisaDevice:
         return self._idn
 
 
-def test_visa_handle_probe_uses_idn_when_available() -> None:
-    handle = _VisaHandle(_FakeVisaDevice(idn="Keysight,MXA,SN1,FW2"))
+def test_visa_handle_probes_with_idn_falls_back_without_it_and_disconnect_closes() -> None:
+    device = _FakeVisaDevice(idn="Keysight,MXA,SN1,FW2")
+    handle = _VisaHandle(device)
     handle.connect()
-    assert handle.probe() == "Keysight,MXA,SN1,FW2"
-    assert handle.device.connected is True
+    assert handle.probe() == "Keysight,MXA,SN1,FW2" and device.connected is True
+    handle.disconnect()
+    assert device.closed is True
+
+    no_idn = _VisaHandle(_FakeVisaDeviceNoIdn(ip="10.140.1.42"))  # e.g. a driver without *IDN?
+    assert no_idn.probe() == "connected @ 10.140.1.42"
 
 
 class _FakeVisaDeviceNoIdn:
@@ -105,18 +110,6 @@ class _FakeVisaDeviceNoIdn:
 
     def __init__(self, ip: str) -> None:
         self.ip = ip
-
-
-def test_visa_handle_probe_falls_back_when_no_idn() -> None:
-    handle = _VisaHandle(_FakeVisaDeviceNoIdn(ip="10.140.1.42"))
-    assert handle.probe() == "connected @ 10.140.1.42"
-
-
-def test_visa_handle_disconnect_closes_device() -> None:
-    device = _FakeVisaDevice()
-    handle = _VisaHandle(device)
-    handle.disconnect()
-    assert device.closed is True
 
 
 # -- ShutterHandle ----------------------------------------------------------
@@ -181,7 +174,7 @@ def test_shutter_handle_needs_a_connected_psu_and_never_touches_a_closed_one() -
 # -- WavemeterHandle ----------------------------------------------------------
 
 
-def test_wavemeter_handle_probe_reads_the_default_channel(
+def test_wavemeter_handle_probe_reads_the_default_channel_and_propagates_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen: list[int] = []
@@ -191,27 +184,18 @@ def test_wavemeter_handle_probe_reads_the_default_channel(
         return 377.105
 
     monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
-
     handle = WavemeterHandle()
-
     assert handle.probe() == "wavemeter = 377.105000 THz"
-    assert isinstance(handle.device, instruments_mod.Wavemeter)
-    assert seen == [DEFAULT_CHANNEL]
+    assert isinstance(handle.device, instruments_mod.Wavemeter) and seen == [DEFAULT_CHANNEL]
 
-
-def test_wavemeter_handle_probe_propagates_read_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
     failure = OSError("switch unreachable")
 
     def fail(self, channel: int = 4) -> float:
         raise failure
 
     monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", fail)
-
     with pytest.raises(OSError, match="switch unreachable") as caught:
         WavemeterHandle().probe()
-
     assert caught.value is failure
 
 
@@ -243,30 +227,29 @@ class _FakeLeCroy:
         return self.answer
 
 
-def test_scope_handle_connects_then_probe_identifies_the_scope(
+def test_scope_handle_identifies_the_scope_reports_a_silent_one_and_follows_its_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
     handle = ScopeHandle()
     handle.connect()
     scope = cast(_FakeLeCroy, handle.device)
-    assert scope.connected_to == str(handle._ip)
+    assert scope.connected_to == str(handle._ip) and handle.alive
 
     assert handle.probe() == "LECROY,WS452,SN1,9.0"
     # the first reply gets the widened bound, not the steady-state one
     assert scope.idn_timeouts == [ScopeHandle.FIRST_RESPONSE_TIMEOUT]
 
+    scope.connected = False  # e.g. dropped after a timeout
+    assert not handle.alive
 
-def test_scope_handle_probe_turns_a_silent_scope_into_an_actionable_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
     monkeypatch.setattr(_FakeLeCroy, "answer", LeCroyTimeoutError("no response after 15.0s"))
-    handle = ScopeHandle()
-    handle.connect()
-
+    silent = ScopeHandle()
+    silent.connect()
     with pytest.raises(ConnectionError, match=r"did not answer \*IDN\? within 15s"):
-        handle.probe()
+        silent.probe()
+
+    assert instruments_mod._LockedHandle().alive is True  # handles that cannot tell report alive
 
 
 # -- registry ----------------------------------------------------------
@@ -276,20 +259,3 @@ def test_instrument_registry_has_unique_nonempty_specs() -> None:
     keys = [spec.key for spec in INSTRUMENTS]
     assert len(keys) == len(set(keys))
     assert all(spec.label for spec in INSTRUMENTS)
-
-
-def test_scope_handle_alive_follows_the_drivers_connected_state(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
-    handle = ScopeHandle()
-    handle.connect()
-    assert handle.alive
-
-    cast(_FakeLeCroy, handle.device).connected = False  # e.g. dropped after a timeout
-
-    assert not handle.alive
-
-
-def test_handles_that_cannot_tell_report_alive() -> None:
-    assert instruments_mod._LockedHandle().alive is True

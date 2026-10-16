@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from helpers import async_test, wait_until
 from textual.geometry import Region
 from textual.widgets import ContentSwitcher, Select
@@ -50,92 +49,82 @@ async def _scroll_to(pilot: Any, widget: Any) -> Region:
     return _visible_area(pilot.app)
 
 
-@pytest.mark.parametrize("size", SIZES)
-@pytest.mark.parametrize("kind", ["bandwidth", "frequency"])
+async def _show(pilot: Any, page_id: str) -> None:
+    """Switch page without keystrokes: the console page keeps the keyboard for itself."""
+    await pilot.app.run_action(f"show_page('{page_id}')")
+    await pilot.pause()
+
+
+async def _resize(pilot: Any, size: tuple[int, int]) -> None:
+    await pilot.resize_terminal(*size)
+    await pilot.pause()
+    await pilot.pause()
+
+
 @async_test
-async def test_every_sweep_control_can_be_scrolled_into_view(
-    size: tuple[int, int], kind: str
-) -> None:
+async def test_every_control_stays_reachable_at_the_extreme_sizes() -> None:
     app = IyzeeApp()
-    async with app.run_test(size=size) as pilot:
+    async with app.run_test() as pilot:
         await pilot.press("s")
         await pilot.pause()
         screen = app.query_one("#sweep")
-        screen.query_one("#sweep-type", Select).value = kind
-        await pilot.pause()
+        for size in SIZES:
+            await _resize(pilot, size)
+            for kind in ("bandwidth", "frequency"):
+                screen.query_one("#sweep-type", Select).value = kind
+                await pilot.pause()
+                for selector in [*CONTROLS[kind], *ALWAYS]:
+                    widget = screen.query_one(selector)
+                    area = await _scroll_to(pilot, widget)
+                    assert area.contains_region(widget.region), f"{selector} not visible at {size}"
+                for selector in DISPLAYS:
+                    widget = screen.query_one(selector)
+                    assert (await _scroll_to(pilot, widget)).overlaps(widget.region), (
+                        f"{selector} at {size}"
+                    )
 
-        for selector in [*CONTROLS[kind], *ALWAYS]:
-            widget = screen.query_one(selector)
-            area = await _scroll_to(pilot, widget)
-            assert area.contains_region(widget.region), f"{selector} not fully visible at {size}"
-        for selector in DISPLAYS:
-            widget = screen.query_one(selector)
-            assert (await _scroll_to(pilot, widget)).overlaps(widget.region), (
-                f"{selector} at {size}"
-            )
-
-
-@async_test
-async def test_the_console_terminal_stays_reachable_on_short_terminals() -> None:
-    size = (80, 16)
-    app = IyzeeApp()
-    async with app.run_test(size=size) as pilot:
-        await pilot.press("i")
+        await _resize(pilot, (80, 16))  # and the console terminal on a short terminal
+        await _show(pilot, "console")
         terminal = app.query_one("#console-terminal")
         await wait_until(pilot, lambda: app.focused is terminal)
         assert (await _scroll_to(pilot, terminal)).overlaps(terminal.region)
 
 
-@pytest.mark.parametrize("width", [60, 140])
 @async_test
-async def test_pages_scroll_instead_of_clipping_and_fit_horizontally(width: int) -> None:
+async def test_pages_scroll_instead_of_clipping_and_the_layout_reflows_with_the_width() -> None:
     app = IyzeeApp()
-    async with app.run_test(size=(width, 30)) as pilot:
-        for key, page_id in [("c", "connect"), ("s", "sweep"), ("t", "results"), ("i", "console")]:
-            await pilot.press(key)
+    async with app.run_test() as pilot:
+        for width in (60, 140):
+            await _resize(pilot, (width, 30))
+            for page_id in ("connect", "sweep", "results", "console"):
+                await _show(pilot, page_id)
+                page = app.query_one(f"#{page_id}")
+                assert page.styles.overflow_x != "hidden" and page.styles.overflow_y != "hidden"
+                assert page.max_scroll_x == 0, f"{page_id} needs sideways scrolling at {width}"
+
+        for size, fields_per_row, buttons_share_a_row in (
+            ((140, 50), 3, True),
+            ((100, 30), 2, True),
+            ((60, 24), 1, False),
+        ):
+            await _resize(pilot, size)
+            await _show(pilot, "sweep")
             await pilot.pause()
-            page = app.query_one(f"#{page_id}")
-            assert page.styles.overflow_x != "hidden" and page.styles.overflow_y != "hidden"
-            assert page.max_scroll_x == 0, f"{page_id} needs sideways scrolling at width {width}"
+            fields = [app.query_one(f"#{i}").region for i in ("rbw-start", "rbw-stop", "rbw-steps")]
+            assert sum(1 for f in fields if f.y == fields[0].y) == fields_per_row
+            buttons = [
+                app.query_one(f"#{i}").region for i in ("run-sweep", "abort-sweep", "capture-trace")
+            ]
+            assert (len({b.y for b in buttons}) == 1) is buttons_share_a_row
+            assert app.query_one("#sweep-plot").region.height >= 14, "the plot must not be squeezed"
 
-
-@pytest.mark.parametrize(
-    "size,fields_per_row,buttons_share_a_row",
-    [((140, 50), 3, True), ((100, 30), 2, True), ((60, 24), 1, False)],
-)
-@async_test
-async def test_the_sweep_form_reflows_with_the_width(
-    size: tuple[int, int], fields_per_row: int, buttons_share_a_row: bool
-) -> None:
-    app = IyzeeApp()
-    async with app.run_test(size=size) as pilot:
-        await pilot.press("s")
-        await pilot.pause()
-        fields = [app.query_one(f"#{i}").region for i in ("rbw-start", "rbw-stop", "rbw-steps")]
-        assert sum(1 for f in fields if f.y == fields[0].y) == fields_per_row
-        buttons = [
-            app.query_one(f"#{i}").region for i in ("run-sweep", "abort-sweep", "capture-trace")
-        ]
-        assert (len({b.y for b in buttons}) == 1) is buttons_share_a_row
-        assert app.query_one("#sweep-plot").region.height >= 14, (
-            "the plot must not be squeezed away"
-        )
-
-
-@pytest.mark.parametrize("size,side_by_side", [((120, 30), True), ((60, 24), False)])
-@async_test
-async def test_the_results_list_and_preview_stack_when_narrow(
-    size: tuple[int, int], side_by_side: bool
-) -> None:
-    app = IyzeeApp()
-    async with app.run_test(size=size) as pilot:
-        await pilot.press("t")
-        await pilot.pause()
-        listing, detail = (
-            app.query_one("#results-list").region,
-            app.query_one("#results-detail").region,
-        )
-        if side_by_side:
-            assert detail.x >= listing.x + listing.width
-        else:
-            assert detail.y >= listing.y + listing.height
+        for size, side_by_side in (((120, 30), True), ((60, 24), False)):
+            await _resize(pilot, size)
+            await _show(pilot, "results")
+            await pilot.pause()
+            listing = app.query_one("#results-list").region
+            detail = app.query_one("#results-detail").region
+            if side_by_side:
+                assert detail.x >= listing.x + listing.width
+            else:
+                assert detail.y >= listing.y + listing.height

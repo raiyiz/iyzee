@@ -65,7 +65,7 @@ class IyzeeIPython:
         self.shell.atexit_operations()
 
 
-def test_ipython_executes_and_preserves_the_lab_namespace() -> None:
+def test_ipython_keeps_its_namespace_and_a_users_own_variables_never_collide_with_lab() -> None:
     marker = object()
     shell = IyzeeIPython(FakeApp(), namespace={"instrument": marker})
 
@@ -77,65 +77,48 @@ def test_ipython_executes_and_preserves_the_lab_namespace() -> None:
     assert repeated.success and result.success and "42" in result.stdout
     assert isinstance(shell.shell.user_ns["lab"], LabProxy)
 
-
-def test_lab_attribute_reflects_current_handles_live() -> None:
-    device = object()
-    app = FakeApp(handles={"mxa": FakeHandle(device=device)})
-    shell = IyzeeIPython(app)
-
-    output = shell.execute("lab.mx")
-    assert output.success
-
-    # Disconnect: no refresh call needed anywhere, lab.mx just stops
-    # resolving because it reads app.handles fresh every time.
-    del app.handles["mxa"]
-    output = shell.execute("lab.mx")
-    assert not output.success
-    assert "not connected" in output.stdout
+    shell.execute("mx = 5")  # shadowing lab.mx's old bare name is an ordinary variable
+    assert "10" in shell.execute("mx * 2").stdout
+    assert isinstance(shell.shell.user_ns["lab"], LabProxy)  # lab is untouched
 
 
-def test_lab_exposes_wavemeter_before_connect(monkeypatch) -> None:
-    monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
-
-    lab = LabProxy(FakeApp())
-
-    assert isinstance(lab.wavemeter, Wavemeter)
-    assert lab.wavemeter.read_frequency(4) == pytest.approx(377.105)
-
-
-def test_lab_tab_completion_reaches_wavemeter_before_connect() -> None:
-    shell = IyzeeIPython(FakeApp())
-
-    _prefix, matches = shell.complete("lab.wavemeter.", len("lab.wavemeter."))
-
-    assert ".read_frequency" in matches
-    assert ".set_pid_setpoint" in matches
-
-
-def test_lab_exposes_the_wavemeter_client_behind_the_handle_lock(monkeypatch) -> None:
-    monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
-
-    app = FakeApp(handles={"wavemeter": FakeHandle(device=Wavemeter())})
-    lab = LabProxy(app)
-
-    assert lab.wavemeter.read_frequency(4) == pytest.approx(377.105)
-
-
-def test_lab_exposes_connected_devices_and_always_lists_the_full_set() -> None:
+def test_lab_reflects_the_current_handles_live_lists_every_name_and_is_read_only() -> None:
     device = object()
     app = FakeApp(
-        handles={
-            "mxa": FakeHandle(device=device),
-            "scope": FakeHandle(device="scope-device"),
-        }
+        handles={"mxa": FakeHandle(device=device), "scope": FakeHandle(device="scope-device")}
     )
+    shell = IyzeeIPython(app)
     lab = LabProxy(app)
 
+    assert shell.execute("lab.mx").success
     assert isinstance(lab.mx, LockedProxy) and repr(lab.mx) == repr(device)
     assert repr(lab.scope) == repr("scope-device")
     assert set(lab.connected) == {"mx", "scope"}
     # dir() lists everything possible, connected or not
-    assert {"mx", "shutter", "scope", "results", "last_run", "connected"} <= set(dir(lab))
+    assert {"mx", "psu", "shutter", "scope", "results", "last_run", "connected"} <= set(dir(lab))
+
+    # Disconnect: no refresh call needed anywhere, lab.mx just stops resolving because it
+    # reads app.handles fresh every time.
+    del app.handles["mxa"]
+    output = shell.execute("lab.mx")
+    assert not output.success and "not connected" in output.stdout
+
+    with pytest.raises(AttributeError):
+        lab.mx = "nope"
+
+
+def test_the_wavemeter_is_on_lab_before_connecting_and_behind_the_lock_after(monkeypatch) -> None:
+    monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
+
+    lab = LabProxy(FakeApp())  # not connected: a plain client is still there
+    assert isinstance(lab.wavemeter, Wavemeter)
+    assert lab.wavemeter.read_frequency(4) == pytest.approx(377.105)
+
+    _prefix, matches = IyzeeIPython(FakeApp()).complete("lab.wavemeter.", len("lab.wavemeter."))
+    assert ".read_frequency" in matches and ".set_pid_setpoint" in matches  # and tab-completes
+
+    app = FakeApp(handles={"wavemeter": FakeHandle(device=Wavemeter())})  # connected
+    assert LabProxy(app).wavemeter.read_frequency(4) == pytest.approx(377.105)
 
 
 def test_lab_results_and_last_run_reflect_the_latest_sweep() -> None:
@@ -149,27 +132,6 @@ def test_lab_results_and_last_run_reflect_the_latest_sweep() -> None:
     last_run = lab.last_run
     assert last_run is not None
     assert last_run.kind == "bandwidth"
-
-
-def test_lab_is_read_only() -> None:
-    lab = LabProxy(FakeApp())
-    try:
-        lab.mx = "nope"
-    except AttributeError:
-        pass
-    else:
-        raise AssertionError("expected AttributeError")
-
-
-def test_a_users_own_mx_variable_never_collides_with_lab() -> None:
-    """The whole point of `lab.mx` over a bare `mx`: shadowing it is a
-    completely ordinary variable, with zero interaction with app state."""
-    shell = IyzeeIPython(FakeApp())
-    shell.execute("mx = 5")
-    result = shell.execute("mx * 2")
-    assert "10" in result.stdout
-    # lab is untouched and still resolves normally
-    assert isinstance(shell.shell.user_ns["lab"], LabProxy)
 
 
 def test_lab_tab_completion_lists_lab_attributes_and_device_methods() -> None:

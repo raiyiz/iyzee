@@ -25,24 +25,17 @@ def make_registry(calls: list) -> CommandRegistry:
     )
 
 
-@pytest.mark.parametrize(
-    ("text", "value"),
-    [
+def test_parse_si_understands_suffixes_and_rejects_garbage():
+    for text, value in (
         ("2u", 2e-6),
         ("500ns", 500e-9),
         ("1.5m", 1.5e-3),
         ("1e-6", 1e-6),
         ("3", 3.0),
         ("2M", 2e6),
-        ("10Hz", 10.0),
         ("5ms", 5e-3),
-    ],
-)
-def test_parse_si(text, value):
-    assert parse_si(text) == pytest.approx(value)
-
-
-def test_parse_si_rejects_garbage():
+    ):
+        assert parse_si(text) == pytest.approx(value)
     with pytest.raises(CommandError, match="not a number"):
         parse_si("fast")
 

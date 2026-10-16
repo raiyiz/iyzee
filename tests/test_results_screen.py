@@ -264,7 +264,7 @@ async def test_scope_operations_apply_and_chain_through_derived_traces(
 
 
 @async_test
-async def test_scope_operation_form_shows_only_relevant_fields(
+async def test_the_operation_form_shows_only_relevant_fields_and_bad_input_makes_no_trace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _save_scope_run(tmp_path)
@@ -272,28 +272,19 @@ async def test_scope_operation_form_shows_only_relevant_fields(
         await wait_until(pilot, lambda: set(screen._measured) == {"C1", "C2"})
         screen.query_one("#results-op", Select).value = "background-region"
         await pilot.pause()
-
         assert screen.query_one("#results-field-chan-a").display
         assert screen.query_one("#results-field-region-lo").display
         assert screen.query_one("#results-field-region-hi").display
         assert not screen.query_one("#results-field-chan-b").display
         assert not screen.query_one("#results-field-yscale").display
 
-
-@pytest.mark.parametrize("invalid", ["not-a-number", "nan", "inf"])
-@async_test
-async def test_invalid_scope_input_creates_no_derived_trace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
-) -> None:
-    _save_scope_run(tmp_path, channels=(Channel.C1,))
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, lambda: set(screen._measured) == {"C1"})
-        await _apply_op(screen, pilot, "scale", a="C1", yscale=invalid)
-        assert screen._derived == {}
-        assert screen.query_one("#results-yscale").has_class("-invalid")
-        assert any(
-            "Y scale" in message for message in notifications(cast(app_mod.IyzeeApp, pilot.app))
-        )
+        for invalid in ("not-a-number", "nan", "inf"):
+            await _apply_op(screen, pilot, "scale", a="C1", yscale=invalid)
+            assert screen._derived == {}
+            assert screen.query_one("#results-yscale").has_class("-invalid")
+            assert any(
+                "Y scale" in message for message in notifications(cast(app_mod.IyzeeApp, pilot.app))
+            )
 
 
 @async_test
@@ -363,9 +354,14 @@ async def test_export_writes_a_real_png_and_runs_off_the_ui_thread(
 
 
 @async_test
-async def test_list_width_keys_resize_clamp_and_persist(
+async def test_list_width_keys_resize_clamp_persist_and_a_bad_saved_width_falls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"results_list_width": 7}')  # unusable: back to the default
+    async with _open_results_screen(monkeypatch, tmp_path, bad) as (screen, _pilot):
+        assert screen.query_one("#results-list").has_class(f"w-{results_mod.DEFAULT_LIST_WIDTH}")
+
     prefs_file = tmp_path / "config" / "tui.json"
     async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, pilot):
         run_list = screen.query_one("#results-list")
@@ -380,13 +376,3 @@ async def test_list_width_keys_resize_clamp_and_persist(
     assert json.loads(prefs_file.read_text())["results_list_width"] == 20
     async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, _pilot):
         assert screen.query_one("#results-list").has_class("w-20")  # remembered
-
-
-@async_test
-async def test_unusable_saved_list_width_falls_back_to_the_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    prefs_file = tmp_path / "tui.json"
-    prefs_file.write_text('{"results_list_width": 7}')
-    async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, _pilot):
-        assert screen.query_one("#results-list").has_class(f"w-{results_mod.DEFAULT_LIST_WIDTH}")

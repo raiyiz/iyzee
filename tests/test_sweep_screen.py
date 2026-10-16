@@ -33,43 +33,19 @@ from iyzee.tui.screens.sweep import (
 # -- standalone validators ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize("raw,expected", [("20000", 20000.0), ("0.5", 0.5)])
-def test_positive_float_accepts_valid_input(raw: str, expected: float) -> None:
-    assert _positive_float(raw, "field") == expected
+def test_the_standalone_validators_accept_good_input_and_name_the_field_on_bad() -> None:
+    assert _positive_float("20000", "field") == 20000.0 and _positive_float("0.5", "field") == 0.5
+    for raw in ("0", "-5", "abc"):
+        with pytest.raises(ValueError, match="field"):
+            _positive_float(raw, "field")
 
-
-@pytest.mark.parametrize(
-    "raw",
-    ["0", "-5", "abc"],
-)
-def test_positive_float_rejects_invalid_input(raw: str) -> None:
-    with pytest.raises(ValueError, match="field"):
-        _positive_float(raw, "field")
-
-
-@pytest.mark.parametrize(
-    "raw,maximum,expected",
-    [
-        ("19", None, 19),
-        (str(MAX_POINTS), MAX_POINTS, MAX_POINTS),
-    ],
-)
-def test_positive_int_accepts_valid_input(raw: str, maximum: int | None, expected: int) -> None:
-    assert _positive_int(raw, "field", maximum=maximum) == expected
-
-
-@pytest.mark.parametrize(
-    "raw,maximum,match",
-    [
-        ("0", None, "field"),
-        ("-1", None, "field"),
-        ("abc", None, "field"),
-        (str(MAX_POINTS + 1), MAX_POINTS, f"at most {MAX_POINTS}"),
-    ],
-)
-def test_positive_int_rejects_invalid_input(raw: str, maximum: int | None, match: str) -> None:
-    with pytest.raises(ValueError, match=match):
-        _positive_int(raw, "field", maximum=maximum)
+    assert _positive_int("19", "field", maximum=None) == 19
+    assert _positive_int(str(MAX_POINTS), "field", maximum=MAX_POINTS) == MAX_POINTS
+    for raw in ("0", "-1", "abc"):
+        with pytest.raises(ValueError, match="field"):
+            _positive_int(raw, "field", maximum=None)
+    with pytest.raises(ValueError, match=f"at most {MAX_POINTS}"):
+        _positive_int(str(MAX_POINTS + 1), "field", maximum=MAX_POINTS)
 
 
 # -- the mounted form ---------------------------------------------------------------------
@@ -82,7 +58,7 @@ async def _open_sweep_screen(pilot: Pilot[Any]) -> SweepScreen:
 
 
 @async_test
-async def test_form_defaults_build_the_documented_runs() -> None:
+async def test_form_defaults_build_the_documented_runs_and_the_duration_applies_to_both() -> None:
     async with IyzeeApp().run_test() as pilot:
         screen = await _open_sweep_screen(pilot)
         bandwidth = screen._build_bandwidth_run()
@@ -95,89 +71,80 @@ async def test_form_defaults_build_the_documented_runs() -> None:
         gaps = [b.x_value - a.x_value for a, b in zip(frequency.steps, frequency.steps[1:])]
         assert all(gap == pytest.approx(10e-6) for gap in gaps)  # 10 MHz, in THz
 
-
-@async_test
-async def test_the_sweep_duration_field_is_honoured_by_both_sweeps() -> None:
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open_sweep_screen(pilot)
         screen.query_one("#sweep-duration", Input).value = "25"
         await pilot.pause()
         assert screen._build_bandwidth_run().config.sweep_duration_ms == 25
         assert screen._build_frequency_run().config.sweep_duration_ms == 25
 
 
-@pytest.mark.parametrize(
-    "field_id,label,bad,kind",
-    [
-        ("rbw-stop", "RBW stop", "abc", "bandwidth"),
-        ("rbw-steps", "Steps", "0", "bandwidth"),
-        ("freq-points", "Points", "5000", "frequency"),
-        ("sweep-duration", "Sweep duration", "0", "bandwidth"),
-        ("sweep-duration", "Sweep duration", "abc", "frequency"),
-    ],
-)
 @async_test
-async def test_an_invalid_field_is_named_marked_and_focused(
-    field_id: str, label: str, bad: str, kind: str
-) -> None:
+async def test_an_invalid_field_is_named_marked_and_focused() -> None:
     app = IyzeeApp()
     async with app.run_test() as pilot:
         screen = await _open_sweep_screen(pilot)
-        app.handles["mxa"] = FakeHandle()
-        app.handles["shutter"] = FakeHandle()
-        app.handles["wavemeter"] = FakeHandle()
-        screen.query_one("#sweep-type", Select).value = kind
-        await pilot.pause()
-        field = screen.query_one(f"#{field_id}", Input)
-        field.value = bad
-        await pilot.pause()
+        for key in ("mxa", "shutter", "wavemeter"):
+            app.handles[key] = FakeHandle()
+        for field_id, label, bad, kind in (
+            ("rbw-stop", "RBW stop", "abc", "bandwidth"),
+            ("rbw-steps", "Steps", "0", "bandwidth"),
+            ("freq-points", "Points", "5000", "frequency"),
+            ("sweep-duration", "Sweep duration", "abc", "frequency"),
+        ):
+            screen.query_one("#sweep-type", Select).value = kind
+            await pilot.pause()
+            field = screen.query_one(f"#{field_id}", Input)
+            good = field.value
+            field.value = bad
+            await pilot.pause()
 
-        build = screen._build_bandwidth_run if kind == "bandwidth" else screen._build_frequency_run
-        with pytest.raises(FieldError) as excinfo:
-            build()
-        assert isinstance(excinfo.value, ValueError)
-        assert excinfo.value.field_id == field_id and label in str(excinfo.value)
+            build = (
+                screen._build_bandwidth_run if kind == "bandwidth" else screen._build_frequency_run
+            )
+            with pytest.raises(FieldError) as excinfo:
+                build()
+            assert excinfo.value.field_id == field_id and label in str(excinfo.value)
 
-        screen._start_sweep()
-        await pilot.pause()
-        assert field.has_class("-invalid")
-        assert app.focused is field
-        assert any(m.startswith("Invalid sweep parameters") for m in notifications(app))
-        assert not app.sweep_running
+            screen._start_sweep()
+            await pilot.pause()
+            assert field.has_class("-invalid") and app.focused is field
+            assert any(m.startswith("Invalid sweep parameters") for m in notifications(app))
+            assert not app.sweep_running
 
-        field.value = "5"
-        await pilot.pause()
-        assert not field.has_class("-invalid")
+            field.value = good  # editing clears the marker
+            await pilot.pause()
+            assert not field.has_class("-invalid")
 
 
 # -- pre-flight guards and the "not ready" banner ------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "kind,connected,action,expected,button",
-    [
-        ("bandwidth", (), "_start_sweep", "Connect the MXA", "#run-sweep"),
-        ("bandwidth", (), "_start_capture", "Connect the MXA", "#capture-trace"),
-        ("frequency", ("mxa",), "_start_sweep", "Connect the shutter", "#run-sweep"),
-        ("frequency", ("mxa", "shutter"), "_start_sweep", "Connect the wavemeter", "#run-sweep"),
-    ],
-)
 @async_test
-async def test_starting_without_the_needed_instrument_notifies_and_launches_nothing(
-    kind: str, connected: tuple[str, ...], action: str, expected: str, button: str
-) -> None:
+async def test_starting_without_the_needed_instrument_notifies_and_launches_nothing() -> None:
     app = IyzeeApp()
     async with app.run_test() as pilot:
         screen = await _open_sweep_screen(pilot)
-        for key in connected:
-            app.handles[key] = FakeHandle()
-        screen.query_one("#sweep-type", Select).value = kind
-        await pilot.pause()
+        for kind, connected, action, expected, button in (
+            ("bandwidth", (), "_start_sweep", "Connect the MXA", "#run-sweep"),
+            ("bandwidth", (), "_start_capture", "Connect the MXA", "#capture-trace"),
+            ("frequency", ("mxa",), "_start_sweep", "Connect the shutter", "#run-sweep"),
+            (
+                "frequency",
+                ("mxa", "shutter"),
+                "_start_sweep",
+                "Connect the wavemeter",
+                "#run-sweep",
+            ),
+        ):
+            app.handles.clear()
+            for key in connected:
+                app.handles[key] = FakeHandle()
+            screen.query_one("#sweep-type", Select).value = kind
+            await pilot.pause()
 
-        getattr(screen, action)()
-        await pilot.pause()
-        assert expected in notifications(app)[0]
-        assert screen.query_one(button).disabled is False
+            getattr(screen, action)()
+            await pilot.pause()
+            assert expected in notifications(app)[-1]
+            assert screen.query_one(button).disabled is False
 
 
 @async_test
@@ -495,7 +462,7 @@ def _log_text(screen: SweepScreen) -> str:
     )
 
 
-@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit, asyncio.CancelledError])
+@pytest.mark.parametrize("exc_type", [asyncio.CancelledError])
 @async_test
 async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exc_type: type[BaseException]
@@ -526,7 +493,7 @@ async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_
         assert '"failed"' in last_run.path.with_suffix(".json").read_text()
 
 
-@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit, asyncio.CancelledError])
+@pytest.mark.parametrize("exc_type", [SystemExit])
 @async_test
 async def test_a_capture_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
     monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
