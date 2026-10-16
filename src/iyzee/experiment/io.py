@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from ..config import data_root
@@ -388,7 +389,6 @@ def build_figure(results: list[StepResult]):
     ``textual-plotext`` — can get the figure without ``matplotlib`` trying
     to pop up a blocking GUI window.
     """
-    import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots()
     series = difference_series_many(
@@ -415,7 +415,6 @@ def multiplot(results: list[StepResult]) -> None:
     Kept for scripts and notebooks that want the one-call figure.
     Non-interactive callers should use :func:`build_figure` instead.
     """
-    import matplotlib.pyplot as plt
 
     build_figure(results)
     plt.show()
