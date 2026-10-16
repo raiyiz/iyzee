@@ -293,8 +293,8 @@ async def test_simulated_frequency_sweep_runs_real_steps_and_checkpointing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Exercise the real sequence/step path with fake devices, through the live TUI worker."""
-    from types import SimpleNamespace
     import json
+    from types import SimpleNamespace
 
     setpoints: list[tuple[float, int]] = []
     readings: list[float] = []
