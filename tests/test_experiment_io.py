@@ -195,8 +195,12 @@ def test_multiplot_plots_each_result(monkeypatch):
         def tight_layout(self):
             pass
 
-    monkeypatch.setattr("iyzee.experiment.io.plt.subplots", lambda: (FakeFig(), FakeAx()))
-    monkeypatch.setattr("iyzee.experiment.io.plt.show", lambda: None)
+    # matplotlib is intentionally imported inside the plotting functions.
+    # Import it here for this test, then patch the shared pyplot module.
+    import matplotlib.pyplot as plt
+
+    monkeypatch.setattr(plt, "subplots", lambda: (FakeFig(), FakeAx()))
+    monkeypatch.setattr(plt, "show", lambda: None)
 
     results = [
         StepResult(
