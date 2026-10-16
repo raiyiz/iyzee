@@ -286,7 +286,7 @@ class PowerScreen(Page):
                     log.exception("power: reading the supply failed")
                     error = error or exc
                 took = time.monotonic() - started
-        except Exception as exc:  # e.g. the lock itself
+        except Exception as exc:  # noqa: BLE001 - finish UI for any lock/driver failure
             error = error or exc
         log.info("power: %s took %.2f s", what, took)
         self._ui(self._finish, handle, what, state, took, error, silent, fill_inputs, fill_channels)
