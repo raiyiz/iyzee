@@ -344,16 +344,11 @@ def _(
     catalog = build_catalog(files)
     return (
         DATA_ROOT,
-        build_catalog,
         catalog,
-        files,
         load_run,
-        plot_scope,
         plot_scope_comparison,
         plot_sweep_comparison,
-        plot_trace,
         read_manifest,
-        verify_run,
     )
 
 
@@ -552,7 +547,7 @@ def _(errors, mo, scope_channels, sweep_points, sweep_runs):
 
 
 @app.cell
-def _(catalog, mo, pl, scope_channels):
+def _(catalog, mo, pl):
     sweep_ids = (
         catalog.filter(pl.col("kind").is_in(["bandwidth", "frequency"]))
         .get_column("run_id")
@@ -574,6 +569,18 @@ def _(catalog, mo, pl, scope_channels):
         value=scope_ids[:3],
         label="Scope runs to compare",
     )
+    return selected_scope_runs, selected_statistic, selected_sweeps
+
+
+@app.cell
+def _(
+    mo,
+    pl,
+    scope_channels,
+    selected_scope_runs,
+    selected_statistic,
+    selected_sweeps,
+):
     channels_for_runs = (
         scope_channels.filter(pl.col("run_id").is_in(selected_scope_runs.value))
         .group_by("channel")
@@ -597,12 +604,7 @@ def _(catalog, mo, pl, scope_channels):
             mo.hstack([selected_scope_runs, selected_scope_channel], gap=2, align="start"),
         ]
     )
-    return (
-        selected_scope_channel,
-        selected_scope_runs,
-        selected_statistic,
-        selected_sweeps,
-    )
+    return (selected_scope_channel,)
 
 
 @app.cell
