@@ -54,7 +54,7 @@ def _enable_fatal_tracebacks() -> None:
         LOG_ROOT.mkdir(parents=True, exist_ok=True)
         _FATAL_LOG_FILE = (LOG_ROOT / "fatal.log").open("a", buffering=1)
         faulthandler.enable(file=_FATAL_LOG_FILE, all_threads=True)
-    except (OSError, RuntimeError, ValueError):
+    except OSError, RuntimeError, ValueError:
         log.exception("could not enable fatal-signal traceback logging")
 
 

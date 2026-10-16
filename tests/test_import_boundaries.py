@@ -12,8 +12,7 @@ def test_importing_tui_does_not_initialize_matplotlib_pyplot() -> None:
         [
             sys.executable,
             "-c",
-            "import sys; import iyzee.tui.app; "
-            "assert 'matplotlib.pyplot' not in sys.modules",
+            "import sys; import iyzee.tui.app; assert 'matplotlib.pyplot' not in sys.modules",
         ],
         capture_output=True,
         text=True,
