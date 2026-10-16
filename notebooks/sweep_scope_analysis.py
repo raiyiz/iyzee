@@ -608,6 +608,11 @@ def _(
 
 
 @app.cell
+def _():
+    return
+
+
+@app.cell
 def _(
     mo,
     plot_scope_comparison,
@@ -694,6 +699,90 @@ def _(mo):
     plot_trace(trace)
     ~~~
     """)
+    return
+
+
+@app.cell
+def _(np):
+    fpath = "/home/gsec/sqz/repos/iyzee/data/2026-10/16T194451_frequency-manual_5cf579.npz"
+    print(dir(np))
+    return (fpath,)
+
+
+@app.cell
+def _(np):
+    lst = dir(np)
+    for l in lst:
+        if "read" not in l:
+            print(l)
+    return
+
+
+@app.cell
+def _(fpath, np):
+    data = np.load(fpath)
+    return (data,)
+
+
+@app.cell
+def _(data):
+    data.keys()
+    return
+
+
+@app.cell
+def _(data):
+    data["trace_squeezing"]
+    data["trace_shot_noise"]
+    it = list(data.items())
+    print(it)
+    return
+
+
+@app.cell
+def _(data):
+    zd = list(zip(data["trace_squeezing"], data["trace_shot_noise"], strict=False))
+
+    # plt.plot(accu[0][0])
+    print(zd)
+    return (zd,)
+
+
+@app.cell
+def _(plt, zd):
+    _fig, ax = plt.subplots(figsize=(10, 4), layout="constrained")
+    for sqz, _shn in zd:
+        # ax.plot(sqz)
+        # ax.plot(shn)
+        ax.plot(sqz)
+    return
+
+
+@app.cell
+def _():
+    # fig.plot()
+    return
+
+
+@app.cell
+def _(plt, zd):
+    for r in zd:
+        for tr in r:
+            plt.plot(tr)
+    plt.show()
+    return
+
+
+@app.cell
+def _(plt, zd):
+
+    plt.plot(zd[1][0])
+    plt.plot(zd[1][1])
+    return
+
+
+@app.cell
+def _():
     return
 
 

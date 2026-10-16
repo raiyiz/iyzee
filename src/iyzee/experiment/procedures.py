@@ -21,6 +21,14 @@ from .core import ExperimentContext, Step, StepResult, run_sequence
 TRACE_SQZ = 1
 TRACE_SHOT = 2
 
+#: Seconds the laser gets to settle on a new PID setpoint before it is read.
+SETTLE_TIME_S = 0.5
+
+# sane default, Rb85 D1 2->2'
+CENTER_FREQ = 377.108945611
+# port of the wavelength meter
+WM_CHANNEL = 4
+
 
 @dataclass(slots=True)
 class AnalyzerConfig:
@@ -94,10 +102,6 @@ class BandwidthStep:
         )
 
 
-#: Seconds the laser gets to settle on a new PID setpoint before it is read.
-SETTLE_TIME_S = 0.5
-
-
 @dataclass
 class FrequencyStep:
     """Set the laser frequency setpoint, wait to settle, read the wavemeter, and acquire.
@@ -157,8 +161,8 @@ def bandwidth_sweep_steps(rbw_values_hz=None) -> list[BandwidthStep]:
 
 
 def frequency_sweep_steps(
-    laser_center_thz: float = 377.1052067,
-    wavemeter_channel: int = 4,
+    laser_center_thz: float = CENTER_FREQ,
+    wavemeter_channel: int = WM_CHANNEL,
     relax_time_s: float = SETTLE_TIME_S,
     offsets_thz=None,
 ) -> list[FrequencyStep]:
@@ -210,8 +214,8 @@ def build_bandwidth_sweep(
 
 
 def build_frequency_sweep(
-    laser_center_thz: float = 377.1052067,
-    wavemeter_channel: int = 4,
+    laser_center_thz: float = CENTER_FREQ,
+    wavemeter_channel: int = WM_CHANNEL,
     offsets_thz=None,
     *,
     sweep_duration_ms: int = 10,
@@ -260,8 +264,8 @@ def run_bandwidth_sweep(mx, rbw_values_hz=None, *, on_error: str = "raise") -> l
 def run_frequency_sweep(
     mx,
     shutter: ShutterControl,
-    laser_center_thz: float = 377.1052067,
-    wavemeter_channel: int = 4,
+    laser_center_thz: float = CENTER_FREQ,
+    wavemeter_channel: int = WM_CHANNEL,
     *,
     on_error: str = "raise",
 ) -> list[StepResult]:

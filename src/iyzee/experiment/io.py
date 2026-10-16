@@ -389,6 +389,7 @@ def build_figure(results: list[StepResult]):
     ``textual-plotext`` — can get the figure without ``matplotlib`` trying
     to pop up a blocking GUI window.
     """
+
     fig, ax = plt.subplots()
     series = difference_series_many(
         [result.traces.get("squeezing") for result in results],
@@ -414,5 +415,6 @@ def multiplot(results: list[StepResult]) -> None:
     Kept for scripts and notebooks that want the one-call figure.
     Non-interactive callers should use :func:`build_figure` instead.
     """
+
     build_figure(results)
     plt.show()

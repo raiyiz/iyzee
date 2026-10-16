@@ -18,6 +18,7 @@ from helpers import FakeHandle, async_test, make_result, notifications, plain, w
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, RichLog, Select, Static
 
+from iyzee.experiment import procedures as procedures_mod
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens import sweep as sweep_mod
@@ -285,6 +286,78 @@ async def test_points_are_on_disk_while_the_sweep_is_still_running(
     assert app.last_run is not None and len(app.last_run.results) == 3
     assert app.last_run.path is not None and app.last_run.path.parent == tmp_path
     assert not app.sweep_running
+
+
+@async_test
+async def test_simulated_frequency_sweep_runs_real_steps_and_checkpointing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Exercise the real sequence/step path with fake devices, through the live TUI worker."""
+    import json
+    from types import SimpleNamespace
+
+    setpoints: list[tuple[float, int]] = []
+    readings: list[float] = []
+    trace_calls: list[int] = []
+    shutter_events: list[str] = []
+
+    class FakeShutter:
+        def open(self) -> None:
+            shutter_events.append("open")
+
+        def close(self) -> None:
+            shutter_events.append("close")
+
+    def set_pid_setpoint(self, frequency: float, channel: int = 4) -> None:
+        setpoints.append((frequency, channel))
+
+    def read_frequency(self, channel: int = 4) -> float:
+        frequency = setpoints[len(readings)][0] + 2e-9
+        readings.append(frequency)
+        return frequency
+
+    def acquire_trace(_mx: object, trace_num: int) -> list[float]:
+        trace_calls.append(trace_num)
+        baseline = 10.0 if trace_num == 1 else 7.0
+        return [baseline + i for i in range(1001)]
+
+    monkeypatch.setattr(sweep_mod, "create_dirs", lambda: tmp_path)
+    monkeypatch.setattr(sweep_mod, "prepare_analyzer", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sweep_mod, "LIVE_PLOT_INTERVAL_S", 0.0)
+    monkeypatch.setattr(procedures_mod, "time", SimpleNamespace(sleep=lambda _seconds: None))
+    monkeypatch.setattr(procedures_mod.Wavemeter, "set_pid_setpoint", set_pid_setpoint)
+    monkeypatch.setattr(procedures_mod.Wavemeter, "read_frequency", read_frequency)
+    monkeypatch.setattr(procedures_mod, "acquire_trace", acquire_trace)
+
+    app = IyzeeApp()
+    app.handles["mxa"] = FakeHandle(device=object())
+    app.handles["shutter"] = FakeHandle(device=FakeShutter())
+    app.handles["wavemeter"] = FakeHandle()
+
+    async with app.run_test() as pilot:
+        screen = await _open_sweep_screen(pilot)
+        screen.query_one("#sweep-type", Select).value = "frequency"
+        await pilot.pause()
+        await pilot.click("#run-sweep")
+        await wait_until(pilot, lambda: app.last_run is not None)
+        await wait_until(pilot, lambda: not app.sweep_running)
+
+    assert app.last_run is not None
+    assert len(app.last_run.results) == 5
+    assert len(setpoints) == len(readings) == 5
+    assert all(channel == 4 for _, channel in setpoints)
+    assert [result.meta["measured_frequency_thz"] for result in app.last_run.results] == readings
+    assert trace_calls == [1, 2] * 5
+    assert shutter_events == ["open", "close"] * 5
+
+    assert app.last_run.path is not None
+    with np.load(app.last_run.path, allow_pickle=False) as archive:
+        assert archive["x_values"].shape == (5,)
+        assert archive["trace_squeezing"].shape == (5, 1001)
+        assert archive["trace_shot_noise"].shape == (5, 1001)
+    metadata = json.loads(app.last_run.path.with_suffix(".json").read_text())
+    assert metadata["run_metadata"]["status"] == "completed"
+    assert len(metadata["points"]) == 5
 
 
 @async_test
