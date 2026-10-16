@@ -323,6 +323,7 @@ async def test_simulated_frequency_sweep_runs_real_steps_and_checkpointing(
 
     monkeypatch.setattr(sweep_mod, "create_dirs", lambda: tmp_path)
     monkeypatch.setattr(sweep_mod, "prepare_analyzer", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sweep_mod, "LIVE_PLOT_INTERVAL_S", 0.0)
     monkeypatch.setattr(procedures_mod, "time", SimpleNamespace(sleep=lambda _seconds: None))
     monkeypatch.setattr(procedures_mod.Wavemeter, "set_pid_setpoint", set_pid_setpoint)
     monkeypatch.setattr(procedures_mod.Wavemeter, "read_frequency", read_frequency)
