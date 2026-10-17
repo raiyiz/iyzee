@@ -57,6 +57,7 @@ class ExperimentContext:
     run_id: str
     shutter: Any | None = None
     config: dict[str, Any] = field(default_factory=dict)
+    wavemeter: Any = None
 
 
 class Step(Protocol):

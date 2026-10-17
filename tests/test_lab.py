@@ -97,3 +97,71 @@ def test_device_returns_the_driver_and_a_missing_instrument_says_so():
         lab.device("a")
     lab.connect("a")
     assert lab.device("a") == "the driver"
+
+
+# -- instruments that are a part of another (the shutter on the PSU) -------------------
+
+
+class PartHandle(FakeHandle):
+    """A part of a parent instrument: shares its lock, records what it was built on."""
+
+    def __init__(self, parent: FakeHandle, events: list[str], **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.parent = parent
+        self.lock = parent.lock  # one link, one lock
+        self.events = events
+
+    def disconnect(self) -> None:
+        # Closing a part needs the parent's link: it must still be open.
+        self.events.append(f"part closes (parent disconnected: {self.parent.disconnected})")
+        super().disconnect()
+
+
+def make_parent_lab(parent: FakeHandle | None = None, part: PartHandle | None = None):
+    events: list[str] = []
+    parent = parent or FakeHandle()
+    built: list[FakeHandle] = []
+
+    def make_part(handle: FakeHandle) -> PartHandle:
+        built.append(handle)
+        return part or PartHandle(handle, events)
+
+    lab = Lab(
+        [
+            InstrumentSpec("psu", "PSU", lambda: parent),
+            InstrumentSpec("shutter", "Shutter", make_part, parent="psu"),
+        ]
+    )
+    return lab, parent, built, events
+
+
+def test_connecting_a_part_connects_its_parent_once_and_builds_it_on_the_parent_handle():
+    lab, parent, built, _ = make_parent_lab()
+
+    lab.connect("shutter")
+    lab.connect("psu")  # already connected by the above: opens nothing a second time
+
+    assert lab.connected == ("psu", "shutter") and built == [parent]
+    assert parent.connect_calls == 1
+    assert lab.details["psu"] == parent.probe()
+
+    failing, _, _, _ = make_parent_lab(parent=FakeHandle(connect_error="no route"))
+    with pytest.raises(ConnectionError, match="no route"):
+        failing.connect("shutter")
+    assert failing.connected == ()  # neither registered
+
+
+def test_a_part_is_closed_before_its_parent_however_they_are_released():
+    for release in (lambda lab: lab.disconnect("psu"), lambda lab: lab.close_all()):
+        lab, parent, _, events = make_parent_lab()
+        lab.connect("shutter")
+
+        release(lab)
+
+        assert events == ["part closes (parent disconnected: False)"]
+        assert parent.disconnected and lab.connected == ()
+
+    lab, parent, _, _ = make_parent_lab()
+    lab.connect("shutter")
+    lab.disconnect("shutter")  # only the part: the parent stays up
+    assert lab.connected == ("psu",) and not parent.disconnected

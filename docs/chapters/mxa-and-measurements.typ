@@ -36,7 +36,7 @@ $ "MXA" -> "SCPI response" -> "PyVISA" -> "KeysightMXA" -> "Python" $
 
 The driver deliberately keeps the SCPI boundary thin. For example, `set_center_freq(freq_hz)` writes `FREQ:CENT`, `set_rbw(rbw_hz)` writes `BWID`, and `get_trace_data()` selects ASCII or binary transfer before reading the trace. Units are explicit at the Python boundary: frequencies are in Hz, sweep duration in ms, RF reference and marker powers in dBm where applicable, and counts are dimensionless.
 
-The experiment layer builds measurements from `Step` objects. `BandwidthStep` scans RBW; `FrequencyStep` changes the laser setpoint, waits for a configured settling interval, and acquires squeezing and shot-noise traces with the shutter closed again before the reference acquisition. A script that imports the library runs a sweep with #code("run_bandwidth_sweep") or #code("run_frequency_sweep") (or composes steps itself) and saves the resulting `StepResult` objects with #code("save_step_results"); the `iyz` application (see the top-level README) runs either sweep interactively, with live progress, from the same `Step`/`run_sequence()` building blocks.
+The experiment layer builds measurements from `Step` objects. Both sweeps share one structure: a #code("SweepStep") subclass is one point (the base class owns the sequence -- check the context, move the swept parameter, acquire the squeezing/shot-noise pair, package the result), `build_<kind>_sweep` pairs the points with their analyzer setup into a sweep plan, and #code("run_sweep") runs any plan. `BandwidthStep` scans RBW; `FrequencyStep` changes the laser setpoint, waits for a configured settling interval, and acquires squeezing and shot-noise traces with the shutter closed again before the reference acquisition (#code("acquire_pair")). A script that imports the library runs a sweep with #code("run_bandwidth_sweep") or #code("run_frequency_sweep") (or composes steps itself) and saves the resulting `StepResult` objects with #code("save_step_results"); the `iyz` application (see the top-level README) runs either sweep interactively, with live progress, from the same `Step`/`run_sequence()` building blocks.
 
 = Measurement architecture
 
@@ -74,7 +74,7 @@ $ "input" -> "attenuation / preamp" -> "mixer / IF" -> "RBW" -> "detector" -> "V
   [Trigger source], [#fact("sweeps.analyzer_defaults.trig_source")], [#fact("sweeps.bandwidth.trig_source")], [#fact("sweeps.frequency.trig_source")],
 )
 
-The Sweep page uses these presets but sets the bandwidth sweep's duration to 10 ms itself (#code("SweepScreen._build_bandwidth_run")), so a TUI run and a library call to #code("run_bandwidth_sweep") differ in that one setting.
+Every preset starts from the same sweep duration (#fact("sweeps.analyzer_defaults.sweep_duration_ms") ms), and every caller can override it: the Sweep page has a "Sweep duration (ms)" field shared by both sweeps, and the library functions take `sweep_duration_ms=`. A TUI run and a library call therefore agree unless you change it.
 
 #callout(
   "Zero span: the trace is time, not frequency",
@@ -185,9 +185,9 @@ shutter, and then acquires the shot-noise reference.
 
 = Current experiment workflows
 
-`run_bandwidth_sweep()` builds a sequence of `BandwidthStep` objects. Each step sets RBW, uses `VBW = 2 * RBW`, acquires squeezing and shot-noise traces, and records the RBW/VBW values as metadata. This scan is useful because the measured noise should approximately follow effective bandwidth for a white-noise region; deviations can reveal non-flat DUT noise, analyzer noise, effective-bandwidth differences, or estimator bias.
+`run_bandwidth_sweep()` runs `build_bandwidth_sweep()`, a sequence of `BandwidthStep` objects. Each step sets RBW, uses `VBW = 2 * RBW`, acquires squeezing and shot-noise traces, and records the RBW/VBW values as metadata. This scan is useful because the measured noise should approximately follow effective bandwidth for a white-noise region; deviations can reveal non-flat DUT noise, analyzer noise, effective-bandwidth differences, or estimator bias.
 
-`run_frequency_sweep()` builds `FrequencyStep` objects around a laser-frequency center value. Its settling interval is a fixed #fact("sweeps.settle_time_s") s for the laser to settle on the new setpoint, after which the wavemeter is read and stored with the step. It is independent of sweep duration and average count, because each acquisition restarts the analyzer's averaging (`INIT:IMM`). It is a chosen value, not a measured settling constant; `build_frequency_sweep(relax_time_s=...)` overrides it.
+`run_frequency_sweep()` runs `build_frequency_sweep()`, `FrequencyStep` objects around a laser-frequency center value, 10 MHz apart by default. The wavemeter comes from the run context: the Sweep page passes the connected one (and holds its lock for the run), and `run_frequency_sweep(wavemeter=...)` takes one, defaulting to a client for the configured server. Its settling interval is a fixed #fact("sweeps.settle_time_s") s for the laser to settle on the new setpoint, after which the wavemeter is read and stored with the step. It is independent of sweep duration and average count, because each acquisition restarts the analyzer's averaging (`INIT:IMM`). It is a chosen value, not a measured settling constant; `build_frequency_sweep(relax_time_s=...)` overrides it.
 
 The key comparison in that workflow is squeezing versus shot noise. A difference between two dBm traces is a power ratio. A residual power requires linear-domain subtraction. Documentation and downstream analysis should keep those quantities distinct.
 
