@@ -107,7 +107,7 @@ elif mode == "segfault":
 
 
 def _crash(tmp_path: Path, mode: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return subprocess.run(  # noqa: S603 - our own interpreter and a fixed script
         [sys.executable, "-c", _CRASH_SCRIPT, str(tmp_path), mode],
         capture_output=True,
         text=True,
@@ -206,7 +206,7 @@ def test_a_real_sigterm_to_a_real_app_ends_it_cleanly_and_leaves_a_log_line(
 ) -> None:
     env = {**os.environ, "IYZEE_DATA_DIR": str(tmp_path / "data")}
     sessions = tmp_path / "sessions"
-    process = subprocess.Popen(
+    process = subprocess.Popen(  # noqa: S603 - our own interpreter and a fixed script
         [sys.executable, "-c", _APP_SCRIPT, str(sessions)],
         env=env,
         cwd=ROOT,

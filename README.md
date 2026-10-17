@@ -228,6 +228,12 @@ scripts/ci.sh all         # run everything
 
 GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. <code>hardware</code> is deliberately not part of <code>all</code> or CI.
 
+The marimo notebooks in <code>notebooks/</code> need packages the application itself does not, kept in their own dependency group and left out of CI:
+
+~~~sh
+uv run --group notebooks marimo edit notebooks/sweep_scope_analysis.py
+~~~
+
 ### Hardware tests
 
 <code>tests/hardware/</code> checks the drivers and procedures against the real instruments. A plain <code>pytest</code> never runs them: they are skipped unless you pass <code>--hardware</code>, and everything in that directory is marked <code>hardware</code> automatically. Addresses come from the same <code>IYZEE_*_IP</code> / <code>config.toml</code> the app uses, and the first line of a run lists them.

@@ -1,3 +1,4 @@
+# ruff: noqa: F401  (scratch notebook: an import cell kept for the cells to come)
 import marimo
 
 __generated_with = "0.25.1"

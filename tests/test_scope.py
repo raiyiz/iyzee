@@ -63,7 +63,7 @@ def test_connect_applies_timeout_and_chunk_size_and_failures_are_clear():
             raise visa_timeout()
 
     refused = LeCroy("10.0.0.1", resource_manager=Refusing())
-    with pytest.raises(LeCroyTimeoutError, match="10.0.0.1"):
+    with pytest.raises(LeCroyTimeoutError, match=r"10\.0\.0\.1"):
         refused.connect()
     assert not refused.connected
 

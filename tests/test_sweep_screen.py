@@ -9,6 +9,7 @@ around it.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import threading
 from pathlib import Path
 from typing import Any
@@ -68,7 +69,7 @@ async def test_form_defaults_build_the_documented_runs_and_the_duration_applies_
         assert len(frequency.steps) == 5
         # The defaults the issue asked for: 10 ms sweeps, 10 MHz between laser points.
         assert bandwidth.config.sweep_duration_ms == frequency.config.sweep_duration_ms == 10
-        gaps = [b.x_value - a.x_value for a, b in zip(frequency.steps, frequency.steps[1:])]
+        gaps = [b.x_value - a.x_value for a, b in itertools.pairwise(frequency.steps)]
         assert all(gap == pytest.approx(10e-6) for gap in gaps)  # 10 MHz, in THz
 
         screen.query_one("#sweep-duration", Input).value = "25"

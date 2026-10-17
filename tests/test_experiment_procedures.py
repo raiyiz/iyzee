@@ -1,3 +1,4 @@
+import itertools
 from types import SimpleNamespace
 
 import pytest
@@ -132,9 +133,7 @@ def test_the_builders_and_their_defaults():
 
     assert pytest.approx(10) == FREQUENCY_STEP_THZ * 1e6  # 10 MHz steps (THz -> MHz)
     freq_steps = frequency_sweep_steps(laser_center_thz=377.0)
-    gaps = [
-        b.frequency_thz - a.frequency_thz for a, b in zip(freq_steps, freq_steps[1:], strict=False)
-    ]
+    gaps = [b.frequency_thz - a.frequency_thz for a, b in itertools.pairwise(freq_steps)]
     assert gaps and all(gap == pytest.approx(10e-6) for gap in gaps)
     assert 377.0 in [pytest.approx(s.frequency_thz) for s in freq_steps]  # still from the centre
 
