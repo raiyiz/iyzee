@@ -130,7 +130,7 @@ def test_the_builders_and_their_defaults():
         config = config_for(sweep_duration_ms=7, res_bw_hz=1e3)
         assert (config.sweep_duration_ms, config.res_bw_hz) == (7, 1e3)
 
-    assert FREQUENCY_STEP_THZ * 1e6 == pytest.approx(10)  # 10 MHz steps (THz -> MHz)
+    assert pytest.approx(10) == FREQUENCY_STEP_THZ * 1e6  # 10 MHz steps (THz -> MHz)
     freq_steps = frequency_sweep_steps(laser_center_thz=377.0)
     gaps = [
         b.frequency_thz - a.frequency_thz for a, b in zip(freq_steps, freq_steps[1:], strict=False)

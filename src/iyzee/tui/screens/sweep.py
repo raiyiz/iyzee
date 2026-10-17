@@ -463,7 +463,7 @@ class SweepScreen(Page):
     def _capture(self, mx) -> None:
         try:
             self._capture_trace(mx)
-        except BaseException as exc:  # noqa: BLE001 - see _run: nothing may leave a worker
+        except BaseException as exc:
             log.critical(
                 "capture: the worker thread died with %s", type(exc).__name__, exc_info=exc
             )

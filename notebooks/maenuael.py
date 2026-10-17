@@ -49,7 +49,6 @@ def _(np):
     fpath = "/home/gsec/sqz/repos/iyzee/data/2026-10/16T194451_frequency-manual_5cf579.npz"
     results = np.load(fpath)
 
-
     return
 
 
@@ -95,10 +94,7 @@ def _(lab):
         step_khz = 10
 
         step_thz = step_khz * 1e-9
-        offsets_thz = [
-            (i - (points // 2)) * step_thz
-            for i in range(points)
-        ]
+        offsets_thz = [(i - (points // 2)) * step_thz for i in range(points)]
 
         steps, config = build_frequency_sweep(
             laser_center_thz=center,
@@ -153,10 +149,7 @@ def _(lab):
                 record.on_step(index, total, step, result, error)
 
                 if error is not None:
-                    print(
-                        f"[{index + 1}/{total}] "
-                        f"{step.label}: FAILED: {error!r}"
-                    )
+                    print(f"[{index + 1}/{total}] {step.label}: FAILED: {error!r}")
                     return
 
                 collected.append(result)
@@ -194,7 +187,6 @@ def _(lab):
         print(f"Saved file: {save_path}")
 
         return collected
-
 
     results = reproduce_tui_frequency_sweep()
     return

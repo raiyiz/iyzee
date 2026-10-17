@@ -178,7 +178,7 @@ class Lab:
         for child in self.dependents(key):
             try:
                 self.disconnect(child)
-            except Exception:  # noqa: BLE001 - the parent must still be released
+            except Exception:
                 log.exception("error closing %s", child)
         handle = self.handles.pop(key, None)
         self.details.pop(key, None)

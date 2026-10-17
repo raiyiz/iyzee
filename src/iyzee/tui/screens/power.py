@@ -276,13 +276,13 @@ class PowerScreen(Page):
                 try:
                     if action is not None:
                         action(psu)
-                except Exception as exc:  # noqa: BLE001 - still read back what the supply is doing
+                except Exception as exc:
                     log.exception("power: %s failed", what)
                     error = exc
                 # Even after a failed change: show the supply's real state, not a guess.
                 try:
                     state = psu.retrieve_state()
-                except Exception as exc:  # noqa: BLE001 - never leave the page busy
+                except Exception as exc:
                     log.exception("power: reading the supply failed")
                     error = error or exc
                 took = time.monotonic() - started
