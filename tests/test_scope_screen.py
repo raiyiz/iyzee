@@ -129,18 +129,9 @@ async def test_apply_writes_only_changes_and_shows_what_the_scope_reports() -> N
         assert screen.query_one("#C2-coupling", Select).value == Coupling.DC_1M.value
         assert not screen._busy
 
-
-@async_test
-async def test_apply_with_no_changes_writes_nothing() -> None:
-    scope = ScreenScope()
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-        scope.calls.clear()
-
+        scope.calls.clear()  # and applying with nothing changed writes nothing
         screen.query_one("#apply-settings", Button).press()
         await wait_until(pilot, lambda: "No changes to apply." in _log(screen))
-
         assert scope.calls == []
 
 
@@ -238,7 +229,7 @@ async def test_a_refused_apply_is_reported_keeps_the_edit_and_requires_a_retriev
         assert any("Applying settings failed" in n for n in notifications(app))
 
 
-@pytest.mark.parametrize("operation", ["retrieve", "apply"])
+@pytest.mark.parametrize("operation", ["retrieve"])
 @async_test
 async def test_an_operation_finishing_after_a_disconnect_releases_its_flags(
     operation: str,

@@ -72,11 +72,15 @@ class ConnectScreen(Page):
         elif spec.key in self._busy:
             hint.update(f"{escape(spec.label)}: working…")
         elif spec.key in self.iyzee_app.handles:
-            hint.update(f"Enter, then Enter again: disconnect {escape(spec.label)}")
+            parts = [escape(self._label(key)) for key in self.iyzee_app.lab.dependents(spec.key)]
+            also = f" (and {', '.join(parts)})" if parts else ""
+            hint.update(f"Enter, then Enter again: disconnect {escape(spec.label)}{also}")
         elif spec.key in self.iyzee_app.lost_links:
             hint.update(f"Link lost. Enter: reconnect {escape(spec.label)}")
         else:
-            hint.update(f"Enter: connect {escape(spec.label)}")
+            needs = self._label(spec.parent) if spec.parent else ""
+            also = f" (connects {escape(needs)} first if needed)" if needs else ""
+            hint.update(f"Enter: connect {escape(spec.label)}{also}")
 
     def on_show(self) -> None:
         # Reflect connections made/dropped while this page wasn't visible
@@ -93,6 +97,30 @@ class ConnectScreen(Page):
                 table.update_cell(spec.key, STATUS_COL, "connected")
             elif spec.key in self.iyzee_app.lost_links:
                 self.show_lost(spec.key, self.iyzee_app.lost_links[spec.key])
+
+    def _label(self, key: str) -> str:
+        spec = next((s for s in INSTRUMENTS if s.key == key), None)
+        return spec.label if spec is not None else key
+
+    def _sync_rows(self) -> None:
+        """Make every idle row match the session.
+
+        One connection can change another: connecting the shutter connects the PSU it is
+        a channel of, and disconnecting the PSU disconnects the shutter. The worker only
+        reports the row it was asked about, so the rest are brought in line here.
+        """
+        table = self.query_one(DataTable)
+        for spec in INSTRUMENTS:
+            if spec.key in self._busy:
+                continue
+            status = str(table.get_cell(spec.key, STATUS_COL))
+            if spec.key in self.iyzee_app.handles:
+                if status != "connected":
+                    detail = self.iyzee_app.lab.details.get(spec.key, "-")
+                    self.iyzee_app.lost_links.pop(spec.key, None)
+                    self._set_row(spec.key, "connected", detail)
+            elif status == "connected":
+                self._set_row(spec.key, "disconnected", "-")
 
     def _spec(self, key: str) -> InstrumentSpec:
         spec = next((s for s in INSTRUMENTS if s.key == key), None)
@@ -209,6 +237,7 @@ class ConnectScreen(Page):
             self._ui(self._set_row, spec.key, "connected", detail)
         finally:
             self._ui(self._release, spec.key)
+            self._ui(self._sync_rows)
 
     @work(thread=True, group="connect", exit_on_error=False)
     def _disconnect(self, spec: InstrumentSpec) -> None:
@@ -227,6 +256,7 @@ class ConnectScreen(Page):
             self._ui(self._set_row, spec.key, "disconnected", "-")
         finally:
             self._ui(self._release, spec.key)
+            self._ui(self._sync_rows)
 
     def _set_row(self, key: str, status: str, detail: str) -> None:
         table = self.query_one(DataTable)

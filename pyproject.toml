@@ -55,7 +55,8 @@ select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF", "S", "BLE", "T20"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101"]
-"notebooks/*.py" = ["B018"]
+# Notebooks show their results with print() and as bare expressions.
+"notebooks/*.py" = ["B018", "T201"]
 "docs/examples/*.py" = ["S101", "T201"]
 "scripts/*.py" = ["T201"]
 "src/iyzee/devices/wavemeter.py" = ["T201"]
@@ -74,4 +75,8 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.13.0",
     "textual-dev>=1.7.0",
+]
+notebooks = [
+    "marimo>=0.25.1",
+    "polars>=2.0.0",
 ]

@@ -119,6 +119,85 @@ Screen {
     height: 16;
 }
 
+/* -- Power ---------------------------------------------------------------
+   Same shapes as Scope: a warning banner, bordered per-channel panels in a grid
+   that reflows 1 / 2 / 4 columns, and a fixed-height log. */
+
+#power-status {
+    height: auto;
+    margin: 1 2 0 2;
+    padding: 0 1;
+    border-left: thick $warning;
+    color: $warning;
+    background: $warning 12%;
+}
+
+#power-summary {
+    height: auto;
+    margin: 1 2 0 2;
+    padding: 0 1;
+    border-left: thick $primary;
+    background: $primary 8%;
+}
+
+/* Global output / Shutter / Refresh: stacked when narrow, side by side otherwise. */
+#power-controls {
+    layout: grid;
+    grid-size: 1;
+    grid-columns: 1fr;
+    grid-rows: auto;
+    grid-gutter: 0 1;
+    height: auto;
+    margin: 1 2 0 2;
+}
+
+.-medium #power-controls {
+    grid-size: 3;
+}
+
+.-wide #power-controls {
+    grid-size: 3;
+    grid-columns: 28;
+}
+
+#power-controls Button {
+    width: 100%;
+    min-width: 0;
+}
+
+#power-channels {
+    layout: grid;
+    grid-size: 1;
+    grid-rows: auto;
+    grid-gutter: 1 2;
+    height: auto;
+    margin: 1 2 0 2;
+}
+
+.-medium #power-channels {
+    grid-size: 2;
+}
+
+.-wide #power-channels {
+    grid-size: 4;
+}
+
+#power-channels .field Input {
+    width: 100%;
+}
+
+#power-channels Button {
+    width: 100%;
+    min-width: 0;
+    margin-top: 1;
+}
+
+#power-log {
+    height: 8;
+    margin: 0 2 1 2;
+    border: round $primary-darken-1;
+}
+
 /* -- Sweep -------------------------------------------------------------- */
 
 /* "Not ready: connect the MXA first" — only displayed while something the

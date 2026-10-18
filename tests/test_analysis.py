@@ -75,33 +75,20 @@ def test_a_frequency_sweep_plots_at_the_measured_frequency(tmp_path):
     assert sweep.points[1].x == 377.2
 
 
-def test_the_statistic_changes_the_reduction_and_is_recorded_on_the_summary(tmp_path):
+def test_sweep_summaries_honour_the_statistic_and_survive_thin_recordings(tmp_path):
     recording = _saved_sweep(
         tmp_path,
         [StepResult("p", 1.0, "Hz", {"squeezing": [-61.0, -50.0], "shot_noise": [-58.0, -58.0]})],
         name="bandwidth",
     )
-
     mean = summarize_sweep(recording, "mean")
-    minimum = summarize_sweep(recording, "minimum")
-
     assert mean.statistic == "mean"
     assert mean.points[0].relative_noise_db == pytest.approx((-3.0 + 8.0) / 2)
-    assert minimum.points[0].relative_noise_db == pytest.approx(-3.0)
-
-
-def test_an_unknown_statistic_is_rejected(tmp_path):
-    recording = _saved_sweep(
-        tmp_path,
-        [StepResult("p", 1.0, "Hz", {"squeezing": [-61.0], "shot_noise": [-58.0]})],
-        name="bandwidth",
-    )
+    assert summarize_sweep(recording, "minimum").points[0].relative_noise_db == pytest.approx(-3.0)
     with pytest.raises(ValueError, match="unknown statistic"):
         summarize_sweep(recording, "median")  # type: ignore[arg-type]
 
-
-def test_a_recording_without_a_sidecar_still_summarizes_with_default_labels():
-    recording = Recording(
+    bare = Recording(  # no sidecar: default labels
         path=Path("x.npz"),
         arrays={
             "x_values": np.array([1.0, 2.0]),
@@ -110,15 +97,10 @@ def test_a_recording_without_a_sidecar_still_summarizes_with_default_labels():
         },
         metadata={},
     )
-
-    sweep = summarize_sweep(recording)
-
+    sweep = summarize_sweep(bare)
     assert [point.label for point in sweep.points] == ["point 0", "point 1"]
     assert sweep.axis == "bandwidth"
-
-
-def test_a_recording_with_no_x_values_has_no_points():
-    assert summarize_sweep(Recording(Path("x.npz"), {}, {})).points == ()
+    assert summarize_sweep(Recording(Path("x.npz"), {}, {})).points == ()  # no x values: no points
 
 
 def _scope_recording(**metadata) -> Recording:
@@ -159,7 +141,7 @@ def test_a_scope_summary_collects_identity_stats_and_timebase():
     assert (timebase.offset, timebase.interval, timebase.samples) == (-5e-6, 1e-9, 10)
 
 
-def test_channels_with_the_same_timebase_are_grouped():
+def test_scope_timebases_are_grouped_and_a_damaged_manifest_never_breaks_the_summary():
     def waveform(channel: str) -> dict:
         return {
             "channel": channel,
@@ -168,43 +150,29 @@ def test_channels_with_the_same_timebase_are_grouped():
             "stats": {"sample_count": 4},
         }
 
-    recording = _scope_recording(waveforms=[waveform("C1"), waveform("C2")])
+    (timebase,) = summarize_scope(
+        _scope_recording(waveforms=[waveform("C1"), waveform("C2")]), []
+    ).timebases
+    assert timebase.channels == ("C1", "C2") and timebase.unit == "S"  # same timebase: grouped
 
-    (timebase,) = summarize_scope(recording, []).timebases
-
-    assert timebase.channels == ("C1", "C2")
-    assert timebase.unit == "S"
-
-
-@pytest.mark.parametrize(
-    "bad",
-    [
+    for bad in (  # unusable numbers are left out rather than guessed
         {"time_offset": "0", "time_interval": 1e-9, "stats": {"sample_count": 4}},
         {"time_offset": 0.0, "time_interval": 0.0, "stats": {"sample_count": 4}},
         {"time_offset": 0.0, "time_interval": 1e-9, "stats": {"sample_count": 0}},
         {"time_offset": 0.0, "time_interval": 1e-9},
-    ],
-)
-def test_a_timebase_with_unusable_numbers_is_left_out_rather_than_guessed(bad):
-    recording = _scope_recording(waveforms=[{"channel": "C1", **bad}])
-    assert summarize_scope(recording, []).timebases == ()
+    ):
+        recording = _scope_recording(waveforms=[{"channel": "C1", **bad}])
+        assert summarize_scope(recording, []).timebases == ()
 
-
-def test_a_hand_edited_manifest_does_not_break_the_summary():
-    recording = _scope_recording(
+    damaged = _scope_recording(
         waveforms=["nonsense", {"channel": "C1", "stats": "nope"}],
         instrument="not a dict",
         configuration=["not", "a", "dict"],
     )
+    summary = summarize_scope(damaged, [_trace("C1")])
+    assert summary.channels == () and summary.timebases == ()
+    assert summary.instrument_address is None and summary.time_per_div is None
 
-    summary = summarize_scope(recording, [_trace("C1")])
-
-    assert summary.channels == ()
-    assert summary.instrument_address is None
-    assert summary.time_per_div is None
-    assert summary.timebases == ()
-
-
-def test_an_instrument_section_without_an_address_is_distinct_from_no_section():
+    # An instrument section without an address is distinct from no section at all.
     assert summarize_scope(_scope_recording(instrument={}), []).instrument_address == ""
     assert summarize_scope(_scope_recording(), []).instrument_address is None

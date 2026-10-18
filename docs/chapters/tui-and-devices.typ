@@ -54,7 +54,7 @@ The TUI (`tui/app.py`) and a script that imports the library are both callers of
   [Ad hoc device access], [the embedded IPython console, live in the same process], [your own Python session],
 )
 
-Both paths build a list of `Step` objects and hand them to `run_sequence()`; nothing about `experiment/` needed to change to support the TUI, and nothing about the TUI needed to know how a `BandwidthStep` or `FrequencyStep` actually talks to the MXA.
+Both paths build the same sweep plan (`build_bandwidth_sweep()` / `build_frequency_sweep()`) and hand its steps to `run_sequence()`; the Sweep page asks the step type which instruments it `requires` rather than branching on the sweep's name; nothing about `experiment/` needed to change to support the TUI, and nothing about the TUI needed to know how a `BandwidthStep` or `FrequencyStep` actually talks to the MXA.
 
 = Device layer <sec-devices>
 
@@ -69,7 +69,8 @@ TUI layers.
   align: (left, left, left),
   [*Instrument*], [*Driver*], [*Transport*],
   [Keysight MXA], [#code("KeysightMXA")], [VISA, `TCPIP0::<ip>::inst0::INSTR`, SCPI],
-  [R&S HMP4040 PSU / shutter], [#code("PSU"), #code("ShutterControl")], [VISA raw socket, `TCPIP::<ip>::5025::SOCKET`],
+  [R&S HMP4040 PSU], [#code("PSU")], [VISA raw socket, `TCPIP::<ip>::5025::SOCKET`],
+  [Optical shutter (PSU channel 3)], [#code("ShutterControl")], [none of its own: a channel of the PSU],
   [LeCroy scope], [#code("LeCroy")], [VISA, `TCPIP0::<ip>::inst0::INSTR` (VXI-11)],
   [WS-7 wavemeter], [#code("Wavemeter")], [HTTP, port #fact("drivers.wavemeter_port")],
 )
@@ -135,14 +136,30 @@ every operation as a plain method that writes or queries one SCPI command, with 
   [`disable_output(ch)`], [`INST OUT<ch>` then `OUTP:SEL 0`], [],
   [`enable_global_output()`], [`OUTP:GEN 1`], [master output switch, independent of per-channel `OUTP:SEL`],
   [`disable_global_output()`], [`OUTP:GEN 0`], [],
+  [`retrieve_state(channels)`], [`OUTP:GEN?`, then per channel `INST:NSEL <ch>`, `VOLT?`, `CURR?`, `MEAS:VOLT?`, `MEAS:CURR?`, `OUTP:SEL?`], [the supply's own report as a #code("PSUState"): setpoints, measurements, what is armed, and the master output. Puts the channel selection back afterwards. A reply that is not a finite number (or 0/1 for a switch) raises `ValueError` naming the command],
 )
 
-#code("ShutterControl") is a thin wrapper that owns a #code("PSU"). Like every other device it
-does *not* connect when constructed: #code("ShutterControl.connect") connects the PSU and sets the
-shutter channel to 1.7 V and 10 mA (the shutter's trigger levels, hard-coded rather than
-configurable), and closing the PSU on a failed connect so nothing is left half-open.
-#code("ShutterControl.disconnect") closes the shutter before releasing the PSU, so a disconnect
-never leaves the beam path open. The shutter is channel 3 (`CH.THREE`) by default.
+A channel is powered only when it is armed (`OUTP:SEL`) *and* the master output is on, which is why
+#code("PSUState") carries both and #code("PSUState.is_live") combines them. The socket has no message
+framing, so #code("PSU.open") sets a read termination; without it a query would wait for the VISA timeout.
+
+The PSU is the instrument; #code("ShutterControl") is a part of it: it *borrows* a #code("PSU") and uses one channel (3 by default,
+`SHUTTER_CHANNEL_DEFAULT`). It neither opens nor closes the supply's connection and has no lock of its own. Like every other device
+it sends nothing when constructed: #code("ShutterControl.configure") sets the channel to 1.7 V and 10 mA (the shutter's trigger
+levels, hard-coded rather than configurable) and refuses if the PSU is not connected. #code("ShutterControl.is_open") asks the supply
+whether the shutter's channel is powered instead of trusting what we last sent. From a script:
+
+```python
+with PSU() as psu:                 # connects on entry, closes on exit
+    shutter = ShutterControl(psu)  # a channel of that PSU; nothing sent yet
+    shutter.configure()
+    shutter.open()
+    ...
+    shutter.close()                # close it yourself: leaving the block only closes the socket
+```
+
+In the lab session the same relationship is expressed in the registry (@sec-locking): the `shutter` spec names `psu` as its
+`parent`.
 
 == LeCroy oscilloscope <sec-scope>
 
@@ -245,6 +262,7 @@ can persist across switches.
   [`c` / F1], [#code("ConnectScreen")], [one row per instrument; Enter connects or disconnects (in a worker thread)],
   [`s` / F2], [#code("SweepScreen")], [bandwidth or frequency sweep with live progress and per-point checkpointing; also "Capture trace"],
   [`o`], [#code("ScopeScreen")], [channel and trigger form, Retrieve / Apply / Acquire & save],
+  [`p`], [#code("PowerScreen")], [the supply's four channels and the shutter, read back from the supply; global/channel/shutter switches and voltage/current setpoints],
   [`r`], [#code("RbScreen")], [static rubidium D1/D2 reference from `Rb_transitions`],
   [`t` / F3], [#code("ResultsScreen")], [browse saved sweep and scope recordings; derived waveforms and PNG export],
   [`i` / F4], [#code("ConsoleScreen")], [embedded IPython (@sec-console)],
@@ -253,7 +271,7 @@ can persist across switches.
 
 The registry is #code("PAGE_SPECS"); the nav rail, the content switcher and the `:` commands all derive from it, so adding a
 page cannot leave them out of step. F1–F4 reach only Connect/Sweep/Results/Console because the console's embedded terminal lets
-exactly those four through; Scope, Rb and Log are letter-only.
+exactly those four through; Scope, Power, Rb and Log are letter-only.
 
 The shared #code("Page") base owns mechanics that are not domain-specific: scrolling without stealing initial focus, labeled fields, the finite/positive
 validators, validation marking, the safe worker-to-UI callback #code("Page._ui"), and the no-op
@@ -279,18 +297,24 @@ differs from the last-reported state and then refreshes the form from the read-b
   stroke: 0.5pt + hairline,
   inset: 5pt,
   [*Key*], [*Label*], [*Short*],
-  ..range(4).map(i => ([`#fact("instruments." + str(i) + ".key")`], [#fact("instruments." + str(i) + ".label")], [#fact("instruments." + str(i) + ".short")])).flatten(),
+  ..range(5).map(i => ([`#fact("instruments." + str(i) + ".key")`], [#fact("instruments." + str(i) + ".label")], [#fact("instruments." + str(i) + ".short")])).flatten(),
 )
 
 #code("Lab") holds the connected handles and implements connect (build, open, probe, register; nothing is registered on failure and the half-open link is closed),
 disconnect, dead-link detection and bounded close-all for the TUI, the console and scripts alike. Adding an instrument means one handle and one #code("InstrumentSpec"); no screen changes.
+
+An instrument that is really a part of another names its `parent` in the spec; the shutter, a channel of the PSU, is the one case. Its handle is built from the
+parent's handle and shares its link, its lock and its liveness, so everything that talks to the supply, a sweep holding the shutter included, is serialized on one lock.
+Connecting the shutter connects the PSU first if it is not already (never twice: one socket per supply); disconnecting the PSU disconnects the shutter first, which closes it;
+and #code("Lab.close_all") closes parts before parents, so the supply going away at exit never leaves the shutter open. Disconnecting only the shutter closes it and leaves the PSU connected.
+The Power page's switches for the shutter's channel are disabled while the shutter is connected: the channel is the shutter's.
 
 Each handle inherits #code("_LockedHandle"), which owns one re-entrant `threading.RLock`; `ScopeHandle` instead returns the driver's own transaction lock, so the handle, the console proxy, workflow batches and the driver's multi-command transfers share
 a single lock. #code("LockedProxy") wraps a live device so every method call takes that lock; `ConnectScreen`, `SweepScreen` and the console's #code("LabProxy") all use the handle's lock. A concurrent console command and a running sweep therefore cannot interleave on one instrument. It is a coarse call-level lock, not a queue: a long call makes a concurrent caller wait for the whole call.
 
 Because the lock lives on the handle, a handle built entirely outside the app (a script's own `ScopeHandle`) gets the same guarantee. Because it is re-entrant, passing a `LockedProxy` over a handle whose lock is already held does not deadlock.
 
-#tested-by("test_locked_proxy_serializes_calls_across_threads", "test_drop_dead_links_unregisters_only_the_dead_ones_and_releases_them", "test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument", "test_a_failed_connect_closes_the_half_open_link_and_registers_nothing", "test_scope_handle_alive_follows_the_drivers_connected_state")
+#tested-by("test_locked_proxy_serializes_calls_across_threads", "test_drop_dead_links_unregisters_only_the_dead_ones_and_releases_them", "test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument", "test_a_failed_connect_closes_the_half_open_link_and_registers_nothing", "test_scope_handle_identifies_the_scope_reports_a_silent_one_and_follows_its_state")
 
 == Design convention: screens display and control, they don't implement <sec-convention>
 
@@ -352,7 +376,7 @@ The Console page runs IPython's own terminal UI (prompt_toolkit's prompt with vi
 )
 
 ```python
-# connect the MXA and shutter on the Connect page first, then:
+# connect the MXA and the shutter (which connects the PSU) on the Connect page first, then:
 lab.mx.set_center_freq(1.5e6)
 lab.mx.set_rbw(24e3)
 lab.mx.single_sweep_wait()
@@ -360,11 +384,12 @@ trace = lab.mx.get_trace_data(1)
 
 lab.shutter.open()
 lab.results[-1].traces["squeezing"]   # last completed sweep, if any
-lab.connected                          # e.g. ("mx", "shutter")
+lab.psu.set_voltage(5.0, 1)            # the supply itself; the shutter is one channel of it
+lab.connected                          # e.g. ("mx", "psu", "shutter")
 lab.wavemeter.read_frequency(4)        # works before (or without) Connect: stateless HTTP
 ```
 
-The names are `mx`, `shutter`, `scope` and `wavemeter` (the proxy maps `mx` to the `mxa` handle); `results`, `last_run`, `handles` and `connected` complete the set. Device calls go through the same #code("LockedProxy") the pages use. Disconnect the MXA and the next `lab.mx` raises a clear `AttributeError`; nothing is cached to go stale. The console is a full-power Python session: it writes to real instruments, so treat it like direct hardware control.
+The names are `mx`, `psu`, `shutter`, `scope` and `wavemeter` (the proxy maps `mx` to the `mxa` handle); `results`, `last_run`, `handles` and `connected` complete the set. Device calls go through the same #code("LockedProxy") the pages use. Disconnect the MXA and the next `lab.mx` raises a clear `AttributeError`; nothing is cached to go stale. The console is a full-power Python session: it writes to real instruments, so treat it like direct hardware control.
 
 = Scope waveform recording <sec-scope-recording>
 

@@ -1,3 +1,4 @@
+# ruff: noqa: F401  (scratch notebook: an import cell kept for the cells to come)
 import marimo
 
 __generated_with = "0.25.1"
@@ -20,7 +21,6 @@ def _():
     from iyzee.config import data_root
     from iyzee.experiment import Recording, load_recording
     from iyzee.waveform_math import Trace, traces_from_scope_recording
-
 
     return
 

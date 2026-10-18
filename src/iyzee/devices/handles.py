@@ -104,7 +104,7 @@ class _LockedHandle:
         self._lock = threading.RLock()
 
     @property
-    def lock(self) -> threading.RLock:
+    def lock(self) -> threading.Lock | threading.RLock:
         return self._lock
 
     @property
@@ -139,30 +139,52 @@ class _VisaHandle(_LockedHandle):
 
 
 class ShutterHandle(_LockedHandle):
-    """Adapter for :class:`~iyzee.devices.power.ShutterControl`."""
+    """Adapter for :class:`~iyzee.devices.power.ShutterControl`, a channel of the PSU.
 
-    def __init__(self, chan: int = SHUTTER_CHANNEL_DEFAULT, ip: str | None = None) -> None:
+    The shutter is not an instrument of its own: it is derived from the PSU's handle
+    (``parent`` in :class:`~iyzee.lab.InstrumentSpec`) and shares its link, its lock and
+    its liveness. Sharing the lock is what keeps a sweep, which holds the shutter's lock
+    for its whole run, from being interleaved with anything else talking to the supply.
+    Connecting configures the channel; disconnecting only closes the shutter, and the PSU
+    stays connected.
+    """
+
+    def __init__(self, psu: InstrumentHandle, chan: int = SHUTTER_CHANNEL_DEFAULT) -> None:
         super().__init__()
+        self._psu = psu
         self._chan = chan
-        self._ip = ip or address(IP.POWER_SUPPLY)
         self._shutter: ShutterControl | None = None
 
+    @property
+    def lock(self) -> threading.Lock | threading.RLock:
+        return self._psu.lock
+
+    @property
+    def alive(self) -> bool:
+        return self._psu.alive
+
     def connect(self) -> None:
-        if self._shutter is None:
-            self._shutter = ShutterControl(chan=self._chan, ip=self._ip)
-            self._shutter.connect()
+        if self._shutter is not None:
+            return
+        psu = self._psu.device
+        if psu is None or getattr(psu, "instrument", None) is None:
+            raise ConnectionError("the shutter is a channel of the PSU, which is not connected")
+        shutter = ShutterControl(psu, self._chan)
+        shutter.configure()
+        self._shutter = shutter
 
     def disconnect(self) -> None:
-        if self._shutter is not None:
-            self._shutter.disconnect()
-            self._shutter = None
+        """Close the shutter (if the PSU can still be reached); never closes the PSU."""
+        shutter, self._shutter = self._shutter, None
+        if shutter is not None and shutter.psu.instrument is not None:
+            shutter.close()
 
     def probe(self) -> str:
         return f"shutter ready on CH{self._chan}"
 
     @property
     def device(self) -> ShutterControl | None:
-        """The underlying live shutter controller, once connected."""
+        """The live shutter controller, once connected."""
         return self._shutter
 
 

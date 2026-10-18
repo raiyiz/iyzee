@@ -18,7 +18,6 @@ from collections.abc import Iterator
 
 import pytest
 
-from iyzee.config import IP, address
 from iyzee.devices.base import SHUTTER_CHANNEL_DEFAULT
 from iyzee.devices.handles import InstrumentHandle
 from iyzee.devices.mxa import KeysightMXA
@@ -30,6 +29,9 @@ from iyzee.lab import Lab
 from .hw_state import psu_output_is_on
 
 _UNREACHABLE: dict[str, str] = {}
+
+#: The pytest marker that deselects an instrument's tests, where it differs from its key.
+_MARKER = {"psu": "shutter"}
 
 
 def _require(lab: Lab, key: str) -> InstrumentHandle:
@@ -48,7 +50,7 @@ def _require(lab: Lab, key: str) -> InstrumentHandle:
         _UNREACHABLE[key] = (
             f"cannot connect to {key}: {problem}\n"
             f"The address comes from IYZEE_*_IP / config.toml. "
-            f'If this instrument is not on the bench, run with -m "not {key}".'
+            f'If this instrument is not on the bench, run with -m "not {_MARKER.get(key, key)}".'
         )
         pytest.fail(_UNREACHABLE[key], pytrace=False)
     return lab[key]
@@ -58,7 +60,7 @@ def _require(lab: Lab, key: str) -> InstrumentHandle:
 def lab() -> Iterator[Lab]:
     session = Lab()
     yield session
-    # Disconnecting the shutter closes it first (ShutterControl.disconnect).
+    # The shutter is a part of the PSU: close_all closes it before it releases the supply.
     session.close_all()
 
 
@@ -106,27 +108,20 @@ def wavemeter(lab: Lab) -> Wavemeter:
 
 
 @pytest.fixture(scope="session")
-def psu() -> Iterator[PSU]:
-    """A raw, read-mostly connection to the PSU.
+def psu_handle(lab: Lab) -> InstrumentHandle:
+    return _require(lab, "psu")
 
-    Opening it writes nothing (``BaseDevice.connect`` only opens the socket), unlike the
-    shutter handle, whose ``connect`` configures the shutter channel's voltage and current.
-    Tests that only look use this; tests that drive the shutter use ``shutter``.
+
+@pytest.fixture(scope="session")
+def psu(psu_handle: InstrumentHandle) -> PSU:
+    """The lab's own connection to the supply (there is only ever one: the shutter shares it).
+
+    Connecting writes nothing; tests that only look use this. Connecting the *shutter*
+    configures its channel's voltage and current, so tests that drive it use ``shutter``.
     """
-    supply = PSU(ip=address(IP.POWER_SUPPLY))
-    problem = None
-    try:
-        supply.connect()
-    except Exception as exc:  # noqa: BLE001
-        problem = f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
-    if problem is not None:
-        pytest.fail(
-            f"cannot connect to the PSU at {address(IP.POWER_SUPPLY)}: {problem}\n"
-            'Run with -m "not shutter" if it is not on the bench.',
-            pytrace=False,
-        )
-    yield supply
-    supply.close()
+    device = psu_handle.device
+    assert isinstance(device, PSU)
+    return device
 
 
 @pytest.fixture
@@ -134,8 +129,8 @@ def shutter(lab: Lab, psu: PSU) -> Iterator[ShutterControl]:
     """The shutter controller, guaranteed closed before and after the test.
 
     A shutter that is already open belongs to somebody's running experiment: the test is
-    skipped, and nothing is connected or written. Whatever the test does, the shutter is
-    closed afterwards and the supply is asked whether it really is.
+    skipped, and the shutter is not connected or written. Whatever the test does, the
+    shutter is closed afterwards and the supply is asked whether it really is.
     """
     if psu_output_is_on(psu, SHUTTER_CHANNEL_DEFAULT):
         pytest.skip("shutter output is already ON (open); not touching it")

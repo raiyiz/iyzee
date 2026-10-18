@@ -21,41 +21,20 @@ def make_ctx():
     return ExperimentContext(mx=object(), run_id="test-run")
 
 
-def test_run_sequence_returns_results_in_order():
-    steps = [RecordingStep("a", 1), RecordingStep("b", 2)]
-
-    results = run_sequence(steps, make_ctx())
-
+def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog):
+    caplog.set_level(logging.INFO, logger="iyzee.experiment")
+    results = run_sequence([RecordingStep("a", 1), RecordingStep("b", 2)], make_ctx())
     assert [r.x_value for r in results] == [1, 2]
+    assert "starting a" in caplog.text and "finished a" in caplog.text  # the step lifecycle
 
-
-def test_run_sequence_raises_by_default_on_step_failure():
-    steps = [RecordingStep("a", 1), RecordingStep("b", 2, fail=True)]
-
-    with pytest.raises(RuntimeError, match="b failed"):
-        run_sequence(steps, make_ctx())
-
-
-def test_run_sequence_can_skip_failures():
-    steps = [RecordingStep("a", 1, fail=True), RecordingStep("b", 2)]
-
-    results = run_sequence(steps, make_ctx(), on_error="skip")
-
-    assert [r.x_value for r in results] == [2]
-
-
-def test_run_sequence_rejects_unknown_error_policy():
+    with pytest.raises(RuntimeError, match="b failed"):  # raising is the default
+        run_sequence([RecordingStep("a", 1), RecordingStep("b", 2, fail=True)], make_ctx())
+    skipped = run_sequence(
+        [RecordingStep("a", 1, fail=True), RecordingStep("b", 2)], make_ctx(), on_error="skip"
+    )
+    assert [r.x_value for r in skipped] == [2]
     with pytest.raises(ValueError):
         run_sequence([], make_ctx(), on_error="bogus")
-
-
-def test_run_sequence_logs_step_lifecycle(caplog):
-    caplog.set_level(logging.INFO, logger="iyzee.experiment")
-
-    run_sequence([RecordingStep("a", 1)], make_ctx())
-
-    assert "starting a" in caplog.text
-    assert "finished a" in caplog.text
 
 
 # -- RunRecord: how a run ended, saved beside its data -----------------------------------------
@@ -71,35 +50,26 @@ def _record_with(*outcomes: Exception | None):
     return record
 
 
-@pytest.mark.parametrize(
-    "outcomes,finish,status",
-    [
+def test_a_run_record_reports_how_the_run_ended_and_names_failed_steps_as_plain_json():
+    import json
+
+    for outcomes, finish, status in (
         ((None, None), {}, "completed"),
         ((None, RuntimeError("x")), {}, "completed_with_errors"),
         ((None,), {"aborted": True}, "aborted"),
         ((None,), {"failed": True}, "failed"),
         ((None,), {"aborted": True, "failed": True}, "aborted"),
-    ],
-)
-def test_run_record_status(outcomes, finish, status):
-    record = _record_with(*outcomes)
-    assert record.status == "running"  # what a run that never finished leaves behind
-    assert record.finished_at_utc is None
-
-    record.finish(**finish)
-
-    assert record.status == status
-    assert record.finished_at_utc is not None and record.finished_at_utc.endswith("Z")
-
-
-def test_run_record_names_each_failed_step_and_is_plain_json():
-    import json
+    ):
+        record = _record_with(*outcomes)
+        assert record.status == "running"  # what a run that never finished leaves behind
+        assert record.finished_at_utc is None
+        record.finish(**finish)
+        assert record.status == status
+        assert record.finished_at_utc is not None and record.finished_at_utc.endswith("Z")
 
     record = _record_with(None, ValueError("wavemeter said no"))
     record.finish()
-
     meta = json.loads(json.dumps(record.as_metadata()))
-
     assert meta["failed_steps"] == [
         {"index": 1, "label": "step[1]", "error_type": "ValueError", "error": "wavemeter said no"}
     ]
