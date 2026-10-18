@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from itertools import pairwise
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -242,7 +243,7 @@ def sweep_points(
                         "shot_noise_dbm": _trace_level(shot_noise, mean.index),
                     }
                 )
-        except Exception as exc:  # keep one damaged archive from hiding other selected runs
+        except Exception as exc:  # noqa: BLE001 - isolate a damaged archive from other selected runs
             if issues is not None:
                 issues.append({"run": row["label"], "problem": f"could not read sweep: {exc}"})
 
@@ -403,7 +404,7 @@ def decimate(time: np.ndarray, values: np.ndarray, budget: int = 1600) -> tuple[
         return time, values
     edges = np.linspace(0, len(values), budget // 2 + 1, dtype=int)
     keep = []
-    for lo, hi in zip(edges[:-1], edges[1:], strict=True):
+    for lo, hi in pairwise(edges):
         if hi <= lo:
             continue
         window = values[lo:hi]
@@ -429,7 +430,7 @@ def scope_traces(
     for row in rows.filter(pl.col("kind") == "scope").iter_rows(named=True):
         try:
             traces = traces_from_scope_recording(_load(row))
-        except Exception as exc:  # keep other scope runs usable
+        except Exception as exc:  # noqa: BLE001 - isolate a damaged archive from other selected runs
             if issues is not None:
                 issues.append({"run": row["label"], "problem": f"could not read scope: {exc}"})
             continue
