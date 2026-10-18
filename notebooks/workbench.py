@@ -91,7 +91,9 @@ def _(data_root, mo):
     )
     mo.vstack(
         [
-            mo.md("## 1 · Find your recordings\nChange the directory here, or set IYZEE_DATA_DIR before launching marimo."),
+            mo.md(
+                "## 1 · Find your recordings\nChange the directory here, or set IYZEE_DATA_DIR before launching marimo."
+            ),
             data_directory,
         ]
     )
@@ -160,8 +162,15 @@ def _(catalog, kind_filter, mo, pl, text_filter):
                 ),
                 mo.ui.table(
                     visible.select(
-                        "label", "kind", "started", "status", "items", "synthetic",
-                        "warnings", "size_kib", "digest",
+                        "label",
+                        "kind",
+                        "started",
+                        "status",
+                        "items",
+                        "synthetic",
+                        "warnings",
+                        "size_kib",
+                        "digest",
                     ),
                     selection=None,
                     page_size=12,
@@ -183,7 +192,9 @@ def _(catalog, mo):
     )
     mo.vstack(
         [
-            mo.md("## 2 · Mark and compare\nMark any mix of sweep and scope files. Selections are independent of the catalog filter."),
+            mo.md(
+                "## 2 · Mark and compare\nMark any mix of sweep and scope files. Selections are independent of the catalog filter."
+            ),
             marked_files,
         ]
     )
@@ -217,7 +228,9 @@ def _(
                 f"{summary['synthetic']} synthetic\n**Kinds:** {kinds}"
             ),
             mo.ui.table(
-                marked.select("label", "kind", "status", "started", "synthetic", "warnings", "path"),
+                marked.select(
+                    "label", "kind", "status", "started", "synthetic", "warnings", "path"
+                ),
                 selection=None,
                 page_size=10,
             ),
@@ -327,7 +340,9 @@ def _(frame_map, mo):
     )
     mo.vstack(
         [
-            mo.md("## 3 · Build a plot\nChoose the tidy table, then choose columns for the axes, colour, and line grouping."),
+            mo.md(
+                "## 3 · Build a plot\nChoose the tidy table, then choose columns for the axes, colour, and line grouping."
+            ),
             source,
         ]
     )
@@ -343,28 +358,51 @@ def _(frame_map, mo, pl, source):
         if dtype == pl.String and column not in {"run_id", "path"}
     ]
     numeric_types = {
-        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
-        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
-        pl.Float32, pl.Float64,
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
+        pl.Float32,
+        pl.Float64,
     }
     numeric = [column for column, dtype in plot_frame.schema.items() if dtype in numeric_types]
-    plot_columns = [column for column in plot_frame.columns if column not in {"run_id", "path", "kind"}]
+    plot_columns = [
+        column for column in plot_frame.columns if column not in {"run_id", "path", "kind"}
+    ]
 
     if plot_frame.is_empty() or not numeric or not plot_columns:
         x_field = y_field = color_field = detail_field = mark_type = None
         plot_controls = mo.md("Mark recordings of this type above to populate this plot.")
     else:
         x_default = next(
-            (column for column in ("offset_mhz", "rbw_khz", "channel", "time", "point") if column in plot_columns),
+            (
+                column
+                for column in ("offset_mhz", "rbw_khz", "channel", "time", "point")
+                if column in plot_columns
+            ),
             plot_columns[0],
         )
         y_default = next(
-            (column for column in ("rel_noise_mean_db", "rms", "value", "peak_to_peak") if column in numeric),
+            (
+                column
+                for column in ("rel_noise_mean_db", "rms", "value", "peak_to_peak")
+                if column in numeric
+            ),
             numeric[0],
         )
         color_options = ["(none)", *categorical]
-        color_default = "run" if "run" in categorical else "channel" if "channel" in categorical else "(none)"
-        detail_default = "channel" if source.value == "Scope waveform samples" and "channel" in categorical else "(none)"
+        color_default = (
+            "run" if "run" in categorical else "channel" if "channel" in categorical else "(none)"
+        )
+        detail_default = (
+            "channel"
+            if source.value == "Scope waveform samples" and "channel" in categorical
+            else "(none)"
+        )
         x_field = mo.ui.dropdown(options=plot_columns, value=x_default, label="X axis")
         y_field = mo.ui.dropdown(options=numeric, value=y_default, label="Y axis")
         color_field = mo.ui.dropdown(options=color_options, value=color_default, label="Color by")
@@ -417,7 +455,9 @@ def _(mo):
     verify_button = mo.ui.run_button(label="Verify SHA-256 checksums of marked files")
     mo.vstack(
         [
-            mo.md("## 4 · Check and export\nChecksum verification reads each selected NPZ from disk; it does not alter recordings."),
+            mo.md(
+                "## 4 · Check and export\nChecksum verification reads each selected NPZ from disk; it does not alter recordings."
+            ),
             verify_button,
         ]
     )
@@ -429,7 +469,9 @@ def _(marked, mo, verify, verify_button):
     if verify_button.value:
         verification = verify(marked)
     else:
-        verification = mo.md("Run checksum verification to check whether the saved arrays match their manifests.")
+        verification = mo.md(
+            "Run checksum verification to check whether the saved arrays match their manifests."
+        )
     verification
     return
 
@@ -441,10 +483,24 @@ def _(channel_stats, csv_bytes, marked, mo, points, traces):
             mo.md("### Download tables"),
             mo.hstack(
                 [
-                    mo.download(data=csv_bytes(marked), filename="iyzee-catalog.csv", label="Catalog CSV"),
-                    mo.download(data=csv_bytes(points), filename="iyzee-sweep-points.csv", label="Sweep points CSV"),
-                    mo.download(data=csv_bytes(channel_stats), filename="iyzee-scope-channels.csv", label="Scope statistics CSV"),
-                    mo.download(data=csv_bytes(traces), filename="iyzee-scope-traces.csv", label="Scope waveforms CSV"),
+                    mo.download(
+                        data=csv_bytes(marked), filename="iyzee-catalog.csv", label="Catalog CSV"
+                    ),
+                    mo.download(
+                        data=csv_bytes(points),
+                        filename="iyzee-sweep-points.csv",
+                        label="Sweep points CSV",
+                    ),
+                    mo.download(
+                        data=csv_bytes(channel_stats),
+                        filename="iyzee-scope-channels.csv",
+                        label="Scope statistics CSV",
+                    ),
+                    mo.download(
+                        data=csv_bytes(traces),
+                        filename="iyzee-scope-traces.csv",
+                        label="Scope waveforms CSV",
+                    ),
                 ],
                 align="start",
             ),
