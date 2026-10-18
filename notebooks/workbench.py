@@ -391,12 +391,14 @@ def _(frame_map, mo, pl, source):
 @app.cell
 def _(color_field, detail_field, field_chart, mo, mark_type, plot_frame, source, x_field, y_field):
     if x_field is None or y_field is None or plot_frame.is_empty():
-        mo.md("No plottable rows yet. Mark some recordings and choose a populated data table.")
+        plot_view = mo.md(
+            "No plottable rows yet. Mark some recordings and choose a populated data table."
+        )
     else:
         color = None if color_field.value == "(none)" else color_field.value
         detail = None if detail_field.value == "(none)" else detail_field.value
         try:
-            field_chart(
+            plot_view = field_chart(
                 plot_frame,
                 x=x_field.value,
                 y=y_field.value,
@@ -406,9 +408,9 @@ def _(color_field, detail_field, field_chart, mo, mark_type, plot_frame, source,
                 title=f"{source.value} · {y_field.value} vs {x_field.value}",
             )
         except ValueError as exc:
-            mo.md(f"**Cannot draw this combination:** {exc}")
+            plot_view = mo.md(f"**Cannot draw this combination:** {exc}")
+    plot_view
     return
-
 
 @app.cell
 def _(mo):
