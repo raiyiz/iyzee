@@ -450,6 +450,7 @@ def _(color_field, detail_field, field_chart, mo, mark_type, plot_frame, source,
     plot_view
     return
 
+
 @app.cell
 def _(mo):
     verify_button = mo.ui.run_button(label="Verify SHA-256 checksums of marked files")
@@ -591,6 +592,7 @@ def _(comparison_points, delta_to_reference, mo, pl, reference_run):
         )
     delta_table
     return
+
 
 if __name__ == "__main__":
     app.run()
