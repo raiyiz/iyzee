@@ -31,7 +31,6 @@ def _():
 
     from toolbox import (
         KINDS,
-        SWEEP_METRICS,
         best_points,
         channels_in,
         csv_bytes,
@@ -48,7 +47,6 @@ def _():
     return (
         KINDS,
         Path,
-        SWEEP_METRICS,
         best_points,
         channels_in,
         csv_bytes,
@@ -329,7 +327,7 @@ def _(frame_map, mo):
     )
     mo.vstack(
         [
-            mo.md("## 3 · Build a plot\nChoose the tidy table, then choose columns for the axes and grouping. Drag across the x-axis to brush a region of interest."),
+            mo.md("## 3 · Build a plot\nChoose the tidy table, then choose columns for the axes, colour, and line grouping."),
             source,
         ]
     )
@@ -482,12 +480,23 @@ def _(channel_stats, csv_bytes, marked, mo, points, traces):
 
 
 @app.cell
-def _(KINDS, SWEEP_METRICS, delta_to_reference, mo, points, pl):
+def _(mo):
     comparison_kind = mo.ui.dropdown(
         options=["frequency", "bandwidth"],
         value="frequency",
-        label="Sweep kind",
+        label="Sweep kind for point-by-point comparison",
     )
+    mo.vstack(
+        [
+            mo.md("## Compare runs on a shared x-grid"),
+            comparison_kind,
+        ]
+    )
+    return (comparison_kind,)
+
+
+@app.cell
+def _(comparison_kind, mo, pl, points):
     comparison_points = points.filter(pl.col("kind") == comparison_kind.value)
     run_labels = comparison_points.select("run").unique(maintain_order=True)["run"].to_list()
     if run_labels:
@@ -496,32 +505,34 @@ def _(KINDS, SWEEP_METRICS, delta_to_reference, mo, points, pl):
             value=run_labels[0],
             label="Reference run",
         )
-        comparison_controls = mo.hstack([comparison_kind, reference_run], align="start")
+        reference_view = reference_run
     else:
         reference_run = None
-        comparison_controls = mo.vstack(
-            [comparison_kind, mo.md("Mark at least two runs of the same sweep type for a point-by-point comparison.")]
-        )
-    comparison_controls
-    return comparison_kind, comparison_points, reference_run
+        reference_view = mo.md("Mark at least one run of the selected sweep kind above.")
+    reference_view
+    return comparison_points, reference_run
 
 
 @app.cell
 def _(comparison_points, delta_to_reference, mo, pl, reference_run):
     if reference_run is None or comparison_points["run_id"].n_unique() < 2:
-        delta_table = mo.md("Select multiple frequency or multiple bandwidth sweeps to compare against a reference.")
+        delta_table = mo.md(
+            "Select multiple runs of the same sweep type to compare them against a reference."
+        )
     else:
         reference_id = comparison_points.filter(pl.col("run") == reference_run.value)["run_id"][0]
         differences = delta_to_reference(comparison_points, reference_id)
         delta_table = mo.vstack(
             [
-                mo.md("### Difference from reference\nPositive means more relative noise than the reference. Other runs are interpolated only over the shared x-range."),
+                mo.md(
+                    "Positive values mean more relative noise than the reference. "
+                    "Other runs are interpolated only over the shared x-range."
+                ),
                 mo.ui.table(differences, selection=None, page_size=12),
             ]
         )
     delta_table
     return
-
 
 if __name__ == "__main__":
     app.run()
