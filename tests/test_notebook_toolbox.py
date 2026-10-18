@@ -17,6 +17,7 @@ pl = pytest.importorskip("polars")
 NOTEBOOKS = Path(__file__).parents[1] / "notebooks"
 sys.path.insert(0, str(NOTEBOOKS))
 
+from iyzee.experiment import StepResult, save_step_results  # noqa: E402
 from toolbox import (  # noqa: E402
     best_points,
     csv_bytes,
@@ -26,7 +27,6 @@ from toolbox import (  # noqa: E402
     sweep_points,
     verify,
 )
-from iyzee.experiment import StepResult, save_step_results  # noqa: E402
 
 
 def _save_sweep(
