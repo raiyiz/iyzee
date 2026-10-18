@@ -411,7 +411,7 @@ def _(color_field, detail_field, field_chart, mo, mark_type, plot_frame, source,
 
 
 @app.cell
-def _(marked, mo):
+def _(mo):
     verify_button = mo.ui.run_button(label="Verify SHA-256 checksums of marked files")
     mo.vstack(
         [
