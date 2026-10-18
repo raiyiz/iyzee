@@ -10,9 +10,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from itertools import pairwise
 from collections.abc import Sequence
 from datetime import datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
