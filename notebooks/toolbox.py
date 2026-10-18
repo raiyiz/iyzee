@@ -15,7 +15,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import altair as alt
 import numpy as np
 import polars as pl
 
@@ -34,9 +33,6 @@ SWEEP_METRICS = {
     "shot_noise_dbm": "Shot-noise level · mean (dBm)",
 }
 SCOPE_METRICS = ("rms", "peak_to_peak", "mean", "minimum", "maximum", "stddev")
-
-# Okabe–Ito: separated hues and useful contrast for most colour-vision deficiencies.
-PALETTE = ["#0072B2", "#E69F00", "#009E73", "#D55E00", "#CC79A7", "#56B4E9", "#F0E442", "#444444"]
 
 CATALOG_SCHEMA = {
     "run_id": pl.String,
@@ -525,54 +521,53 @@ def field_chart(
     detail: str | None = None,
     mark: str = "line",
     title: str = "",
-) -> alt.Chart:
-    """Build an interactive chart from any tidy Polars table.
+) -> Any:
+    """Build a reusable Matplotlib plot from any tidy Polars table.
 
-    Choose columns rather than writing a one-off plot. The x-axis brush can isolate a
-    region; mark can be line, points, or bars. For lines, detail splits multiple series
-    that share the same colour (for example, scope channels in the same recording).
+    Choose columns instead of maintaining a one-off plot per experiment. Colour and detail
+    split the selected rows into separate series; the returned figure can be saved or composed.
     """
+    import matplotlib.pyplot as plt
+
     for column in (x, y, color, detail):
         if column is not None and column not in frame.columns:
             raise ValueError(f"column {column!r} is not in the selected table")
-    columns = list(dict.fromkeys(c for c in (x, y, color, detail) if c is not None))
-    data = frame.select(columns).drop_nulls([x, y])
+    columns = list(dict.fromkeys(column for column in (x, y, color, detail) if column is not None))
+    data = frame.select(columns).drop_nulls([x, y]).sort(x)
     if data.is_empty():
         raise ValueError("no usable rows for these plot fields")
-    encoded = alt.Chart(alt.Data(values=data.to_dicts()))
-    x_type, y_type = _encoding_type(frame, x), _encoding_type(frame, y)
-    encodings = {
-        "x": alt.X(f"{x}:{x_type}", title=_title(x)),
-        "y": alt.Y(f"{y}:{y_type}", title=_title(y), scale=alt.Scale(zero=False)),
-        "tooltip": [
-            alt.Tooltip(f"{column}:{_encoding_type(frame, column)}", title=_title(column))
-            for column in columns
-        ],
-    }
-    if color is not None:
-        encodings["color"] = alt.Color(
-            f"{color}:{_encoding_type(frame, color)}",
-            scale=alt.Scale(range=PALETTE),
-            legend=alt.Legend(title=_title(color)),
-        )
-    if detail is not None and detail != color:
-        encodings["detail"] = alt.Detail(f"{detail}:N")
-    if mark == "points":
-        chart = encoded.mark_circle(size=65, opacity=0.85).encode(**encodings)
-    elif mark == "bars":
-        chart = encoded.mark_bar().encode(**encodings)
-    else:
-        chart = encoded.mark_line(point=True, strokeWidth=1.8).encode(**encodings)
-    brush = alt.selection_interval(encodings=["x"], name="brush")
-    return (
-        chart.add_params(brush)
-        .properties(width="container", height=350, title=title or f"{_title(y)} by {_title(x)}")
-        .configure_view(stroke=None)
-        .configure_axis(grid=True, labelFontSize=11, titleFontSize=12)
-        .configure_legend(orient="bottom", title=None)
-        .configure_title(anchor="start", fontSize=14)
-    )
 
+    groups = [column for column in (color, detail) if column is not None and column not in {x, y}]
+    groups = list(dict.fromkeys(groups))
+    buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for row in data.to_dicts():
+        key = tuple(row[column] for column in groups)
+        buckets.setdefault(key, []).append(row)
+
+    figure, axis = plt.subplots(figsize=(9, 4.8), layout="constrained")
+    for key, records in buckets.items():
+        label = " · ".join(
+            f"{column}: {value}" for column, value in zip(groups, key, strict=True)
+        ) or None
+        xs = [row[x] for row in records]
+        ys = [row[y] for row in records]
+        if mark == "points":
+            axis.scatter(xs, ys, label=label, s=26, alpha=0.85)
+        elif mark == "bars":
+            axis.bar(xs, ys, label=label, alpha=0.8)
+        else:
+            axis.plot(xs, ys, marker="o", markersize=3.5, linewidth=1.5, label=label)
+
+    if y.startswith("rel_noise"):
+        axis.axhline(0, linestyle="--", linewidth=1, alpha=0.7)
+    axis.set_title(title or f"{_title(y)} by {_title(x)}", loc="left", pad=10)
+    axis.set_xlabel(_title(x))
+    axis.set_ylabel(_title(y))
+    axis.grid(True, which="major", alpha=0.25)
+    axis.spines[["top", "right"]].set_visible(False)
+    if groups:
+        axis.legend(frameon=False, fontsize="small")
+    return figure
 
 def csv_bytes(frame: pl.DataFrame) -> bytes:
     """CSV bytes suitable for a marimo download control."""
