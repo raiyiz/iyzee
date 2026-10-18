@@ -539,7 +539,7 @@ def field_chart(
     data = frame.select(columns).drop_nulls([x, y])
     if data.is_empty():
         raise ValueError("no usable rows for these plot fields")
-    encoded = alt.Chart(data.to_dicts())
+    encoded = alt.Chart(alt.Data(values=data.to_dicts()))
     x_type, y_type = _encoding_type(frame, x), _encoding_type(frame, y)
     encodings = {
         "x": alt.X(f"{x}:{x_type}", title=_title(x)),
