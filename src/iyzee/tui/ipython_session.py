@@ -288,19 +288,25 @@ class IPythonSession:
 
     def _run(self) -> None:
         self._thread_id = threading.get_ident()
-        with create_app_session(input=self._pipe, output=self._output):
-            try:
-                self._welcome()
-                self.shell.mainloop()
-            except BaseException:  # noqa: BLE001 - the thread must never die silently
-                log.exception("IPython session ended unexpectedly")
+        try:
+            with create_app_session(input=self._pipe, output=self._output):
+                try:
+                    self._welcome()
+                    self.shell.mainloop()
+                except BaseException:
+                    log.exception("IPython session ended unexpectedly")
+        finally:
+            # The OS hands a finished thread's id to the next thread that starts (a sweep's
+            # worker, say). A stale id here would aim ``interrupt()``'s KeyboardInterrupt at
+            # whichever stranger now owns it.
+            self._thread_id = None
 
     def _welcome(self) -> None:
         mode = self.shell.editing_mode
         self._sink.write(
             f"{_BOLD}iyzee console{_RESET}{_DIM} · IPython {IPython.__version__} · "
             f"{mode} mode{_RESET}\n"
-            f"{_DIM}lab.mx / lab.shutter / lab.scope · F1-F4 switch pages · "
+            f"{_DIM}lab.mx / lab.psu / lab.shutter / lab.scope · F1-F4 switch pages · "
             f"Ctrl+Q quits iyzee{_RESET}\n\n"
         )
 
@@ -312,10 +318,9 @@ class IPythonSession:
         self._closing = True
         thread = self._thread
         if thread is not None and thread.is_alive():
-            if self._prompt_depth == 0 and self._started_prompting:
+            if self._prompt_depth == 0 and self._started_prompting and self._thread_id is not None:
                 # Mid-cell: interrupt it so the shell can reach its next prompt.
-                if self._thread_id is not None:
-                    _raise_in_thread(self._thread_id, KeyboardInterrupt)
+                _raise_in_thread(self._thread_id, KeyboardInterrupt)
             self._exit_prompt()
             thread.join(timeout)
         self._restore_streams()
@@ -382,7 +387,8 @@ class IPythonSession:
             if self._prompt_depth > 0:
                 self.send(b"\x03")
             return
-        if self._thread_id is not None:
+        thread = self._thread
+        if self._thread_id is not None and thread is not None and thread.is_alive():
             _raise_in_thread(self._thread_id, KeyboardInterrupt)
 
     def _set_busy(self, busy: bool) -> None:

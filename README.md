@@ -29,6 +29,7 @@ The TUI is the way to run interactive measurements:
 │ Connect │  connect / disconnect instruments            │
 │ Sweep   │  configure and run MXA measurements          │
 │ Scope   │  configure and acquire oscilloscope traces   │
+│ Power   │  supply channels, global output and shutter  │
 │ Rb      │  browse rubidium D1/D2 transitions           │
 │ Results │  inspect and export saved measurements       │
 │ Console │  work directly with the live Python objects  │
@@ -36,7 +37,7 @@ The TUI is the way to run interactive measurements:
 └─────────┴──────────────────────────────────────────────┘
 ~~~
 
-Navigate with the letter keys (<code>c s o r t i l</code>) or the navigation rail. <code>F1</code>–<code>F4</code> provide quick access to Connect, Sweep, Results, and Console.
+Navigate with the letter keys (<code>c s o p r t i l</code>) or the navigation rail. <code>F1</code>–<code>F4</code> provide quick access to Connect, Sweep, Results, and Console.
 
 ### Use it as a library
 
@@ -80,7 +81,8 @@ For the architecture and the reasoning behind this split, see the [architecture 
 | --- | --- | --- |
 | **Keysight MXA** | VISA / SCPI | noise spectra and automated sweeps |
 | **LeCroy scope** | VISA / VXI-11 | waveform acquisition and channel/trigger control |
-| **Power supply / shutter** | VISA | supply control and optical shutter |
+| **Power supply (HMP4040)** | VISA (raw socket) | channel setpoints and outputs |
+| **Shutter** | a channel of the supply | the optical shutter, opened around squeezing acquisitions |
 | **Wavemeter** | HTTP | frequency readout and PID setpoints |
 
 Hardware is **not** connected merely by constructing a driver. Connections are explicit and owned by the application/session, which keeps experiment code testable and makes failure handling visible.
@@ -92,6 +94,7 @@ Hardware is **not** connected merely by constructing a driver. Connections are e
 | <code>c</code> **Connect** | Connect and disconnect individual instruments |
 | <code>s</code> **Sweep** | Run bandwidth or frequency sweeps with live progress and traces |
 | <code>o</code> **Scope** | Synchronize scope settings, apply changes, acquire and save waveforms |
+| <code>p</code> **Power** | Read the power supply and shutter; switch global output and channels, set voltage and current limit |
 | <code>r</code> **Rb** | Inspect the rubidium D1/D2 hyperfine transition tables |
 | <code>t</code> **Results** | Browse saved sweep/scope recordings and export scope plots |
 | <code>i</code> **Console** | Use the live IPython session |
@@ -214,7 +217,8 @@ The compiled guide is published by CI as the <code>iyzee-documentation</code> ar
 ~~~sh
 uv sync
 
-scripts/ci.sh test        # pytest
+scripts/ci.sh test        # pytest (no instruments are touched)
+scripts/ci.sh hardware    # tests/hardware against the real instruments, read-only
 scripts/ci.sh lint        # ruff
 scripts/ci.sh typecheck   # mypy
 scripts/ci.sh doc-links   # guide <-> code references still resolve
@@ -222,7 +226,28 @@ scripts/ci.sh docs        # build the code index and compile the Typst guide
 scripts/ci.sh all         # run everything
 ~~~
 
-GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets.
+GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. <code>hardware</code> is deliberately not part of <code>all</code> or CI.
+
+The marimo notebooks in <code>notebooks/</code> need packages the application itself does not, kept in their own dependency group and left out of CI:
+
+~~~sh
+uv run --group notebooks marimo edit notebooks/sweep_scope_analysis.py
+~~~
+
+### Hardware tests
+
+<code>tests/hardware/</code> checks the drivers and procedures against the real instruments. A plain <code>pytest</code> never runs them: they are skipped unless you pass <code>--hardware</code>, and everything in that directory is marked <code>hardware</code> automatically. Addresses come from the same <code>IYZEE_*_IP</code> / <code>config.toml</code> the app uses, and the first line of a run lists them.
+
+~~~sh
+pytest --hardware                          # read-only: identity, error queues, settings, readings
+pytest --hardware --hardware-actuate       # also: configure and sweep the MXA, open the shutter, acquire on the scope
+pytest --hardware -m "not scope"           # leave out an instrument that is not on the bench
+pytest --hardware -m "mxa and not actuates"
+~~~
+
+- Tests that change instrument state are marked <code>actuates</code> and need <code>--hardware-actuate</code> as well. Each one restores what it changed (MXA settings, scope trigger mode) and the shutter is closed afterwards and confirmed closed by the supply. A shutter that is already open is left alone and its tests are skipped.
+- An instrument that cannot be reached fails its tests; it is not skipped. Use <code>-m "not mxa"</code> (or <code>scope</code>, <code>shutter</code>, <code>wavemeter</code>) to leave one out.
+- Opening the shutter lets light through. The wavemeter setpoint test also needs <code>IYZEE_TEST_LASER_SETPOINT_THZ</code> (a frequency that is safe to lock to, ideally where the laser already is); see <code>tests/hardware/test_hw_wavemeter.py</code> for the other knobs.
 
 The codebase is intentionally layered:
 
@@ -230,6 +255,7 @@ The codebase is intentionally layered:
 src/iyzee/
 ├── devices/             hardware drivers
 ├── experiment/          measurement procedures + result handling
+├── analysis.py          what a saved sweep or scope recording means
 ├── lab.py               connected-instrument session
 ├── scope_workflows.py   reusable scope operations
 └── tui/                 interactive presentation/control

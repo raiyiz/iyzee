@@ -39,8 +39,8 @@ def test_read_frequency_uses_the_requested_and_default_channel(
     assert client.read_frequency() == pytest.approx(377.123456)
     timeout = {"timeout": wavemeter.READ_TIMEOUT_S}
     assert seen == [
-        (f"{client.base_url}7/", timeout),
-        (f"{client.base_url}{wavemeter.DEFAULT_CHANNEL}/", timeout),
+        (f"{client.base_url}frequency/7/", timeout),
+        (f"{client.base_url}frequency/{wavemeter.DEFAULT_CHANNEL}/", timeout),
     ]
 
 
@@ -53,45 +53,32 @@ def test_host_uses_the_configured_address(monkeypatch: pytest.MonkeyPatch) -> No
     assert explicit.base_url == f"http://198.51.100.1:{wavemeter.WAVEMETER_PORT}/api/"
 
 
-@pytest.mark.parametrize(
-    "failure",
-    [requests.Timeout("timed out"), requests.ConnectionError("reset"), OSError("refused")],
-)
-@pytest.mark.parametrize("call", ["read", "set"])
-def test_request_failures_are_raised_unwrapped(
-    monkeypatch: pytest.MonkeyPatch, failure: BaseException, call: str
+def test_failures_are_raised_as_they_are_never_wrapped_or_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    verb = "get" if call == "read" else "post"
-    monkeypatch.setattr(wavemeter.requests, verb, raising(failure))
-    client = Wavemeter()
+    calls = {
+        "get": lambda client: client.read_frequency(1),
+        "post": lambda client: client.set_pid_setpoint(377.1, 4),
+    }
+    for verb, call in calls.items():
+        for failure in (
+            requests.Timeout("timed out"),
+            requests.ConnectionError("reset"),
+            OSError("refused"),
+        ):
+            monkeypatch.setattr(wavemeter.requests, verb, raising(failure))
+            with pytest.raises(type(failure)) as caught:
+                call(Wavemeter())
+            assert caught.value is failure
 
-    with pytest.raises(type(failure)) as caught:
-        client.read_frequency(1) if call == "read" else client.set_pid_setpoint(377.1, 4)
-    assert caught.value is failure
+        monkeypatch.setattr(  # an HTTP error status is raised by requests
+            wavemeter.requests, verb, lambda *a, **k: response("lock unit offline", status=500)
+        )
+        with pytest.raises(requests.HTTPError, match="500"):
+            call(Wavemeter())
 
-
-@pytest.mark.parametrize("call", ["read", "set"])
-def test_http_errors_are_raised_by_requests(monkeypatch: pytest.MonkeyPatch, call: str) -> None:
-    verb = "get" if call == "read" else "post"
-    monkeypatch.setattr(
-        wavemeter.requests,
-        verb,
-        lambda *args, **kwargs: response("lock unit offline", status=500),
-    )
-    client = Wavemeter()
-
-    with pytest.raises(requests.HTTPError, match="500"):
-        client.read_frequency(1) if call == "read" else client.set_pid_setpoint(377.1, 4)
-
-
-def test_unparseable_reading_raises_value_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        wavemeter.requests,
-        "get",
-        lambda *args, **kwargs: response("not-a-frequency"),
-    )
-
-    with pytest.raises(ValueError, match="not-a-frequency"):
+    monkeypatch.setattr(wavemeter.requests, "get", lambda *a, **k: response("not-a-frequency"))
+    with pytest.raises(ValueError, match="not-a-frequency"):  # an unparseable reading
         Wavemeter().read_frequency(1)
 
 

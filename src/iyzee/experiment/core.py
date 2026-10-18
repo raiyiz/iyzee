@@ -14,13 +14,13 @@ import logging
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 
 def utc_now() -> str:
     """The current UTC time as an ISO-8601 string with a ``Z`` suffix."""
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 @dataclass
@@ -57,6 +57,7 @@ class ExperimentContext:
     run_id: str
     shutter: Any | None = None
     config: dict[str, Any] = field(default_factory=dict)
+    wavemeter: Any = None
 
 
 class Step(Protocol):

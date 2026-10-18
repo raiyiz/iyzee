@@ -203,7 +203,7 @@ def monitoring_frequencies(channels):
     wavemeter = Wavemeter()
     freqs = [wavemeter.read_frequency(c) for c in channels]
 
-    rows.append(["absolute freq (THz)"] + [""] + list(freqs))
+    rows.append(["absolute freq (THz)", "", *freqs])
     for label, f in Rb_transitions:
         row = [label, f] + [(freq - f) * 1e3 for freq in freqs]
         rows.append(row)

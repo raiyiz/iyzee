@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
+import signal
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import ClassVar, cast
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -20,8 +22,11 @@ from textual.widgets import ContentSwitcher, Footer, Header, Static
 
 from ..devices.handles import InstrumentHandle
 from ..lab import INSTRUMENTS, Lab
+from . import logging_support
 from .command_bar import CommandBar
 from .commands import Command, CommandError, CommandRegistry
+from .diagnostics import SessionMarker, describe
+from .diagnostics import install as install_crash_diagnostics
 from .ipython import default_history_file
 from .ipython_session import IPythonSession
 from .logging_support import LogEntry
@@ -31,6 +36,7 @@ from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
 from .screens.log import LogScreen
 from .screens.page import Page
+from .screens.power import PowerScreen
 from .screens.rb import RbScreen
 from .screens.results import ResultsScreen
 from .screens.scope import ScopeScreen
@@ -44,6 +50,7 @@ PAGE_SPECS = (
     ("connect", "Connect", ConnectScreen),
     ("sweep", "Sweep", SweepScreen),
     ("scope", "Scope", ScopeScreen),
+    ("power", "Power", PowerScreen),
     ("rb", "Rb", RbScreen),
     ("results", "Results", ResultsScreen),
     ("console", "Console", ConsoleScreen),
@@ -127,7 +134,7 @@ class IyzeeApp(App):
     # by side from ``-medium`` up, four form fields per row at ``-wide``.
     # At ``-narrow`` everything stacks into a single column, and whatever
     # still doesn't fit is reached with the pages' scrollbars.
-    HORIZONTAL_BREAKPOINTS = [
+    HORIZONTAL_BREAKPOINTS: list[tuple[int, str]] = [  # noqa: RUF012 - Textual class configuration
         (0, "-narrow"),
         (76, "-medium"),
         (116, "-wide"),
@@ -172,10 +179,11 @@ class IyzeeApp(App):
     # reachable everywhere via "o", the nav rail, and the command palette,
     # just without a dedicated function key. "l" for the Log page (added
     # later) follows the same reasoning.
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("c", "show_page('connect')", "Connect"),
         Binding("s", "show_page('sweep')", "Sweep"),
         Binding("o", "show_page('scope')", "Scope"),
+        Binding("p", "show_page('power')", "Power"),
         Binding("r", "show_page('rb')", "Rb"),
         Binding("t", "show_page('results')", "Results"),
         Binding("i", "show_page('console')", "Console"),
@@ -206,7 +214,9 @@ class IyzeeApp(App):
     # Mount every page once; navigation labels come from the same registry
     # used by NavRail.PAGES above. Key bindings remain explicit because F1-F4
     # intentionally cover only four pages.
-    PAGES = {page_id: screen for page_id, _label, screen in PAGE_SPECS}
+    PAGES: ClassVar[dict[str, type[Page]]] = {
+        page_id: cast(type[Page], screen) for page_id, _label, screen in PAGE_SPECS
+    }
     DEFAULT_PAGE = "connect"
 
     def __init__(
@@ -215,8 +225,15 @@ class IyzeeApp(App):
         console_history_file: str | Path | None = None,
         console_editing_mode: str = "vi",
         prefs_file: str | Path | None = None,
+        session_dir: str | Path | None = None,
+        handle_signals: bool = False,
     ) -> None:
         super().__init__()
+        # Like the history and prefs files, only real runs opt in (see ``run()``): a marker per
+        # running session so the next start can say the last one did not end cleanly, and
+        # handlers that turn SIGTERM/SIGHUP into a logged, clean shutdown.
+        self.session_marker = SessionMarker(Path(session_dir)) if session_dir else None
+        self._handle_signals = handle_signals
         # Like the console history, persistent only for real runs (see ``run()``).
         self.prefs = Prefs(Path(prefs_file) if prefs_file else None)
         self._quit_armed_until = 0.0  # monotonic deadline for the second "q"
@@ -252,7 +269,7 @@ class IyzeeApp(App):
         # True while a sweep or a trace capture is running. ConnectScreen
         # refuses to disconnect instruments meanwhile (the run holds the
         # instrument locks, so a disconnect could only stall behind it).
-        self.sweep_running = False
+        self._sweep_running = False
         # Passed straight through to IPythonSession (see ConsoleScreen.compose)
         # as its `history_file`. Defaults to `None` — `:memory:`, private,
         # nothing persisted — quite deliberately: every test in this
@@ -274,6 +291,39 @@ class IyzeeApp(App):
 
     def on_mount(self) -> None:
         self.set_interval(self.LINK_CHECK_INTERVAL, self._check_links)
+        if self.session_marker is not None:
+            for info in self.session_marker.start():
+                what = describe(info)
+                log.warning("the previous session did not end cleanly: %s", what)
+                self.notify(
+                    f"The previous iyzee session did not end cleanly ({what}). "
+                    "See the Log page, and faulthandler.log in the logs folder.",
+                    severity="warning",
+                    timeout=30,
+                    markup=False,
+                )
+        if self._handle_signals:
+            loop = asyncio.get_running_loop()
+            for name in ("SIGTERM", "SIGHUP"):
+                number = getattr(signal, name, None)
+                if number is not None:
+                    # Not the main thread, or not a platform that supports it: just skip it.
+                    with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+                        loop.add_signal_handler(number, self._on_signal, name)
+
+    def _on_signal(self, name: str) -> None:
+        """SIGTERM / SIGHUP (a closed terminal, ``kill``): say so, then shut down cleanly.
+
+        Without a handler the process just stops: no log line, and the shutter and the
+        instruments are left exactly as they were.
+        """
+        log.critical("received %s: shutting down cleanly", name)
+        self.exit()
+
+    def session_note(self, activity: str) -> None:
+        """Tell the session marker what is going on, for the report after a crash."""
+        if self.session_marker is not None:
+            self.session_marker.note(activity)
 
     def _check_links(self) -> None:
         """Notice links that died while nobody was talking to them (no instrument I/O)."""
@@ -329,6 +379,19 @@ class IyzeeApp(App):
                 return False
         return True
 
+    @property
+    def sweep_running(self) -> bool:
+        return self._sweep_running
+
+    @sweep_running.setter
+    def sweep_running(self, running: bool) -> None:
+        """Set by the Sweep page; the Power page follows it (a sweep moves the shutter)."""
+        changed = running != self._sweep_running
+        self._sweep_running = running
+        if changed and self.is_running:
+            for page in self.query(PowerScreen):
+                page.sweep_state_changed()
+
     def instruments_changed(self) -> None:
         """Refresh every mounted view whose state depends on connections."""
         for nav in self.query(NavRail):
@@ -367,7 +430,11 @@ class IyzeeApp(App):
         able to hang the quit.
         """
         self.shutdown_requested.set()
-        await asyncio.to_thread(self._close_console_and_instruments)
+        try:
+            await asyncio.to_thread(self._close_console_and_instruments)
+        finally:
+            if self.session_marker is not None:
+                self.session_marker.stop()  # reached: this session ended cleanly
 
     def _close_console_and_instruments(self) -> None:
         # The console first: a cell still running holds instrument locks, and
@@ -403,7 +470,7 @@ class IyzeeApp(App):
         except CommandError as exc:
             self.notify(str(exc), severity="error", timeout=5, markup=False)
             return
-        except Exception as exc:  # noqa: BLE001 - a bad command must never take the app down
+        except Exception as exc:  # a bad command must never take the app down
             log.exception("command failed: %s", line)
             self.notify(f"command failed: {exc}", severity="error", timeout=6, markup=False)
             return
@@ -495,6 +562,7 @@ class IyzeeApp(App):
         for page_id, label, key in (
             ("sweep", "Sweep", "s"),
             ("scope", "Scope", "o"),
+            ("power", "Power", "p"),
             ("rb", "Rb", "r"),
             ("results", "Results", "t"),
             ("console", "Console", "i"),
@@ -543,10 +611,13 @@ def run() -> None:
     `IyzeeApp.__init__` and `default_history_file`'s docstrings for why
     that's deliberately not the default.
     """
+    install_crash_diagnostics(logging_support.LOG_ROOT)
     IyzeeApp(
         console_history_file=default_history_file(),
         console_editing_mode=os.environ.get("IYZEE_EDITING_MODE", "vi"),
         prefs_file=default_prefs_file(),
+        session_dir=logging_support.LOG_ROOT,
+        handle_signals=True,
     ).run()
 
 

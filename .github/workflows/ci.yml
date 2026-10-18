@@ -17,13 +17,14 @@ jobs:
   checks:
     name: ${{ matrix.check }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         check: [test, lint, typecheck, doc-links]
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -36,9 +37,10 @@ jobs:
 
   docs:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -50,16 +52,18 @@ jobs:
         run: scripts/ci.sh docs-index
 
       - name: Set up Typst
-        uses: typst-community/setup-typst@v5
+        uses: typst-community/setup-typst@fee4b65b091cc546f02ce3be15fad8760f38a108 # v5
         with:
           typst-version: "0.15.1"
           cache-dependency-path: docs/main.typ
 
       - name: Compile documentation
+        env:
+          DOCS_INDEX_PREBUILT: "1"  # built in the step above; don't sync and index twice
         run: scripts/ci.sh docs
 
       - name: Upload compiled documentation
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: iyzee-documentation
           path: build/docs/*.pdf

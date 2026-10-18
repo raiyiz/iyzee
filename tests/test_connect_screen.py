@@ -25,7 +25,10 @@ from rich.text import Text
 from textual.pilot import Pilot
 from textual.widgets import DataTable, Static
 
-from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL
+from iyzee.lab import InstrumentSpec
+from iyzee.tui import app as app_mod
+from iyzee.tui.screens import connect as connect_mod
+from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL, ConnectScreen
 
 
 async def _row_is(pilot: Pilot, table: DataTable, status: str) -> None:
@@ -45,7 +48,7 @@ async def test_connecting_a_row_updates_table_handles_hint_and_detail(
         hint = app.query_one("#connect-hint", Static)
         assert "connect Fake" in plain(hint) and "disconnect" not in plain(hint)
 
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "connected")
         await pilot.pause()
         assert app.handles["fake"] is handle and handle.connected
@@ -70,7 +73,7 @@ async def test_connect_error_is_shown_verbatim_and_leaves_no_handle(
 ) -> None:
     app = connect_app(monkeypatch, FakeHandle(connect_error=message))
     async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "error")
         app.export_screenshot()  # force a real render of the table
         # DataTable parses str cells as markup; what it would display is
@@ -90,7 +93,7 @@ async def test_a_failed_probe_closes_the_half_open_link(monkeypatch: pytest.Monk
     handle = FakeHandle(probe_error="no answer")
     app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "error")
         assert (handle.connect_calls, handle.disconnect_calls) == (1, 1)
         assert "fake" not in app.handles
@@ -104,7 +107,7 @@ async def test_enter_on_a_connecting_row_does_not_open_the_device_twice(
     first, second = FakeHandle(connect_delay=0.4), FakeHandle(connect_delay=0.4)
     app = connect_app(monkeypatch, first, second)
     async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "connecting...")
         await pilot.press("enter")  # impatient second press
         await _row_is(pilot, table, "connected")
@@ -149,10 +152,44 @@ async def test_disconnect_is_refused_while_a_sweep_is_running(
     handle = FakeHandle()
     app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
+        _, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "connected")
         app.sweep_running = True
 
         await pilot.press("enter", "enter")
         assert handle.disconnect_calls == 0 and "fake" in app.handles
         assert any("sweep is running" in m for m in notifications(app))
+
+
+@async_test
+async def test_a_part_and_its_parent_keep_each_others_rows_in_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Connecting the shutter connects the PSU it is a channel of; disconnecting the PSU
+    takes the shutter with it. The rows of both must say so, not just the one acted on."""
+    parent, part = FakeHandle(probe="supply ready"), FakeHandle(probe="shutter ready")
+    specs = [
+        InstrumentSpec("psu", "PSU", lambda: parent, short="PSU"),
+        InstrumentSpec("shutter", "Shutter", lambda _psu: part, short="Sh", parent="psu"),
+    ]
+    monkeypatch.setattr(connect_mod, "INSTRUMENTS", specs)
+    monkeypatch.setattr(app_mod, "INSTRUMENTS", specs)
+    app = app_mod.IyzeeApp()
+    app.lab.specs = specs
+    async with app.run_test() as pilot:
+        screen = app.query_one(ConnectScreen)
+        table = screen.query_one(DataTable)
+
+        def status(key: str) -> str:
+            return str(table.get_cell(key, "status"))
+
+        screen.request_connect("shutter")
+        await wait_until(pilot, lambda: status("shutter") == "connected")
+        await wait_until(pilot, lambda: status("psu") == "connected")
+        assert str(table.get_cell("psu", "detail")) == "supply ready"
+        assert set(app.handles) == {"psu", "shutter"} and parent.connect_calls == 1
+
+        screen.request_disconnect("psu")
+        await wait_until(pilot, lambda: status("psu") == "disconnected")
+        await wait_until(pilot, lambda: status("shutter") == "disconnected")
+        assert app.handles == {} and part.disconnected and parent.disconnected

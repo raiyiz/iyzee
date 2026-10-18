@@ -406,7 +406,8 @@ IyzeeApp
 ├── Lab
 │    ├── mx → InstrumentHandle
 │    ├── scope → InstrumentHandle
-│    ├── shutter → InstrumentHandle
+│    ├── psu → InstrumentHandle
+│    ├── shutter → InstrumentHandle   (a part of psu: shares its link and lock)
 │    └── wavemeter → InstrumentHandle
 │
 ├── last_run
@@ -445,7 +446,8 @@ forcing every device into one command model.
   align: (left, left, left),
   [*Instrument*], [*Client/driver*], [*Transport*],
   [Keysight MXA], [`KeysightMXA`], [VISA / SCPI],
-  [PSU / shutter], [`PSU` / `ShutterControl`], [VISA raw socket, port 5025],
+  [PSU], [`PSU`], [VISA raw socket, port 5025],
+  [Shutter], [`ShutterControl`], [a channel of the PSU (no link of its own)],
   [LeCroy scope], [`LeCroy`], [VISA / VXI-11 (`TCPIP0::<ip>::inst0::INSTR`)],
   [Wavemeter], [`Wavemeter`], [HTTP],
 )
@@ -538,8 +540,8 @@ coordinate in a frequency sweep.
 
 `ExperimentContext` carries the already-connected hardware and the metadata
 shared by all steps in one run. This is a deliberate boundary: a step may use
-the MXA, the shutter, and run metadata, but it does not decide who owns those
-resources.
+the MXA, the shutter, the wavemeter, and run metadata, but it does not decide who
+owns those resources.
 
 == `StepResult` is the measurement contract
 
@@ -677,7 +679,7 @@ would not freeze, the trigger mode could not be restored, `*IDN?` did not answer
 are collected in `ScopeAcquisition.warnings` and written to the manifest, so a
 recording says honestly how trustworthy it is.
 
-#tested-by("test_acquire_raises_on_the_first_failed_channel_and_restores_trigger_mode", "test_apply_channel_settings_raises_on_the_first_failure_and_skips_the_rest", "test_failure_to_restore_is_reported_as_a_warning")
+#tested-by("test_acquisition_failures_raise_and_restore_the_trigger_mode", "test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_first_failure", "test_freeze_restore_and_identity_failures_are_warnings_and_the_download_still_happens")
 
 = The scope transport: VISA over VXI-11 <arch-scope-transport>
 
@@ -741,7 +743,7 @@ order (`CFMT DEF9,WORD,BIN`, `CORD LO`) are written *before* each waveform reque
 because the scope encodes the reply when it executes `WF?`.
 
 #anchors("LeCroy", "LeCroy._io", "LeCroy._read_words", "devices.scope._definite_block", "LeCroy.getDataFloatsDetailed")
-#tested-by("test_a_silent_scope_raises_lecroy_timeout_and_drops_the_connection", "test_malformed_waveform_blocks_are_rejected_but_keep_the_link", "test_a_waveform_read_timeout_drops_the_connection", "test_free_form_channel_names_must_be_plain_identifiers", "test_numeric_setters_reject_non_finite_values")
+#tested-by("test_a_silent_scope_raises_lecroy_timeout_and_drops_the_connection", "test_waveform_download_decodes_calibrates_and_rejects_malformed_blocks", "test_bad_names_and_numbers_are_refused_before_anything_is_written")
 
 = Transport state and link monitoring <arch-link-monitoring>
 
@@ -1151,6 +1153,27 @@ The same principle appears in dead-link cleanup: remove a dead handle from the
 authoritative session inventory so the application can offer a clean reconnect,
 then release the underlying object without blocking the main UI path.
 
+== Nothing leaves a worker thread, and a vanished process leaves evidence
+
+Textual handles an `Exception` (or a cancellation) from a worker thread and nothing else. A
+`KeyboardInterrupt` or `SystemExit` escaping one unwinds the event loop and ends the whole app
+with no message, and a swallowed cancellation leaves the page stuck in "running". So the sweep
+and capture workers catch `BaseException` at their outer edge, log it, and report it as a failed
+run: the page is usable again, the points already measured are saved, and the run file says
+`failed` rather than `running`.
+
+For the deaths no code can catch, the real entry point (not the constructor, so tests are
+unaffected) arranges for something to read afterwards:
+
+- #code("iyzee.tui.diagnostics.install") logs uncaught exceptions from any thread and turns on `faulthandler`, so a hard crash
+  writes every thread's stack to `faulthandler.log` next to the application log.
+- SIGTERM and SIGHUP (a closed terminal, `kill`) are logged and become a normal shutdown, which
+  also closes the shutter and the instruments; without a handler the process simply stops.
+- #code("SessionMarker") keeps one small file per running session and removes it on a clean exit. A
+  marker whose process is gone means that session was killed (out of memory, `kill -9`), crashed
+  hard, or lost its terminal. The next start says so, and says what it was doing (for example
+  "frequency sweep running (200 points)").
+
 = Error philosophy
 
 The architecture has a few rules that are more important in laboratory
@@ -1344,6 +1367,7 @@ question it answers.
   [#source("src/iyzee/tui/vterm.py", [tui/vterm.py])], [Terminal-emulator state and scrollback via `pyte`],
   [#source("src/iyzee/tui/terminal_view.py", [tui/terminal_view.py])], [Rendering of the virtual terminal inside Textual],
   [#source("src/iyzee/tui/workers.py", [tui/workers.py])], [Small worker-facing result objects such as `LastRun`],
+  [#source("src/iyzee/analysis.py", [analysis.py])], [Typed summaries of saved sweep and scope recordings, shared by scripts and the Results page],
   [#source("src/iyzee/waveform_math.py", [waveform_math.py])], [Reusable numerical operations on waveform recordings],
 )
 

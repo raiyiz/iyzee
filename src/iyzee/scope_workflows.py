@@ -460,7 +460,8 @@ def acquire_scope_recording(
     frozen = False
 
     def restore() -> str | None:
-        assert prior_mode is not None
+        if prior_mode is None:
+            return None
         try:
             scope.set_trigger_mode(prior_mode)
         except Exception as exc:  # noqa: BLE001 - reported, not raised
