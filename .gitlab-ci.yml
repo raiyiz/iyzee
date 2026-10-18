@@ -30,6 +30,9 @@ typecheck:
 doc-links:
   script: [scripts/ci.sh doc-links]
 
+notebooks:
+  script: [scripts/ci.sh notebooks]
+
 docs-index:
   script: [scripts/ci.sh docs-index]
   artifacts:
