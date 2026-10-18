@@ -239,8 +239,14 @@ def write_demo(root: Path, *, now: datetime | None = None, seed: int = 7) -> lis
     ):
         when = at(days, 14)
         frequency_sweep(
-            month(when), when, rng, name=name, depth_db=depth,
-            detuning_mhz=detuning, points=count, status=status,
+            month(when),
+            when,
+            rng,
+            name=name,
+            depth_db=depth,
+            detuning_mhz=detuning,
+            points=count,
+            status=status,
         )
 
     for days, name, hz, amplitude, warnings in (
@@ -250,8 +256,13 @@ def write_demo(root: Path, *, now: datetime | None = None, seed: int = 7) -> lis
     ):
         when = at(days, 16)
         scope_acquisition(
-            month(when), when, rng, name=name, pulse_hz=hz,
-            amplitude=amplitude, warnings=warnings,
+            month(when),
+            when,
+            rng,
+            name=name,
+            pulse_hz=hz,
+            amplitude=amplitude,
+            warnings=warnings,
         )
     return sorted(set(root.rglob("*.npz")) - before)
 
