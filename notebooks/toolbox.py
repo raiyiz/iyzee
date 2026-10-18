@@ -132,6 +132,8 @@ def scan_catalog(root: Path) -> pl.DataFrame:
             size_kib = path.stat().st_size / 1024
         except OSError:
             size_kib = None
+        warning_values = acquisition.get("warnings") or manifest.get("warnings") or []
+        warning_count = len(warning_values) if isinstance(warning_values, list) else 0
         rows.append(
             {
                 "run_id": path.stem,
@@ -145,7 +147,7 @@ def scan_catalog(root: Path) -> pl.DataFrame:
                     instrument.get("identity") or manifest.get("instrument_id") or ""
                 ),
                 "synthetic": bool(run.get("synthetic") or manifest.get("synthetic")),
-                "warnings": len(acquisition.get("warnings") or manifest.get("warnings") or []),
+                "warnings": warning_count,
                 "size_kib": size_kib,
                 "digest": "recorded" if manifest.get("data_sha256") else "missing",
                 "path": str(path.resolve()),
@@ -333,6 +335,12 @@ def delta_to_reference(
     return pl.DataFrame(rows, schema=schema)
 
 
+def _finite_number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
 def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
     """Long table of per-channel statistics stored in each scope manifest."""
     output = []
@@ -341,7 +349,7 @@ def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
         configuration = _mapping(manifest.get("configuration"))
         settings = {
             str(item.get("channel")): item
-            for item in configuration.get("applied_channel_settings", [])
+            for item in (configuration.get("applied_channel_settings") or [])
             if isinstance(item, dict)
         }
         for waveform in manifest.get("waveforms") or []:
@@ -356,14 +364,14 @@ def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
                     "run_id": row["run_id"],
                     "channel": channel,
                     "unit": str(waveform.get("value_unit") or ""),
-                    "samples": stats.get("sample_count"),
-                    "minimum": stats.get("min"),
-                    "maximum": stats.get("max"),
-                    "peak_to_peak": stats.get("peak_to_peak"),
-                    "mean": stats.get("mean"),
-                    "rms": stats.get("rms"),
-                    "stddev": stats.get("stddev"),
-                    "volts_per_div": setting.get("volts_per_div"),
+                    "samples": stats.get("sample_count") if isinstance(stats.get("sample_count"), int) else None,
+                    "minimum": _finite_number(stats.get("min")),
+                    "maximum": _finite_number(stats.get("max")),
+                    "peak_to_peak": _finite_number(stats.get("peak_to_peak")),
+                    "mean": _finite_number(stats.get("mean")),
+                    "rms": _finite_number(stats.get("rms")),
+                    "stddev": _finite_number(stats.get("stddev")),
+                    "volts_per_div": _finite_number(setting.get("volts_per_div")),
                     "coupling": setting.get("coupling"),
                     "warnings": row["warnings"],
                 }
@@ -389,6 +397,8 @@ def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
 
 def decimate(time: np.ndarray, values: np.ndarray, budget: int = 1600) -> tuple[np.ndarray, np.ndarray]:
     """Reduce plot size while keeping both extrema in every bucket."""
+    count = min(len(time), len(values))
+    time, values = time[:count], values[:count]
     if budget < 4 or len(values) <= budget:
         return time, values
     edges = np.linspace(0, len(values), budget // 2 + 1, dtype=int)
@@ -486,18 +496,6 @@ def pair_trace(row: dict[str, Any], point: int) -> pl.DataFrame:
             "rel_noise_db": difference,
         }
     )
-
-
-def _encoding_type(frame: pl.DataFrame, column: str) -> str:
-    dtype = frame.schema[column]
-    if dtype in {
-        pl.Int8, pl.Int16, pl.Int32, pl.Int64, pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
-        pl.Float32, pl.Float64,
-    }:
-        return "Q"
-    if str(dtype).startswith("Datetime") or dtype == pl.Date:
-        return "T"
-    return "N"
 
 
 def _title(column: str) -> str:
