@@ -62,7 +62,7 @@ def _save_sweep(
                 meta=meta,
             )
         )
-    path = folder / f"18T10000_{name}_abc123.npz"
+    path = folder / f"18T100000_{name}_abc123.npz"
     return save_step_results(
         results,
         folder,
