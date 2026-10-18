@@ -207,9 +207,10 @@ def _(field_chart, mo, points, traces, pl):
             ]
         )
     if plots:
-        mo.vstack(plots)
+        plot_view = mo.vstack(plots)
     else:
-        mo.md("Mark compatible sweep or scope recordings above to make plots.")
+        plot_view = mo.md("Mark compatible sweep or scope recordings above to make plots.")
+    plot_view
     return
 
 
