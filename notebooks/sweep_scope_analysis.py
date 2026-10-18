@@ -264,12 +264,12 @@ def _(mo):
 
 @app.cell
 def _(catalog, csv_bytes, mo, marked, pl, verify):
-    chosen = catalog.filter(pl.col("label").is_in(marked.value))
+    export_chosen = catalog.filter(pl.col("label").is_in(marked.value))
     mo.vstack(
         [
             mo.md("## Exports and integrity"),
-            mo.download(data=csv_bytes(chosen), filename="iyzee-marked-catalog.csv", label="Download marked catalog"),
-            mo.ui.table(verify(chosen), selection=None, page_size=10),
+            mo.download(data=csv_bytes(export_chosen), filename="iyzee-marked-catalog.csv", label="Download marked catalog"),
+            mo.ui.table(verify(export_chosen), selection=None, page_size=10),
         ]
     )
     return
