@@ -94,8 +94,14 @@ def _(data_root, mo, scan_catalog):
                 ),
                 mo.ui.table(
                     catalog.select(
-                        "label", "kind", "started", "status", "items",
-                        "synthetic", "warnings", "digest",
+                        "label",
+                        "kind",
+                        "started",
+                        "status",
+                        "items",
+                        "synthetic",
+                        "warnings",
+                        "digest",
                     ),
                     selection=None,
                     page_size=12,
@@ -150,12 +156,22 @@ def _(
             mo.md("### Sweep points"),
             mo.ui.table(points, selection=None, page_size=12),
             mo.md("### Best mean relative-noise point per run"),
-            mo.ui.table(best_points(points.filter(pl.col("kind") == "frequency")), selection=None, page_size=8),
-            mo.ui.table(best_points(points.filter(pl.col("kind") == "bandwidth")), selection=None, page_size=8),
+            mo.ui.table(
+                best_points(points.filter(pl.col("kind") == "frequency")),
+                selection=None,
+                page_size=8,
+            ),
+            mo.ui.table(
+                best_points(points.filter(pl.col("kind") == "bandwidth")),
+                selection=None,
+                page_size=8,
+            ),
             mo.md("### Scope channel statistics"),
             mo.ui.table(channel_stats, selection=None, page_size=10),
             mo.md("### Read issues"),
-            mo.ui.table(errors, selection=None, page_size=8) if not errors.is_empty() else mo.md("No selected recording failed to load."),
+            mo.ui.table(errors, selection=None, page_size=8)
+            if not errors.is_empty()
+            else mo.md("No selected recording failed to load."),
         ]
     )
     return channel_stats, chosen, errors, points, scopes, traces
@@ -269,7 +285,11 @@ def _(catalog, csv_bytes, mo, marked, pl, verify):
     mo.vstack(
         [
             mo.md("## Exports and integrity"),
-            mo.download(data=csv_bytes(export_chosen), filename="iyzee-marked-catalog.csv", label="Download marked catalog"),
+            mo.download(
+                data=csv_bytes(export_chosen),
+                filename="iyzee-marked-catalog.csv",
+                label="Download marked catalog",
+            ),
             mo.ui.table(verify(export_chosen), selection=None, page_size=10),
         ]
     )
