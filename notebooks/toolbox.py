@@ -56,7 +56,7 @@ def _manifest(path: Path) -> dict[str, Any]:
     """Return a sidecar object; a missing or malformed sidecar is not fatal."""
     try:
         value = json.loads(path.with_suffix(".json").read_text())
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return {}
     return value if isinstance(value, dict) else {}
 
@@ -80,7 +80,7 @@ def _started(path: Path, manifest: dict[str, Any]) -> datetime | None:
         year, month = (int(part) for part in path.parent.name.split("-")[:2])
         day, clock = path.stem.split("_", 1)[0].split("T")
         return datetime(year, month, int(day), int(clock[:2]), int(clock[2:4]), int(clock[4:6]))
-    except (ValueError, IndexError):
+    except ValueError, IndexError:
         try:
             return datetime.fromtimestamp(path.stat().st_mtime)
         except OSError:
@@ -207,9 +207,7 @@ def _trace_level(array: np.ndarray | None, index: int) -> float:
     return float(values.mean()) if values.size else math.nan
 
 
-def sweep_points(
-    rows: pl.DataFrame, issues: list[dict[str, str]] | None = None
-) -> pl.DataFrame:
+def sweep_points(rows: pl.DataFrame, issues: list[dict[str, str]] | None = None) -> pl.DataFrame:
     """Long table: one row per sweep point from the selected recordings.
 
     Frequency offsets use one shared median reference across all marked frequency runs;
@@ -250,9 +248,7 @@ def sweep_points(
     frequencies = [
         row["x_thz"]
         for row in output
-        if row["kind"] == "frequency"
-        and row["x_thz"] is not None
-        and math.isfinite(row["x_thz"])
+        if row["kind"] == "frequency" and row["x_thz"] is not None and math.isfinite(row["x_thz"])
     ]
     reference = float(np.median(frequencies)) if frequencies else 0.0
     for row in output:
@@ -365,7 +361,9 @@ def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
                     "run_id": row["run_id"],
                     "channel": channel,
                     "unit": str(waveform.get("value_unit") or ""),
-                    "samples": stats.get("sample_count") if isinstance(stats.get("sample_count"), int) else None,
+                    "samples": stats.get("sample_count")
+                    if isinstance(stats.get("sample_count"), int)
+                    else None,
                     "minimum": _finite_number(stats.get("min")),
                     "maximum": _finite_number(stats.get("max")),
                     "peak_to_peak": _finite_number(stats.get("peak_to_peak")),
@@ -396,7 +394,9 @@ def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(output, schema=schema)
 
 
-def decimate(time: np.ndarray, values: np.ndarray, budget: int = 1600) -> tuple[np.ndarray, np.ndarray]:
+def decimate(
+    time: np.ndarray, values: np.ndarray, budget: int = 1600
+) -> tuple[np.ndarray, np.ndarray]:
     """Reduce plot size while keeping both extrema in every bucket."""
     count = min(len(time), len(values))
     time, values = time[:count], values[:count]
@@ -545,9 +545,10 @@ def field_chart(
 
     figure, axis = plt.subplots(figsize=(9, 4.8), layout="constrained")
     for key, records in buckets.items():
-        label = " · ".join(
-            f"{column}: {value}" for column, value in zip(groups, key, strict=True)
-        ) or None
+        label = (
+            " · ".join(f"{column}: {value}" for column, value in zip(groups, key, strict=True))
+            or None
+        )
         xs = [row[x] for row in records]
         ys = [row[y] for row in records]
         if mark == "points":
@@ -567,6 +568,7 @@ def field_chart(
     if groups:
         axis.legend(frameon=False, fontsize="small")
     return figure
+
 
 def csv_bytes(frame: pl.DataFrame) -> bytes:
     """CSV bytes suitable for a marimo download control."""
