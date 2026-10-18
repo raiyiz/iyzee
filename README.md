@@ -228,11 +228,21 @@ scripts/ci.sh all         # run everything
 
 GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. <code>hardware</code> is deliberately not part of <code>all</code> or CI.
 
-The marimo notebooks in <code>notebooks/</code> need packages the application itself does not, kept in their own dependency group and left out of CI:
+The marimo notebooks in <code>notebooks/</code> use an optional dependency group, separate from the instrument-control app. Start with the interactive workbench to mark runs, compare sweep points, overlay scope channels, build plots by choosing axes and series, verify saved-file checksums, and export tables. The code-first companion shows the same toolbox as reusable Polars recipes.
 
 ~~~sh
+uv run --group notebooks marimo edit notebooks/workbench.py
 uv run --group notebooks marimo edit notebooks/sweep_scope_analysis.py
 ~~~
+
+Try the whole workflow without connecting to hardware:
+
+~~~sh
+uv run scripts/demo_data.py demo-data
+IYZEE_DATA_DIR=demo-data uv run --group notebooks marimo edit notebooks/workbench.py
+~~~
+
+Synthetic runs are marked in the catalog; their signal shapes are for learning the interface, not scientific results. <code>scripts/ci.sh notebooks</code> runs the notebook-specific lint and analysis tests in the optional environment.
 
 ### Hardware tests
 
