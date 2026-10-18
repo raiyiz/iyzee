@@ -263,8 +263,8 @@ def _(mo):
 
 
 @app.cell
-def _(catalog, csv_bytes, mo, marked, verify):
-    chosen = catalog.filter(__import__("polars").col("label").is_in(marked.value))
+def _(catalog, csv_bytes, mo, marked, pl, verify):
+    chosen = catalog.filter(pl.col("label").is_in(marked.value))
     mo.vstack(
         [
             mo.md("## Exports and integrity"),
