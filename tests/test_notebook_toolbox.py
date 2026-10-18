@@ -17,7 +17,6 @@ pl = pytest.importorskip("polars")
 NOTEBOOKS = Path(__file__).parents[1] / "notebooks"
 sys.path.insert(0, str(NOTEBOOKS))
 
-from iyzee.experiment import StepResult, save_step_results  # noqa: E402
 from toolbox import (  # noqa: E402
     best_points,
     csv_bytes,
@@ -27,6 +26,8 @@ from toolbox import (  # noqa: E402
     sweep_points,
     verify,
 )
+
+from iyzee.experiment import StepResult, save_step_results  # noqa: E402
 
 
 def _save_sweep(
@@ -140,7 +141,7 @@ def test_plot_builder_accepts_tidy_tables_and_exports_csv(tmp_path):
         color="run",
         title="A reusable plot",
     )
-    assert figure.axes[0].get_title() == "A reusable plot"
+    assert figure.axes[0].get_title(loc="left") == "A reusable plot"
     assert b"rel_noise_mean_db" in csv_bytes(points)
 
 
