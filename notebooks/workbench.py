@@ -59,6 +59,7 @@ def _():
         field_chart,
         load_recording,
         mo,
+        np,
         pl,
         scan_catalog,
         scope_channels,
@@ -353,10 +354,10 @@ def _(marked, mo):
         raw_run = None
         run_view = mo.md("Mark at least one recording above to inspect its raw arrays.")
     else:
-        run_labels = marked["label"].to_list()
+        _raw_run_labels = marked["label"].to_list()
         raw_run = mo.ui.dropdown(
-            options=run_labels,
-            value=run_labels[0],
+            options=_raw_run_labels,
+            value=_raw_run_labels[0],
             label="Recording",
         )
         run_view = raw_run
@@ -413,22 +414,22 @@ def _(mo, np, raw_array_name, raw_recording):
         raw_index = None
         index_view = mo.md("Choose a recording with a readable array above.")
     else:
-        values = np.asarray(raw_recording.arrays[raw_array_name.value])
-        if values.ndim == 2 and values.shape[0] > 0:
+        _raw_values = np.asarray(raw_recording.arrays[raw_array_name.value])
+        if _raw_values.ndim == 2 and _raw_values.shape[0] > 0:
             raw_index = mo.ui.dropdown(
-                options=list(range(values.shape[0])),
+                options=list(range(_raw_values.shape[0])),
                 value=0,
                 label="First-axis index",
             )
             index_view = mo.vstack(
                 [
                     raw_index,
-                    mo.md(f"Array shape: {values.shape} · dtype: {values.dtype}"),
+                    mo.md(f"Array shape: {_raw_values.shape} · dtype: {_raw_values.dtype}"),
                 ]
             )
         else:
             raw_index = None
-            index_view = mo.md(f"Array shape: {values.shape} · dtype: {values.dtype}")
+            index_view = mo.md(f"Array shape: {_raw_values.shape} · dtype: {_raw_values.dtype}")
     index_view
     return (raw_index,)
 
@@ -441,17 +442,17 @@ def _(array_frame, field_chart, mo, np, pl, raw_array_name, raw_index, raw_recor
     if raw_recording is None or raw_array_name is None or raw_run is None:
         raw_array_plot = mo.md("Select a readable recording and array above to plot its data.")
     else:
-        values = np.asarray(raw_recording.arrays[raw_array_name.value])
-        if values.ndim == 1:
+        _raw_values = np.asarray(raw_recording.arrays[raw_array_name.value])
+        if _raw_values.ndim == 1:
             index = None
-            selected_array_frame = array_frame(values)
-        elif values.ndim == 2 and values.shape[0] > 0:
+            selected_array_frame = array_frame(_raw_values)
+        elif _raw_values.ndim == 2 and _raw_values.shape[0] > 0:
             index = int(raw_index.value) if raw_index is not None else 0
-            selected_array_frame = array_frame(values, index=index)
+            selected_array_frame = array_frame(_raw_values, index=index)
         else:
             index = None
             raw_array_plot = mo.md(
-                f"Array shape {values.shape} is not a non-empty 1-D or 2-D array; "
+                f"Array shape {_raw_values.shape} is not a non-empty 1-D or 2-D array; "
                 "choose another array rather than flattening it implicitly."
             )
 
@@ -476,7 +477,7 @@ def _(array_frame, field_chart, mo, np, pl, raw_array_name, raw_index, raw_recor
                 raw_array_plot = mo.vstack(
                     [
                         mo.md(
-                            f"Shape: {values.shape} · plotting "
+                            f"Shape: {_raw_values.shape} · plotting "
                             + (f"row {index}" if index is not None else "the full array")
                         ),
                         figure,
