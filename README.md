@@ -228,11 +228,13 @@ scripts/ci.sh all         # run everything
 
 GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. <code>hardware</code> is deliberately not part of <code>all</code> or CI.
 
-The marimo notebooks in <code>notebooks/</code> use an optional dependency group, separate from the instrument-control app. The interactive <code>workbench.py</code> indexes JSON sidecars first, then loads only marked recordings; it offers sweep-point and scope-channel tables, raw-array inspection, reusable plots, shared-grid run comparisons, SHA-256 verification, and CSV exports. <code>sweep_scope_analysis.py</code> is the code-first companion, and both notebooks reuse the Polars helpers in <code>notebooks/toolbox.py</code>.
+The notebook tools use the optional <code>notebooks</code> dependency group. <code>workbench.py</code> is the read-only analysis front end: it indexes JSON sidecars first, loads only marked recordings, shows standard sweep/scope comparisons, and provides raw-array inspection, custom plots, shared-grid comparisons, SHA-256 verification, and CSV exports. <code>reproduce_frequency_sweep.py</code> is a separate hardware diagnostic that replays the frequency sweep with explicit confirmation; it changes the laser setpoint, opens/closes the shutter, and reconfigures the MXA. Close the TUI before running it, and use it only when you intend to operate the bench. The shared Polars analysis helpers live in <code>notebooks/toolbox.py</code>.
 
 ~~~sh
 uv run --group notebooks marimo edit notebooks/workbench.py
-uv run --group notebooks marimo edit notebooks/sweep_scope_analysis.py
+
+# Hardware-driving diagnostic only; close the TUI first
+uv run --group notebooks marimo edit notebooks/reproduce_frequency_sweep.py
 ~~~
 
 Try the whole workflow without connecting to hardware:
