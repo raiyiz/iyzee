@@ -394,7 +394,11 @@ def _(Path, load_recording, marked, mo, pl, raw_run):
                 array_view = mo.md("This recording has no stored arrays.")
             else:
                 preferred = next(
-                    (name for name in ("trace_squeezing", "trace_shot_noise") if name in array_names),
+                    (
+                        name
+                        for name in ("trace_squeezing", "trace_shot_noise")
+                        if name in array_names
+                    ),
                     array_names[0],
                 )
                 raw_array_name = mo.ui.dropdown(

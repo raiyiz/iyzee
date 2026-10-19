@@ -77,7 +77,6 @@ def _save_sweep(
     )
 
 
-
 def test_array_frame_selects_a_row_and_rejects_ambiguous_shapes():
     frame = array_frame(np.array([[1.0, 2.0], [3.0, 4.0]]), index=1)
     assert frame["sample"].to_list() == [0, 1]
