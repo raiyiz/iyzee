@@ -45,10 +45,17 @@ def _(mo):
 
 @app.cell
 def _(mo):
+    from iyzee.experiment import FREQUENCY_STEP_THZ
+
     center = mo.ui.number(value=377.1052067, step=1e-7, label="Laser center (THz)", full_width=True)
     channel = mo.ui.number(1, 8, value=4, step=1, label="Wavemeter channel")
     points = mo.ui.number(1, 200, value=5, step=1, label="Points")
-    step_khz = mo.ui.number(value=10, start=0.001, step=1, label="Offset step (kHz)")
+    step_khz = mo.ui.number(
+        value=FREQUENCY_STEP_THZ * 1e9,
+        start=0.001,
+        step=1,
+        label="Offset step (kHz)",
+    )
     duration_ms = mo.ui.number(1, 10_000, value=10, step=1, label="Sweep duration (ms)")
     mo.hstack([center, channel, points, step_khz, duration_ms], widths="equal", align="end")
     return center, channel, duration_ms, points, step_khz
