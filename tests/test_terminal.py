@@ -161,7 +161,7 @@ async def test_session_runs_a_real_ipython_in_process() -> None:
 def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(monkeypatch) -> None:
     virtual_output: list[str] = []
     session = IPythonSession(FakeApp(), on_output=virtual_output.append)
-    assert atexit.unregister(session._run_shell_atexit_operations)
+    atexit.unregister(session._run_shell_atexit_operations)
 
     host_stdout = io.StringIO()
     monkeypatch.setattr(sys, "stdout", host_stdout)
