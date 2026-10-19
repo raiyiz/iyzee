@@ -322,12 +322,13 @@ def _(scope_records, scope_traces, chosen_channels, trace_budget):
 
 
 @app.cell
-def _(channel_stats, mo, pl, points, trace_issues, traces, sweep_issues):
+def _(channel_stats, mo, pl, points, selected_array_frame, trace_issues, traces, sweep_issues):
     frame_map = {
         "Frequency sweep points": points.filter(pl.col("kind") == "frequency"),
         "Bandwidth sweep points": points.filter(pl.col("kind") == "bandwidth"),
         "Scope channel statistics": channel_stats,
         "Scope waveform samples": traces,
+        "Selected raw array": selected_array_frame,
     }
     issues = sweep_issues + trace_issues
     issue_frame = pl.DataFrame(

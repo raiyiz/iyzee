@@ -258,24 +258,27 @@ def _(mo):
 
     # Compare runs at common x values; no extrapolation outside overlap.
     frequency = points.filter(pl.col("kind") == "frequency")
-    reference_id = frequency["run_id"][0]
-    differences = delta_to_reference(frequency, reference_id)
+    if not frequency.is_empty():
+        differences = delta_to_reference(frequency, frequency["run_id"][0])
 
     # Inspect available raw data, then plot a selected 1-D / 2-D array.
     from toolbox import array_frame
 
-    row = chosen.row(0, named=True)
-    recording = load_recording(Path(row["path"]))
-    print({name: array.shape for name, array in recording.arrays.items()})
-    numeric_arrays = {
-        name: array
-        for name, array in recording.arrays.items()
-        if getattr(array, "ndim", 0) in (1, 2)
-    }
-    if numeric_arrays:
-        name = next(iter(numeric_arrays))
-        raw = array_frame(numeric_arrays[name], index=0)
-        fig = field_chart(raw, x="sample", y="value", color=None, title=name)
+    if not chosen.is_empty():
+        row = chosen.row(0, named=True)
+        recording = load_recording(Path(row["path"]))
+        print({name: array.shape for name, array in recording.arrays.items()})
+        preferred = next(
+            (
+                name
+                for name in ("trace_squeezing", "trace_shot_noise")
+                if name in recording.arrays
+            ),
+            None,
+        )
+        if preferred is not None:
+            raw = array_frame(recording.arrays[preferred], index=0)
+            fig = field_chart(raw, x="sample", y="value", color=None, title=preferred)
 
     # Use the same chart helper, or compose a publication figure yourself.
     fig = field_chart(
