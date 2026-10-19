@@ -443,8 +443,6 @@ def _(marked, mo):
     return raw_run, run_view, raw_section_heading
 
 
-
-
 @app.cell
 def _(Path, load_recording, marked, mo, pl, raw_run):
     if raw_run is None:
@@ -752,7 +750,9 @@ def _(
                 filename="iyzee-selected-array.csv",
                 label="Selected raw array CSV",
             ),
-            mo.accordion({"Reusable in code": mo.md("""
+            mo.accordion(
+                {
+                    "Reusable in code": mo.md("""
             ### Reusable in code
 
             These tables are ordinary Polars dataframes. Keep a small marked set and adapt
@@ -798,7 +798,9 @@ def _(
                     title="Lowest relative noise by laser detuning",
                 )
             ~~~
-            """)}),
+            """)
+                }
+            ),
         ]
     )
     return (export_view,)
@@ -874,7 +876,10 @@ def _(
 ):
     mo.vstack(
         [
-            mo.md("## Further analysis\nOpen a section only when you need raw arrays, custom plots, pairwise comparison, or data checks and exports."),
+            mo.md(
+                "## Further analysis\nOpen a section only when you need raw arrays, custom plots, "
+                "pairwise comparison, or data checks and exports."
+            ),
             mo.accordion(
                 {
                     "Inspect raw arrays": mo.vstack(
