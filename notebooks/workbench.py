@@ -20,6 +20,7 @@ def _():
     from pathlib import Path
 
     import marimo as mo
+    import numpy as np
     import polars as pl
 
     from iyzee.config import data_root
@@ -31,6 +32,7 @@ def _():
 
     from toolbox import (
         KINDS,
+        array_frame,
         best_points,
         channels_in,
         csv_bytes,
@@ -47,6 +49,7 @@ def _():
     return (
         KINDS,
         Path,
+        array_frame,
         best_points,
         channels_in,
         csv_bytes,
@@ -89,20 +92,31 @@ def _(data_root, mo):
         full_width=True,
         debounce=True,
     )
+    refresh_index = mo.ui.run_button(label="Refresh index")
     mo.vstack(
         [
             mo.md(
-                "## 1 · Find your recordings\nChange the directory here, or set IYZEE_DATA_DIR before launching marimo."
+                "## 1 · Find your recordings\nChange the directory here, or set IYZEE_DATA_DIR before launching marimo. "
+                "Press **Refresh index** after files are added while the notebook is open."
             ),
-            data_directory,
+            mo.hstack([data_directory, refresh_index], align="end"),
         ]
     )
-    return (data_directory,)
+    return data_directory, refresh_index
 
 
 @app.cell
-def _(Path, data_directory, scan_catalog):
-    catalog = scan_catalog(Path(data_directory.value).expanduser())
+def _(Path, data_directory, mo, refresh_index, scan_catalog):
+    root = Path(data_directory.value).expanduser()
+    refresh_index.value  # Re-index the directory when the button is pressed.
+    catalog = scan_catalog(root)
+    if not root.is_dir():
+        index_status = mo.md(f"**Directory not found:** {root}")
+    elif catalog.is_empty():
+        index_status = mo.md(f"No .npz recordings found in {root}.")
+    else:
+        index_status = mo.md(f"Indexed **{catalog.height:,} recordings** in {root}.")
+    index_status
     return (catalog,)
 
 
@@ -140,6 +154,9 @@ def _(catalog, kind_filter, mo, pl, text_filter):
                 pl.col("label").str.to_lowercase().str.contains(query, literal=True),
                 pl.col("status").str.to_lowercase().str.contains(query, literal=True),
                 pl.col("kind").str.to_lowercase().str.contains(query, literal=True),
+                pl.col("name").str.to_lowercase().str.contains(query, literal=True),
+                pl.col("instrument").str.to_lowercase().str.contains(query, literal=True),
+                pl.col("path").str.to_lowercase().str.contains(query, literal=True),
             )
         )
     if catalog.is_empty():
@@ -329,6 +346,146 @@ def _(channel_stats, mo, pl, points, trace_issues, traces, sweep_issues):
     return frame_map, issue_frame
 
 
+
+@app.cell
+def _(marked, mo):
+    if marked.is_empty():
+        raw_run = None
+        run_view = mo.md("Mark at least one recording above to inspect its raw arrays.")
+    else:
+        run_labels = marked["label"].to_list()
+        raw_run = mo.ui.dropdown(
+            options=run_labels,
+            value=run_labels[0],
+            label="Recording",
+        )
+        run_view = raw_run
+    mo.vstack(
+        [
+            mo.md(
+                "## 3 · Explore raw arrays\nChoose any marked recording and a saved array. "
+                "One-dimensional arrays plot directly; for two-dimensional arrays, choose a "
+                "first-axis row (often a sweep point). Higher dimensions are never flattened silently."
+            ),
+            run_view,
+        ]
+    )
+    return (raw_run,)
+
+
+@app.cell
+def _(Path, load_recording, marked, mo, pl, raw_run):
+    if raw_run is None:
+        raw_recording = None
+        raw_array_name = None
+        array_view = mo.md("Select a recording above to list its saved arrays.")
+    else:
+        row = marked.filter(pl.col("label") == raw_run.value).row(0, named=True)
+        try:
+            raw_recording = load_recording(Path(row["path"]))
+        except Exception as exc:  # noqa: BLE001 - show a damaged selected file without breaking the notebook
+            raw_recording = None
+            raw_array_name = None
+            array_view = mo.md(f"**Could not load {raw_run.value}:** {exc}")
+        else:
+            array_names = sorted(raw_recording.arrays)
+            if not array_names:
+                raw_array_name = None
+                array_view = mo.md("This recording has no stored arrays.")
+            else:
+                preferred = next(
+                    (name for name in ("trace_squeezing", "trace_shot_noise") if name in array_names),
+                    array_names[0],
+                )
+                raw_array_name = mo.ui.dropdown(
+                    options=array_names,
+                    value=preferred,
+                    label="Saved array",
+                )
+                array_view = raw_array_name
+    array_view
+    return raw_array_name, raw_recording
+
+
+@app.cell
+def _(mo, np, raw_array_name, raw_recording):
+    if raw_recording is None or raw_array_name is None:
+        raw_index = None
+        index_view = mo.md("Choose a recording with a readable array above.")
+    else:
+        values = np.asarray(raw_recording.arrays[raw_array_name.value])
+        if values.ndim == 2 and values.shape[0] > 0:
+            raw_index = mo.ui.dropdown(
+                options=list(range(values.shape[0])),
+                value=0,
+                label="First-axis index",
+            )
+            index_view = mo.vstack(
+                [
+                    raw_index,
+                    mo.md(f"Array shape: {values.shape} · dtype: {values.dtype}"),
+                ]
+            )
+        else:
+            raw_index = None
+            index_view = mo.md(f"Array shape: {values.shape} · dtype: {values.dtype}")
+    index_view
+    return (raw_index,)
+
+
+@app.cell
+def _(array_frame, field_chart, mo, np, pl, raw_array_name, raw_index, raw_recording, raw_run):
+    selected_array_frame = pl.DataFrame(
+        schema={"sample": pl.Int64, "value": pl.Float64}
+    )
+    if raw_recording is None or raw_array_name is None or raw_run is None:
+        raw_array_plot = mo.md("Select a readable recording and array above to plot its data.")
+    else:
+        values = np.asarray(raw_recording.arrays[raw_array_name.value])
+        if values.ndim == 1:
+            index = None
+            selected_array_frame = array_frame(values)
+        elif values.ndim == 2 and values.shape[0] > 0:
+            index = int(raw_index.value) if raw_index is not None else 0
+            selected_array_frame = array_frame(values, index=index)
+        else:
+            index = None
+            raw_array_plot = mo.md(
+                f"Array shape {values.shape} is not a non-empty 1-D or 2-D array; "
+                "choose another array rather than flattening it implicitly."
+            )
+
+        if selected_array_frame.height:
+            selected_array_frame = selected_array_frame.with_columns(
+                pl.lit(raw_run.value).alias("run"),
+                pl.lit(raw_array_name.value).alias("array"),
+                pl.lit(index, dtype=pl.Int64).alias("array_index"),
+            )
+            try:
+                figure = field_chart(
+                    selected_array_frame,
+                    x="sample",
+                    y="value",
+                    color=None,
+                    title=f"{raw_run.value} · {raw_array_name.value}"
+                    + (f" · row {index}" if index is not None else ""),
+                )
+            except ValueError as exc:
+                raw_array_plot = mo.md(f"**Cannot plot this array:** {exc}")
+            else:
+                raw_array_plot = mo.vstack(
+                    [
+                        mo.md(
+                            f"Shape: {values.shape} · plotting "
+                            + (f"row {index}" if index is not None else "the full array")
+                        ),
+                        figure,
+                    ]
+                )
+    raw_array_plot
+    return (selected_array_frame,)
+
+
 @app.cell
 def _(frame_map, mo):
     plot_sources = list(frame_map)
@@ -341,7 +498,7 @@ def _(frame_map, mo):
     mo.vstack(
         [
             mo.md(
-                "## 3 · Build a plot\nChoose the tidy table, then choose columns for the axes, colour, and line grouping."
+                "## 4 · Build a plot\nChoose the tidy table, then choose columns for the axes, colour, and line grouping."
             ),
             source,
         ]
@@ -411,9 +568,10 @@ def _(frame_map, mo, pl, source):
             value=detail_default,
             label="Split lines by",
         )
+        mark_default = "bars" if source.value == "Scope channel statistics" else "line"
         mark_type = mo.ui.dropdown(
             options=["line", "points", "bars"],
-            value="line",
+            value=mark_default,
             label="Mark",
         )
         plot_controls = mo.vstack(
@@ -457,7 +615,7 @@ def _(mo):
     mo.vstack(
         [
             mo.md(
-                "## 4 · Check and export\nChecksum verification reads each selected NPZ from disk; it does not alter recordings."
+                "## 5 · Check and export\nChecksum verification reads each selected NPZ from disk; it does not alter recordings."
             ),
             verify_button,
         ]
@@ -478,7 +636,7 @@ def _(marked, mo, verify, verify_button):
 
 
 @app.cell
-def _(channel_stats, csv_bytes, marked, mo, points, traces):
+def _(channel_stats, csv_bytes, marked, mo, points, selected_array_frame, traces):
     mo.vstack(
         [
             mo.md("### Download tables"),
@@ -504,6 +662,11 @@ def _(channel_stats, csv_bytes, marked, mo, points, traces):
                     ),
                 ],
                 align="start",
+            ),
+            mo.download(
+                data=csv_bytes(selected_array_frame),
+                filename="iyzee-selected-array.csv",
+                label="Selected raw array CSV",
             ),
             mo.md("""
             ### Reusable in code

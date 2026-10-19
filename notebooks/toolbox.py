@@ -499,6 +499,30 @@ def pair_trace(row: dict[str, Any], point: int) -> pl.DataFrame:
     )
 
 
+def array_frame(array: np.ndarray, index: int = 0) -> pl.DataFrame:
+    """Make a 1-D array, or one row of a 2-D array, ready to plot or export.
+
+    Two-dimensional recordings commonly store one trace per sweep point. Higher
+    dimensions are rejected rather than silently flattening away their meaning.
+    """
+    values = np.asarray(array)
+    if values.ndim == 1:
+        if index != 0:
+            raise ValueError("index only applies to two-dimensional arrays")
+        selected = values
+    elif values.ndim == 2:
+        if not 0 <= index < values.shape[0]:
+            raise ValueError(f"row index {index} is outside an array with {values.shape[0]} rows")
+        selected = values[index]
+    else:
+        raise ValueError(f"expected a 1-D or 2-D array, got shape {values.shape}")
+
+    selected = np.asarray(selected, dtype=float)
+    return pl.DataFrame(
+        {"sample": np.arange(selected.size, dtype=np.int64), "value": selected}
+    )
+
+
 def _title(column: str) -> str:
     known = {
         **SWEEP_METRICS,
@@ -506,6 +530,12 @@ def _title(column: str) -> str:
         "rbw_khz": "Resolution bandwidth (kHz)",
         "x_thz": "Measured laser frequency (THz)",
         "time": "Time",
+        "sample": "Sample index",
+        "value": "Amplitude",
+        "rms": "RMS amplitude",
+        "minimum": "Minimum amplitude",
+        "maximum": "Maximum amplitude",
+        "stddev": "Standard deviation",
         "peak_to_peak": "Peak-to-peak amplitude",
     }
     return known.get(column, column.replace("_", " ").capitalize())

@@ -18,6 +18,7 @@ NOTEBOOKS = Path(__file__).parents[1] / "notebooks"
 sys.path.insert(0, str(NOTEBOOKS))
 
 from toolbox import (  # noqa: E402
+    array_frame,
     best_points,
     csv_bytes,
     delta_to_reference,
@@ -75,6 +76,15 @@ def _save_sweep(
         path=path,
     )
 
+
+
+def test_array_frame_selects_a_row_and_rejects_ambiguous_shapes():
+    frame = array_frame(np.array([[1.0, 2.0], [3.0, 4.0]]), index=1)
+    assert frame["sample"].to_list() == [0, 1]
+    assert frame["value"].to_list() == [3.0, 4.0]
+
+    with pytest.raises(ValueError, match="1-D or 2-D"):
+        array_frame(np.zeros((2, 3, 4)))
 
 def test_catalog_uses_sidecars_and_marks_synthetic_data(tmp_path):
     _save_sweep(tmp_path, "frequency-a", [377.1, 377.10001], [-2.0, -1.0], kind="frequency")

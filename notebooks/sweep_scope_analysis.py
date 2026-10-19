@@ -27,6 +27,7 @@ def _():
         sys.path.insert(0, notebook_dir)
 
     from toolbox import (
+        array_frame,
         best_points,
         channels_in,
         csv_bytes,
@@ -41,6 +42,7 @@ def _():
 
     return (
         Path,
+        array_frame,
         best_points,
         channels_in,
         csv_bytes,
@@ -261,10 +263,19 @@ def _(mo):
     reference_id = frequency["run_id"][0]
     differences = delta_to_reference(frequency, reference_id)
 
-    # Load raw arrays only when a question needs the original trace.
-    for row in chosen.iter_rows(named=True):
-        recording = load_recording(Path(row["path"]))
-        print(row["label"], list(recording.arrays))
+    # Inspect available raw data, then plot a selected 1-D / 2-D array.
+    row = chosen.row(0, named=True)
+    recording = load_recording(Path(row["path"]))
+    print({name: array.shape for name, array in recording.arrays.items()})
+    numeric_arrays = {
+        name: array
+        for name, array in recording.arrays.items()
+        if getattr(array, "ndim", 0) in (1, 2)
+    }
+    if numeric_arrays:
+        name = next(iter(numeric_arrays))
+        raw = array_frame(numeric_arrays[name], index=0)
+        fig = field_chart(raw, x="sample", y="value", color=None, title=name)
 
     # Use the same chart helper, or compose a publication figure yourself.
     fig = field_chart(
