@@ -228,7 +228,7 @@ scripts/ci.sh all         # run everything
 
 GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. <code>hardware</code> is deliberately not part of <code>all</code> or CI.
 
-The marimo notebooks in <code>notebooks/</code> use an optional dependency group, separate from the instrument-control app. Start with the interactive workbench to mark runs, compare sweep points, overlay scope channels, build plots by choosing axes and series, verify saved-file checksums, and export tables. The code-first companion shows the same toolbox as reusable Polars recipes.
+The marimo notebooks in <code>notebooks/</code> use an optional dependency group, separate from the instrument-control app. The interactive <code>workbench.py</code> indexes JSON sidecars first, then loads only marked recordings; it offers sweep-point and scope-channel tables, raw-array inspection, reusable plots, shared-grid run comparisons, SHA-256 verification, and CSV exports. <code>sweep_scope_analysis.py</code> is the code-first companion, and both notebooks reuse the Polars helpers in <code>notebooks/toolbox.py</code>.
 
 ~~~sh
 uv run --group notebooks marimo edit notebooks/workbench.py
