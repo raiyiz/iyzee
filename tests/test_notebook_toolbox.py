@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import math
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from datetime import UTC, datetime
 
 import numpy as np
 import pytest
