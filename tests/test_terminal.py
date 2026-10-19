@@ -170,8 +170,8 @@ def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(monkeypatch) -> No
     finally:
         session.close()
 
-    assert "\\x1b[0 q" not in host_stdout.getvalue()
-    assert "\\x1b[0 q" in "".join(virtual_output)
+    assert "\x1b[0 q" not in host_stdout.getvalue()
+    assert "\x1b[0 q" in "".join(virtual_output)
 
 
 def _prompt_line(screen_text) -> str:
