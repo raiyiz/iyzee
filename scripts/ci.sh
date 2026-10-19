@@ -1,5 +1,5 @@
 #!/bin/sh
-# One entry point for CI and local checks: scripts/ci.sh {test|hardware|lint|typecheck|doc-links|docs-index|docs|all|update}
+# One entry point for CI and local checks: scripts/ci.sh {test|hardware|lint|typecheck|doc-links|notebooks|docs-index|docs|all|update}
 set -eu
 
 cd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/.."
@@ -31,6 +31,12 @@ doc_links() {
     uv run --locked scripts/check_doc_links.py
 }
 
+notebooks() {
+    uv sync --locked --group dev --group notebooks
+    uv run --locked --group notebooks marimo check --strict notebooks/workbench.py notebooks/reproduce_frequency_sweep.py
+    uv run --locked --group notebooks pytest tests/test_notebook_toolbox.py
+}
+
 all() {
     sync
     uv run --locked pytest
@@ -38,6 +44,7 @@ all() {
     uv run --locked ruff format --check .
     uv run --locked mypy src tests
     uv run --locked scripts/check_doc_links.py
+    notebooks
     docs
 }
 
@@ -82,9 +89,10 @@ case "${1:-}" in
     lint)      sync; uv run --locked ruff check .; uv run --locked ruff format --check . ;;
     typecheck) sync; uv run --locked mypy src tests ;;
     doc-links) sync; doc_links ;;
+    notebooks)  notebooks ;;
     docs-index) sync; docs_index ;;
     docs)      docs ;;
     all)       all ;;
     update)    update ;;
-    *)         echo "usage: $0 {test|hardware|lint|typecheck|doc-links|docs-index|docs|all|update}" >&2; exit 2 ;;
+    *)         echo "usage: $0 {test|hardware|lint|typecheck|doc-links|notebooks|docs-index|docs|all|update}" >&2; exit 2 ;;
 esac

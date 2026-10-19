@@ -202,7 +202,7 @@ The README is the **quick-start and orientation layer**. The technical guide goe
 | [Architecture](docs/chapters/architecture.typ) | understand ownership, locking, layering, the scope transport and why the code is shaped this way |
 | [MXA & measurements](docs/chapters/mxa-and-measurements.typ) | know what the analyzer is programmed to do: RBW/VBW, averaging, zero span, the two standard sweeps |
 | [TUI & devices](docs/chapters/tui-and-devices.typ) | connect and debug instruments, learn the pages, keys and console |
-| [Data & analysis](docs/chapters/data-and-analysis.typ) | know what every saved file contains, load it, and judge whether to trust it |
+| [Data & analysis](docs/chapters/data-and-analysis.typ) | understand recordings, compare runs in the notebook workbench, and assess data integrity |
 | [Rubidium physics](docs/chapters/rubidium-physics.typ) | follow the D1/D2 structure, spectroscopy and polarization self-rotation |
 | [Code map](docs/chapters/code-map.typ) | find where any module is explained (generated from the code) |
 
@@ -228,11 +228,23 @@ scripts/ci.sh all         # run everything
 
 GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. <code>hardware</code> is deliberately not part of <code>all</code> or CI.
 
-The marimo notebooks in <code>notebooks/</code> need packages the application itself does not, kept in their own dependency group and left out of CI:
+The notebook tools use the optional <code>notebooks</code> dependency group. <code>workbench.py</code> is the read-only analysis front end: it indexes JSON sidecars first, loads only marked recordings, shows standard sweep/scope comparisons, and provides raw-array inspection, custom plots, shared-grid comparisons, SHA-256 verification, and CSV exports. <code>reproduce_frequency_sweep.py</code> is a separate hardware diagnostic that replays the frequency sweep with explicit confirmation; it changes the laser setpoint, opens/closes the shutter, and reconfigures the MXA. Close the TUI before running it, and use it only when you intend to operate the bench. The shared Polars analysis helpers live in <code>notebooks/toolbox.py</code>.
 
 ~~~sh
-uv run --group notebooks marimo edit notebooks/sweep_scope_analysis.py
+uv run --group notebooks marimo edit notebooks/workbench.py
+
+# Hardware-driving diagnostic only; close the TUI first
+uv run --group notebooks marimo edit notebooks/reproduce_frequency_sweep.py
 ~~~
+
+Try the whole workflow without connecting to hardware:
+
+~~~sh
+uv run scripts/demo_data.py demo-data
+IYZEE_DATA_DIR=demo-data uv run --group notebooks marimo edit notebooks/workbench.py
+~~~
+
+Synthetic runs are marked in the catalog; their signal shapes are for learning the interface, not scientific results. <code>scripts/ci.sh notebooks</code> runs the notebook-specific lint and analysis tests in the optional environment.
 
 ### Hardware tests
 
