@@ -12,7 +12,6 @@ dependencies = [
     "matplotlib>=3.11.1",
     "numpy>=2.5.2",
     "platformdirs>=4.0",
-    "polars>=2.0.0",
     "prompt-toolkit>=3.0.41",
     "pyte>=0.8.2",
     "pyvisa>=1.16.2",
@@ -71,7 +70,6 @@ ignore_missing_imports = true
 [dependency-groups]
 dev = [
     "ipdb>=0.13.13",
-    "marimo>=0.25.1",
     "mypy>=1.18.2",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
