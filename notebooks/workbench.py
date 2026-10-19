@@ -511,6 +511,71 @@ def _(
 
 
 @app.cell
+def _(field_chart, mo, pl, points, traces):
+    plots = []
+    frequency = points.filter(pl.col("kind") == "frequency")
+    bandwidth = points.filter(pl.col("kind") == "bandwidth")
+
+    if not frequency.is_empty():
+        plots.extend(
+            [
+                mo.md("#### Frequency sweeps · shared frequency reference"),
+                field_chart(
+                    frequency,
+                    x="offset_mhz",
+                    y="rel_noise_mean_db",
+                    color="run",
+                    title="Frequency sweeps · mean relative noise",
+                ),
+            ]
+        )
+    if not bandwidth.is_empty():
+        plots.extend(
+            [
+                mo.md("#### Bandwidth sweeps"),
+                field_chart(
+                    bandwidth,
+                    x="rbw_khz",
+                    y="rel_noise_mean_db",
+                    color="run",
+                    title="Bandwidth sweeps · mean relative noise",
+                ),
+            ]
+        )
+    if not traces.is_empty():
+        plots.extend(
+            [
+                mo.md("#### Scope captures"),
+                field_chart(
+                    traces,
+                    x="time",
+                    y="value",
+                    color="run",
+                    detail="channel",
+                    title="Scope waveforms · marked runs and channels",
+                ),
+            ]
+        )
+
+    view = (
+        mo.vstack(plots)
+        if plots
+        else mo.md("Mark compatible sweep or scope recordings to show quick plots.")
+    )
+    mo.vstack(
+        [
+            mo.md(
+                "## 4 · Quick plots\n"
+                "Standard comparisons appear automatically; use the plot builder below "
+                "for a different quantity or grouping."
+            ),
+            view,
+        ]
+    )
+    return
+
+
+@app.cell
 def _(frame_map, mo):
     plot_sources = list(frame_map)
     populated = [name for name, frame in frame_map.items() if not frame.is_empty()]
@@ -522,7 +587,7 @@ def _(frame_map, mo):
     mo.vstack(
         [
             mo.md(
-                "## 4 · Build a plot\nChoose the tidy table, then choose columns for the axes, colour, and line grouping."
+                "## 5 · Build a plot\nChoose the tidy table, then choose columns for the axes, colour, and line grouping."
             ),
             source,
         ]
@@ -649,7 +714,7 @@ def _(mo):
     mo.vstack(
         [
             mo.md(
-                "## 5 · Check and export\nChecksum verification reads each selected NPZ from disk; it does not alter recordings."
+                "## 6 · Check and export\nChecksum verification reads each selected NPZ from disk; it does not alter recordings."
             ),
             verify_button,
         ]
@@ -713,8 +778,8 @@ def _(
             mo.md("""
             ### Reusable in code
 
-            The tables are ordinary Polars dataframes. Keep a small selection in the notebook,
-            then use normal expressions or list comprehensions for a focused analysis.
+            These tables are ordinary Polars dataframes. Keep a small marked set and adapt
+            these recipes in the console, a script, or this notebook.
 
             ~~~python
             # Frequency points below shot noise, strongest first.
@@ -726,16 +791,35 @@ def _(
                 .sort("rel_noise_mean_db")
             )
 
-            # One best point per frequency run.
-            best = {
-                row["run"]: row
-                for row in best_points(points.filter(pl.col("kind") == "frequency")).to_dicts()
-            }
+            # Summarize repeats without losing the run label.
+            by_run = (
+                points.group_by(["kind", "run"])
+                .agg(
+                    pl.col("rel_noise_mean_db").min().alias("best_db"),
+                    pl.col("rel_noise_mean_db").mean().alias("mean_db"),
+                )
+                .sort("best_db")
+            )
 
-            # Inspect arrays of one marked file.
+            # Compare frequency runs on their shared measured range.
+            frequency = points.filter(pl.col("kind") == "frequency")
+            if frequency["run_id"].n_unique() > 1:
+                differences = delta_to_reference(frequency, frequency["run_id"][0])
+
+            # Inspect each saved array using a short loop.
             recording = load_recording(Path(marked["path"][0]))
             for name, array in recording.arrays.items():
                 print(name, array.shape)
+
+            # Reuse the same plot helper, or replace it with Matplotlib code.
+            if not frequency.is_empty():
+                fig = field_chart(
+                    frequency,
+                    x="offset_mhz",
+                    y="rel_noise_min_db",
+                    color="run",
+                    title="Lowest relative noise by laser detuning",
+                )
             ~~~
             """),
         ]
@@ -752,7 +836,7 @@ def _(mo):
     )
     mo.vstack(
         [
-            mo.md("## Compare runs on a shared x-grid"),
+            mo.md("## 7 · Compare runs on a shared x-grid"),
             comparison_kind,
         ]
     )
