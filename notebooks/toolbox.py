@@ -518,9 +518,7 @@ def array_frame(array: np.ndarray, index: int = 0) -> pl.DataFrame:
         raise ValueError(f"expected a 1-D or 2-D array, got shape {values.shape}")
 
     selected = np.asarray(selected, dtype=float)
-    return pl.DataFrame(
-        {"sample": np.arange(selected.size, dtype=np.int64), "value": selected}
-    )
+    return pl.DataFrame({"sample": np.arange(selected.size, dtype=np.int64), "value": selected})
 
 
 def _title(column: str) -> str:

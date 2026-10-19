@@ -440,9 +440,7 @@ def _(mo, np, raw_array_name, raw_recording):
 
 @app.cell
 def _(array_frame, field_chart, mo, np, pl, raw_array_name, raw_index, raw_recording, raw_run):
-    selected_array_frame = pl.DataFrame(
-        schema={"sample": pl.Int64, "value": pl.Float64}
-    )
+    selected_array_frame = pl.DataFrame(schema={"sample": pl.Int64, "value": pl.Float64})
     if raw_recording is None or raw_array_name is None or raw_run is None:
         raw_array_plot = mo.md("Select a readable recording and array above to plot its data.")
     else:
