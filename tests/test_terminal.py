@@ -7,8 +7,8 @@ ties them together (``terminal_view`` / ``screens.console``).
 
 from __future__ import annotations
 
-import atexit
 import asyncio
+import atexit
 import io
 import sys
 import time
