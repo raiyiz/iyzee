@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -17,6 +18,7 @@ pl = pytest.importorskip("polars")
 NOTEBOOKS = Path(__file__).parents[1] / "notebooks"
 sys.path.insert(0, str(NOTEBOOKS))
 
+import toolbox  # noqa: E402
 from toolbox import (  # noqa: E402
     array_frame,
     best_points,
@@ -167,3 +169,53 @@ def test_verification_reports_digest_mismatch(tmp_path):
     path = Path(catalog[0, "path"])
     path.write_bytes(path.read_bytes() + b"modified")
     assert verify(catalog)["integrity"].to_list() == ["MISMATCH"]
+
+
+def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch, tmp_path):
+    path = tmp_path / "scope.npz"
+    np.savez(path, placeholder=np.arange(4))
+    calls = 0
+
+    def decode(_recording):
+        nonlocal calls
+        calls += 1
+        time = np.linspace(-1e-3, 1e-3, 100)
+        return (
+            SimpleNamespace(
+                label="C1",
+                time=time,
+                values=np.sin(np.linspace(0, 10, 100)),
+                time_unit="S",
+                value_unit="V",
+            ),
+            SimpleNamespace(
+                label="C2",
+                time=time,
+                values=np.cos(np.linspace(0, 10, 100)),
+                time_unit="S",
+                value_unit="V",
+            ),
+        )
+
+    rows = pl.DataFrame(
+        {
+            "kind": ["scope"],
+            "path": [str(path)],
+            "label": ["SYNTHETIC · scope test"],
+            "run_id": ["scope-test"],
+            "synthetic": [True],
+        }
+    )
+    toolbox._cached_scope_traces.cache_clear()
+    monkeypatch.setattr(toolbox, "traces_from_scope_recording", decode)
+    try:
+        first = toolbox.scope_traces(rows, ["C1"], budget=20)
+        second = toolbox.scope_traces(rows, ["C2"], budget=40)
+    finally:
+        toolbox._cached_scope_traces.cache_clear()
+
+    assert calls == 1
+    assert set(first["channel"]) == {"C1"}
+    assert set(second["channel"]) == {"C2"}
+    assert first["synthetic"].to_list() == [True] * first.height
+    assert second["synthetic"].to_list() == [True] * second.height

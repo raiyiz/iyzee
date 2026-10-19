@@ -12,6 +12,7 @@ import json
 import math
 from collections.abc import Sequence
 from datetime import datetime
+from functools import lru_cache
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -431,6 +432,12 @@ def decimate(
     return time[index], values[index]
 
 
+@lru_cache(maxsize=4)
+def _cached_scope_traces(path: str, mtime_ns: int, size: int) -> tuple[Any, ...]:
+    """Decode a scope file once per file version; reuse traces when display controls change."""
+    return tuple(traces_from_scope_recording(load_recording(Path(path))))
+
+
 def scope_traces(
     rows: pl.DataFrame,
     channels: Sequence[str],
@@ -441,7 +448,9 @@ def scope_traces(
     output = []
     for row in rows.filter(pl.col("kind") == "scope").iter_rows(named=True):
         try:
-            traces = traces_from_scope_recording(_load(row))
+            path = Path(row["path"])
+            stat = path.stat()
+            traces = _cached_scope_traces(str(path), stat.st_mtime_ns, stat.st_size)
         except Exception as exc:  # noqa: BLE001 - isolate a damaged archive from other selected runs
             if issues is not None:
                 issues.append({"run": row["label"], "problem": f"could not read scope: {exc}"})
