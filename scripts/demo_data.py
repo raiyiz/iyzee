@@ -222,22 +222,22 @@ def write_demo(root: Path, *, now: datetime | None = None, seed: int = 7) -> lis
     def month(when: datetime) -> Path:
         return root / f"{when:%Y-%m}"
 
-    for days, name, depth, fade in (
+    for bandwidth_days, name, depth, fade in (
         (9, "rbw-baseline", 3.2, 140.0),
         (6, "rbw-lowpower", 2.1, 110.0),
         (2, "rbw-aligned", 3.8, 190.0),
     ):
-        when = at(days, 10)
+        when = at(bandwidth_days, 10)
         bandwidth_sweep(month(when), when, rng, name=name, depth_db=depth, fade_khz=fade)
 
-    for days, name, depth, detuning, count, status in (
+    for frequency_days, name, depth, detuning, count, status in (
         (8, "scan-coarse", 2.2, -20.0, 21, "completed"),
         (5, "scan-aligned", 3.4, 5.0, 21, "completed"),
         (3, "scan-repeat", 3.1, 10.0, 21, "completed"),
         (1, "scan-pumped", 4.0, 0.0, 21, "completed"),
         (0.2, "scan-interrupted", 2.8, 15.0, 9, "aborted"),
     ):
-        when = at(days, 14)
+        when = at(frequency_days, 14)
         frequency_sweep(
             month(when),
             when,
