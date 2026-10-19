@@ -6,9 +6,11 @@ Run with:
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -21,6 +23,9 @@ sys.path.insert(0, str(NOTEBOOKS))
 import toolbox  # noqa: E402
 from toolbox import (  # noqa: E402
     array_frame,
+    decimate,
+    scope_channels,
+    scope_traces,
     best_points,
     csv_bytes,
     delta_to_reference,
@@ -31,6 +36,7 @@ from toolbox import (  # noqa: E402
 )
 
 from iyzee.experiment import StepResult, save_step_results  # noqa: E402
+from scripts.demo_data import write_demo  # noqa: E402
 
 
 def _save_sweep(
@@ -219,3 +225,43 @@ def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch, tmp_
     assert set(second["channel"]) == {"C2"}
     assert first["synthetic"].to_list() == [True] * first.height
     assert second["synthetic"].to_list() == [True] * second.height
+
+
+def test_scope_decimation_preserves_extrema_within_the_point_budget():
+    time = np.arange(1000, dtype=float)
+    values = np.zeros(1000)
+    values[117] = 25.0
+    values[703] = -22.0
+
+    reduced_time, reduced_values = decimate(time, values, budget=100)
+
+    assert len(reduced_values) <= 100
+    assert len(reduced_time) == len(reduced_values)
+    assert reduced_values.max() == 25.0
+    assert reduced_values.min() == -22.0
+
+
+def test_synthetic_scope_recordings_flow_through_analysis_helpers(tmp_path):
+    paths = write_demo(
+        tmp_path,
+        now=datetime(2026, 10, 19, 12, tzinfo=UTC),
+        seed=3,
+    )
+    catalog = scan_catalog(tmp_path)
+    scopes = catalog.filter(pl.col("kind") == "scope")
+
+    assert len(paths) == 11
+    assert scopes.height == 3
+    assert scopes["synthetic"].to_list() == [True, True, True]
+
+    channel_stats = scope_channels(scopes)
+    assert set(channel_stats["channel"]) == {"C1", "C2", "C3"}
+    assert channel_stats["synthetic"].all()
+    assert channel_stats.filter(pl.col("channel") == "C2")["peak_to_peak"].min() > 0
+
+    traces = scope_traces(scopes, ["C2"], budget=200)
+    assert set(traces["channel"]) == {"C2"}
+    assert traces.height <= 3 * 200
+    assert set(traces["time_unit"]) == {"ms"}
+    assert traces["synthetic"].all()
+    assert all(math.isfinite(value) for value in traces["value"].to_list())
