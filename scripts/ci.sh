@@ -82,7 +82,7 @@ update() {
 }
 
 case "${1:-}" in
-    test)      sync; uv run --locked pytest --durations=25 ;;
+    test)      sync; TERM=dumb uv run --locked pytest --durations=25 ;;
     # Real instruments; never part of `all`. Extra arguments go to pytest:
     #   scripts/ci.sh hardware --hardware-actuate -m 'not scope'
     hardware)  sync; shift; uv run --locked pytest tests/hardware --hardware "$@" ;;
