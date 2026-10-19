@@ -202,7 +202,7 @@ The README is the **quick-start and orientation layer**. The technical guide goe
 | [Architecture](docs/chapters/architecture.typ) | understand ownership, locking, layering, the scope transport and why the code is shaped this way |
 | [MXA & measurements](docs/chapters/mxa-and-measurements.typ) | know what the analyzer is programmed to do: RBW/VBW, averaging, zero span, the two standard sweeps |
 | [TUI & devices](docs/chapters/tui-and-devices.typ) | connect and debug instruments, learn the pages, keys and console |
-| [Data & analysis](docs/chapters/data-and-analysis.typ) | know what every saved file contains, load it, and judge whether to trust it |
+| [Data & analysis](docs/chapters/data-and-analysis.typ) | understand recordings, compare runs in the notebook workbench, and assess data integrity |
 | [Rubidium physics](docs/chapters/rubidium-physics.typ) | follow the D1/D2 structure, spectroscopy and polarization self-rotation |
 | [Code map](docs/chapters/code-map.typ) | find where any module is explained (generated from the code) |
 
