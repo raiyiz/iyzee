@@ -213,7 +213,7 @@ def _(center, channel, duration_ms, mo, points, run_button, step_khz):
 
         {len(collected)} of {total} points measured · saved to `{save_path}`
 
-        Open it in `notebooks/workbench.py` (press *Rescan folder* there).
+        Open it in `notebooks/workbench.py` (press *Refresh index* there).
         """
     )
     return
