@@ -178,12 +178,21 @@ The reference-comparison view interpolates compatible runs onto the chosen run's
 does not extrapolate beyond another run's measured range. A positive difference means the
 comparison run has more relative noise than the reference.
 
-The code-first companion,
-#file("notebooks/sweep_scope_analysis.py", label: "sweep_scope_analysis.py"),
-presents the tables, standard plots, exports, and integrity check without the full interactive
-raw-array/plot-builder workflow. Both notebooks reuse the ordinary Python helpers in
-#file("notebooks/toolbox.py", label: "toolbox.py"), which can also be imported from scripts or
-IPython. The data path uses the same
+The workbench includes ready-made frequency, bandwidth, and scope comparisons as well as
+the configurable plot builder. The companion analysis-recipe notebook has therefore been
+folded into this workbench: its standard plots and concise Polars examples now live next to
+the interactive tools instead of duplicating the catalog and selection flow.
+
+For a different task—reproducing the live frequency sweep to investigate TUI versus
+measurement behavior—use
+#file("notebooks/reproduce_frequency_sweep.py", label: "reproduce_frequency_sweep.py").
+This notebook operates real instruments: it changes the laser setpoint, opens and closes the
+shutter, and reconfigures the MXA. It requires explicit confirmation and the TUI must be
+closed first. It is intentionally separate from the read-only workbench.
+
+The shared helpers in
+#file("notebooks/toolbox.py", label: "toolbox.py")
+remain ordinary Python functions; the data path uses the same
 #file("src/iyzee/experiment/io.py", label: "recording loader")
 and
 #file("src/iyzee/analysis.py", label: "analysis summaries")
