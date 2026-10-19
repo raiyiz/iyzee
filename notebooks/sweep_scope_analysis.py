@@ -20,7 +20,6 @@ def _():
     import polars as pl
 
     from iyzee.config import data_root
-    from iyzee.experiment import load_recording
 
     notebook_dir = str(Path(__file__).resolve().parent)
     if notebook_dir not in sys.path:
@@ -30,7 +29,6 @@ def _():
         best_points,
         channels_in,
         csv_bytes,
-        delta_to_reference,
         field_chart,
         scan_catalog,
         scope_channels,
