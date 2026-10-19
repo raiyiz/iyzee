@@ -513,3 +513,21 @@ async def test_a_capture_worker_dying_with_a_base_exception_does_not_take_the_ap
         assert app.is_running
         assert app.sweep_running is False
         assert "Capture failed" in _log_text(screen)
+
+
+@async_test
+async def test_even_frequency_sweeps_are_centered_symmetrically() -> None:
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open_sweep_screen(pilot)
+        screen.query_one("#freq-points", Input).value = "4"
+        await pilot.pause()
+
+        sweep = screen._build_frequency_run()
+        offsets = [step.x_value - 377.1052067 for step in sweep.steps]
+
+        np.testing.assert_allclose(
+            offsets,
+            np.array([-1.5, -0.5, 0.5, 1.5]) * 10e-6,
+            atol=1e-12,
+        )
+        assert sum(offsets) == pytest.approx(0.0, abs=1e-12)

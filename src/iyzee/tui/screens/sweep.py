@@ -302,7 +302,7 @@ class SweepScreen(Page):
         points = self._read("freq-points", _positive_int, "Points", maximum=MAX_POINTS)
         step_khz = self._read("freq-offset-khz", _positive_float, "Offset step")
         step_thz = step_khz * 1e-9
-        offsets = [(i - (points // 2)) * step_thz for i in range(points)]
+        offsets = [(i - (points - 1) / 2) * step_thz for i in range(points)]
         return build_frequency_sweep(
             laser_center_thz=center,
             wavemeter_channel=channel,

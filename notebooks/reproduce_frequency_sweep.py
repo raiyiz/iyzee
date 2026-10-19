@@ -112,7 +112,8 @@ def _(center, channel, duration_ms, mo, points, run_button, step_khz):
 
         # The offset calculation from SweepScreen._build_frequency_run.
         step_thz = step_khz.value * 1e-9
-        offsets_thz = [(i - (int(points.value) // 2)) * step_thz for i in range(int(points.value))]
+        point_count = int(points.value)
+        offsets_thz = [(i - (point_count - 1) / 2) * step_thz for i in range(point_count)]
 
         sweep = build_frequency_sweep(
             laser_center_thz=center.value,
