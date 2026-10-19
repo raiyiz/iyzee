@@ -211,7 +211,7 @@ def _(catalog, mo):
     mo.vstack(
         [
             mo.md(
-                "## 2 · Mark and compare\nMark any mix of sweep and scope files. Selections are independent of the catalog filter."
+                "## 2 · Mark and compare\nMark any mix of sweep and scope files. The browser filter does not clear your selection, so you can compare different run types together."
             ),
             marked_files,
         ]
@@ -322,6 +322,71 @@ def _(chosen_channels, scope_records, scope_traces, trace_budget):
 
 
 @app.cell
+def _(field_chart, mo, pl, points, traces):
+    plots = []
+    frequency = points.filter(pl.col("kind") == "frequency")
+    bandwidth = points.filter(pl.col("kind") == "bandwidth")
+
+    if not frequency.is_empty():
+        plots.extend(
+            [
+                mo.md("#### Frequency sweeps · shared frequency reference"),
+                field_chart(
+                    frequency,
+                    x="offset_mhz",
+                    y="rel_noise_mean_db",
+                    color="run",
+                    title="Frequency sweeps · mean relative noise",
+                ),
+            ]
+        )
+    if not bandwidth.is_empty():
+        plots.extend(
+            [
+                mo.md("#### Bandwidth sweeps"),
+                field_chart(
+                    bandwidth,
+                    x="rbw_khz",
+                    y="rel_noise_mean_db",
+                    color="run",
+                    title="Bandwidth sweeps · mean relative noise",
+                ),
+            ]
+        )
+    if not traces.is_empty():
+        plots.extend(
+            [
+                mo.md("#### Scope captures"),
+                field_chart(
+                    traces,
+                    x="time",
+                    y="value",
+                    color="run",
+                    detail="channel",
+                    title="Scope waveforms · marked runs and channels",
+                ),
+            ]
+        )
+
+    view = (
+        mo.vstack(plots)
+        if plots
+        else mo.md("Mark compatible sweep or scope recordings to show quick plots.")
+    )
+    mo.vstack(
+        [
+            mo.md(
+                "## 3 · Compare your recordings\n"
+                "Standard comparisons appear automatically; use the plot builder below "
+                "for a different quantity or grouping."
+            ),
+            view,
+        ]
+    )
+    return
+
+
+@app.cell
 def _(
     channel_stats,
     mo,
@@ -370,17 +435,12 @@ def _(marked, mo):
             label="Recording",
         )
         run_view = raw_run
-    mo.vstack(
-        [
-            mo.md(
-                "## 3 · Explore raw arrays\nChoose any marked recording and a saved array. "
-                "One-dimensional arrays plot directly; for two-dimensional arrays, choose a "
-                "first-axis row (often a sweep point). Higher dimensions are never flattened silently."
-            ),
-            run_view,
-        ]
+    raw_section_heading = mo.md(
+        "Choose a marked recording and a saved array. One-dimensional arrays plot directly; "
+        "for two-dimensional arrays, select a first-axis row. Higher dimensions are never "
+        "flattened silently."
     )
-    return (raw_run,)
+    return raw_run, run_view, raw_section_heading
 
 
 @app.cell
@@ -417,8 +477,7 @@ def _(Path, load_recording, marked, mo, pl, raw_run):
                     label="Saved array",
                 )
                 array_view = raw_array_name
-    array_view
-    return raw_array_name, raw_recording
+    return raw_array_name, raw_recording, array_view
 
 
 @app.cell
@@ -443,8 +502,7 @@ def _(mo, np, raw_array_name, raw_recording):
         else:
             raw_index = None
             index_view = mo.md(f"Array shape: {_raw_values.shape} · dtype: {_raw_values.dtype}")
-    index_view
-    return (raw_index,)
+    return raw_index, index_view
 
 
 @app.cell
@@ -506,73 +564,7 @@ def _(
                 )
         else:
             raw_array_plot = mo.md("The selected array or row contains no samples to plot.")
-    raw_array_plot
-    return (selected_array_frame,)
-
-
-@app.cell
-def _(field_chart, mo, pl, points, traces):
-    plots = []
-    frequency = points.filter(pl.col("kind") == "frequency")
-    bandwidth = points.filter(pl.col("kind") == "bandwidth")
-
-    if not frequency.is_empty():
-        plots.extend(
-            [
-                mo.md("#### Frequency sweeps · shared frequency reference"),
-                field_chart(
-                    frequency,
-                    x="offset_mhz",
-                    y="rel_noise_mean_db",
-                    color="run",
-                    title="Frequency sweeps · mean relative noise",
-                ),
-            ]
-        )
-    if not bandwidth.is_empty():
-        plots.extend(
-            [
-                mo.md("#### Bandwidth sweeps"),
-                field_chart(
-                    bandwidth,
-                    x="rbw_khz",
-                    y="rel_noise_mean_db",
-                    color="run",
-                    title="Bandwidth sweeps · mean relative noise",
-                ),
-            ]
-        )
-    if not traces.is_empty():
-        plots.extend(
-            [
-                mo.md("#### Scope captures"),
-                field_chart(
-                    traces,
-                    x="time",
-                    y="value",
-                    color="run",
-                    detail="channel",
-                    title="Scope waveforms · marked runs and channels",
-                ),
-            ]
-        )
-
-    view = (
-        mo.vstack(plots)
-        if plots
-        else mo.md("Mark compatible sweep or scope recordings to show quick plots.")
-    )
-    mo.vstack(
-        [
-            mo.md(
-                "## 4 · Quick plots\n"
-                "Standard comparisons appear automatically; use the plot builder below "
-                "for a different quantity or grouping."
-            ),
-            view,
-        ]
-    )
-    return
+    return selected_array_frame, raw_array_plot
 
 
 @app.cell
@@ -584,15 +576,8 @@ def _(frame_map, mo):
         value=populated[0] if populated else plot_sources[0],
         label="Data to plot",
     )
-    mo.vstack(
-        [
-            mo.md(
-                "## 5 · Build a plot\nChoose the tidy table, then choose columns for the axes, colour, and line grouping."
-            ),
-            source,
-        ]
-    )
-    return (source,)
+    source_view = mo.vstack([source])
+    return source, source_view
 
 
 @app.cell
@@ -669,8 +654,7 @@ def _(frame_map, mo, pl, source):
                 mo.hstack([color_field, detail_field, mark_type], align="start"),
             ]
         )
-    plot_controls
-    return color_field, detail_field, mark_type, plot_frame, x_field, y_field
+    return color_field, detail_field, mark_type, plot_frame, x_field, y_field, plot_controls
 
 
 @app.cell
@@ -704,22 +688,14 @@ def _(
             )
         except ValueError as exc:
             plot_view = mo.md(f"**Cannot draw this combination:** {exc}")
-    plot_view
-    return
+    return (plot_view,)
 
 
 @app.cell
 def _(mo):
     verify_button = mo.ui.run_button(label="Verify SHA-256 checksums of marked files")
-    mo.vstack(
-        [
-            mo.md(
-                "## 6 · Check and export\nChecksum verification reads each selected NPZ from disk; it does not alter recordings."
-            ),
-            verify_button,
-        ]
-    )
-    return (verify_button,)
+    verify_view = mo.vstack([verify_button])
+    return verify_button, verify_view
 
 
 @app.cell
@@ -730,8 +706,7 @@ def _(marked, mo, verify, verify_button):
         verification = mo.md(
             "Run checksum verification to check whether the saved arrays match their manifests."
         )
-    verification
-    return
+    return (verification,)
 
 
 @app.cell
@@ -744,7 +719,7 @@ def _(
     selected_array_frame,
     traces,
 ):
-    mo.vstack(
+    export_view = mo.vstack(
         [
             mo.md("### Download tables"),
             mo.hstack(
@@ -775,7 +750,9 @@ def _(
                 filename="iyzee-selected-array.csv",
                 label="Selected raw array CSV",
             ),
-            mo.md("""
+            mo.accordion(
+                {
+                    "Reusable in code": mo.md("""
             ### Reusable in code
 
             These tables are ordinary Polars dataframes. Keep a small marked set and adapt
@@ -821,10 +798,12 @@ def _(
                     title="Lowest relative noise by laser detuning",
                 )
             ~~~
-            """),
+            """)
+                }
+            ),
         ]
     )
-    return
+    return (export_view,)
 
 
 @app.cell
@@ -834,13 +813,8 @@ def _(mo):
         value="frequency",
         label="Sweep kind for point-by-point comparison",
     )
-    mo.vstack(
-        [
-            mo.md("## 7 · Compare runs on a shared x-grid"),
-            comparison_kind,
-        ]
-    )
-    return (comparison_kind,)
+    comparison_kind_view = mo.vstack([comparison_kind])
+    return comparison_kind, comparison_kind_view
 
 
 @app.cell
@@ -857,8 +831,7 @@ def _(comparison_kind, mo, pl, points):
     else:
         reference_run = None
         reference_view = mo.md("Mark at least one run of the selected sweep kind above.")
-    reference_view
-    return comparison_points, reference_run
+    return comparison_points, reference_run, reference_view
 
 
 @app.cell
@@ -879,7 +852,47 @@ def _(comparison_points, delta_to_reference, mo, pl, reference_run):
                 mo.ui.table(differences, selection=None, page_size=12),
             ]
         )
-    delta_table
+    return (delta_table,)
+
+
+@app.cell
+def _(
+    array_view,
+    comparison_kind_view,
+    delta_table,
+    export_view,
+    index_view,
+    mo,
+    plot_controls,
+    plot_view,
+    raw_array_plot,
+    raw_section_heading,
+    reference_view,
+    run_view,
+    source_view,
+    verification,
+    verify_view,
+):
+    mo.vstack(
+        [
+            mo.md(
+                "## Further analysis\nOpen a section only when you need raw arrays, custom plots, "
+                "pairwise comparison, or data checks and exports."
+            ),
+            mo.accordion(
+                {
+                    "Inspect raw arrays": mo.vstack(
+                        [raw_section_heading, run_view, array_view, index_view, raw_array_plot]
+                    ),
+                    "Build a custom plot": mo.vstack([source_view, plot_controls, plot_view]),
+                    "Compare runs on a shared x-grid": mo.vstack(
+                        [comparison_kind_view, reference_view, delta_table]
+                    ),
+                    "Integrity and export": mo.vstack([verify_view, verification, export_view]),
+                }
+            ),
+        ]
+    )
     return
 
 

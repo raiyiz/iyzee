@@ -6,24 +6,35 @@ Run with:
 
 from __future__ import annotations
 
+import math
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 pl = pytest.importorskip("polars")
 
-NOTEBOOKS = Path(__file__).parents[1] / "notebooks"
+ROOT = Path(__file__).parents[1]
+NOTEBOOKS = ROOT / "notebooks"
+SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(NOTEBOOKS))
+sys.path.insert(0, str(SCRIPTS))
 
+import toolbox  # noqa: E402
+from demo_data import write_demo  # noqa: E402
 from toolbox import (  # noqa: E402
     array_frame,
     best_points,
     csv_bytes,
+    decimate,
     delta_to_reference,
     field_chart,
     scan_catalog,
+    scope_channels,
+    scope_traces,
     sweep_points,
     verify,
 )
@@ -97,6 +108,7 @@ def test_catalog_uses_sidecars_and_marks_synthetic_data(tmp_path):
     assert catalog["synthetic"].to_list() == [True, True]
     assert catalog["status"].to_list() == ["completed", "completed"]
     assert all(catalog["label"].str.contains("Oct 18").to_list())
+    assert all(catalog["label"].str.contains("SYNTHETIC").to_list())
     assert set(catalog["name"]) == {"frequency-a", "rbw-baseline"}
 
 
@@ -123,6 +135,8 @@ def test_frequency_offsets_share_one_reference_between_runs(tmp_path):
     assert first["offset_mhz"].to_list() == pytest.approx([-55.0, -45.0])
     assert second["offset_mhz"].to_list() == pytest.approx([45.0, 55.0])
     assert first["rel_noise_mean_db"].to_list() == pytest.approx([-2.0, -1.0])
+    assert first["synthetic"].to_list() == [True, True]
+    assert all(label.startswith("SYNTHETIC · ") for label in first["run"].to_list())
 
 
 def test_best_points_and_reference_differences_do_not_extrapolate(tmp_path):
@@ -138,6 +152,7 @@ def test_best_points_and_reference_differences_do_not_extrapolate(tmp_path):
     reference_id = catalog.filter(pl.col("name") == "rbw-a")[0, "run_id"]
     delta = delta_to_reference(points, reference_id).sort("rbw_khz")
     assert delta["delta_db"].to_list() == pytest.approx([1.0, -1.0, 1.0])
+    assert delta["synthetic"].to_list() == [True, True, True]
     assert "delta_db" in delta.columns
 
 
@@ -163,3 +178,93 @@ def test_verification_reports_digest_mismatch(tmp_path):
     path = Path(catalog[0, "path"])
     path.write_bytes(path.read_bytes() + b"modified")
     assert verify(catalog)["integrity"].to_list() == ["MISMATCH"]
+
+
+def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch, tmp_path):
+    path = tmp_path / "scope.npz"
+    np.savez(path, placeholder=np.arange(4))
+    calls = 0
+
+    def decode(_recording):
+        nonlocal calls
+        calls += 1
+        time = np.linspace(-1e-3, 1e-3, 100)
+        return (
+            SimpleNamespace(
+                label="C1",
+                time=time,
+                values=np.sin(np.linspace(0, 10, 100)),
+                time_unit="S",
+                value_unit="V",
+            ),
+            SimpleNamespace(
+                label="C2",
+                time=time,
+                values=np.cos(np.linspace(0, 10, 100)),
+                time_unit="S",
+                value_unit="V",
+            ),
+        )
+
+    rows = pl.DataFrame(
+        {
+            "kind": ["scope"],
+            "path": [str(path)],
+            "label": ["SYNTHETIC · scope test"],
+            "run_id": ["scope-test"],
+            "synthetic": [True],
+        }
+    )
+    toolbox._cached_scope_traces.cache_clear()
+    monkeypatch.setattr(toolbox, "traces_from_scope_recording", decode)
+    try:
+        first = toolbox.scope_traces(rows, ["C1"], budget=20)
+        second = toolbox.scope_traces(rows, ["C2"], budget=40)
+    finally:
+        toolbox._cached_scope_traces.cache_clear()
+
+    assert calls == 1
+    assert set(first["channel"]) == {"C1"}
+    assert set(second["channel"]) == {"C2"}
+    assert first["synthetic"].to_list() == [True] * first.height
+    assert second["synthetic"].to_list() == [True] * second.height
+
+
+def test_scope_decimation_preserves_extrema_within_the_point_budget():
+    time = np.arange(1000, dtype=float)
+    values = np.zeros(1000)
+    values[117] = 25.0
+    values[703] = -22.0
+
+    reduced_time, reduced_values = decimate(time, values, budget=100)
+
+    assert len(reduced_values) <= 100
+    assert len(reduced_time) == len(reduced_values)
+    assert reduced_values.max() == 25.0
+    assert reduced_values.min() == -22.0
+
+
+def test_synthetic_scope_recordings_flow_through_analysis_helpers(tmp_path):
+    paths = write_demo(
+        tmp_path,
+        now=datetime(2026, 10, 19, 12, tzinfo=UTC),
+        seed=3,
+    )
+    catalog = scan_catalog(tmp_path)
+    scopes = catalog.filter(pl.col("kind") == "scope")
+
+    assert len(paths) == 11
+    assert scopes.height == 3
+    assert scopes["synthetic"].to_list() == [True, True, True]
+
+    channel_stats = scope_channels(scopes)
+    assert set(channel_stats["channel"]) == {"C1", "C2", "C3"}
+    assert channel_stats["synthetic"].all()
+    assert channel_stats.filter(pl.col("channel") == "C2")["peak_to_peak"].min() > 0
+
+    traces = scope_traces(scopes, ["C2"], budget=200)
+    assert set(traces["channel"]) == {"C2"}
+    assert traces.height <= 3 * 200
+    assert set(traces["time_unit"]) == {"ms"}
+    assert traces["synthetic"].all()
+    assert all(math.isfinite(value) for value in traces["value"].to_list())
