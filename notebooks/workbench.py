@@ -196,7 +196,7 @@ def _(catalog, kind_filter, mo, pl, text_filter):
             ]
         )
     browser_view
-    return (visible,)
+    return
 
 
 @app.cell
@@ -282,7 +282,7 @@ def _(
             mo.ui.table(channel_stats, selection=None, page_size=10),
         ]
     )
-    return channel_stats, marked, points, scope_records, sweep_issues, sweep_records
+    return channel_stats, marked, points, scope_records, sweep_issues
 
 
 @app.cell
@@ -310,7 +310,7 @@ def _(channels_in, mo, scope_records):
 
 
 @app.cell
-def _(scope_records, scope_traces, chosen_channels, trace_budget):
+def _(chosen_channels, scope_records, scope_traces, trace_budget):
     trace_issues = []
     traces = scope_traces(
         scope_records,
@@ -322,7 +322,16 @@ def _(scope_records, scope_traces, chosen_channels, trace_budget):
 
 
 @app.cell
-def _(channel_stats, mo, pl, points, selected_array_frame, trace_issues, traces, sweep_issues):
+def _(
+    channel_stats,
+    mo,
+    pl,
+    points,
+    selected_array_frame,
+    sweep_issues,
+    trace_issues,
+    traces,
+):
     frame_map = {
         "Frequency sweep points": points.filter(pl.col("kind") == "frequency"),
         "Bandwidth sweep points": points.filter(pl.col("kind") == "bandwidth"),
@@ -345,7 +354,7 @@ def _(channel_stats, mo, pl, points, selected_array_frame, trace_issues, traces,
             ]
         )
     issue_view
-    return frame_map, issue_frame
+    return (frame_map,)
 
 
 @app.cell
@@ -439,7 +448,17 @@ def _(mo, np, raw_array_name, raw_recording):
 
 
 @app.cell
-def _(array_frame, field_chart, mo, np, pl, raw_array_name, raw_index, raw_recording, raw_run):
+def _(
+    array_frame,
+    field_chart,
+    mo,
+    np,
+    pl,
+    raw_array_name,
+    raw_index,
+    raw_recording,
+    raw_run,
+):
     selected_array_frame = pl.DataFrame(schema={"sample": pl.Int64, "value": pl.Float64})
     if raw_recording is None or raw_array_name is None or raw_run is None:
         raw_array_plot = mo.md("Select a readable recording and array above to plot its data.")
@@ -586,11 +605,21 @@ def _(frame_map, mo, pl, source):
             ]
         )
     plot_controls
-    return color_field, detail_field, mark_type, plot_controls, plot_frame, x_field, y_field
+    return color_field, detail_field, mark_type, plot_frame, x_field, y_field
 
 
 @app.cell
-def _(color_field, detail_field, field_chart, mo, mark_type, plot_frame, source, x_field, y_field):
+def _(
+    color_field,
+    detail_field,
+    field_chart,
+    mark_type,
+    mo,
+    plot_frame,
+    source,
+    x_field,
+    y_field,
+):
     if x_field is None or y_field is None or plot_frame.is_empty():
         plot_view = mo.md(
             "No plottable rows yet. Mark some recordings and choose a populated data table."
@@ -641,7 +670,15 @@ def _(marked, mo, verify, verify_button):
 
 
 @app.cell
-def _(channel_stats, csv_bytes, marked, mo, points, selected_array_frame, traces):
+def _(
+    channel_stats,
+    csv_bytes,
+    marked,
+    mo,
+    points,
+    selected_array_frame,
+    traces,
+):
     mo.vstack(
         [
             mo.md("### Download tables"),
@@ -759,6 +796,11 @@ def _(comparison_points, delta_to_reference, mo, pl, reference_run):
             ]
         )
     delta_table
+    return
+
+
+@app.cell
+def _():
     return
 
 

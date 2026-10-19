@@ -40,14 +40,11 @@ def _():
     )
 
     return (
-        Path,
         best_points,
         channels_in,
         csv_bytes,
         data_root,
-        delta_to_reference,
         field_chart,
-        load_recording,
         mo,
         pl,
         scan_catalog,
@@ -109,7 +106,7 @@ def _(data_root, mo, scan_catalog):
             ]
         )
     catalog_view
-    return catalog, root
+    return (catalog,)
 
 
 @app.cell
@@ -174,11 +171,11 @@ def _(
             else mo.md("No selected recording failed to load."),
         ]
     )
-    return channel_stats, chosen, errors, points, scopes, traces
+    return points, traces
 
 
 @app.cell
-def _(field_chart, mo, points, traces, pl):
+def _(field_chart, mo, pl, points, traces):
     plots = []
     frequency = points.filter(pl.col("kind") == "frequency")
     bandwidth = points.filter(pl.col("kind") == "bandwidth")
@@ -294,7 +291,7 @@ def _(mo):
 
 
 @app.cell
-def _(catalog, csv_bytes, mo, marked, pl, verify):
+def _(catalog, csv_bytes, marked, mo, pl, verify):
     export_chosen = catalog.filter(pl.col("label").is_in(marked.value))
     mo.vstack(
         [
@@ -307,6 +304,11 @@ def _(catalog, csv_bytes, mo, marked, pl, verify):
             mo.ui.table(verify(export_chosen), selection=None, page_size=10),
         ]
     )
+    return
+
+
+@app.cell
+def _():
     return
 
 

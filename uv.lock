@@ -717,6 +717,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "platformdirs" },
+    { name = "polars" },
     { name = "prompt-toolkit" },
     { name = "pyte" },
     { name = "pyvisa" },
@@ -732,6 +733,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "ipdb" },
+    { name = "marimo" },
     { name = "mypy" },
     { name = "pre-commit" },
     { name = "pytest" },
@@ -749,6 +751,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "numpy", specifier = ">=2.5.2" },
     { name = "platformdirs", specifier = ">=4.0" },
+    { name = "polars", specifier = ">=2.0.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.41" },
     { name = "pyte", specifier = ">=0.8.2" },
     { name = "pyvisa", specifier = ">=1.16.2" },
@@ -764,6 +767,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "ipdb", specifier = ">=0.13.13" },
+    { name = "marimo", specifier = ">=0.25.1" },
     { name = "mypy", specifier = ">=1.18.2" },
     { name = "pre-commit", specifier = ">=4.6.2" },
     { name = "pytest", specifier = ">=9.1.1" },
