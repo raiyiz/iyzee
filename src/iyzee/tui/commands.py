@@ -12,11 +12,11 @@ the candidates.
 
 from __future__ import annotations
 
-import os
 import re
 import shlex
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from os.path import commonpath
 
 
 class CommandError(Exception):
@@ -126,7 +126,7 @@ class CommandRegistry:
         head = line[: len(line) - len(prefix)]
         if len(options) == 1:
             return head + options[0] + " ", options
-        return head + os.path.commonprefix(options), options
+        return head + commonpath(options), options
 
     def help_text(self, word: str | None = None) -> str:
         if word:
