@@ -7,7 +7,9 @@ ties them together (``terminal_view`` / ``screens.console``).
 
 from __future__ import annotations
 
+import atexit
 import asyncio
+import io
 import sys
 import time
 from typing import Any
@@ -154,6 +156,22 @@ async def test_session_runs_a_real_ipython_in_process() -> None:
     session._thread.join()
     assert not session._thread.is_alive()
     assert sys.stdout is real_stdout, "stdout is restored on close"
+
+
+def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(monkeypatch) -> None:
+    virtual_output: list[str] = []
+    session = IPythonSession(FakeApp(), on_output=virtual_output.append)
+    assert atexit.unregister(session._run_shell_atexit_operations)
+
+    host_stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", host_stdout)
+    try:
+        session._run_shell_atexit_operations()
+    finally:
+        session.close()
+
+    assert "\\x1b[0 q" not in host_stdout.getvalue()
+    assert "\\x1b[0 q" in "".join(virtual_output)
 
 
 def _prompt_line(screen_text) -> str:
