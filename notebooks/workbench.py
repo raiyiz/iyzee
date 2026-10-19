@@ -211,7 +211,7 @@ def _(catalog, mo):
     mo.vstack(
         [
             mo.md(
-                "## 2 · Mark and compare\nMark any mix of sweep and scope files. Selections are independent of the catalog filter."
+                "## 2 · Mark and compare\nMark any mix of sweep and scope files. The browser filter does not clear your selection, so you can compare different run types together."
             ),
             marked_files,
         ]
@@ -322,6 +322,71 @@ def _(chosen_channels, scope_records, scope_traces, trace_budget):
 
 
 @app.cell
+def _(field_chart, mo, pl, points, traces):
+    plots = []
+    frequency = points.filter(pl.col("kind") == "frequency")
+    bandwidth = points.filter(pl.col("kind") == "bandwidth")
+
+    if not frequency.is_empty():
+        plots.extend(
+            [
+                mo.md("#### Frequency sweeps · shared frequency reference"),
+                field_chart(
+                    frequency,
+                    x="offset_mhz",
+                    y="rel_noise_mean_db",
+                    color="run",
+                    title="Frequency sweeps · mean relative noise",
+                ),
+            ]
+        )
+    if not bandwidth.is_empty():
+        plots.extend(
+            [
+                mo.md("#### Bandwidth sweeps"),
+                field_chart(
+                    bandwidth,
+                    x="rbw_khz",
+                    y="rel_noise_mean_db",
+                    color="run",
+                    title="Bandwidth sweeps · mean relative noise",
+                ),
+            ]
+        )
+    if not traces.is_empty():
+        plots.extend(
+            [
+                mo.md("#### Scope captures"),
+                field_chart(
+                    traces,
+                    x="time",
+                    y="value",
+                    color="run",
+                    detail="channel",
+                    title="Scope waveforms · marked runs and channels",
+                ),
+            ]
+        )
+
+    view = (
+        mo.vstack(plots)
+        if plots
+        else mo.md("Mark compatible sweep or scope recordings to show quick plots.")
+    )
+    mo.vstack(
+        [
+            mo.md(
+                "## 3 · Compare your recordings\n"
+                "Standard comparisons appear automatically; use the plot builder below "
+                "for a different quantity or grouping."
+            ),
+            view,
+        ]
+    )
+    return
+
+
+@app.cell
 def _(
     channel_stats,
     mo,
@@ -373,7 +438,7 @@ def _(marked, mo):
     mo.vstack(
         [
             mo.md(
-                "## 3 · Explore raw arrays\nChoose any marked recording and a saved array. "
+                "## Advanced · Inspect raw arrays\nChoose any marked recording and a saved array. "
                 "One-dimensional arrays plot directly; for two-dimensional arrays, choose a "
                 "first-axis row (often a sweep point). Higher dimensions are never flattened silently."
             ),
@@ -511,71 +576,6 @@ def _(
 
 
 @app.cell
-def _(field_chart, mo, pl, points, traces):
-    plots = []
-    frequency = points.filter(pl.col("kind") == "frequency")
-    bandwidth = points.filter(pl.col("kind") == "bandwidth")
-
-    if not frequency.is_empty():
-        plots.extend(
-            [
-                mo.md("#### Frequency sweeps · shared frequency reference"),
-                field_chart(
-                    frequency,
-                    x="offset_mhz",
-                    y="rel_noise_mean_db",
-                    color="run",
-                    title="Frequency sweeps · mean relative noise",
-                ),
-            ]
-        )
-    if not bandwidth.is_empty():
-        plots.extend(
-            [
-                mo.md("#### Bandwidth sweeps"),
-                field_chart(
-                    bandwidth,
-                    x="rbw_khz",
-                    y="rel_noise_mean_db",
-                    color="run",
-                    title="Bandwidth sweeps · mean relative noise",
-                ),
-            ]
-        )
-    if not traces.is_empty():
-        plots.extend(
-            [
-                mo.md("#### Scope captures"),
-                field_chart(
-                    traces,
-                    x="time",
-                    y="value",
-                    color="run",
-                    detail="channel",
-                    title="Scope waveforms · marked runs and channels",
-                ),
-            ]
-        )
-
-    view = (
-        mo.vstack(plots)
-        if plots
-        else mo.md("Mark compatible sweep or scope recordings to show quick plots.")
-    )
-    mo.vstack(
-        [
-            mo.md(
-                "## 4 · Quick plots\n"
-                "Standard comparisons appear automatically; use the plot builder below "
-                "for a different quantity or grouping."
-            ),
-            view,
-        ]
-    )
-    return
-
-
-@app.cell
 def _(frame_map, mo):
     plot_sources = list(frame_map)
     populated = [name for name, frame in frame_map.items() if not frame.is_empty()]
@@ -587,7 +587,7 @@ def _(frame_map, mo):
     mo.vstack(
         [
             mo.md(
-                "## 5 · Build a plot\nChoose the tidy table, then choose columns for the axes, colour, and line grouping."
+                "## Advanced · Build a custom plot\nChoose the tidy table, then choose columns for the axes, colour, and line grouping."
             ),
             source,
         ]
@@ -714,7 +714,7 @@ def _(mo):
     mo.vstack(
         [
             mo.md(
-                "## 6 · Check and export\nChecksum verification reads each selected NPZ from disk; it does not alter recordings."
+                "## Advanced · Integrity and export\nChecksum verification reads each selected NPZ from disk; it does not alter recordings."
             ),
             verify_button,
         ]
@@ -775,7 +775,7 @@ def _(
                 filename="iyzee-selected-array.csv",
                 label="Selected raw array CSV",
             ),
-            mo.md("""
+            mo.accordion({"Reusable in code": mo.md("""
             ### Reusable in code
 
             These tables are ordinary Polars dataframes. Keep a small marked set and adapt
@@ -821,7 +821,7 @@ def _(
                     title="Lowest relative noise by laser detuning",
                 )
             ~~~
-            """),
+            """)}),
         ]
     )
     return
@@ -836,7 +836,7 @@ def _(mo):
     )
     mo.vstack(
         [
-            mo.md("## 7 · Compare runs on a shared x-grid"),
+            mo.md("## Advanced · Compare runs on a shared x-grid"),
             comparison_kind,
         ]
     )
