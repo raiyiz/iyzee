@@ -347,7 +347,6 @@ def _(channel_stats, mo, pl, points, trace_issues, traces, sweep_issues):
     return frame_map, issue_frame
 
 
-
 @app.cell
 def _(marked, mo):
     if marked.is_empty():

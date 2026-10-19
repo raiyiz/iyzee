@@ -86,6 +86,7 @@ def test_array_frame_selects_a_row_and_rejects_ambiguous_shapes():
     with pytest.raises(ValueError, match="1-D or 2-D"):
         array_frame(np.zeros((2, 3, 4)))
 
+
 def test_catalog_uses_sidecars_and_marks_synthetic_data(tmp_path):
     _save_sweep(tmp_path, "frequency-a", [377.1, 377.10001], [-2.0, -1.0], kind="frequency")
     _save_sweep(tmp_path, "rbw-baseline", [20e3, 40e3], [-2.0, -1.0])

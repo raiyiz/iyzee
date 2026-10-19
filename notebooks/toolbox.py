@@ -512,7 +512,9 @@ def array_frame(array: np.ndarray, index: int = 0) -> pl.DataFrame:
         selected = values
     elif values.ndim == 2:
         if not 0 <= index < values.shape[0]:
-            raise ValueError(f"row index {index} is outside an array with {values.shape[0]} rows")
+            raise ValueError(
+                f"row index {index} is outside an array with {values.shape[0]} rows"
+            )
         selected = values[index]
     else:
         raise ValueError(f"expected a 1-D or 2-D array, got shape {values.shape}")
