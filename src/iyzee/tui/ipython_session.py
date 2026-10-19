@@ -51,6 +51,7 @@ import IPython
 from IPython.core.interactiveshell import InteractiveShell
 from IPython.terminal.interactiveshell import TerminalInteractiveShell
 from prompt_toolkit.application import create_app_session
+from prompt_toolkit.cursor_shapes import SimpleCursorShapeConfig
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import ColorDepth
@@ -257,6 +258,11 @@ class IPythonSession:
             self.shell = TerminalInteractiveShell(
                 config=config, user_ns=lab_namespace(app, namespace)
             )
+        # The terminal view draws its cursor itself. Prevent Prompt Toolkit from
+        # emitting cursor-shape escape sequences to the host terminal.
+        if self.shell.pt_app is not None:
+            self.shell.pt_app.cursor = SimpleCursorShapeConfig()
+
         # IPython's get_ipython() (used by the prompt's own key bindings,
         # page(), %pdoc, ...) reads InteractiveShell's class-level singleton
         # pointer, which a plain constructor never sets. Assigning it directly

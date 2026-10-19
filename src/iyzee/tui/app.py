@@ -400,21 +400,14 @@ class IyzeeApp(App):
             page.refresh_readiness()
 
     def _on_log_entry(self, entry: LogEntry) -> None:
-        """``TuiLogHandler``'s callback — runs on whichever thread just
-        logged something, which is almost never this app's own thread (see
-        ``TuiLogHandler``'s docstring), so hop onto it before touching any
-        widget, the same as every screen's own worker->UI callbacks do.
-
-        ``call_from_thread`` itself refuses to run when it's *already* on
-        the app's thread (a direct call, not from a worker) as well as
-        when the app isn't running yet (a log call during startup, before
-        ``run()``) — both are real, both just mean "call it directly"
-        rather than an error worth surfacing.
-        """
-        try:
-            self.call_from_thread(self._show_log_entry, entry)
-        except RuntimeError:
+        """Update the live log view on the UI thread while the app is running."""
+        if not self.is_running:
+            return
+        if threading.get_ident() == self._thread_id:
             self._show_log_entry(entry)
+        else:
+            with contextlib.suppress(RuntimeError):
+                self.call_from_thread(self._show_log_entry, entry)
 
     def _show_log_entry(self, entry: LogEntry) -> None:
         for screen in self.query(LogScreen):

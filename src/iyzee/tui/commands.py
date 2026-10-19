@@ -16,7 +16,6 @@ import re
 import shlex
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from os.path import commonpath
 
 
 class CommandError(Exception):
@@ -126,7 +125,10 @@ class CommandRegistry:
         head = line[: len(line) - len(prefix)]
         if len(options) == 1:
             return head + options[0] + " ", options
-        return head + commonpath(options), options
+        prefix = options[0]
+        while not all(option.startswith(prefix) for option in options[1:]):
+            prefix = prefix[:-1]
+        return head + prefix, options
 
     def help_text(self, word: str | None = None) -> str:
         if word:

@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from helpers import FakeApp, FakeHandle, history_manager
+from IPython.core.completer import provisionalcompleter
 from IPython.core.interactiveshell import InteractiveShell
 
 from iyzee.devices.handles import LockedProxy
@@ -48,8 +49,12 @@ class IyzeeIPython:
             result = self.shell.run_cell(source, store_history=True, silent=False)
         return _Result(out.getvalue(), err.getvalue(), result.error_in_exec is None)
 
-    def complete(self, source: str, cursor_pos: int):
-        return self.shell.complete(source, line=source, cursor_pos=cursor_pos)
+    def complete(self, source: str, cursor_pos: int) -> list[str]:
+        with provisionalcompleter():
+            return [
+                completion.text
+                for completion in self.shell.Completer.completions(source, cursor_pos)
+            ]
 
     @property
     def history(self) -> list[str]:
@@ -114,7 +119,7 @@ def test_the_wavemeter_is_on_lab_before_connecting_and_behind_the_lock_after(mon
     assert isinstance(lab.wavemeter, Wavemeter)
     assert lab.wavemeter.read_frequency(4) == pytest.approx(377.105)
 
-    _prefix, matches = IyzeeIPython(FakeApp()).complete("lab.wavemeter.", len("lab.wavemeter."))
+    matches = IyzeeIPython(FakeApp()).complete("lab.wavemeter.", len("lab.wavemeter."))
     assert ".read_frequency" in matches and ".set_pid_setpoint" in matches  # and tab-completes
 
     app = FakeApp(handles={"wavemeter": FakeHandle(device=Wavemeter())})  # connected
@@ -146,13 +151,13 @@ def test_lab_tab_completion_lists_lab_attributes_and_device_methods() -> None:
 
     shell = IyzeeIPython(FakeApp(handles={"mxa": FakeHandle(device=Device())}))
 
-    _text, matches = shell.complete("lab.", len("lab."))
+    matches = shell.complete("lab.", len("lab."))
     assert {".mx", ".results", ".last_run", ".connected"} <= set(matches)
 
-    _prefix, matches = shell.complete("lab.mx.", len("lab.mx."))
+    matches = shell.complete("lab.mx.", len("lab.mx."))
     assert {".configure", ".single_sweep_wait"} <= set(matches)
 
-    _prefix, matches = shell.complete("lab.mx.si", len("lab.mx.si"))
+    matches = shell.complete("lab.mx.si", len("lab.mx.si"))
     assert ".single_sweep_wait" in matches
 
 

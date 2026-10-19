@@ -201,7 +201,7 @@ def shell_config(history_file: str | Path | None = None) -> Config:
         history_file = Path(history_file)
         history_file.parent.mkdir(parents=True, exist_ok=True)
         config.HistoryManager.hist_file = str(history_file)
-    config.InteractiveShell.log_output = False
+    config.HistoryManager.db_log_output = False
     config.InteractiveShell.banner1 = ""
     config.InteractiveShell.banner2 = ""
     # Jedi does static analysis and can't see through LabProxy's dynamic
