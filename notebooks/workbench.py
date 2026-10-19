@@ -482,6 +482,8 @@ def _(array_frame, field_chart, mo, np, pl, raw_array_name, raw_index, raw_recor
                         figure,
                     ]
                 )
+        else:
+            raw_array_plot = mo.md("The selected array or row contains no samples to plot.")
     raw_array_plot
     return (selected_array_frame,)
 
