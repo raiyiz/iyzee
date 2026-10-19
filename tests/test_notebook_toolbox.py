@@ -23,14 +23,14 @@ sys.path.insert(0, str(NOTEBOOKS))
 import toolbox  # noqa: E402
 from toolbox import (  # noqa: E402
     array_frame,
-    decimate,
-    scope_channels,
-    scope_traces,
     best_points,
     csv_bytes,
+    decimate,
     delta_to_reference,
     field_chart,
     scan_catalog,
+    scope_channels,
+    scope_traces,
     sweep_points,
     verify,
 )
