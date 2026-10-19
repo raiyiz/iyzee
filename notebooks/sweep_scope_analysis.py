@@ -27,7 +27,6 @@ def _():
         sys.path.insert(0, notebook_dir)
 
     from toolbox import (
-        array_frame,
         best_points,
         channels_in,
         csv_bytes,
@@ -42,7 +41,6 @@ def _():
 
     return (
         Path,
-        array_frame,
         best_points,
         channels_in,
         csv_bytes,
@@ -264,6 +262,8 @@ def _(mo):
     differences = delta_to_reference(frequency, reference_id)
 
     # Inspect available raw data, then plot a selected 1-D / 2-D array.
+    from toolbox import array_frame
+
     row = chosen.row(0, named=True)
     recording = load_recording(Path(row["path"]))
     print({name: array.shape for name, array in recording.arrays.items()})
