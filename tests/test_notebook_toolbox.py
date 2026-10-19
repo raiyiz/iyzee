@@ -24,6 +24,7 @@ sys.path.insert(0, str(NOTEBOOKS))
 sys.path.insert(0, str(SCRIPTS))
 
 import toolbox  # noqa: E402
+from demo_data import write_demo  # noqa: E402
 from toolbox import (  # noqa: E402
     array_frame,
     best_points,
@@ -39,7 +40,6 @@ from toolbox import (  # noqa: E402
 )
 
 from iyzee.experiment import StepResult, save_step_results  # noqa: E402
-from demo_data import write_demo  # noqa: E402
 
 
 def _save_sweep(
