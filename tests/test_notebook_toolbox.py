@@ -97,6 +97,7 @@ def test_catalog_uses_sidecars_and_marks_synthetic_data(tmp_path):
     assert catalog["synthetic"].to_list() == [True, True]
     assert catalog["status"].to_list() == ["completed", "completed"]
     assert all(catalog["label"].str.contains("Oct 18").to_list())
+    assert all(catalog["label"].str.contains("SYNTHETIC").to_list())
     assert set(catalog["name"]) == {"frequency-a", "rbw-baseline"}
 
 
@@ -123,6 +124,8 @@ def test_frequency_offsets_share_one_reference_between_runs(tmp_path):
     assert first["offset_mhz"].to_list() == pytest.approx([-55.0, -45.0])
     assert second["offset_mhz"].to_list() == pytest.approx([45.0, 55.0])
     assert first["rel_noise_mean_db"].to_list() == pytest.approx([-2.0, -1.0])
+    assert first["synthetic"].to_list() == [True, True]
+    assert all(label.startswith("SYNTHETIC · ") for label in first["run"].to_list())
 
 
 def test_best_points_and_reference_differences_do_not_extrapolate(tmp_path):
@@ -138,6 +141,7 @@ def test_best_points_and_reference_differences_do_not_extrapolate(tmp_path):
     reference_id = catalog.filter(pl.col("name") == "rbw-a")[0, "run_id"]
     delta = delta_to_reference(points, reference_id).sort("rbw_khz")
     assert delta["delta_db"].to_list() == pytest.approx([1.0, -1.0, 1.0])
+    assert delta["synthetic"].to_list() == [True, True, True]
     assert "delta_db" in delta.columns
 
 

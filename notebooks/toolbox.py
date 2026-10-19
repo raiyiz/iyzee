@@ -110,7 +110,8 @@ def _unique_labels(frame: pl.DataFrame) -> pl.Series:
     counts: dict[str, int] = {}
     for row in frame.iter_rows(named=True):
         when = row["started"].strftime("%b %d %H:%M") if row["started"] else "undated"
-        base = f"{row['name'] or row['kind']} · {when}"
+        prefix = "SYNTHETIC · " if row["synthetic"] else ""
+        base = f"{prefix}{row['name'] or row['kind']} · {when}"
         counts[base] = counts.get(base, 0) + 1
         labels.append(base if counts[base] == 1 else f"{base} ({counts[base]})")
     return pl.Series("label", labels, dtype=pl.String)
@@ -227,6 +228,7 @@ def sweep_points(rows: pl.DataFrame, issues: list[dict[str, str]] | None = None)
                     {
                         "run": row["label"],
                         "run_id": row["run_id"],
+                        "synthetic": row["synthetic"],
                         "kind": row["kind"],
                         "point": mean.index,
                         "point_label": mean.label,
@@ -258,6 +260,7 @@ def sweep_points(rows: pl.DataFrame, issues: list[dict[str, str]] | None = None)
     schema = {
         "run": pl.String,
         "run_id": pl.String,
+        "synthetic": pl.Boolean,
         "kind": pl.String,
         "point": pl.Int64,
         "point_label": pl.String,
@@ -303,7 +306,13 @@ def delta_to_reference(
         raise ValueError("compare only one sweep kind at a time")
     x = "offset_mhz" if kinds == ["frequency"] else "rbw_khz"
     reference = points.filter(pl.col("run_id") == reference_run_id).drop_nulls([x, metric]).sort(x)
-    schema = {"run": pl.String, "run_id": pl.String, x: pl.Float64, "delta_db": pl.Float64}
+    schema = {
+        "run": pl.String,
+        "run_id": pl.String,
+        "synthetic": pl.Boolean,
+        x: pl.Float64,
+        "delta_db": pl.Float64,
+    }
     if reference.is_empty():
         return pl.DataFrame(schema=schema)
     ref_x = reference[x].to_numpy()
@@ -324,6 +333,7 @@ def delta_to_reference(
             {
                 "run": other["run"][0],
                 "run_id": run_id,
+                "synthetic": bool(other["synthetic"][0]),
                 x: float(x_value),
                 "delta_db": float(delta),
             }
@@ -359,6 +369,7 @@ def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
                 {
                     "run": row["label"],
                     "run_id": row["run_id"],
+                    "synthetic": row["synthetic"],
                     "channel": channel,
                     "unit": str(waveform.get("value_unit") or ""),
                     "samples": stats.get("sample_count")
@@ -378,6 +389,7 @@ def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
     schema = {
         "run": pl.String,
         "run_id": pl.String,
+        "synthetic": pl.Boolean,
         "channel": pl.String,
         "unit": pl.String,
         "samples": pl.Int64,
@@ -443,6 +455,7 @@ def scope_traces(
                 {
                     "run": row["label"],
                     "run_id": row["run_id"],
+                    "synthetic": row["synthetic"],
                     "channel": trace.label,
                     "time": float(t * 1000 if seconds else t),
                     "time_unit": "ms" if seconds else trace.time_unit,
@@ -456,6 +469,7 @@ def scope_traces(
         schema={
             "run": pl.String,
             "run_id": pl.String,
+            "synthetic": pl.Boolean,
             "channel": pl.String,
             "time": pl.Float64,
             "time_unit": pl.String,
