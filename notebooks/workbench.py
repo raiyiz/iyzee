@@ -855,7 +855,6 @@ def _(comparison_points, delta_to_reference, mo, pl, reference_run):
     return (delta_table,)
 
 
-
 @app.cell
 def _(
     array_view,
