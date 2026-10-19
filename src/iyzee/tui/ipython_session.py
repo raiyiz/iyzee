@@ -36,6 +36,7 @@ handled here:
 from __future__ import annotations
 
 import asyncio
+import atexit
 import builtins
 import contextlib
 import ctypes
@@ -51,7 +52,6 @@ import IPython
 from IPython.core.interactiveshell import InteractiveShell
 from IPython.terminal.interactiveshell import TerminalInteractiveShell
 from prompt_toolkit.application import create_app_session
-from prompt_toolkit.cursor_shapes import SimpleCursorShapeConfig
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import ColorDepth
@@ -258,10 +258,12 @@ class IPythonSession:
             self.shell = TerminalInteractiveShell(
                 config=config, user_ns=lab_namespace(app, namespace)
             )
-        # The terminal view draws its cursor itself. Prevent Prompt Toolkit from
-        # emitting cursor-shape escape sequences to the host terminal.
-        if self.shell.pt_app is not None:
-            self.shell.pt_app.cursor = SimpleCursorShapeConfig()
+        # IPython registers this handler during construction. Its vi-mode cleanup
+        # writes ESC[0 q directly to process-wide stdout, which is Textual's real
+        # terminal after this session closes. Keep IPython's cleanup, but route its
+        # terminal output into the virtual console instead.
+        atexit.unregister(self.shell.atexit_operations)
+        atexit.register(self._run_shell_atexit_operations)
 
         # IPython's get_ipython() (used by the prompt's own key bindings,
         # page(), %pdoc, ...) reads InteractiveShell's class-level singleton
@@ -306,6 +308,15 @@ class IPythonSession:
             # worker, say). A stale id here would aim ``interrupt()``'s KeyboardInterrupt at
             # whichever stranger now owns it.
             self._thread_id = None
+
+    def _run_shell_atexit_operations(self) -> None:
+        """Run IPython cleanup without writing its cursor reset to the host terminal."""
+        stdout = sys.stdout
+        try:
+            sys.stdout = cast(TextIO, self._sink)
+            self.shell.atexit_operations()
+        finally:
+            sys.stdout = stdout
 
     def _welcome(self) -> None:
         mode = self.shell.editing_mode
