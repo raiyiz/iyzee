@@ -883,10 +883,5 @@ def _(comparison_points, delta_to_reference, mo, pl, reference_run):
     return
 
 
-@app.cell
-def _():
-    return
-
-
 if __name__ == "__main__":
     app.run()
