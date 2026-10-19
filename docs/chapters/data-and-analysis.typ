@@ -141,6 +141,54 @@ the Results page calls the same ones.
 
 #tested-by("test_load_sweep_example_reads_what_save_step_results_wrote", "test_load_scope_example_reads_what_save_scope_acquisition_wrote", "test_a_bandwidth_sweep_reports_requested_setpoints_and_relative_noise")
 
+
+= Notebook workbench <data-workbench>
+
+The interactive workbench is a read-only front end for recordings already on disk. It never
+connects to an instrument or changes hardware state. It starts with the JSON sidecars and
+loads the numeric arrays only for recordings you mark, so browsing a large data directory
+does not read every waveform into memory.
+
+Install the optional notebook dependencies and launch it from the repository root:
+
+#raw("uv sync --group notebooks\nuv run --group notebooks marimo edit notebooks/workbench.py", lang: "sh", block: true)
+
+Use the directory control to select a recording folder (or set `IYZEE_DATA_DIR` before
+launching), then press *Refresh index* after adding or changing files. The browser shows
+recording kind, status, instrument, synthetic-data flag, warnings, file size, and whether a
+checksum is recorded. Mark a working set to populate the analysis views.
+
+#table(
+  columns: (1.2fr, 2.5fr),
+  stroke: (x, y) => (bottom: 0.4pt + hairline),
+  inset: (x: 5pt, y: 4pt),
+  fill: none,
+  [*View*], [*What it provides*],
+  [*Sweep comparison*], [One row per sweep point, best point per run, and relative-noise and trace-level metrics in tidy Polars tables.],
+  [*Scope statistics*], [Per-channel sample count, extrema, peak-to-peak amplitude, mean, RMS, standard deviation, and recorded channel settings.],
+  [*Scope traces*], [Selected waveforms for overlay and plotting. Plotting uses extrema-preserving decimation for responsiveness; the saved arrays are not modified.],
+  [*Raw arrays*], [Inspect a named array and plot it. One-dimensional arrays and a selected row of a two-dimensional array are supported; higher-dimensional arrays are rejected rather than silently flattened.],
+  [*Plot builder*], [Choose a tidy table, x/y fields, series groups, and line/point/bar marks instead of writing a separate plotting function for each question.],
+  [*Integrity and export*], [Verify the NPZ SHA-256 digest against its JSON manifest and download tidy tables as CSV. Missing digests are reported rather than treated as verified.],
+)
+
+For frequency sweeps, plotted offsets use one median reference shared by all marked frequency
+runs; the code does not re-center each run independently, so measured drift remains visible.
+The reference-comparison view interpolates compatible runs onto the chosen run's x-grid and
+does not extrapolate beyond another run's measured range. A positive difference means the
+comparison run has more relative noise than the reference.
+
+The code-first companion,
+#file("notebooks/sweep_scope_analysis.py", label: "sweep_scope_analysis.py"),
+presents the tables, standard plots, exports, and integrity check without the full interactive
+raw-array/plot-builder workflow. Both notebooks reuse the ordinary Python helpers in
+#file("notebooks/toolbox.py", label: "toolbox.py"), which can also be imported from scripts or
+IPython. The data path uses the same
+#file("src/iyzee/experiment/io.py", label: "recording loader")
+and
+#file("src/iyzee/analysis.py", label: "analysis summaries")
+as the rest of iyzee.
+
 = Deciding whether to trust a recording <data-trust>
 
 A recording is only as good as its provenance, and iyzee records the provenance so you do not have to remember it. Before using one, check:
