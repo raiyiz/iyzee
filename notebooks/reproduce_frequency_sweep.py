@@ -45,9 +45,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    center = mo.ui.number(
-        value=377.1052067, step=1e-7, label="Laser center (THz)", full_width=True
-    )
+    center = mo.ui.number(value=377.1052067, step=1e-7, label="Laser center (THz)", full_width=True)
     channel = mo.ui.number(1, 8, value=4, step=1, label="Wavemeter channel")
     points = mo.ui.number(1, 200, value=5, step=1, label="Points")
     step_khz = mo.ui.number(value=10, start=0.001, step=1, label="Offset step (kHz)")
