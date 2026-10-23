@@ -171,16 +171,19 @@ def test_shutter_handle_is_a_channel_of_the_psu_it_is_built_on() -> None:
     assert psu.commands[-1] == ("off", (3,)) and psu.instrument is not None
 
 
-def test_shutter_handle_retains_controller_when_safe_close_fails() -> None:
+def test_shutter_handle_retains_controller_when_safe_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     psu = _FakePsuDevice()
     handle = ShutterHandle(cast(Any, _FakePsuHandle(psu)))
     handle.connect()
     shutter = handle.device
+    assert shutter is not None
 
-    def fail_close():
+    def fail_close(self):
         raise RuntimeError("PSU timeout")
 
-    shutter.safe_close = fail_close
+    monkeypatch.setattr(instruments_mod.ShutterControl, "safe_close", fail_close)
     with pytest.raises(RuntimeError, match="PSU timeout"):
         handle.disconnect()
     assert handle.device is shutter
