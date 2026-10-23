@@ -317,8 +317,7 @@ def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkey
     assert prepared[0][0] is mx  # the caller's analyzer
     assert frequency.run_metadata["status"] == "completed"
     assert (
-        frequency.run_metadata["run_id"]
-        and frequency.run_metadata["config"]["center_hz"] == 1.5e6
+        frequency.run_metadata["run_id"] and frequency.run_metadata["config"]["center_hz"] == 1.5e6
     )
 
     monkeypatch.setattr(
