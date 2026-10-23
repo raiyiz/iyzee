@@ -183,9 +183,14 @@ class ShutterHandle(_LockedHandle):
 
     def disconnect(self) -> None:
         """Close the shutter (if the PSU can still be reached); never closes the PSU."""
-        shutter, self._shutter = self._shutter, None
-        if shutter is not None and shutter.psu.instrument is not None:
+        shutter = self._shutter
+        if shutter is None:
+            return
+        if shutter.psu.instrument is not None:
+            # Keep the controller published if verification fails, so cleanup can
+            # be retried rather than forgetting that the shutter may be powered.
             shutter.safe_close()
+        self._shutter = None
 
     def probe(self) -> str:
         return f"shutter ready on CH{self._chan}"
