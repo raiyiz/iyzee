@@ -68,11 +68,18 @@ def test_save_step_results_writes_a_pickle_free_data_and_metadata_pair(tmp_path)
 
 def test_save_step_results_uses_metadata_attached_to_sweep_results(tmp_path):
     class SweepResults(list):
-        run_metadata = {"run_id": "run-1", "status": "completed", "config": {"avg_count": 10}}
+        def __init__(self, results):
+            super().__init__(results)
+            self.run_metadata = {
+                "run_id": "run-1",
+                "status": "completed",
+                "config": {"avg_count": 10},
+            }
 
-    path = save_step_results(SweepResults([_result(1.0)]), tmp_path)
+    results = SweepResults([_result(1.0)])
+    path = save_step_results(results, tmp_path)
     sidecar = json.loads(path.with_suffix(".json").read_text())
-    assert sidecar["run_metadata"] == SweepResults.run_metadata
+    assert sidecar["run_metadata"] == results.run_metadata
 
 
 def test_save_step_results_aligns_traces_across_points(tmp_path):
