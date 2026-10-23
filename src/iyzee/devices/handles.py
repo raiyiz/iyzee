@@ -177,7 +177,7 @@ class ShutterHandle(_LockedHandle):
         """Close the shutter (if the PSU can still be reached); never closes the PSU."""
         shutter, self._shutter = self._shutter, None
         if shutter is not None and shutter.psu.instrument is not None:
-            shutter.close()
+            shutter.safe_close()
 
     def probe(self) -> str:
         return f"shutter ready on CH{self._chan}"
