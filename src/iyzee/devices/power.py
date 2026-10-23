@@ -1,9 +1,10 @@
+import contextlib
 import math
 import time
-
-import pyvisa
 from collections.abc import Iterable
 from dataclasses import dataclass
+
+import pyvisa
 
 from ..config import IP, address
 from .base import SHUTTER_CHANNEL_DEFAULT, BaseDevice
@@ -69,11 +70,8 @@ class PSU(BaseDevice):
 
     def _drop_after_io_error(self) -> None:
         """Best-effort close after VISA reports an unusable transport."""
-        try:
+        with contextlib.suppress(Exception):
             self.close()
-        except Exception:  # noqa: BLE001 - cleanup must not mask the I/O error
-            # BaseDevice clears its published reference before closing the resource.
-            pass
 
     def _write(self, command: str) -> None:
         instrument = self.instrument
@@ -242,7 +240,7 @@ class ShutterControl:
                 last_error = RuntimeError(
                     f"PSU still reports shutter channel {self.chan} enabled after close"
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - retry on any close/verification failure
                 last_error = exc
 
             if attempt + 1 < attempts and retry_delay_s:
