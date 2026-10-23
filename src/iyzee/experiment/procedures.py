@@ -126,9 +126,13 @@ def acquire_pair(
         squeezing = acquire_trace(mx, TRACE_SQZ)
     finally:
         if shutter is not None:
-            shutter.close()
-            if shutter.is_open():
-                raise RuntimeError("shutter remained open after close")
+            safe_close = getattr(shutter, "safe_close", None)
+            if callable(safe_close):
+                safe_close()
+            else:
+                shutter.close()
+                if shutter.is_open():
+                    raise RuntimeError("shutter remained open after close")
             if settle_time_s:
                 time.sleep(settle_time_s)
     return {"squeezing": squeezing, "shot_noise": acquire_trace(mx, TRACE_SHOT)}
