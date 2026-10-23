@@ -362,7 +362,9 @@ class SweepScreen(Page):
                     if not state.general_output:
                         raise RuntimeError("PSU master output is off; enable it before sweeping")
                     if state.channel(shutter.chan).selected:
-                        raise RuntimeError("shutter channel is already enabled; close it before sweeping")
+                        raise RuntimeError(
+                            "shutter channel is already enabled; close it before sweeping"
+                        )
                 prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
             except Exception as exc:
                 log.exception("sweep: failed to configure analyzer")
