@@ -1,3 +1,4 @@
+import pyvisa
 import pytest
 
 from iyzee import IP, SHUTTER_CHANNEL_DEFAULT
@@ -192,6 +193,19 @@ def test_retrieve_state_reports_what_the_supply_says():
         selected=True,
     )
     assert state.is_live(3) and not state.is_live(1)
+
+
+def test_psu_drops_a_timed_out_session_and_does_not_restore_channel_on_closed_link():
+    supply = FakeHMP()
+    psu = _connected_psu(supply)
+
+    def timeout(command):
+        raise pyvisa.errors.VisaIOError(pyvisa.constants.StatusCode.error_timeout)
+
+    supply.query = timeout
+    with pytest.raises(pyvisa.errors.VisaIOError):
+        psu.retrieve_state([3])
+    assert psu.instrument is None
 
 
 def test_retrieve_state_only_asks_and_puts_the_selected_channel_back():
