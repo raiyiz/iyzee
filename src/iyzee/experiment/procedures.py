@@ -66,29 +66,40 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
 
 
 def acquire_trace(mx, trace_num):
-    """Acquire one trace and return its data."""
+    """Acquire one trace and return its data, refusing an incomplete sweep."""
     mx.set_trace_update(trace_num, True)
     try:
-        mx.single_sweep_wait()
+        if not mx.single_sweep_wait():
+            raise TimeoutError(f"MXA sweep for trace {trace_num} did not complete")
         return mx.get_trace_data(trace_num=trace_num, binary=False)
     finally:
-        mx.set_trace_update(trace_num, False)
+        # A VISA timeout invalidates the MXA connection. Do not let cleanup try
+        # another command on that already-dropped resource and mask the timeout.
+        if getattr(mx, "instrument", object()) is not None:
+            mx.set_trace_update(trace_num, False)
 
 
 def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
-    """Acquire the squeezing and shot-noise traces, in that order.
+    """Acquire squeezing and shot-noise traces, verifying the shutter transitions.
 
-    A ``shutter`` is open only around the squeezing acquisition and is closed again (in a
-    ``finally``) before the shot-noise reference, which must not include the squeezed-light
-    path. Without one both traces are taken as the setup stands.
+    The shutter is open only around the squeezing acquisition and is closed again
+    before the shot-noise reference. A missing PSU master output or failed channel
+    transition must stop the measurement rather than silently recording shot noise
+    as squeezing.
     """
     try:
         if shutter is not None:
             shutter.open()
+            if not shutter.is_open():
+                raise RuntimeError(
+                    "shutter did not open; check the PSU master output and shutter channel"
+                )
         squeezing = acquire_trace(mx, TRACE_SQZ)
     finally:
         if shutter is not None:
             shutter.close()
+            if shutter.is_open():
+                raise RuntimeError("shutter remained open after close")
     return {"squeezing": squeezing, "shot_noise": acquire_trace(mx, TRACE_SHOT)}
 
 
