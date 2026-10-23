@@ -346,7 +346,9 @@ class LockedProxy:
             setattr(target, name, value)
 
     def __dir__(self) -> list[str]:
-        return [name for name in dir(object.__getattribute__(self, "_target")) if name != "instrument"]
+        return [
+            name for name in dir(object.__getattribute__(self, "_target")) if name != "instrument"
+        ]
 
     def __repr__(self) -> str:
         return repr(object.__getattribute__(self, "_target"))
