@@ -277,7 +277,8 @@ def frequency_sweep_steps(
 ) -> list[FrequencyStep]:
     """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
-        offsets_thz = [i * FREQUENCY_STEP_THZ for i in range(-1, 1)]
+        # Five points around the requested center: -2, -1, 0, +1, +2 steps.
+        offsets_thz = [i * FREQUENCY_STEP_THZ for i in range(-2, 3)]
     return [
         FrequencyStep(laser_center_thz + offset, wavemeter_channel, relax_time_s)
         for offset in offsets_thz
