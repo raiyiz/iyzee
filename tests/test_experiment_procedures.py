@@ -55,8 +55,10 @@ class BoomStep:
 class FakeShutterControl:
     """Stand-in for power.ShutterControl as a context manager."""
 
-    def __init__(self):
+    def __init__(self, *, can_open=True):
         self.events = []
+        self._open = False
+        self.can_open = can_open
 
     def __enter__(self):
         return self
@@ -66,9 +68,14 @@ class FakeShutterControl:
 
     def open(self):
         self.events.append("open")
+        self._open = True
 
     def close(self):
         self.events.append("close")
+        self._open = False
+
+    def is_open(self):
+        return self._open and self.can_open
 
 
 class FakeMXAForTraceAcquisition:
@@ -80,6 +87,20 @@ class FakeMXAForTraceAcquisition:
 
     def single_sweep_wait(self):
         raise RuntimeError("sweep failed")
+
+
+class FakeMXATimeout:
+    def __init__(self):
+        self.update_states = []
+
+    def set_trace_update(self, trace_num, state):
+        self.update_states.append((trace_num, state))
+
+    def single_sweep_wait(self):
+        return False
+
+    def get_trace_data(self, **kwargs):
+        pytest.fail("trace data must not be read after a sweep timeout")
 
 
 def _quiet(monkeypatch):
@@ -250,6 +271,11 @@ def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(monk
         acquire_trace(mx, 1)
     assert mx.update_states == [(1, True), (1, False)]
 
+    timed_out = FakeMXATimeout()
+    with pytest.raises(TimeoutError, match="did not complete"):
+        acquire_trace(timed_out, 1)
+    assert timed_out.update_states == [(1, True), (1, False)]
+
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
     plain = FakeMXA()
     assert acquire_pair(plain) == {"squeezing": [1], "shot_noise": [2]}  # no shutter: both traces
@@ -262,3 +288,9 @@ def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(monk
     with pytest.raises(RuntimeError, match="sweep failed"):
         acquire_pair(FakeMXA(), shutter)
     assert shutter.events == ["open", "close"]  # closed even though the trace failed
+
+    unavailable = FakeShutterControl(can_open=False)
+    with pytest.raises(RuntimeError, match="shutter did not open"):
+        acquire_pair(FakeMXA(), unavailable)
+    assert unavailable.events == ["open", "close"]
+    assert not unavailable.is_open()
