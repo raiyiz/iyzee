@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -135,6 +136,7 @@ class _FakePsuDevice:
     def __init__(self, *, connected: bool = True) -> None:
         self.instrument: object | None = object() if connected else None
         self.commands: list[tuple[str, tuple[object, ...]]] = []
+        self.selected_channels: set[int] = set()
 
     def set_voltage(self, voltage: float, channel: int) -> None:
         self.commands.append(("volt", (channel, voltage)))
@@ -144,9 +146,16 @@ class _FakePsuDevice:
 
     def enable_output(self, channel: int) -> None:
         self.commands.append(("on", (channel,)))
+        self.selected_channels.add(channel)
 
     def disable_output(self, channel: int) -> None:
         self.commands.append(("off", (channel,)))
+        self.selected_channels.discard(channel)
+
+    def retrieve_state(self):
+        return SimpleNamespace(
+            channel=lambda number: SimpleNamespace(selected=number in self.selected_channels)
+        )
 
 
 class _FakePsuHandle:
