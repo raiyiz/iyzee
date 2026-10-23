@@ -254,6 +254,14 @@ def save_step_results(
     module is the only writer, so that stale-for-an-instant window isn't
     worth a heavier two-phase commit here.
     """
+    if run_metadata is None:
+        # Scripted sweeps return a list-compatible object with its RunRecord
+        # attached, so the common run_sweep -> save_step_results path is
+        # self-describing without extra ceremony from every caller.
+        attached_metadata = getattr(results, "run_metadata", None)
+        if isinstance(attached_metadata, dict):
+            run_metadata = attached_metadata
+
     if path is None:
         path = savedir / f"{_new_stem(name)}.npz"
     trace_names = list(dict.fromkeys(name for result in results for name in result.traces))
