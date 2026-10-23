@@ -1,5 +1,5 @@
-import pyvisa
 import pytest
+import pyvisa
 
 from iyzee import IP, SHUTTER_CHANNEL_DEFAULT
 from iyzee.devices.power import PSU, ChannelState, PSUState, ShutterControl
