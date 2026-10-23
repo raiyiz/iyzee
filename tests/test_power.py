@@ -245,6 +245,39 @@ def test_bad_channels_and_bad_replies_are_errors_never_guesses():
                 psu.retrieve_state()
 
 
+def test_safe_close_verifies_the_channel_is_disarmed():
+    supply = FakeHMP()
+    shutter = ShutterControl(_connected_psu(supply), chan=3)
+    shutter.configure()
+    shutter.open()
+    assert supply.channels[3]["SEL"] == 1
+
+    shutter.safe_close()
+    assert supply.channels[3]["SEL"] == 0
+    assert not shutter.is_open()
+
+
+def test_safe_close_retries_when_the_channel_refuses_to_disarm(monkeypatch):
+    supply = FakeHMP()
+    psu = _connected_psu(supply)
+    shutter = ShutterControl(psu, chan=3)
+    shutter.configure()
+    shutter.open()
+    real_disable = psu.disable_output
+    attempts = []
+
+    def disable_once_fails(channel):
+        attempts.append(channel)
+        if len(attempts) == 1:
+            return
+        real_disable(channel)
+
+    monkeypatch.setattr(psu, "disable_output", disable_once_fails)
+    shutter.safe_close(retry_delay_s=0)
+    assert attempts == [3, 3]
+    assert supply.channels[3]["SEL"] == 0
+
+
 def test_the_shutter_reports_open_only_when_the_supply_says_it_is_powered():
     supply = FakeHMP()
     shutter = ShutterControl(_connected_psu(supply), chan=2)
