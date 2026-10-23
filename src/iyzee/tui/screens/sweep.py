@@ -54,6 +54,7 @@ from ...experiment import (
     create_dirs,
     difference_series,
     prepare_analyzer,
+    read_analyzer_settings,
     run_sequence,
     save_step_results,
 )
@@ -78,6 +79,24 @@ LIVE_PLOT_INTERVAL_S = 0.1
 
 # How each instrument key a sweep ``requires`` is named in "connect the ..." messages.
 _INSTRUMENT_NAMES = {"mxa": "MXA", "shutter": "shutter", "wavemeter": "wavemeter"}
+
+
+def _preflight_shutter_supply(shutter: Any | None) -> None:
+    """Refuse to start a sweep if the PSU cannot safely power the shutter."""
+    if shutter is None:
+        return
+    psu = getattr(shutter, "psu", None)
+    retrieve_state = getattr(psu, "retrieve_state", None)
+    if not callable(retrieve_state):
+        # Lightweight screen fakes have no PSU. The real ShutterControl always
+        # exposes its parent PSU; acquisition independently verifies shutter state.
+        return
+
+    state = retrieve_state()
+    if not state.general_output:
+        raise RuntimeError("PSU master output is off; enable it before sweeping")
+    if state.channel(shutter.chan).selected:
+        raise RuntimeError("shutter channel is already enabled; close it before sweeping")
 
 
 class SweepAborted(Exception):
@@ -353,13 +372,15 @@ class SweepScreen(Page):
                 stack.enter_context(lock)
 
             try:
+                _preflight_shutter_supply(devices.get("shutter"))
                 prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
+                applied_settings = read_analyzer_settings(mx)
             except Exception as exc:
                 log.exception("sweep: failed to configure analyzer")
                 self._ui(self._finish, kind, aborted=False, setup_error=exc)
                 return
 
-            record = RunRecord(config=asdict(config))
+            record = RunRecord(config={**asdict(config), "applied_settings": applied_settings})
             self._record = record
             ctx = ExperimentContext(
                 mx=mx,

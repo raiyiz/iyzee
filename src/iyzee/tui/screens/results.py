@@ -313,6 +313,8 @@ class ResultsScreen(Page):
         self._checkboxes: dict[str, Checkbox] = {}
         self._selected_point = 0
         self._load_generation = 0
+        self._scan_generation = 0
+        self._scan_complete = False
         self._render_generation = 0
         self._point_render_generation = 0
         self._set_sweep_visible(False)
@@ -325,35 +327,51 @@ class ResultsScreen(Page):
         self.query_one("#results-list").focus()
 
     def refresh_runs(self) -> None:
-        """Re-scan the data directory (newest first), keeping the selection.
-
-        ``ListView`` posts its own ``Highlighted`` message on every change to
-        ``.index``, including the implicit ``None -> 0`` it makes the moment
-        the first item is mounted into a previously-empty list, not just the
-        explicit assignment below. Rebuilding the list would otherwise drive
-        :meth:`on_list_view_highlighted` (and everything it triggers: a file
-        load, a worker-threaded render) two or three times for what is, to
-        the person looking at the screen, one visit to this page.
-        ``_suppress_events`` turns those off for the rebuild, and this method
-        makes the one call that matters, to ``_select`` or ``_show_empty``,
-        itself.
-        """
+        """Schedule a background scan of recordings, preserving the selection."""
         list_view = self.query_one(f"#{self.LIST_ID}", ListView)
         index = list_view.index
         previous = (
             self._paths[index] if index is not None and 0 <= index < len(self._paths) else None
         )
-        self._paths = sorted(
-            _DATA_ROOT.glob("**/*.npz"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
         self.query_one(f"#{self.HINT_ID}", Static).update(
             f"Saved recordings are read from {escape(str(_DATA_ROOT))}"
         )
+        self._scan_generation += 1
+        self._scan_complete = False
+        self._scan_runs(self._scan_generation, previous)
+
+    @work(thread=True, exclusive=True, group="results-scan", exit_on_error=False)
+    def _scan_runs(self, generation: int, previous: Path | None) -> None:
+        """Gather file paths and modification times without blocking the Textual event loop."""
+        entries: list[tuple[Path, float]] = []
+        try:
+            for path in _DATA_ROOT.glob("**/*.npz"):
+                try:
+                    modified = path.stat().st_mtime
+                except OSError:
+                    # The file may have been removed or become inaccessible while scanning.
+                    continue
+                entries.append((path, modified))
+        except OSError:
+            # A missing or temporarily unavailable data directory is an empty listing.
+            entries = []
+        entries.sort(key=lambda entry: entry[1], reverse=True)
+        self._ui(self._populate_runs, generation, entries, previous)
+
+    def _populate_runs(
+        self, generation: int, entries: list[tuple[Path, float]], previous: Path | None
+    ) -> None:
+        """Update the list on the UI thread using stat data gathered by the worker."""
+        if generation != self._scan_generation:
+            return
+        self._paths = [path for path, _ in entries]
+        self._scan_complete = True
+        list_view = self.query_one(f"#{self.LIST_ID}", ListView)
         self._suppress_events = True
         try:
             list_view.clear()
-            for path in self._paths:
-                list_view.append(ListItem(Label(run_label(path, path.stat().st_mtime))))
+            for path, modified in entries:
+                list_view.append(ListItem(Label(run_label(path, modified))))
             if self._paths:
                 list_view.index = self._paths.index(previous) if previous in self._paths else 0
         finally:

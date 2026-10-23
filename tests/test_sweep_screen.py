@@ -12,6 +12,7 @@ import asyncio
 import itertools
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -47,6 +48,23 @@ def test_the_standalone_validators_accept_good_input_and_name_the_field_on_bad()
             _positive_int(raw, "field", maximum=None)
     with pytest.raises(ValueError, match=f"at most {MAX_POINTS}"):
         _positive_int(str(MAX_POINTS + 1), "field", maximum=MAX_POINTS)
+
+
+def test_shutter_preflight_checks_the_parent_psu_before_starting() -> None:
+    def shutter(*, general_output: bool, selected: bool):
+        psu = SimpleNamespace(
+            retrieve_state=lambda: SimpleNamespace(
+                general_output=general_output,
+                channel=lambda _: SimpleNamespace(selected=selected),
+            )
+        )
+        return SimpleNamespace(psu=psu, chan=3)
+
+    sweep_mod._preflight_shutter_supply(shutter(general_output=True, selected=False))
+    with pytest.raises(RuntimeError, match="PSU master output is off"):
+        sweep_mod._preflight_shutter_supply(shutter(general_output=False, selected=False))
+    with pytest.raises(RuntimeError, match="channel is already enabled"):
+        sweep_mod._preflight_shutter_supply(shutter(general_output=True, selected=True))
 
 
 # -- the mounted form ---------------------------------------------------------------------
@@ -366,6 +384,9 @@ class _FakeMxaForCapture:
     def get_frequency_axis(self) -> list[float]:
         return self._freq
 
+    def get_errors(self) -> list[str]:
+        return []
+
 
 @async_test
 async def test_capture_trace_plots_power_vs_frequency() -> None:
@@ -416,6 +437,7 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
     assert meta["status"] == "completed_with_errors"
     assert meta["finished_at_utc"] and meta["started_at_utc"]
     assert meta["config"]["res_bw_hz"] > 0  # AnalyzerConfig, as the sweep used it
+    assert meta["config"]["applied_settings"] == {}
     assert [(f["index"], f["error_type"]) for f in meta["failed_steps"]] == [(1, "TimeoutError")]
 
 

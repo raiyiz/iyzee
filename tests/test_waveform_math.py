@@ -122,6 +122,10 @@ def test_subtract_traces_is_exact_resamples_and_never_mutates_or_mixes_units():
         with pytest.raises(ValueError, match="different units"):
             operation(volts, amps)
 
+    milliseconds = _trace("C2", [0.0], [1.0], time_unit="ms")
+    with pytest.raises(ValueError, match="different time units"):
+        subtract_traces(volts, milliseconds)
+
 
 def test_background_correction_by_region_or_reference_and_its_input_checks():
     trace = _trace("C1", [0.0, 1.0, 2.0, 3.0], [10.0, 12.0, 100.0, 100.0])

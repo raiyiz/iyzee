@@ -118,6 +118,11 @@ def _resample_onto(reference: Trace, other: Trace) -> np.ndarray:
     two channels from the same acquisition are combined sample-for-sample
     rather than smoothed by needless interpolation.
     """
+    if reference.time_unit != other.time_unit:
+        raise ValueError(
+            f"cannot align traces with different time units: "
+            f"{reference.time_unit!r} vs {other.time_unit!r}"
+        )
     if reference.time.shape == other.time.shape and np.array_equal(reference.time, other.time):
         return other.values
     return np.interp(reference.time, other.time, other.values)
@@ -133,10 +138,10 @@ def _require_same_unit(a: Trace, b: Trace, what: str) -> None:
 def subtract_traces(a: Trace, b: Trace, *, label: str | None = None) -> Trace:
     """``a - b``, ``b`` resampled onto ``a``'s time grid if they differ.
 
-    Both traces must share ``value_unit`` — subtracting volts from amps is
-    never meaningful, so this raises ``ValueError`` rather than doing it
-    anyway. ``a``'s ``time``/``time_unit`` become the result's; ``b`` only
-    contributes its (possibly resampled) values.
+    Both traces must share ``value_unit`` and ``time_unit``: subtracting
+    volts from amps or aligning seconds with milliseconds without conversion is
+    not meaningful, so this raises ``ValueError``. ``a``'s time grid becomes
+    the result's; ``b`` only contributes its (possibly resampled) values.
     """
     _require_same_unit(a, b, "subtract")
     b_values = _resample_onto(a, b)

@@ -45,6 +45,7 @@ async def _open_results_screen(
         await pilot.press("t")
         screen = app.query_one(ResultsScreen)
         await wait_until(pilot, lambda: screen.query_one("#results-list", ListView).has_focus)
+        await wait_until(pilot, lambda: screen._scan_complete)
         yield screen, pilot
 
 
