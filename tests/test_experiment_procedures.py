@@ -202,9 +202,7 @@ def test_bandwidth_step_uses_applied_instrument_value_as_the_sweep_coordinate(mo
         def query(self, command):
             return {"BWID?": "976.0", "BWID:VID?": "1952.0"}[command]
 
-    result = BandwidthStep(1000).run(
-        ExperimentContext(mx=QuantizingMXA(), run_id="quantized")
-    )
+    result = BandwidthStep(1000).run(ExperimentContext(mx=QuantizingMXA(), run_id="quantized"))
     assert result.x_value == 976.0
     assert result.label == "rbw=976Hz"
     assert result.meta == {
@@ -265,7 +263,9 @@ def test_a_frequency_step_aborts_if_the_laser_never_reaches_its_setpoint(monkeyp
     monkeypatch.setattr("iyzee.experiment.procedures.FREQUENCY_LOCK_TIMEOUT_S", 0.0)
     events = []
     ctx = ExperimentContext(
-        mx=FakeMXA(), run_id="t", shutter=FakeShutterControl(),
+        mx=FakeMXA(),
+        run_id="t",
+        shutter=FakeShutterControl(),
         wavemeter=_wavemeter(events, 377.101),
     )
     with pytest.raises(TimeoutError, match="laser did not reach"):
