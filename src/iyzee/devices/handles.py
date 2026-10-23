@@ -120,6 +120,14 @@ class _VisaHandle(_LockedHandle):
         super().__init__()
         self._device = device
 
+    @property
+    def alive(self) -> bool:
+        # VISA drivers drop this reference when an I/O error leaves the stream
+        # unreliable, so this remains a cheap check without probing hardware.
+        if hasattr(self._device, "instrument"):
+            return self._device.instrument is not None
+        return bool(getattr(self._device, "connected", True))
+
     def connect(self) -> None:
         self._device.connect()
 
