@@ -6,12 +6,16 @@ Launch with:
 To try it without instruments:
     uv run scripts/demo_data.py demo-data
     IYZEE_DATA_DIR=demo-data uv run --group notebooks marimo edit notebooks/workbench.py
+
+The flow is: find recordings -> build a working set -> every later section analyses that
+set. The set is a ``Workset`` (see ``notebooks/workset.py``), so everything below is also
+available in a script or IPython with two lines of code.
 """
 
 import marimo
 
 __generated_with = "0.25.1"
-app = marimo.App(width="full")
+app = marimo.App(width="full", app_title="iyzee · data workbench")
 
 
 @app.cell
@@ -20,11 +24,9 @@ def _():
     from pathlib import Path
 
     import marimo as mo
-    import numpy as np
     import polars as pl
 
     from iyzee.config import data_root
-    from iyzee.experiment import load_recording
 
     notebook_dir = str(Path(__file__).resolve().parent)
     if notebook_dir not in sys.path:
@@ -32,40 +34,26 @@ def _():
 
     from toolbox import (
         KINDS,
-        array_frame,
-        best_points,
-        channels_in,
-        csv_bytes,
-        delta_to_reference,
-        describe,
-        field_chart,
+        SWEEP_METRICS,
+        default_selection,
+        figure_bytes,
+        pick,
         scan_catalog,
-        scope_channels,
-        scope_traces,
-        sweep_points,
-        verify,
     )
+    from workset import Workset
 
     return (
         KINDS,
         Path,
-        array_frame,
-        best_points,
-        channels_in,
-        csv_bytes,
+        SWEEP_METRICS,
+        Workset,
         data_root,
-        delta_to_reference,
-        describe,
-        field_chart,
-        load_recording,
+        default_selection,
+        figure_bytes,
         mo,
-        np,
+        pick,
         pl,
         scan_catalog,
-        scope_channels,
-        scope_traces,
-        sweep_points,
-        verify,
     )
 
 
@@ -74,9 +62,12 @@ def _(mo):
     mo.md("""
     # iyzee · Data workbench
 
-    Browse saved runs, **mark the recordings worth comparing**, and turn them into plots
-    without writing a plotting function for every question. The catalog reads lightweight
-    JSON sidecars first; waveform arrays are loaded only for marked recordings.
+    **1 Find** a directory → **2 Select** recordings into a *working set* → **3 Overview**,
+    **4 Compare** and **5 Toolbox** all analyse that set.
+
+    The working set stays in the **sidebar** (open it with the ☰ button on the left), and every section
+    repeats which runs it is using. Each recording has a stable id like `#07` that is the same in every
+    table, legend and plot, and a run keeps one colour in all plots.
 
     **Read-only:** this notebook never connects to, configures, or acquires from an instrument.
     Synthetic examples are clearly labelled. Negative relative noise means the squeezing trace
@@ -98,7 +89,8 @@ def _(data_root, mo):
         [
             mo.md(
                 "## 1 · Find your recordings\nChange the directory here, or set IYZEE_DATA_DIR before launching marimo. "
-                "Press **Refresh index** after files are added while the notebook is open."
+                "Press **Refresh index** after files are added while the notebook is open "
+                "(your working set is kept)."
             ),
             mo.hstack([data_directory, refresh_index], align="end"),
         ]
@@ -107,14 +99,22 @@ def _(data_root, mo):
 
 
 @app.cell
-def _(Path, data_directory, mo, refresh_index, scan_catalog):
+def _(Path, data_directory):
     root = Path(data_directory.value).expanduser()
+    return (root,)
+
+
+@app.cell
+def _(mo, refresh_index, root, scan_catalog):
     refresh_index.value  # Re-index the directory when the button is pressed.
     catalog = scan_catalog(root)
     if not root.is_dir():
         index_status = mo.md(f"**Directory not found:** {root}")
     elif catalog.is_empty():
-        index_status = mo.md(f"No .npz recordings found in {root}.")
+        index_status = mo.md(
+            f"No .npz recordings found in {root}. Create demo data with "
+            "`uv run scripts/demo_data.py demo-data` and point the directory above at it."
+        )
     else:
         index_status = mo.md(f"Indexed **{catalog.height:,} recordings** in {root}.")
     index_status
@@ -122,684 +122,598 @@ def _(Path, data_directory, mo, refresh_index, scan_catalog):
 
 
 @app.cell
-def _(KINDS, mo):
-    kind_filter = mo.ui.dropdown(
-        options=["all", *KINDS],
+def _(default_selection, mo, root):
+    # The working set is a list of file paths that survives filtering and re-indexing;
+    # it starts with the newest recordings and is reset only when the directory changes.
+    get_selection, set_selection = mo.state(default_selection(root))
+    return get_selection, set_selection
+
+
+@app.cell
+def _(KINDS, catalog, mo):
+    kind_filter = mo.ui.dropdown(options=["all", *KINDS], value="all", label="Type")
+    status_filter = mo.ui.dropdown(
+        options=["all", *sorted(catalog["status"].unique().to_list())],
         value="all",
-        label="File type",
+        label="Status",
+    )
+    origin_filter = mo.ui.dropdown(
+        options=["all", "measured only", "synthetic only"], value="all", label="Origin"
     )
     text_filter = mo.ui.text(
         value="",
-        placeholder="e.g. aligned, aborted, scope",
-        label="Find by name or status",
+        placeholder="name, status, instrument, path ...",
+        label="Find",
         debounce=True,
     )
     mo.vstack(
         [
-            mo.md("### Browse"),
-            mo.hstack([kind_filter, text_filter], align="end"),
-        ]
-    )
-    return kind_filter, text_filter
-
-
-@app.cell
-def _(catalog, kind_filter, mo, pl, text_filter):
-    visible = catalog
-    if kind_filter.value != "all":
-        visible = visible.filter(pl.col("kind") == kind_filter.value)
-    query = text_filter.value.strip().lower()
-    if query:
-        visible = visible.filter(
-            pl.any_horizontal(
-                pl.col("label").str.to_lowercase().str.contains(query, literal=True),
-                pl.col("status").str.to_lowercase().str.contains(query, literal=True),
-                pl.col("kind").str.to_lowercase().str.contains(query, literal=True),
-                pl.col("name").str.to_lowercase().str.contains(query, literal=True),
-                pl.col("instrument").str.to_lowercase().str.contains(query, literal=True),
-                pl.col("path").str.to_lowercase().str.contains(query, literal=True),
-            )
-        )
-    if catalog.is_empty():
-        browser_view = mo.vstack(
-            [
-                mo.md("**No recordings found in this directory.**"),
-                mo.md(
-                    "Create a self-contained demo catalog with "
-                    "uv run scripts/demo_data.py demo-data, then set the directory above "
-                    "to demo-data. These illustrative traces do not represent measurements."
-                ),
-            ]
-        )
-    else:
-        browser_view = mo.vstack(
-            [
-                mo.md(
-                    f"**{visible.height:,} of {catalog.height:,} recordings** · "
-                    f"{int(catalog['synthetic'].sum())} synthetic"
-                ),
-                mo.ui.table(
-                    visible.select(
-                        "label",
-                        "kind",
-                        "started",
-                        "status",
-                        "items",
-                        "synthetic",
-                        "warnings",
-                        "size_kib",
-                        "digest",
-                    ),
-                    selection=None,
-                    page_size=12,
-                ),
-            ]
-        )
-    browser_view
-    return
-
-
-@app.cell
-def _(catalog, mo):
-    labels = catalog["label"].to_list()
-    marked_files = mo.ui.multiselect(
-        options=labels,
-        value=labels[: min(5, len(labels))],
-        label="Mark recordings for analysis",
-        full_width=True,
-    )
-    mo.vstack(
-        [
             mo.md(
-                "## 2 · Mark and compare\nMark any mix of sweep and scope files. The browser filter does not clear your selection, so you can compare different run types together."
+                "## 2 · Select recordings\n"
+                "Filter the list, **tick rows**, then add them to the working set. "
+                "Filters never change the working set, so you can collect runs "
+                "of different types and dates."
             ),
-            marked_files,
+            mo.hstack([kind_filter, status_filter, origin_filter, text_filter], align="end"),
         ]
     )
-    return (marked_files,)
+    return kind_filter, origin_filter, status_filter, text_filter
 
 
 @app.cell
 def _(
-    best_points,
     catalog,
-    describe,
-    marked_files,
+    get_selection,
+    kind_filter,
     mo,
+    origin_filter,
+    pick,
     pl,
-    scope_channels,
-    sweep_points,
+    status_filter,
+    text_filter,
 ):
-    marked = catalog.filter(pl.col("label").is_in(marked_files.value))
-    summary = describe(marked)
-    sweep_records = marked.filter(pl.col("kind").is_in(["frequency", "bandwidth"]))
-    scope_records = marked.filter(pl.col("kind") == "scope")
-    sweep_issues = []
-    points = sweep_points(sweep_records, issues=sweep_issues)
-    channel_stats = scope_channels(scope_records)
-
-    kinds = ", ".join(f"{kind}: {count}" for kind, count in summary["by_kind"].items()) or "none"
+    visible = pick(
+        catalog,
+        kind=kind_filter.value,
+        status=status_filter.value,
+        synthetic={"all": None, "measured only": False, "synthetic only": True}[
+            origin_filter.value
+        ],
+        text=text_filter.value,
+    )
+    _chosen = set(get_selection())
+    catalog_table = mo.ui.table(
+        visible.select(
+            pl.when(pl.col("path").is_in(list(_chosen)))
+            .then(pl.lit("✓"))
+            .otherwise(pl.lit(""))
+            .alias("in set"),
+            "ref",
+            "name",
+            "kind",
+            "started",
+            "status",
+            "items",
+            "synthetic",
+            "warnings",
+            "size_kib",
+            "digest",
+        ),
+        selection="multi",
+        page_size=12,
+        show_column_summaries=False,
+    )
     mo.vstack(
         [
             mo.md(
-                f"### {summary['runs']} marked · {summary['items']} sweep points / scope channels · "
-                f"{summary['synthetic']} synthetic\n**Kinds:** {kinds}"
+                f"**{visible.height:,} of {catalog.height:,} recordings shown** · "
+                f"{int(catalog['synthetic'].sum()) if catalog.height else 0} synthetic"
             ),
-            mo.ui.table(
-                marked.select(
-                    "label", "kind", "status", "started", "synthetic", "warnings", "path"
-                ),
-                selection=None,
-                page_size=10,
+            catalog_table,
+        ]
+    )
+    return catalog_table, visible
+
+
+@app.cell
+def _(catalog, catalog_table, mo, set_selection, visible):
+    _ref_to_path = dict(zip(catalog["ref"], catalog["path"], strict=True))
+
+    def _ticked():
+        value = catalog_table.value
+        rows = value.to_dicts() if hasattr(value, "to_dicts") else list(value or [])
+        return [_ref_to_path[r["ref"]] for r in rows if r["ref"] in _ref_to_path]
+
+    def _add(paths):
+        set_selection(lambda current: [*current, *[p for p in paths if p not in current]])
+
+    add_ticked = mo.ui.button(label="Add ticked rows", on_click=lambda _: _add(_ticked()))
+    add_newest = mo.ui.button(
+        label="Add 3 newest shown",
+        on_click=lambda _: _add(visible.sort("started", descending=True).head(3)["path"].to_list()),
+    )
+    add_shown = mo.ui.button(
+        label=f"Add all {visible.height} shown", on_click=lambda _: _add(visible["path"].to_list())
+    )
+    replace_ticked = mo.ui.button(
+        label="Replace set with ticked rows", on_click=lambda _: set_selection(_ticked())
+    )
+    clear_set = mo.ui.button(label="Clear set", on_click=lambda _: set_selection([]), kind="danger")
+    mo.hstack([add_ticked, add_newest, add_shown, replace_ticked, clear_set], justify="start")
+    return
+
+
+@app.cell
+def _(Workset, catalog, get_selection, mo, pl):
+    ws = Workset.from_catalog(catalog, get_selection(), strict=False)
+    ws_table = mo.ui.table(
+        ws.rows.select("ref", "name", "kind", "started", "status", "synthetic", "warnings"),
+        selection="multi",
+        page_size=10,
+        show_column_summaries=False,
+    )
+    return ws, ws_table
+
+
+@app.cell
+def _(mo, set_selection, ws, ws_table):
+    def _remove():
+        value = ws_table.value
+        rows = value.to_dicts() if hasattr(value, "to_dicts") else list(value or [])
+        drop = {r["ref"] for r in rows}
+        paths = {p for ref, p in zip(ws.rows["ref"], ws.rows["path"], strict=True) if ref in drop}
+        set_selection(lambda current: [p for p in current if p not in paths])
+
+    remove_ticked = mo.ui.button(label="Remove ticked from set", on_click=lambda _: _remove())
+    mo.vstack(
+        [
+            mo.md(f"### Working set · {len(ws)} recording(s)"),
+            mo.Html(ws.banner(title="In use")),
+            mo.md(
+                "Not found in the current index (skipped): " + ", ".join(ws.missing)
+                if ws.missing
+                else ""
             ),
-            mo.md("#### Best point per sweep"),
+            ws_table,
+            remove_ticked,
+        ]
+    )
+    return
+
+
+@app.cell
+def _(mo, ws):
+    _summary = ws.summary()
+    mo.sidebar(
+        [
+            mo.md("## Working set"),
+            mo.Html(ws.banner(title=f"{len(ws)} run(s)", vertical=True)),
+            mo.md(
+                f"{_summary['items']} sweep points / scope channels · "
+                f"{_summary['synthetic']} synthetic\n\n"
+                "Change it in **section 2**."
+            ),
+        ]
+    )
+    return
+
+
+@app.cell
+def _(mo, pl, ws):
+    mo.stop(
+        ws.rows.is_empty(),
+        mo.md("## 3 · Overview\nThe working set is empty: add recordings in section 2."),
+    )
+    _board = ws.scoreboard()
+    _issues = ws.issues
+    mo.vstack(
+        [
+            mo.md("## 3 · Overview"),
+            mo.Html(ws.banner()),
             mo.hstack(
                 [
-                    mo.vstack(
-                        [
-                            mo.md("**Frequency sweeps**"),
-                            mo.ui.table(
-                                best_points(points.filter(pl.col("kind") == "frequency")),
-                                selection=None,
-                                page_size=8,
-                            ),
-                        ]
-                    ),
-                    mo.vstack(
-                        [
-                            mo.md("**Bandwidth sweeps**"),
-                            mo.ui.table(
-                                best_points(points.filter(pl.col("kind") == "bandwidth")),
-                                selection=None,
-                                page_size=8,
-                            ),
-                        ]
-                    ),
+                    mo.stat(len(ws), label="runs"),
+                    mo.stat(ws.sweeps.height, label="sweeps"),
+                    mo.stat(ws.scopes.height, label="scope acquisitions"),
+                    mo.stat(int(ws.rows["synthetic"].sum()), label="synthetic"),
+                    mo.stat(int(ws.rows["warnings"].sum()), label="warnings"),
                 ],
-                align="start",
+                justify="start",
             ),
-            mo.md("#### Scope channel statistics"),
-            mo.ui.table(channel_stats, selection=None, page_size=10),
-        ]
-    )
-    return channel_stats, marked, points, scope_records, sweep_issues
-
-
-@app.cell
-def _(channels_in, mo, scope_records):
-    available_channels = channels_in(scope_records)
-    chosen_channels = mo.ui.multiselect(
-        options=available_channels,
-        value=available_channels[: min(2, len(available_channels))],
-        label="Scope channels to overlay",
-    )
-    trace_budget = mo.ui.slider(
-        start=200,
-        stop=8000,
-        step=200,
-        value=1600,
-        label="Plot points per trace (preserves peaks)",
-    )
-    mo.vstack(
-        [
-            mo.md("### Scope waveform options"),
-            mo.hstack([chosen_channels, trace_budget], align="start"),
-        ]
-    )
-    return chosen_channels, trace_budget
-
-
-@app.cell
-def _(chosen_channels, scope_records, scope_traces, trace_budget):
-    trace_issues = []
-    traces = scope_traces(
-        scope_records,
-        chosen_channels.value,
-        budget=int(trace_budget.value),
-        issues=trace_issues,
-    )
-    return trace_issues, traces
-
-
-@app.cell
-def _(field_chart, mo, pl, points, traces):
-    plots = []
-    frequency = points.filter(pl.col("kind") == "frequency")
-    bandwidth = points.filter(pl.col("kind") == "bandwidth")
-
-    if not frequency.is_empty():
-        plots.extend(
-            [
-                mo.md("#### Frequency sweeps · shared frequency reference"),
-                field_chart(
-                    frequency,
-                    x="offset_mhz",
-                    y="rel_noise_mean_db",
-                    color="run",
-                    title="Frequency sweeps · mean relative noise",
-                ),
-            ]
-        )
-    if not bandwidth.is_empty():
-        plots.extend(
-            [
-                mo.md("#### Bandwidth sweeps"),
-                field_chart(
-                    bandwidth,
-                    x="rbw_khz",
-                    y="rel_noise_mean_db",
-                    color="run",
-                    title="Bandwidth sweeps · mean relative noise",
-                ),
-            ]
-        )
-    if not traces.is_empty():
-        plots.extend(
-            [
-                mo.md("#### Scope captures"),
-                field_chart(
-                    traces,
-                    x="time",
-                    y="value",
-                    color="run",
-                    detail="channel",
-                    title="Scope waveforms · marked runs and channels",
-                ),
-            ]
-        )
-
-    view = (
-        mo.vstack(plots)
-        if plots
-        else mo.md("Mark compatible sweep or scope recordings to show quick plots.")
-    )
-    mo.vstack(
-        [
             mo.md(
-                "## 3 · Compare your recordings\n"
-                "Standard comparisons appear automatically; use the plot builder below "
-                "for a different quantity or grouping."
+                "#### Sweep scoreboard · best point per run\n`best_x` is the laser offset (MHz) for frequency "
+                "sweeps and the RBW (kHz) for bandwidth sweeps."
             ),
-            view,
+            mo.ui.table(_board, selection=None, page_size=10)
+            if not _board.is_empty()
+            else mo.md("_No sweeps in the working set._"),
+            mo.md("#### Scope channel statistics"),
+            mo.ui.table(ws.channel_stats, selection=None, page_size=10)
+            if not ws.channel_stats.is_empty()
+            else mo.md("_No scope acquisitions in the working set._"),
+            mo.md(f"**{_issues.height} recording read issue(s)**")
+            if not _issues.is_empty()
+            else mo.md(""),
+            mo.ui.table(_issues, selection=None, page_size=8)
+            if not _issues.is_empty()
+            else mo.md(""),
         ]
     )
     return
 
 
 @app.cell
-def _(
-    channel_stats,
-    mo,
-    pl,
-    points,
-    selected_array_frame,
-    sweep_issues,
-    trace_issues,
-    traces,
-):
-    frame_map = {
-        "Frequency sweep points": points.filter(pl.col("kind") == "frequency"),
-        "Bandwidth sweep points": points.filter(pl.col("kind") == "bandwidth"),
-        "Scope channel statistics": channel_stats,
-        "Scope waveform samples": traces,
-        "Selected raw array": selected_array_frame,
-    }
-    issues = sweep_issues + trace_issues
-    issue_frame = pl.DataFrame(
-        issues,
-        schema={"run": pl.String, "problem": pl.String},
+def _(SWEEP_METRICS, mo, ws):
+    quick_metric = mo.ui.dropdown(
+        options={label: key for key, label in SWEEP_METRICS.items()},
+        value=SWEEP_METRICS["rel_noise_mean_db"],
+        label="Sweep metric",
     )
-    if issue_frame.is_empty():
-        issue_view = mo.md("No marked recordings failed to load.")
+    chosen_channels = mo.ui.multiselect(
+        options=ws.channels,
+        value=ws.channels[: min(2, len(ws.channels))],
+        label="Scope channels",
+    )
+    split_channels = mo.ui.checkbox(value=True, label="One panel per channel")
+    trace_budget = mo.ui.slider(
+        start=200, stop=8000, step=200, value=1600, label="Plot points per trace (keeps peaks)"
+    )
+    mo.vstack(
+        [
+            mo.md(
+                "## 4 · Compare\nStandard comparisons of everything in the working set. "
+                "Use the Toolbox below for a different quantity or grouping."
+            ),
+            mo.Html(ws.banner()),
+            mo.hstack([quick_metric, chosen_channels, split_channels, trace_budget], align="end"),
+        ]
+    )
+    return chosen_channels, quick_metric, split_channels, trace_budget
+
+
+@app.cell
+def _(chosen_channels, mo, quick_metric, split_channels, trace_budget, ws):
+    _figures = ws.quick_plots(
+        metric=quick_metric.value,
+        channels=chosen_channels.value,
+        budget=int(trace_budget.value),
+        facet_channels=split_channels.value,
+    )
+    mo.vstack(
+        [item for heading, figure in _figures for item in (mo.md(f"#### {heading}"), figure)]
+        or [mo.md("_Nothing to plot yet: add sweeps or scope recordings to the working set._")]
+    )
+    return
+
+
+# --- Toolbox widgets -----------------------------------------------------------------
+
+
+@app.cell
+def _(mo, ws):
+    _longest = int(ws.sweeps["items"].max() or 1) if not ws.sweeps.is_empty() else 1
+    point_index = mo.ui.number(
+        start=0, stop=max(_longest - 1, 0), step=1, value=0, label="Sweep point"
+    )
+    return (point_index,)
+
+
+@app.cell
+def _(mo, pl, point_index, ws):
+    _frame = ws.point_traces(int(point_index.value))
+    if _frame.is_empty():
+        point_view = mo.md("_No sweeps with this point in the working set._")
     else:
-        issue_view = mo.vstack(
+        _relative = _frame.filter(pl.col("signal") == "relative noise")
+        _levels = _frame.filter(pl.col("signal") != "relative noise")
+        point_view = mo.vstack(
             [
-                mo.md(f"**{issue_frame.height} recording read issue(s)**"),
-                mo.ui.table(issue_frame, selection=None, page_size=10),
-            ]
-        )
-    issue_view
-    return (frame_map,)
-
-
-@app.cell
-def _(marked, mo):
-    if marked.is_empty():
-        raw_run = None
-        run_view = mo.md("Mark at least one recording above to inspect its raw arrays.")
-    else:
-        _raw_run_labels = marked["label"].to_list()
-        raw_run = mo.ui.dropdown(
-            options=_raw_run_labels,
-            value=_raw_run_labels[0],
-            label="Recording",
-        )
-        run_view = raw_run
-    raw_section_heading = mo.md(
-        "Choose a marked recording and a saved array. One-dimensional arrays plot directly; "
-        "for two-dimensional arrays, select a first-axis row. Higher dimensions are never "
-        "flattened silently."
-    )
-    return raw_run, run_view, raw_section_heading
-
-
-@app.cell
-def _(Path, load_recording, marked, mo, pl, raw_run):
-    if raw_run is None:
-        raw_recording = None
-        raw_array_name = None
-        array_view = mo.md("Select a recording above to list its saved arrays.")
-    else:
-        row = marked.filter(pl.col("label") == raw_run.value).row(0, named=True)
-        try:
-            raw_recording = load_recording(Path(row["path"]))
-        except Exception as exc:  # noqa: BLE001 - show a damaged selected file without breaking the notebook
-            raw_recording = None
-            raw_array_name = None
-            array_view = mo.md(f"**Could not load {raw_run.value}:** {exc}")
-        else:
-            array_names = sorted(raw_recording.arrays)
-            if not array_names:
-                raw_array_name = None
-                array_view = mo.md("This recording has no stored arrays.")
-            else:
-                preferred = next(
-                    (
-                        name
-                        for name in ("trace_squeezing", "trace_shot_noise")
-                        if name in array_names
-                    ),
-                    array_names[0],
-                )
-                raw_array_name = mo.ui.dropdown(
-                    options=array_names,
-                    value=preferred,
-                    label="Saved array",
-                )
-                array_view = raw_array_name
-    return raw_array_name, raw_recording, array_view
-
-
-@app.cell
-def _(mo, np, raw_array_name, raw_recording):
-    if raw_recording is None or raw_array_name is None:
-        raw_index = None
-        index_view = mo.md("Choose a recording with a readable array above.")
-    else:
-        _raw_values = np.asarray(raw_recording.arrays[raw_array_name.value])
-        if _raw_values.ndim == 2 and _raw_values.shape[0] > 0:
-            raw_index = mo.ui.dropdown(
-                options=list(range(_raw_values.shape[0])),
-                value=0,
-                label="First-axis index",
-            )
-            index_view = mo.vstack(
-                [
-                    raw_index,
-                    mo.md(f"Array shape: {_raw_values.shape} · dtype: {_raw_values.dtype}"),
-                ]
-            )
-        else:
-            raw_index = None
-            index_view = mo.md(f"Array shape: {_raw_values.shape} · dtype: {_raw_values.dtype}")
-    return raw_index, index_view
-
-
-@app.cell
-def _(
-    array_frame,
-    field_chart,
-    mo,
-    np,
-    pl,
-    raw_array_name,
-    raw_index,
-    raw_recording,
-    raw_run,
-):
-    selected_array_frame = pl.DataFrame(schema={"sample": pl.Int64, "value": pl.Float64})
-    if raw_recording is None or raw_array_name is None or raw_run is None:
-        raw_array_plot = mo.md("Select a readable recording and array above to plot its data.")
-    else:
-        _raw_values = np.asarray(raw_recording.arrays[raw_array_name.value])
-        if _raw_values.ndim == 1:
-            index = None
-            selected_array_frame = array_frame(_raw_values)
-        elif _raw_values.ndim == 2 and _raw_values.shape[0] > 0:
-            index = int(raw_index.value) if raw_index is not None else 0
-            selected_array_frame = array_frame(_raw_values, index=index)
-        else:
-            index = None
-            raw_array_plot = mo.md(
-                f"Array shape {_raw_values.shape} is not a non-empty 1-D or 2-D array; "
-                "choose another array rather than flattening it implicitly."
-            )
-
-        if selected_array_frame.height:
-            selected_array_frame = selected_array_frame.with_columns(
-                pl.lit(raw_run.value).alias("run"),
-                pl.lit(raw_array_name.value).alias("array"),
-                pl.lit(index, dtype=pl.Int64).alias("array_index"),
-            )
-            try:
-                figure = field_chart(
-                    selected_array_frame,
+                mo.md(
+                    f"Raw traces of point {int(point_index.value)} in every sweep: relative noise "
+                    "(squeezing minus shot noise), then both levels per run."
+                ),
+                ws.plot(
+                    _relative,
                     x="sample",
                     y="value",
-                    color=None,
-                    title=f"{raw_run.value} · {raw_array_name.value}"
-                    + (f" · row {index}" if index is not None else ""),
-                )
-            except ValueError as exc:
-                raw_array_plot = mo.md(f"**Cannot plot this array:** {exc}")
-            else:
-                raw_array_plot = mo.vstack(
-                    [
-                        mo.md(
-                            f"Shape: {_raw_values.shape} · plotting "
-                            + (f"row {index}" if index is not None else "the full array")
-                        ),
-                        figure,
-                    ]
-                )
-        else:
-            raw_array_plot = mo.md("The selected array or row contains no samples to plot.")
-    return selected_array_frame, raw_array_plot
+                    title=f"Relative noise · point {int(point_index.value)}",
+                ),
+                ws.plot(
+                    _levels,
+                    x="sample",
+                    y="value",
+                    color="signal",
+                    facet="run",
+                    title=f"Squeezing vs shot noise · point {int(point_index.value)}",
+                ),
+            ]
+        )
+    point_frame = _frame
+    return point_frame, point_view
 
 
 @app.cell
-def _(frame_map, mo):
-    plot_sources = list(frame_map)
-    populated = [name for name, frame in frame_map.items() if not frame.is_empty()]
+def _(mo, ws):
+    _inventory = ws.array_inventory()
+    _names = ws.array_names
+    array_name = mo.ui.dropdown(
+        options=_names or ["(none)"],
+        value="trace_squeezing"
+        if "trace_squeezing" in _names
+        else (_names[0] if _names else "(none)"),
+        label="Saved array",
+    )
+    array_row = mo.ui.number(start=0, stop=10_000, step=1, value=0, label="Row (2-D arrays)")
+    array_inventory_view = (
+        mo.ui.table(_inventory.drop("run_id"), selection=None, page_size=10)
+        if not _inventory.is_empty()
+        else mo.md("_No arrays to list._")
+    )
+    return array_inventory_view, array_name, array_row
+
+
+@app.cell
+def _(array_name, array_row, mo, ws):
+    raw_frame = ws.array(array_name.value, int(array_row.value))
+    if raw_frame.is_empty():
+        raw_view = mo.md("_No run in the working set has this array (or this row)._")
+    else:
+        raw_view = ws.plot(
+            raw_frame,
+            x="sample",
+            y="value",
+            title=f"{array_name.value} · row {int(array_row.value)}",
+        )
+    return raw_frame, raw_view
+
+
+@app.cell
+def _(mo, ws):
+    _kinds = sorted(ws.points["kind"].unique().to_list()) if not ws.sweeps.is_empty() else []
+    delta_kind = mo.ui.dropdown(
+        options=_kinds or ["(none)"], value=(_kinds or ["(none)"])[0], label="Sweep kind"
+    )
+    return (delta_kind,)
+
+
+@app.cell
+def _(SWEEP_METRICS, delta_kind, mo, pl, ws):
+    _runs = (
+        ws.points.filter(pl.col("kind") == delta_kind.value)["run"]
+        .unique(maintain_order=True)
+        .to_list()
+        if not ws.sweeps.is_empty()
+        else []
+    )
+    delta_reference = mo.ui.dropdown(
+        options=_runs or ["(none)"], value=(_runs or ["(none)"])[0], label="Reference run"
+    )
+    delta_metric = mo.ui.dropdown(
+        options={label: key for key, label in SWEEP_METRICS.items()},
+        value=SWEEP_METRICS["rel_noise_mean_db"],
+        label="Metric",
+    )
+    return delta_metric, delta_reference
+
+
+@app.cell
+def _(delta_kind, delta_metric, delta_reference, mo, ws):
+    try:
+        _delta = ws.delta(delta_reference.value, delta_kind.value, delta_metric.value)
+    except ValueError as exc:
+        delta_frame = ws.points.clear()
+        delta_view = mo.md(f"_{exc}_")
+    else:
+        delta_frame = _delta
+        if _delta.is_empty():
+            delta_view = mo.md(
+                "_Needs at least two runs of this sweep kind with overlapping x ranges._"
+            )
+        else:
+            _x = "offset_mhz" if delta_kind.value == "frequency" else "rbw_khz"
+            delta_view = mo.vstack(
+                [
+                    mo.md(
+                        "Other runs minus the reference, interpolated only over the range both cover. "
+                        "**Positive = noisier than the reference.**"
+                    ),
+                    ws.plot(_delta, x=_x, y="delta_db", title=f"Δ vs {delta_reference.value}"),
+                    mo.ui.table(_delta, selection=None, page_size=10),
+                ]
+            )
+    return delta_frame, delta_view
+
+
+@app.cell
+def _(mo, pl, point_frame, raw_frame, ws):
+    frame_map = {
+        **ws.tables(),
+        "Raw array across runs": raw_frame,
+        "Point traces (squeezing / shot noise)": point_frame,
+    }
     source = mo.ui.dropdown(
-        options=plot_sources,
-        value=populated[0] if populated else plot_sources[0],
+        options=list(frame_map),
+        value=next(
+            (name for name, frame in frame_map.items() if not frame.is_empty()), "Run scoreboard"
+        ),
         label="Data to plot",
     )
-    source_view = mo.vstack([source])
-    return source, source_view
+    return frame_map, source
 
 
 @app.cell
 def _(frame_map, mo, pl, source):
     plot_frame = frame_map[source.value]
-    categorical = [
-        column
-        for column, dtype in plot_frame.schema.items()
-        if dtype == pl.String and column not in {"run_id", "path"}
+    _numeric = [c for c, d in plot_frame.schema.items() if d.is_numeric()]
+    _text = [
+        c for c, d in plot_frame.schema.items() if d == pl.String and c not in {"run_id", "path"}
     ]
-    numeric_types = {
-        pl.Int8,
-        pl.Int16,
-        pl.Int32,
-        pl.Int64,
-        pl.UInt8,
-        pl.UInt16,
-        pl.UInt32,
-        pl.UInt64,
-        pl.Float32,
-        pl.Float64,
-    }
-    numeric = [column for column, dtype in plot_frame.schema.items() if dtype in numeric_types]
-    plot_columns = [
-        column for column in plot_frame.columns if column not in {"run_id", "path", "kind"}
-    ]
-
-    if plot_frame.is_empty() or not numeric or not plot_columns:
-        x_field = y_field = color_field = detail_field = mark_type = None
-        plot_controls = mo.md("Mark recordings of this type above to populate this plot.")
+    _columns = [c for c in plot_frame.columns if c not in {"run_id", "path"}]
+    if plot_frame.is_empty() or not _numeric:
+        x_field = y_field = color_field = detail_field = facet_field = mark_type = None
+        x_log = y_log = None
+        plot_controls = mo.md(
+            "_The selected table is empty: add matching recordings to the working set._"
+        )
     else:
-        x_default = next(
+        _x_default = next(
             (
-                column
-                for column in ("offset_mhz", "rbw_khz", "channel", "time", "point")
-                if column in plot_columns
+                c
+                for c in ("offset_mhz", "rbw_khz", "time", "sample", "channel", "best_db")
+                if c in _columns
             ),
-            plot_columns[0],
+            _columns[0],
         )
-        y_default = next(
-            (
-                column
-                for column in ("rel_noise_mean_db", "rms", "value", "peak_to_peak")
-                if column in numeric
-            ),
-            numeric[0],
+        _y_default = next(
+            (c for c in ("rel_noise_mean_db", "value", "rms", "best_db") if c in _numeric),
+            _numeric[0],
         )
-        color_options = ["(none)", *categorical]
-        color_default = (
-            "run" if "run" in categorical else "channel" if "channel" in categorical else "(none)"
-        )
-        detail_default = (
-            "channel"
-            if source.value == "Scope waveform samples" and "channel" in categorical
-            else "(none)"
-        )
-        x_field = mo.ui.dropdown(options=plot_columns, value=x_default, label="X axis")
-        y_field = mo.ui.dropdown(options=numeric, value=y_default, label="Y axis")
-        color_field = mo.ui.dropdown(options=color_options, value=color_default, label="Color by")
-        detail_field = mo.ui.dropdown(
-            options=color_options,
-            value=detail_default,
-            label="Split lines by",
-        )
-        mark_default = "bars" if source.value == "Scope channel statistics" else "line"
+        _group = ["(none)", *_text]
+        _color_default = "run" if "run" in _text else "(none)"
+        _detail_default = "channel" if source.value == "Scope waveform samples" else "(none)"
+        _facet_default = "(none)"
+        x_field = mo.ui.dropdown(options=_columns, value=_x_default, label="X axis")
+        y_field = mo.ui.dropdown(options=_numeric, value=_y_default, label="Y axis")
+        color_field = mo.ui.dropdown(options=_group, value=_color_default, label="Colour by")
+        detail_field = mo.ui.dropdown(options=_group, value=_detail_default, label="Line style by")
+        facet_field = mo.ui.dropdown(options=_group, value=_facet_default, label="Panel per")
         mark_type = mo.ui.dropdown(
             options=["line", "points", "bars"],
-            value=mark_default,
+            value="bars"
+            if source.value in {"Scope channel statistics", "Run scoreboard"}
+            else "line",
             label="Mark",
         )
+        x_log = mo.ui.checkbox(label="log X")
+        y_log = mo.ui.checkbox(label="log Y")
         plot_controls = mo.vstack(
             [
-                mo.hstack([x_field, y_field], align="start"),
-                mo.hstack([color_field, detail_field, mark_type], align="start"),
+                mo.hstack([x_field, y_field, mark_type], align="start"),
+                mo.hstack([color_field, detail_field, facet_field, x_log, y_log], align="start"),
             ]
         )
-    return color_field, detail_field, mark_type, plot_frame, x_field, y_field, plot_controls
+    return (
+        color_field,
+        detail_field,
+        facet_field,
+        mark_type,
+        plot_controls,
+        plot_frame,
+        x_field,
+        x_log,
+        y_field,
+        y_log,
+    )
 
 
 @app.cell
 def _(
     color_field,
     detail_field,
-    field_chart,
+    facet_field,
+    figure_bytes,
     mark_type,
     mo,
     plot_frame,
     source,
+    ws,
     x_field,
+    x_log,
     y_field,
+    y_log,
 ):
-    if x_field is None or y_field is None or plot_frame.is_empty():
-        plot_view = mo.md(
-            "No plottable rows yet. Mark some recordings and choose a populated data table."
-        )
+    def _opt(widget):
+        return None if widget.value == "(none)" else widget.value
+
+    custom_figure = None
+    if x_field is None or plot_frame.is_empty():
+        plot_view = mo.md("_Nothing to plot._")
     else:
-        color = None if color_field.value == "(none)" else color_field.value
-        detail = None if detail_field.value == "(none)" else detail_field.value
         try:
-            plot_view = field_chart(
+            custom_figure = ws.plot(
                 plot_frame,
                 x=x_field.value,
                 y=y_field.value,
-                color=color,
-                detail=detail,
+                color=_opt(color_field),
+                detail=_opt(detail_field),
+                facet=_opt(facet_field),
                 mark=mark_type.value,
+                x_log=x_log.value,
+                y_log=y_log.value,
                 title=f"{source.value} · {y_field.value} vs {x_field.value}",
             )
         except ValueError as exc:
             plot_view = mo.md(f"**Cannot draw this combination:** {exc}")
+        else:
+            _figure = custom_figure
+            plot_view = mo.vstack(
+                [
+                    custom_figure,
+                    mo.hstack(
+                        [
+                            mo.download(
+                                lambda: figure_bytes(_figure, "png"),
+                                filename="iyzee-plot.png",
+                                label="PNG",
+                            ),
+                            mo.download(
+                                lambda: figure_bytes(_figure, "svg"),
+                                filename="iyzee-plot.svg",
+                                label="SVG",
+                            ),
+                            mo.download(
+                                lambda: figure_bytes(_figure, "pdf"),
+                                filename="iyzee-plot.pdf",
+                                label="PDF",
+                            ),
+                        ],
+                        justify="start",
+                    ),
+                ]
+            )
     return (plot_view,)
 
 
 @app.cell
 def _(mo):
-    verify_button = mo.ui.run_button(label="Verify SHA-256 checksums of marked files")
-    verify_view = mo.vstack([verify_button])
-    return verify_button, verify_view
+    verify_button = mo.ui.run_button(label="Verify SHA-256 checksums of the working set")
+    return (verify_button,)
 
 
 @app.cell
-def _(marked, mo, verify, verify_button):
-    if verify_button.value:
-        verification = verify(marked)
-    else:
-        verification = mo.md(
-            "Run checksum verification to check whether the saved arrays match their manifests."
-        )
+def _(mo, verify_button, ws):
+    verification = (
+        mo.ui.table(ws.verify(), selection=None, page_size=10)
+        if verify_button.value
+        else mo.md("Check whether the saved arrays still match the checksums in their manifests.")
+    )
     return (verification,)
 
 
 @app.cell
-def _(
-    channel_stats,
-    csv_bytes,
-    marked,
-    mo,
-    points,
-    selected_array_frame,
-    traces,
-):
+def _(Workset, frame_map, mo, ws):
+    _downloads = [
+        mo.download(
+            lambda frame=frame: Workset.csv(frame),
+            filename="iyzee-" + name.lower().replace(" ", "-").replace("/", "-") + ".csv",
+            label=name,
+        )
+        for name, frame in frame_map.items()
+    ]
     export_view = mo.vstack(
         [
-            mo.md("### Download tables"),
+            mo.md("#### Download tables (CSV)"),
             mo.hstack(
                 [
                     mo.download(
-                        data=csv_bytes(marked), filename="iyzee-catalog.csv", label="Catalog CSV"
+                        lambda: Workset.csv(ws.rows),
+                        filename="iyzee-working-set.csv",
+                        label="Working set",
                     ),
-                    mo.download(
-                        data=csv_bytes(points),
-                        filename="iyzee-sweep-points.csv",
-                        label="Sweep points CSV",
-                    ),
-                    mo.download(
-                        data=csv_bytes(channel_stats),
-                        filename="iyzee-scope-channels.csv",
-                        label="Scope statistics CSV",
-                    ),
-                    mo.download(
-                        data=csv_bytes(traces),
-                        filename="iyzee-scope-traces.csv",
-                        label="Scope waveforms CSV",
-                    ),
+                    *_downloads,
                 ],
-                align="start",
-            ),
-            mo.download(
-                data=csv_bytes(selected_array_frame),
-                filename="iyzee-selected-array.csv",
-                label="Selected raw array CSV",
-            ),
-            mo.accordion(
-                {
-                    "Reusable in code": mo.md("""
-            ### Reusable in code
-
-            These tables are ordinary Polars dataframes. Keep a small marked set and adapt
-            these recipes in the console, a script, or this notebook.
-
-            ~~~python
-            # Frequency points below shot noise, strongest first.
-            quiet = (
-                points.filter(
-                    (pl.col("kind") == "frequency")
-                    & (pl.col("rel_noise_mean_db") < 0)
-                )
-                .sort("rel_noise_mean_db")
-            )
-
-            # Summarize repeats without losing the run label.
-            by_run = (
-                points.group_by(["kind", "run"])
-                .agg(
-                    pl.col("rel_noise_mean_db").min().alias("best_db"),
-                    pl.col("rel_noise_mean_db").mean().alias("mean_db"),
-                )
-                .sort("best_db")
-            )
-
-            # Compare frequency runs on their shared measured range.
-            frequency = points.filter(pl.col("kind") == "frequency")
-            if frequency["run_id"].n_unique() > 1:
-                differences = delta_to_reference(frequency, frequency["run_id"][0])
-
-            # Inspect each saved array using a short loop.
-            recording = load_recording(Path(marked["path"][0]))
-            for name, array in recording.arrays.items():
-                print(name, array.shape)
-
-            # Reuse the same plot helper, or replace it with Matplotlib code.
-            if not frequency.is_empty():
-                fig = field_chart(
-                    frequency,
-                    x="offset_mhz",
-                    y="rel_noise_min_db",
-                    color="run",
-                    title="Lowest relative noise by laser detuning",
-                )
-            ~~~
-            """)
-                }
+                justify="start",
+                wrap=True,
             ),
         ]
     )
@@ -808,87 +722,83 @@ def _(
 
 @app.cell
 def _(mo):
-    comparison_kind = mo.ui.dropdown(
-        options=["frequency", "bandwidth"],
-        value="frequency",
-        label="Sweep kind for point-by-point comparison",
-    )
-    comparison_kind_view = mo.vstack([comparison_kind])
-    return comparison_kind, comparison_kind_view
+    recipes_view = mo.md("""
+    The same working set is available in code, with no notebook widgets:
 
+    ~~~python
+    from workset import Workset            # run from notebooks/, or add it to sys.path
 
-@app.cell
-def _(comparison_kind, mo, pl, points):
-    comparison_points = points.filter(pl.col("kind") == comparison_kind.value)
-    run_labels = comparison_points.select("run").unique(maintain_order=True)["run"].to_list()
-    if run_labels:
-        reference_run = mo.ui.dropdown(
-            options=run_labels,
-            value=run_labels[0],
-            label="Reference run",
-        )
-        reference_view = reference_run
-    else:
-        reference_run = None
-        reference_view = mo.md("Mark at least one run of the selected sweep kind above.")
-    return comparison_points, reference_run, reference_view
+    ws = Workset.open("demo-data", kind="frequency", latest=3)   # filter on load
+    ws = Workset.open("demo-data", ["#02", "#05", "scan-pumped"])  # or pick by #ref / name
 
+    ws.points                       # tidy table: one row per sweep point
+    ws.scoreboard()                 # best point, mean, count below shot noise
+    ws.delta("#02")                 # every run minus run #02 on the shared x range
+    ws.traces(["C1"], budget=2000)  # scope waveforms
+    ws.point_traces(3)              # raw squeezing / shot-noise traces of point 3
+    ws.array("trace_squeezing", 3)  # any saved array, overlaid across runs
 
-@app.cell
-def _(comparison_points, delta_to_reference, mo, pl, reference_run):
-    if reference_run is None or comparison_points["run_id"].n_unique() < 2:
-        delta_table = mo.md(
-            "Select multiple runs of the same sweep type to compare them against a reference."
-        )
-    else:
-        reference_id = comparison_points.filter(pl.col("run") == reference_run.value)["run_id"][0]
-        differences = delta_to_reference(comparison_points, reference_id)
-        delta_table = mo.vstack(
-            [
-                mo.md(
-                    "Positive values mean more relative noise than the reference. "
-                    "Other runs are interpolated only over the shared x-range."
-                ),
-                mo.ui.table(differences, selection=None, page_size=12),
-            ]
-        )
-    return (delta_table,)
+    fig = ws.plot(ws.points, x="offset_mhz", y="rel_noise_min_db",
+                  mark="points", facet="run")                 # colours follow the runs
+    open("fig.png", "wb").write(ws.png(fig))
+
+    # Tables are ordinary Polars frames:
+    quiet = ws.points.filter(pl.col("rel_noise_mean_db") < 0).sort("rel_noise_mean_db")
+    ~~~
+    """)
+    return (recipes_view,)
 
 
 @app.cell
 def _(
-    array_view,
-    comparison_kind_view,
-    delta_table,
+    array_inventory_view,
+    array_name,
+    array_row,
+    delta_kind,
+    delta_metric,
+    delta_reference,
+    delta_view,
     export_view,
-    index_view,
     mo,
     plot_controls,
     plot_view,
-    raw_array_plot,
-    raw_section_heading,
-    reference_view,
-    run_view,
-    source_view,
+    point_index,
+    point_view,
+    raw_view,
+    recipes_view,
+    source,
     verification,
-    verify_view,
+    verify_button,
+    ws,
 ):
     mo.vstack(
         [
             mo.md(
-                "## Further analysis\nOpen a section only when you need raw arrays, custom plots, "
-                "pairwise comparison, or data checks and exports."
+                "## 5 · Toolbox\nEach tool works on the working set. Open only the ones you need."
             ),
+            mo.Html(ws.banner()),
             mo.accordion(
                 {
-                    "Inspect raw arrays": mo.vstack(
-                        [raw_section_heading, run_view, array_view, index_view, raw_array_plot]
+                    "Custom plot builder": mo.vstack([source, plot_controls, plot_view]),
+                    "Point inspector · squeezing vs shot noise": mo.vstack(
+                        [point_index, point_view]
                     ),
-                    "Build a custom plot": mo.vstack([source_view, plot_controls, plot_view]),
-                    "Compare runs on a shared x-grid": mo.vstack(
-                        [comparison_kind_view, reference_view, delta_table]
+                    "Raw arrays across runs": mo.vstack(
+                        [
+                            mo.hstack([array_name, array_row], justify="start"),
+                            raw_view,
+                            mo.md("#### Arrays in each file"),
+                            array_inventory_view,
+                        ]
                     ),
-                    "Integrity and export": mo.vstack([verify_view, verification, export_view]),
+                    "Compare against a reference run": mo.vstack(
+                        [
+                            mo.hstack([delta_kind, delta_reference, delta_metric], justify="start"),
+                            delta_view,
+                        ]
+                    ),
+                    "Integrity and export": mo.vstack([verify_button, verification, export_view]),
+                    "Use the same working set in code": recipes_view,
                 }
             ),
         ]

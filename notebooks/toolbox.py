@@ -10,8 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Sequence
-from datetime import datetime
+from collections.abc import Mapping, Sequence
+from datetime import date, datetime
 from functools import lru_cache
 from itertools import pairwise
 from pathlib import Path
@@ -36,8 +36,22 @@ SWEEP_METRICS = {
 }
 SCOPE_METRICS = ("rms", "peak_to_peak", "mean", "minimum", "maximum", "stddev")
 
+# Colour-blind-safe (Okabe-Ito based) cycle. Plots give every run one colour from this list.
+PALETTE = (
+    "#0072B2",
+    "#D55E00",
+    "#009E73",
+    "#CC79A7",
+    "#E69F00",
+    "#56B4E9",
+    "#555555",
+    "#B8A100",
+)
+LINESTYLES = ("-", "--", ":", "-.")
+
 CATALOG_SCHEMA = {
     "run_id": pl.String,
+    "ref": pl.String,
     "label": pl.String,
     "name": pl.String,
     "kind": pl.String,
@@ -118,6 +132,25 @@ def _unique_labels(frame: pl.DataFrame) -> pl.Series:
     return pl.Series("label", labels, dtype=pl.String)
 
 
+def _refs(frame: pl.DataFrame) -> pl.Series:
+    """Short chronological ids (``#01`` is the oldest recording in the catalog).
+
+    They depend on the whole catalog, not on a filter or a selection, so a run keeps its
+    ``#ref`` in every table, legend and plot while you change what you are looking at.
+    """
+    started = frame["started"].to_list()
+    paths = frame["path"].to_list()
+    order = sorted(
+        range(frame.height),
+        key=lambda i: (started[i] is not None, started[i] or datetime.min, paths[i]),
+    )
+    width = max(2, len(str(frame.height)))
+    refs = [""] * frame.height
+    for rank, index in enumerate(order, start=1):
+        refs[index] = f"#{rank:0{width}d}"
+    return pl.Series("ref", refs, dtype=pl.String)
+
+
 def scan_catalog(root: Path) -> pl.DataFrame:
     """Index each saved NPZ once, using sidecars only (no waveform arrays are loaded)."""
     root = root.expanduser()
@@ -140,6 +173,7 @@ def scan_catalog(root: Path) -> pl.DataFrame:
         rows.append(
             {
                 "run_id": path.stem,
+                "ref": "",
                 "label": "",
                 "name": match["name"] if match else "",
                 "kind": kind,
@@ -161,7 +195,86 @@ def scan_catalog(root: Path) -> pl.DataFrame:
     if frame.is_empty():
         return frame
     frame = frame.sort("started", descending=True, nulls_last=True)
-    return frame.with_columns(_unique_labels(frame))
+    return frame.with_columns(_unique_labels(frame), _refs(frame))
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, str | bytes) or not isinstance(value, Sequence | set | frozenset):
+        return [value]
+    return list(value)
+
+
+def pick(
+    catalog: pl.DataFrame,
+    *,
+    kind: str | Sequence[str] | None = None,
+    text: str = "",
+    status: str | Sequence[str] | None = None,
+    synthetic: bool | None = None,
+    since: date | datetime | None = None,
+    until: date | datetime | None = None,
+    refs: Sequence[str] | None = None,
+    latest: int | None = None,
+) -> pl.DataFrame:
+    """Filter catalog rows; every argument left at its default keeps everything.
+
+    The notebook's filter bar and scripts share this one function, so "the 3 latest
+    frequency sweeps that completed" reads the same in both::
+
+        pick(catalog, kind="frequency", status="completed", latest=3)
+
+    ``kind`` and ``status`` accept one value or several (``"all"`` means no filter).
+    ``text`` is a case-insensitive substring match over name, status, kind, instrument and
+    path. ``since``/``until`` compare with the start time (dates cover the whole day).
+    ``latest`` keeps the newest N rows left after the other filters, in catalog order.
+    """
+    frame = catalog
+    kinds = [k for k in _as_list(kind) if k != "all"]
+    if kinds:
+        frame = frame.filter(pl.col("kind").is_in(kinds))
+    statuses = [v for v in _as_list(status) if v != "all"]
+    if statuses:
+        frame = frame.filter(pl.col("status").is_in(statuses))
+    if synthetic is not None:
+        frame = frame.filter(pl.col("synthetic") == synthetic)
+    if refs:
+        frame = frame.filter(pl.col("ref").is_in(list(refs)))
+    if since is not None:
+        start = (
+            since if isinstance(since, datetime) else datetime.combine(since, datetime.min.time())
+        )
+        frame = frame.filter(pl.col("started") >= start)
+    if until is not None:
+        end = until if isinstance(until, datetime) else datetime.combine(until, datetime.max.time())
+        frame = frame.filter(pl.col("started") <= end)
+    query = text.strip().lower()
+    if query:
+        frame = frame.filter(
+            pl.any_horizontal(
+                *(
+                    pl.col(column).str.to_lowercase().str.contains(query, literal=True)
+                    for column in ("label", "status", "kind", "name", "instrument", "path")
+                )
+            )
+        )
+    if latest is not None and latest < frame.height:
+        newest = frame.sort("started", descending=True, nulls_last=True).head(latest)
+        frame = frame.filter(pl.col("path").is_in(newest["path"].to_list()))
+    return frame
+
+
+def default_selection(root: Path, count: int = 3) -> list[str]:
+    """Paths of the newest recordings, found from file names alone (no sidecar is read).
+
+    Files are written to ``YYYY-MM/DDTHHMMSS_*.npz``, so sorting the paths sorts by time.
+    This is only a cheap starting point for a notebook; it is not the catalog's ordering.
+    """
+    root = root.expanduser()
+    if not root.is_dir() or count <= 0:
+        return []
+    return [str(path.resolve()) for path in sorted(root.rglob("*.npz"))[-count:]]
 
 
 def describe(rows: pl.DataFrame) -> dict[str, Any]:
@@ -197,8 +310,16 @@ def verify(rows: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(results, schema={"run": pl.String, "integrity": pl.String})
 
 
+@lru_cache(maxsize=6)
+def _cached_recording(path: str, mtime_ns: int, size: int) -> Recording:
+    """Read each file once per file version, so several views of a run share one load."""
+    return load_recording(Path(path))
+
+
 def _load(row: dict[str, Any]) -> Recording:
-    return load_recording(Path(row["path"]))
+    path = Path(row["path"])
+    stat = path.stat()
+    return _cached_recording(str(path), stat.st_mtime_ns, stat.st_size)
 
 
 def _trace_level(array: np.ndarray | None, index: int) -> float:
@@ -291,6 +412,48 @@ def best_points(points: pl.DataFrame, metric: str = "rel_noise_mean_db") -> pl.D
         .first()
         .sort(metric)
     )
+
+
+def scoreboard(points: pl.DataFrame, metric: str = "rel_noise_mean_db") -> pl.DataFrame:
+    """One row per sweep: the quick "which run was best, and where" table.
+
+    ``best_x`` is the laser offset (MHz) for frequency sweeps and the RBW (kHz) for
+    bandwidth sweeps, so it only compares between runs of the same ``kind``.
+    """
+    if metric not in SWEEP_METRICS:
+        raise ValueError(f"unsupported sweep metric: {metric!r}")
+    schema = {
+        "run": pl.String,
+        "run_id": pl.String,
+        "kind": pl.String,
+        "synthetic": pl.Boolean,
+        "points": pl.Int64,
+        "best_db": pl.Float64,
+        "best_x": pl.Float64,
+        "mean_db": pl.Float64,
+        "below_shot_noise": pl.Int64,
+    }
+    rows = []
+    for part in points.partition_by("run_id", maintain_order=True):
+        usable = part.drop_nulls(metric)
+        if usable.is_empty():
+            continue
+        best = usable.sort(metric).row(0, named=True)
+        x = best["offset_mhz"] if best["kind"] == "frequency" else best["rbw_khz"]
+        rows.append(
+            {
+                "run": best["run"],
+                "run_id": best["run_id"],
+                "kind": best["kind"],
+                "synthetic": best["synthetic"],
+                "points": usable.height,
+                "best_db": best[metric],
+                "best_x": x,
+                "mean_db": float(usable[metric].mean()),  # type: ignore[arg-type]
+                "below_shot_noise": int((usable[metric] < 0).sum()),
+            }
+        )
+    return pl.DataFrame(rows, schema=schema).sort("best_db", nulls_last=True)
 
 
 def delta_to_reference(
@@ -544,14 +707,105 @@ def array_frame(array: np.ndarray, index: int = 0) -> pl.DataFrame:
     return pl.DataFrame({"sample": np.arange(selected.size, dtype=np.int64), "value": selected})
 
 
+def array_inventory(rows: pl.DataFrame, issues: list[dict[str, str]] | None = None) -> pl.DataFrame:
+    """Every saved array of every run (name, shape, dtype), to see what a file holds."""
+    output = []
+    for row in rows.iter_rows(named=True):
+        try:
+            recording = _load(row)
+        except Exception as exc:  # noqa: BLE001 - isolate a damaged archive from other selected runs
+            if issues is not None:
+                issues.append({"run": row["label"], "problem": f"could not read arrays: {exc}"})
+            continue
+        output.extend(
+            {
+                "run": row["label"],
+                "run_id": row["run_id"],
+                "array": name,
+                "shape": " x ".join(str(n) for n in array.shape) or "scalar",
+                "ndim": array.ndim,
+                "dtype": str(array.dtype),
+            }
+            for name, array in sorted(recording.arrays.items())
+        )
+    return pl.DataFrame(
+        output,
+        schema={
+            "run": pl.String,
+            "run_id": pl.String,
+            "array": pl.String,
+            "shape": pl.String,
+            "ndim": pl.Int64,
+            "dtype": pl.String,
+        },
+    )
+
+
+def array_overlay(
+    rows: pl.DataFrame,
+    name: str,
+    index: int = 0,
+    budget: int | None = 4000,
+    issues: list[dict[str, str]] | None = None,
+) -> pl.DataFrame:
+    """One saved array (a row of it, when 2-D) from every run that has it, as a long table.
+
+    Runs without the array are skipped quietly; runs with fewer rows than ``index`` (or an
+    unreadable file) are skipped and reported in ``issues`` instead of stopping the others.
+    """
+    output = []
+    for row in rows.iter_rows(named=True):
+        try:
+            recording = _load(row)
+            if name not in recording.arrays:
+                continue  # a different kind of recording: nothing to overlay, not an error
+            frame = array_frame(recording.arrays[name], index=index)
+        except Exception as exc:  # noqa: BLE001 - isolate a damaged archive from other selected runs
+            if issues is not None:
+                issues.append({"run": row["label"], "problem": f"{name}: {exc}"})
+            continue
+        sample = frame["sample"].to_numpy().astype(float)
+        value = frame["value"].to_numpy()
+        if budget:
+            sample, value = decimate(sample, value, budget)
+        output.append(
+            pl.DataFrame(
+                {
+                    "run": row["label"],
+                    "run_id": row["run_id"],
+                    "synthetic": row["synthetic"],
+                    "array": name,
+                    "array_index": index,
+                    "sample": sample.astype(np.int64),
+                    "value": value,
+                }
+            )
+        )
+    schema = {
+        "run": pl.String,
+        "run_id": pl.String,
+        "synthetic": pl.Boolean,
+        "array": pl.String,
+        "array_index": pl.Int64,
+        "sample": pl.Int64,
+        "value": pl.Float64,
+    }
+    return pl.concat(output) if output else pl.DataFrame(schema=schema)
+
+
 def _title(column: str) -> str:
     known = {
         **SWEEP_METRICS,
         "offset_mhz": "Laser frequency offset (MHz; shared reference)",
         "rbw_khz": "Resolution bandwidth (kHz)",
         "x_thz": "Measured laser frequency (THz)",
-        "time": "Time",
+        "time": "Time (ms)",
         "sample": "Sample index",
+        "delta_db": "Δ relative noise vs reference (dB)",
+        "best_db": "Best relative noise (dB)",
+        "best_x": "Position of best point",
+        "mean_db": "Mean relative noise (dB)",
+        "rel_noise_db": "Relative noise (dB)",
         "value": "Amplitude",
         "rms": "RMS amplitude",
         "minimum": "Minimum amplitude",
@@ -562,6 +816,14 @@ def _title(column: str) -> str:
     return known.get(column, column.replace("_", " ").capitalize())
 
 
+def _tick_text(value: Any) -> str:
+    return (
+        f"{value:g}"
+        if isinstance(value, int | float) and not isinstance(value, bool)
+        else str(value)
+    )
+
+
 def field_chart(
     frame: pl.DataFrame,
     *,
@@ -569,56 +831,133 @@ def field_chart(
     y: str,
     color: str | None = "run",
     detail: str | None = None,
+    facet: str | None = None,
     mark: str = "line",
     title: str = "",
+    palette: Mapping[str, str] | None = None,
+    x_log: bool = False,
+    y_log: bool = False,
 ) -> Any:
-    """Build a reusable Matplotlib plot from any tidy Polars table.
+    """Build a reusable Matplotlib figure from any tidy Polars table.
 
-    Choose columns instead of maintaining a one-off plot per experiment. Colour and detail
-    split the selected rows into separate series; the returned figure can be saved or composed.
+    Choose columns instead of maintaining a one-off plot per experiment:
+
+    * ``color`` and ``detail`` split the rows into series. ``color`` picks the hue (looked up
+      in ``palette`` when the value is there, so a run keeps its colour across figures);
+      ``detail`` varies the line style, e.g. run = colour, channel = dashes.
+    * ``facet`` draws one panel per value, with a shared x axis.
+    * ``mark`` is ``"line"``, ``"points"`` or ``"bars"`` (grouped side by side per x value).
+
+    The figure is not registered with pyplot, so repeated calls do not accumulate; save it
+    with :func:`figure_bytes` or ``figure.savefig``.
     """
-    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
 
-    for column in (x, y, color, detail):
+    for column in (x, y, color, detail, facet):
         if column is not None and column not in frame.columns:
             raise ValueError(f"column {column!r} is not in the selected table")
-    columns = list(dict.fromkeys(column for column in (x, y, color, detail) if column is not None))
+    columns = list(dict.fromkeys(c for c in (x, y, color, detail, facet) if c is not None))
     data = frame.select(columns).drop_nulls([x, y]).sort(x)
     if data.is_empty():
         raise ValueError("no usable rows for these plot fields")
 
-    groups = [column for column in (color, detail) if column is not None and column not in {x, y}]
-    groups = list(dict.fromkeys(groups))
-    buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
-    for row in data.to_dicts():
-        key = tuple(row[column] for column in groups)
-        buckets.setdefault(key, []).append(row)
+    groups = list(dict.fromkeys(c for c in (color, detail) if c is not None and c not in {x, y}))
+    panels = data[facet].unique(maintain_order=True).to_list() if facet else [None]
+    ncols = min(len(panels), 3)
+    nrows = math.ceil(len(panels) / ncols)
 
-    figure, axis = plt.subplots(figsize=(9, 4.8), layout="constrained")
-    for key, records in buckets.items():
-        label = (
-            " · ".join(f"{column}: {value}" for column, value in zip(groups, key, strict=True))
-            or None
+    # Colours are fixed per colour-value for the whole figure, whatever the panel.
+    hues: dict[Any, str] = {}
+    styles: dict[Any, str] = {}
+    for record in data.select(groups).iter_rows() if groups else []:
+        key = dict(zip(groups, record, strict=True))
+        if color in key and key[color] not in hues:
+            fallback = PALETTE[len(hues) % len(PALETTE)]
+            hues[key[color]] = (palette or {}).get(key[color], fallback)
+        if detail in key and key[detail] not in styles:
+            styles[key[detail]] = LINESTYLES[len(styles) % len(LINESTYLES)]
+
+    categories = list(dict.fromkeys(data[x].to_list())) if mark == "bars" else []
+    figure = Figure(figsize=(6.2 * ncols + 3.2, 4.2 * nrows + 0.6), layout="constrained")
+    axes = figure.subplots(nrows, ncols, squeeze=False, sharex=True)
+    handles: dict[str, Any] = {}
+
+    for slot, panel in zip(axes.flat, panels, strict=False):
+        part = data.filter(pl.col(facet) == panel) if facet else data
+        buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+        for record in part.to_dicts():
+            buckets.setdefault(tuple(record[g] for g in groups), []).append(record)
+        for position, (key, records) in enumerate(buckets.items()):
+            named = dict(zip(groups, key, strict=True))
+            label = " · ".join(str(v) for v in key) or None
+            style = {
+                "color": hues.get(named.get(color)) if color else None,
+                "label": label,
+            }
+            xs = [r[x] for r in records]
+            ys = [r[y] for r in records]
+            if mark == "points":
+                artist = slot.scatter(xs, ys, s=26, alpha=0.85, **style)
+            elif mark == "bars":
+                width = 0.8 / len(buckets)
+                shifted = [
+                    categories.index(v) + (position - (len(buckets) - 1) / 2) * width for v in xs
+                ]
+                artist = slot.bar(shifted, ys, width=width, alpha=0.85, **style)
+            else:
+                (artist,) = slot.plot(
+                    xs,
+                    ys,
+                    marker="o" if len(xs) <= 80 else None,
+                    markersize=3.5,
+                    linewidth=1.5,
+                    linestyle=styles.get(named.get(detail), "-"),
+                    **style,
+                )
+            if label and label not in handles:
+                handles[label] = artist
+        if mark == "bars":
+            slot.set_xticks(range(len(categories)), [_tick_text(c) for c in categories])
+        if x_log:
+            slot.set_xscale("log")
+        if y_log:
+            slot.set_yscale("log")
+        if y.startswith("rel_noise"):
+            slot.axhline(0, linestyle="--", linewidth=1, alpha=0.7, color="black")
+        slot.grid(True, which="major", alpha=0.25)
+        slot.spines[["top", "right"]].set_visible(False)
+        slot.set_xlabel(_title(x))
+        slot.set_ylabel(_title(y))
+        if facet:
+            slot.set_title(f"{facet}: {panel}", loc="left", fontsize="small")
+    for slot in list(axes.flat)[len(panels) :]:
+        slot.set_visible(False)
+
+    heading = title or f"{_title(y)} by {_title(x)}"
+    if facet:
+        figure.suptitle(heading, x=0.01, ha="left", fontsize="large")
+    else:
+        axes[0, 0].set_title(heading, loc="left", pad=10)
+    if handles:
+        figure.legend(
+            list(handles.values()),
+            list(handles),
+            loc="outside right upper",
+            frameon=False,
+            fontsize="small",
         )
-        xs = [row[x] for row in records]
-        ys = [row[y] for row in records]
-        if mark == "points":
-            axis.scatter(xs, ys, label=label, s=26, alpha=0.85)
-        elif mark == "bars":
-            axis.bar(xs, ys, label=label, alpha=0.8)
-        else:
-            axis.plot(xs, ys, marker="o", markersize=3.5, linewidth=1.5, label=label)
-
-    if y.startswith("rel_noise"):
-        axis.axhline(0, linestyle="--", linewidth=1, alpha=0.7)
-    axis.set_title(title or f"{_title(y)} by {_title(x)}", loc="left", pad=10)
-    axis.set_xlabel(_title(x))
-    axis.set_ylabel(_title(y))
-    axis.grid(True, which="major", alpha=0.25)
-    axis.spines[["top", "right"]].set_visible(False)
-    if groups:
-        axis.legend(frameon=False, fontsize="small")
     return figure
+
+
+def figure_bytes(figure: Any, fmt: str = "png", dpi: int = 200) -> bytes:
+    """Serialise a figure (``png``, ``svg`` or ``pdf``) for a download button or a file."""
+    import io
+
+    if fmt not in {"png", "svg", "pdf"}:
+        raise ValueError(f"unsupported figure format: {fmt!r}")
+    buffer = io.BytesIO()
+    figure.savefig(buffer, format=fmt, dpi=dpi)
+    return buffer.getvalue()
 
 
 def csv_bytes(frame: pl.DataFrame) -> bytes:

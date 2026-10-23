@@ -61,3 +61,6 @@ notebooks/__marimo__/
 
 # uv download cache used by the GitLab pipeline
 .uv-cache/
+
+# Synthetic recordings from scripts/demo_data.py
+demo-data/

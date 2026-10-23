@@ -156,7 +156,14 @@ Install the optional notebook dependencies and launch it from the repository roo
 Use the directory control to select a recording folder (or set `IYZEE_DATA_DIR` before
 launching), then press *Refresh index* after adding or changing files. The browser shows
 recording kind, status, instrument, synthetic-data flag, warnings, file size, and whether a
-checksum is recorded. Mark a working set to populate the analysis views.
+checksum is recorded.
+
+Every recording gets a stable short id such as `#07` (numbered oldest to newest across the
+whole index), shown in every table, legend and plot. To analyse recordings, build a
+*working set*: filter the list, tick rows, and press *Add ticked rows* (or one of the quick
+buttons). Filters never change the working set, so a set can mix kinds and dates, and the set
+survives re-indexing. The set is shown in the sidebar and at the top of each section, with one
+plot colour per run, so it is always clear which files an analysis is using.
 
 #table(
   columns: (1.2fr, 2.5fr),
@@ -164,11 +171,12 @@ checksum is recorded. Mark a working set to populate the analysis views.
   inset: (x: 5pt, y: 4pt),
   fill: none,
   [*View*], [*What it provides*],
-  [*Sweep comparison*], [One row per sweep point, best point per run, and relative-noise and trace-level metrics in tidy Polars tables.],
+  [*Sweep comparison*], [One row per sweep point, a scoreboard with the best point per run, and relative-noise and trace-level metrics in tidy Polars tables.],
+  [*Point inspector*], [The raw squeezing and shot-noise traces of one sweep point, for every sweep in the set at once.],
   [*Scope statistics*], [Per-channel sample count, extrema, peak-to-peak amplitude, mean, RMS, standard deviation, and recorded channel settings.],
   [*Scope traces*], [Selected waveforms for overlay and plotting. Plotting uses extrema-preserving decimation for responsiveness; the saved arrays are not modified.],
-  [*Raw arrays*], [Inspect a named array and plot it. One-dimensional arrays and a selected row of a two-dimensional array are supported; higher-dimensional arrays are rejected rather than silently flattened.],
-  [*Plot builder*], [Choose a tidy table, x/y fields, series groups, and line/point/bar marks instead of writing a separate plotting function for each question.],
+  [*Raw arrays*], [List every array in every file, then overlay one named array across the runs that have it. One-dimensional arrays and a selected row of a two-dimensional array are supported; higher-dimensional arrays are rejected rather than silently flattened.],
+  [*Plot builder*], [Choose a tidy table, x/y fields, colour and line-style groups, one panel per value, log axes, and line/point/bar marks instead of writing a separate plotting function for each question. Download the figure as PNG, SVG or PDF.],
   [*Integrity and export*], [Verify the NPZ SHA-256 digest against its JSON manifest and download tidy tables as CSV. Missing digests are reported rather than treated as verified.],
 )
 
@@ -179,9 +187,13 @@ does not extrapolate beyond another run's measured range. A positive difference 
 comparison run has more relative noise than the reference.
 
 The workbench includes ready-made frequency, bandwidth, and scope comparisons as well as
-the configurable plot builder. The companion analysis-recipe notebook has therefore been
-folded into this workbench: its standard plots and concise Polars examples now live next to
-the interactive tools instead of duplicating the catalog and selection flow.
+the configurable plot builder. All of it is driven by one `Workset` object, so the same
+analysis is available without the widgets:
+
+#raw("ws = Workset.open(\"demo-data\", kind=\"frequency\", latest=3)  # or a list of #refs / names\nws.scoreboard()\nws.delta(ws.refs[0])\nws.plot(ws.points, x=\"offset_mhz\", y=\"rel_noise_mean_db\")", lang: "python", block: true)
+
+#file("notebooks/sweep_scope_analysis.py", label: "sweep_scope_analysis.py") is a short code-first
+notebook that does exactly this.
 
 For a different task—reproducing the live frequency sweep to investigate TUI versus
 measurement behavior—use
@@ -192,7 +204,9 @@ closed first. It is intentionally separate from the read-only workbench.
 
 The shared helpers in
 #file("notebooks/toolbox.py", label: "toolbox.py")
-remain ordinary Python functions; the data path uses the same
+and the working-set class in
+#file("notebooks/workset.py", label: "workset.py")
+remain ordinary Python; the data path uses the same
 #file("src/iyzee/experiment/io.py", label: "recording loader")
 and
 #file("src/iyzee/analysis.py", label: "analysis summaries")
