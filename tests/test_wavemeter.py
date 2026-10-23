@@ -81,6 +81,11 @@ def test_failures_are_raised_as_they_are_never_wrapped_or_swallowed(
     with pytest.raises(ValueError, match="not-a-frequency"):  # an unparseable reading
         Wavemeter().read_frequency(1)
 
+    for invalid in ("nan", "inf", "0", "-3.0"):
+        monkeypatch.setattr(wavemeter.requests, "get", lambda *a, value=invalid, **k: response(value))
+        with pytest.raises(ValueError, match="invalid frequency"):
+            Wavemeter().read_frequency(1)
+
 
 def test_set_pid_setpoint_posts_the_expected_form(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[dict[str, Any]] = []
@@ -94,6 +99,9 @@ def test_set_pid_setpoint_posts_the_expected_form(monkeypatch: pytest.MonkeyPatc
 
     client.set_pid_setpoint(377.1052, 4)
     client.set_pid_setpoint(377.1052)
+    for invalid in (0.0, -3.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="finite and positive"):
+            client.set_pid_setpoint(invalid, 4)
 
     expected = {
         "url": f"{client.base_url}set_pid/",
