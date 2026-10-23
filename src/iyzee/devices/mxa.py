@@ -26,15 +26,33 @@ class KeysightMXA(BaseDevice):
         """Backward-compatible alias for :meth:`close`."""
         self.close()
 
+    def _drop_after_io_error(self) -> None:
+        """Best-effort close after a VISA exchange leaves the stream unreliable."""
+        try:
+            self.close()
+        except Exception:
+            # The BaseDevice reference is cleared before resource.close() is called.
+            pass
+
     def write(self, cmd: str):
-        if self.instrument is None:
+        instrument = self.instrument
+        if instrument is None:
             raise RuntimeError("Instrument not connected")
-        self.instrument.write(cmd)
+        try:
+            instrument.write(cmd)
+        except pyvisa.errors.VisaIOError:
+            self._drop_after_io_error()
+            raise
 
     def query(self, cmd: str) -> str:
-        if self.instrument is None:
+        instrument = self.instrument
+        if instrument is None:
             raise RuntimeError("Instrument not connected")
-        return self.instrument.query(cmd)
+        try:
+            return instrument.query(cmd)
+        except pyvisa.errors.VisaIOError:
+            self._drop_after_io_error()
+            raise
 
     def query_binary(
         self, cmd: str, datatype: str = "f", is_big_endian: bool = True
@@ -43,11 +61,16 @@ class KeysightMXA(BaseDevice):
         Query binary IEEE 488.2 block data.
         datatype='f' (float32) or 'd' (float64).
         """
-        if self.instrument is None:
+        instrument = self.instrument
+        if instrument is None:
             raise RuntimeError("Instrument not connected")
-        return self.instrument.query_binary_values(
-            cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
-        )
+        try:
+            return instrument.query_binary_values(
+                cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
+            )
+        except pyvisa.errors.VisaIOError:
+            self._drop_after_io_error()
+            raise
 
     # ------------------------------------------------------------------
     # System & Synchronization
@@ -73,12 +96,7 @@ class KeysightMXA(BaseDevice):
         except pyvisa.errors.VisaIOError:
             # A timed-out query may still have a late reply in the stream. Drop
             # the resource rather than letting that reply corrupt the next query.
-            try:
-                self.close()
-            except Exception:
-                # BaseDevice.close() clears the published handle before closing;
-                # a VISA cleanup error must not mask the acquisition timeout.
-                pass
+            self._drop_after_io_error()
             return False
         finally:
             # A timed-out query has already dropped this resource. Restoring a
