@@ -366,6 +366,9 @@ class _FakeMxaForCapture:
     def get_frequency_axis(self) -> list[float]:
         return self._freq
 
+    def get_errors(self) -> list[str]:
+        return []
+
 
 @async_test
 async def test_capture_trace_plots_power_vs_frequency() -> None:
