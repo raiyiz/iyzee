@@ -20,8 +20,13 @@ the same way.
 
 from __future__ import annotations
 
+import contextlib
 import html
-from collections.abc import Iterable, Mapping, Sequence
+import json
+import os
+import tempfile
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +43,9 @@ from toolbox import (
     describe,
     field_chart,
     figure_bytes,
+    group_curves,
+    group_difference,
+    group_summary,
     pair_trace,
     pick,
     scan_catalog,
@@ -81,6 +89,7 @@ class Workset:
             label: PALETTE[index % len(PALETTE)]
             for index, label in enumerate(self.rows["label"].to_list())
         }
+        self._groups: dict[str, str] = {}  # run_id -> group label
 
     # --- construction ---------------------------------------------------------------
 
@@ -133,6 +142,34 @@ class Workset:
         catalog = scan_catalog(Path(root) if root is not None else data_root())
         return cls.from_catalog(catalog, selection, **filters)
 
+    @classmethod
+    def from_saved(cls, catalog: pl.DataFrame, saved: SavedSet, *, strict: bool = False) -> Workset:
+        """Rebuild a saved working set (and its groups) against the current catalog.
+
+        Each saved run is found by its file path, else by its run id (so a recording that
+        moved to another directory is still found). Runs that are gone are listed in
+        ``missing`` (or raise with ``strict=True``). ``#refs`` are *not* used for matching:
+        they number the whole catalog by age, so they shift if older recordings are added.
+        """
+        by_path = dict(zip(catalog["path"], catalog["path"], strict=True))
+        by_run = dict(zip(catalog["run_id"], catalog["path"], strict=True))
+        found: list[str] = []
+        missing: list[str] = []
+        for entry in saved.runs:
+            path = by_path.get(entry.get("path", "")) or by_run.get(entry.get("run_id", ""))
+            if path:
+                found.append(path)
+            else:
+                missing.append(
+                    f"{entry.get('ref', '?')} {entry.get('name') or entry.get('run_id', '')}"
+                )
+        if missing and strict:
+            raise ValueError(f"not in the catalog: {', '.join(missing)}")
+        ws = cls(catalog.filter(pl.col("path").is_in(found)), missing)
+        return ws.with_groups(
+            {run: group for run, group in saved.groups.items() if run in set(ws.rows["run_id"])}
+        )
+
     def subset(self, **filters: Any) -> Workset:
         """A smaller set, e.g. ``ws.subset(kind="frequency")``; same refs, same colours."""
         keep = pick(self.rows, **filters)
@@ -142,6 +179,8 @@ class Workset:
         clone._cache = {}
         clone._issues = {}
         clone._colors = self._colors  # a subset keeps its parent's colours
+        keep = set(clone.rows["run_id"].to_list())
+        clone._groups = {run: group for run, group in self._groups.items() if run in keep}
         return clone
 
     # --- identity -------------------------------------------------------------------
@@ -352,6 +391,159 @@ class Workset:
                 raise ValueError(f"{reference!r} is not a {kind} sweep in this working set")
         return delta_to_reference(points, run_id, metric)
 
+    # --- groups and statistics ------------------------------------------------------
+
+    def _clone(self) -> Workset:
+        clone = Workset.__new__(Workset)
+        clone.rows = self.rows
+        clone.missing = list(self.missing)
+        clone._cache = self._cache  # same runs, so cached tables stay valid
+        clone._issues = self._issues
+        clone._colors = self._colors
+        clone._groups = dict(self._groups)
+        return clone
+
+    def with_groups(
+        self,
+        spec: Mapping[str, Any] | str | Callable[[dict[str, Any]], str | None],
+    ) -> Workset:
+        """A copy of this set whose runs are labelled with group names.
+
+        ``spec`` can be:
+
+        * ``{"#02": "A", "#05": "B"}``: run (``#ref``, run id, path or recording name) -> group;
+        * ``{"pumped": ["#05", "#09"], "baseline": ["#02"]}``: group -> runs;
+        * a column name such as ``"name"``, ``"kind"``, ``"status"`` or ``"synthetic"``;
+        * a function of the catalog row returning a group name (or ``None`` for ungrouped).
+
+        Empty names mean "no group". Runs not mentioned stay ungrouped. Unknown runs raise.
+        """
+        rows = self.rows.to_dicts()
+        assigned: dict[str, str] = {}
+        pairs: list[tuple[str, Any]]
+        if callable(spec):
+            pairs = [(row["run_id"], spec(row)) for row in rows]
+        elif isinstance(spec, str):
+            if spec not in self.rows.columns:
+                raise ValueError(f"cannot group by unknown column {spec!r}")
+            pairs = [(row["run_id"], row[spec]) for row in rows]
+        else:
+            pairs = []
+            for key, value in spec.items():
+                if isinstance(value, str):  # run -> group
+                    pairs.extend(self._resolve(key, value))
+                else:  # group -> runs
+                    for run_key in value:
+                        pairs.extend(self._resolve(run_key, key))
+        for run_id, group in pairs:
+            label = "" if group is None else str(group).strip()
+            if label:
+                assigned[run_id] = label
+        clone = self._clone()
+        clone._groups = assigned
+        return clone
+
+    def _resolve(self, key: str, group: str) -> list[tuple[str, str]]:
+        hits = {
+            row["run_id"]
+            for row in self.rows.iter_rows(named=True)
+            if key in (row["ref"], row["run_id"], row["path"], row["name"])
+        }
+        if not hits:
+            raise ValueError(f"not in this working set: {key!r}")
+        return [(run_id, group) for run_id in hits]
+
+    @property
+    def group_map(self) -> dict[str, str]:
+        """``run_id -> group`` for the grouped runs (a copy)."""
+        return dict(self._groups)
+
+    @property
+    def groups(self) -> pl.DataFrame:
+        """Which run is in which group (ungrouped runs are left out)."""
+        rows = [
+            {
+                "group": self._groups[row["run_id"]],
+                "ref": row["ref"],
+                "run": row["label"],
+                "run_id": row["run_id"],
+            }
+            for row in self.rows.iter_rows(named=True)
+            if row["run_id"] in self._groups
+        ]
+        schema = {"group": pl.String, "ref": pl.String, "run": pl.String, "run_id": pl.String}
+        return pl.DataFrame(rows, schema=schema).sort(["group", "ref"])
+
+    @property
+    def group_names(self) -> list[str]:
+        return sorted(set(self._groups.values()))
+
+    @property
+    def group_colors(self) -> dict[str, str]:
+        """One colour per group, assigned in alphabetical order of the group names."""
+        return {name: PALETTE[i % len(PALETTE)] for i, name in enumerate(self.group_names)}
+
+    def group_summary(self, metric: str = "rel_noise_mean_db") -> pl.DataFrame:
+        """Run count per group and the mean/spread of each run's best point."""
+        return group_summary(self.scoreboard(metric), self._groups)
+
+    def group_stats(
+        self, metric: str = "rel_noise_mean_db", kind: str | None = None, band: str = "std"
+    ) -> pl.DataFrame:
+        """Mean curve (with spread) of each group on one shared x grid; see :func:`toolbox.group_curves`."""
+        return group_curves(self.points, self._groups, metric, kind, band)
+
+    def group_diff(
+        self, a: str, b: str, metric: str = "rel_noise_mean_db", kind: str | None = None
+    ) -> pl.DataFrame:
+        """Group ``a`` minus group ``b`` with standard error; see :func:`toolbox.group_difference`."""
+        return group_difference(self.points, self._groups, a, b, metric, kind)
+
+    def plot_groups(
+        self, metric: str = "rel_noise_mean_db", kind: str | None = None, band: str = "std"
+    ) -> Any:
+        """Group mean curves with their spread band, one colour per group."""
+        stats = self.group_stats(metric, kind, band)
+        if stats.is_empty():
+            raise ValueError(
+                "no grouped sweep has usable points on a shared x range (label some sweeps first)"
+            )
+        x = "offset_mhz" if stats["kind"][0] == "frequency" else "rbw_khz"
+        label = {"std": "±1 s.d.", "sem": "±1 s.e.", "minmax": "min to max", "none": "no band"}[
+            band
+        ]
+        return field_chart(
+            stats.with_columns(
+                (pl.col("group") + " (n=" + pl.col("n").cast(pl.String) + ")").alias("group_n")
+            ),
+            x=x,
+            y=metric,
+            color="group_n",
+            title=f"Group means ({label})",
+            palette={
+                f"{name} (n={n})": self.group_colors[name]
+                for name, n in stats.unique("group").select("group", "n").iter_rows()
+            },
+            x_log=stats["kind"][0] == "bandwidth",
+            band=None if band == "none" else ("band_low", "band_high"),
+        )
+
+    def plot_group_diff(
+        self, a: str, b: str, metric: str = "rel_noise_mean_db", kind: str | None = None
+    ) -> Any:
+        """Difference of two group means with a ±2 standard-error band."""
+        diff = self.group_diff(a, b, metric, kind)
+        x = "offset_mhz" if diff["kind"][0] == "frequency" else "rbw_khz"
+        return field_chart(
+            diff,
+            x=x,
+            y="delta",
+            color=None,
+            title=f"{a} minus {b} (band: ±2 standard errors)",
+            x_log=diff["kind"][0] == "bandwidth",
+            band=("delta_low", "delta_high"),
+        )
+
     # --- problems, integrity, export ------------------------------------------------
 
     @property
@@ -389,8 +581,10 @@ class Workset:
         title: str = "",
         x_log: bool = False,
         y_log: bool = False,
+        palette: Mapping[str, str] | None = None,
+        band: tuple[str, str] | None = None,
     ) -> Any:
-        """:func:`toolbox.field_chart` with this set's run colours."""
+        """:func:`toolbox.field_chart` with this set's run colours (``palette`` overrides them)."""
         return field_chart(
             frame,
             x=x,
@@ -400,9 +594,10 @@ class Workset:
             facet=facet,
             mark=mark,
             title=title,
-            palette=self.palette,
+            palette=self.palette if palette is None else palette,
             x_log=x_log,
             y_log=y_log,
+            band=band,
         )
 
     def quick_plots(
@@ -459,3 +654,162 @@ class Workset:
             "Scope channel statistics": self.channel_stats,
             "Scope waveform samples": self.traces(),
         }
+
+
+class SavedSet:
+    """One stored working set: which recordings, and how they were grouped."""
+
+    def __init__(
+        self,
+        name: str,
+        saved: str,
+        runs: Sequence[Mapping[str, str]],
+        groups: Mapping[str, str],
+    ) -> None:
+        self.name = name
+        self.saved = saved
+        self.runs = [dict(run) for run in runs]
+        self.groups = dict(groups)
+
+    def __repr__(self) -> str:
+        return f"SavedSet({self.name!r}, {len(self.runs)} runs, {len(self.groups)} grouped)"
+
+
+def default_store_path() -> Path:
+    """``worksets.json`` next to iyzee's config file (override: ``IYZEE_WORKSETS_FILE``).
+
+    It deliberately lives with the user's settings, never inside the data directory, so the
+    recordings folder stays strictly read-only for analysis.
+    """
+    override = os.environ.get("IYZEE_WORKSETS_FILE")
+    if override:
+        return Path(override).expanduser()
+    from iyzee.config import config_file
+
+    return config_file().parent / "worksets.json"
+
+
+class WorksetStore:
+    """Named working sets kept in one small JSON file.
+
+    ::
+
+        store = WorksetStore()
+        store.save("repeat scans", ws)                  # remembers the runs and any groups
+        ws = Workset.from_saved(catalog, store.get("repeat scans"))
+
+    Sets are matched back to recordings by file path (then run id), not by ``#ref``. Writes
+    are atomic. A file that cannot be parsed is set aside as ``worksets.json.corrupt``
+    rather than overwritten, and ``problem`` explains it.
+    """
+
+    VERSION = 1
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        self.path = Path(path).expanduser() if path is not None else default_store_path()
+        self.problem: str | None = None
+
+    def _read(self) -> dict[str, dict[str, Any]]:
+        self.problem = None
+        try:
+            payload = json.loads(self.path.read_text())
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as exc:
+            self.problem = f"cannot read {self.path}: {exc}"
+            return {}
+        sets = payload.get("sets") if isinstance(payload, dict) else None
+        if not isinstance(sets, dict):
+            self.problem = f"{self.path} is not a saved-sets file"
+            return {}
+        return {name: entry for name, entry in sets.items() if isinstance(entry, dict)}
+
+    def names(self) -> list[str]:
+        return sorted(self._read(), key=str.casefold)
+
+    def describe(self) -> pl.DataFrame:
+        """One row per saved set: name, when, how many runs and grouped runs."""
+        rows = [
+            {
+                "name": name,
+                "saved": str(entry.get("saved", "")),
+                "runs": len(entry.get("runs", [])),
+                "grouped": len(entry.get("groups", {})),
+            }
+            for name, entry in self._read().items()
+        ]
+        schema = {"name": pl.String, "saved": pl.String, "runs": pl.Int64, "grouped": pl.Int64}
+        return pl.DataFrame(rows, schema=schema).sort("name")
+
+    def get(self, name: str) -> SavedSet:
+        entries = self._read()
+        if name not in entries:
+            raise KeyError(f"no saved working set named {name!r}")
+        entry = entries[name]
+        runs = [r for r in entry.get("runs", []) if isinstance(r, dict)]
+        groups = entry.get("groups", {})
+        return SavedSet(
+            name,
+            str(entry.get("saved", "")),
+            runs,
+            groups if isinstance(groups, dict) else {},
+        )
+
+    @staticmethod
+    def _clean_name(name: str) -> str:
+        cleaned = " ".join(name.split())
+        if not cleaned:
+            raise ValueError("give the working set a name")
+        if len(cleaned) > 80:
+            raise ValueError("working-set names are limited to 80 characters")
+        return cleaned
+
+    def save(self, name: str, ws: Workset, groups: Mapping[str, str] | None = None) -> SavedSet:
+        """Store ``ws`` under ``name`` (replacing a set of that name).
+
+        ``groups`` (``run_id -> group``) defaults to the set's own groups; entries for runs
+        that are not in the set are dropped.
+        """
+        name = self._clean_name(name)
+        if len(ws) == 0:
+            raise ValueError("the working set is empty; add recordings before saving it")
+        in_set = set(ws.rows["run_id"].to_list())
+        chosen = ws.group_map if groups is None else dict(groups)
+        entry = SavedSet(
+            name,
+            datetime.now().astimezone().isoformat(timespec="seconds"),
+            [
+                {k: row[k] or "" for k in ("path", "run_id", "ref", "name")}
+                for row in ws.rows.iter_rows(named=True)
+            ],
+            {run: str(g).strip() for run, g in chosen.items() if run in in_set and str(g).strip()},
+        )
+        entries = self._read()
+        if self.problem and self.path.exists():
+            self.path.replace(self.path.with_name(self.path.name + ".corrupt"))
+            self.problem = f"{self.problem} (moved aside as {self.path.name}.corrupt)"
+        entries[name] = {"saved": entry.saved, "runs": entry.runs, "groups": entry.groups}
+        self._write(entries)
+        return entry
+
+    def delete(self, name: str) -> bool:
+        """Remove a saved set; returns whether there was one."""
+        entries = self._read()
+        if name not in entries:
+            return False
+        del entries[name]
+        self._write(entries)
+        return True
+
+    def _write(self, entries: Mapping[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps({"version": self.VERSION, "sets": entries}, indent=2, sort_keys=True)
+        handle, temp = tempfile.mkstemp(dir=self.path.parent, prefix=".worksets-", suffix=".tmp")
+        try:
+            with os.fdopen(handle, "w") as stream:
+                stream.write(payload + "\n")
+            Path(temp).replace(self.path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                Path(temp).unlink()
+            raise

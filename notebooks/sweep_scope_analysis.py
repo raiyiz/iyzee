@@ -105,6 +105,11 @@ def _(mo, ws):
     ws.array("trace_squeezing", 3)   # a saved array, overlaid across runs
     ws.traces(["C1"], budget=2000)   # scope waveforms
     ws.subset(kind="frequency")      # a smaller set that keeps its colours
+    g = ws.with_groups({"#02": "base", "#05": "pumped", "#07": "pumped"})  # or "name", "kind", ...
+    g.plot_groups(band="sem")        # group means with a spread band
+    g.group_diff("pumped", "base")   # difference, standard error, |t| > 2 flag
+    WorksetStore().save("my set", g)               # saved sets keep the groups too
+    Workset.from_saved(catalog, WorksetStore().get("my set"))
     ws.verify()                      # SHA-256 check against the manifests
     ws.png(fig)                      # figure bytes (or ws.png(fig, "svg"))
     ~~~

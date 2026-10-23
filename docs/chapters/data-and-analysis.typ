@@ -165,6 +165,20 @@ buttons). Filters never change the working set, so a set can mix kinds and dates
 survives re-indexing. The set is shown in the sidebar and at the top of each section, with one
 plot colour per run, so it is always clear which files an analysis is using.
 
+The recording table is built for scanning many files: the `in set` and `ref` columns stay
+pinned while you scroll sideways, hovering a `ref` shows the recording's facts (instrument,
+status, item count, checksum, path), and a date range, *Only the working set* and the type,
+status and origin filters narrow the list. Click a column header to sort. Ticking a row shows a
+preview below the table: its facts, a thumbnail of its data, the arrays stored in the file, and
+its raw JSON sidecar, so a recording can be inspected before it is added to the set.
+
+*Saved working sets* keep a selection (and its group labels, below) under a name. They are stored
+in `worksets.json` next to the iyzee config file (set `IYZEE_WORKSETS_FILE` to move it), never in
+the data directory, so the recordings folder stays read-only. A saved set is matched back to
+files by path and then by run id, because the `ref` numbers shift if older recordings are added
+later. Runs that no longer exist are reported rather than silently dropped. A file that cannot
+be parsed is moved aside as `worksets.json.corrupt` instead of being overwritten.
+
 #table(
   columns: (1.2fr, 2.5fr),
   stroke: (x, y) => (bottom: 0.4pt + hairline),
@@ -175,10 +189,18 @@ plot colour per run, so it is always clear which files an analysis is using.
   [*Point inspector*], [The raw squeezing and shot-noise traces of one sweep point, for every sweep in the set at once.],
   [*Scope statistics*], [Per-channel sample count, extrema, peak-to-peak amplitude, mean, RMS, standard deviation, and recorded channel settings.],
   [*Scope traces*], [Selected waveforms for overlay and plotting. Plotting uses extrema-preserving decimation for responsiveness; the saved arrays are not modified.],
+  [*Groups and statistics*], [Label runs with a group (an editable column, or filled from name, type, status or origin). Each group gets a mean curve with a standard-deviation, standard-error or min-to-max band on one shared x grid, a per-group summary of the best points, and an A minus B difference with a two-standard-error band.],
   [*Raw arrays*], [List every array in every file, then overlay one named array across the runs that have it. One-dimensional arrays and a selected row of a two-dimensional array are supported; higher-dimensional arrays are rejected rather than silently flattened.],
   [*Plot builder*], [Choose a tidy table, x/y fields, colour and line-style groups, one panel per value, log axes, and line/point/bar marks instead of writing a separate plotting function for each question. Download the figure as PNG, SVG or PDF.],
   [*Integrity and export*], [Verify the NPZ SHA-256 digest against its JSON manifest and download tidy tables as CSV. Missing digests are reported rather than treated as verified.],
 )
+
+Group statistics interpolate every grouped run onto one x grid (linearly; in log x for bandwidth
+sweeps) over the range that all of them cover, so nothing is extrapolated. A group needs at least
+two runs for a spread, and a group of one run shows only its mean. The A minus B difference uses
+Welch's unequal-variance standard error; a point is flagged when the difference exceeds two
+standard errors. That flag is a rough guide to whether a gap is larger than the run-to-run
+scatter, not a p-value, and with fewer than three runs per group it is only indicative.
 
 For frequency sweeps, plotted offsets use one median reference shared by all marked frequency
 runs; the code does not re-center each run independently, so measured drift remains visible.
@@ -190,7 +212,7 @@ The workbench includes ready-made frequency, bandwidth, and scope comparisons as
 the configurable plot builder. All of it is driven by one `Workset` object, so the same
 analysis is available without the widgets:
 
-#raw("ws = Workset.open(\"demo-data\", kind=\"frequency\", latest=3)  # or a list of #refs / names\nws.scoreboard()\nws.delta(ws.refs[0])\nws.plot(ws.points, x=\"offset_mhz\", y=\"rel_noise_mean_db\")", lang: "python", block: true)
+#raw("ws = Workset.open(\"demo-data\", kind=\"frequency\", latest=5)  # or a list of #refs / names\nws.scoreboard()\nws.delta(ws.refs[0])\ng = ws.with_groups({ws.refs[0]: \"base\", ws.refs[1]: \"pumped\", ws.refs[2]: \"pumped\"})\ng.plot_groups()  # mean with a band per group\ng.group_diff(\"pumped\", \"base\")  # difference, standard error, flag\nWorksetStore().save(\"my set\", g)  # saved sets, groups included", lang: "python", block: true)
 
 #file("notebooks/sweep_scope_analysis.py", label: "sweep_scope_analysis.py") is a short code-first
 notebook that does exactly this.

@@ -6,12 +6,15 @@ Run with:
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import subprocess
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 pl = pytest.importorskip("polars")
@@ -27,10 +30,15 @@ from toolbox import (  # noqa: E402
     default_selection,
     field_chart,
     figure_bytes,
+    group_curves,
+    group_difference,
+    group_summary,
     pick,
+    preview_facts,
+    read_manifest,
     scan_catalog,
 )
-from workset import Workset  # noqa: E402
+from workset import SavedSet, Workset, WorksetStore, default_store_path  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -203,3 +211,322 @@ def test_workbench_notebook_runs_end_to_end(demo):
         check=False,
     )
     assert result.returncode == 0, result.stderr[-2000:]
+
+
+# --- groups and statistics -----------------------------------------------------------
+
+
+def _synthetic_sweeps(offsets=(-2.0, -1.0), per_group=3, seed=0, jitter=0.3):
+    """Frequency sweeps with a known group difference and jittered, unequal x grids."""
+    rng = np.random.default_rng(seed)
+    rows, groups = [], {}
+    for g, offset in zip("AB", offsets, strict=True):
+        for i in range(per_group):
+            x = np.linspace(-50, 50, 21) + rng.normal(0, jitter, 21)
+            y = offset + 0.01 * x + rng.normal(0, 0.1, 21)
+            run_id = f"{g}{i}"
+            groups[run_id] = g
+            rows += [
+                {
+                    "run": run_id,
+                    "run_id": run_id,
+                    "kind": "frequency",
+                    "synthetic": True,
+                    "offset_mhz": float(a),
+                    "rel_noise_mean_db": float(b),
+                }
+                for a, b in zip(x, y, strict=True)
+            ]
+    return pl.DataFrame(rows), groups
+
+
+def test_group_curves_recover_known_means_and_spread():
+    points, groups = _synthetic_sweeps()
+    curves = group_curves(points, groups)
+    by = {g: curves.filter(pl.col("group") == g) for g in "AB"}
+    assert by["A"]["n"].unique().to_list() == [3]
+    assert by["A"]["rel_noise_mean_db"].mean() == pytest.approx(-2.0, abs=0.1)
+    assert by["B"]["rel_noise_mean_db"].mean() == pytest.approx(-1.0, abs=0.1)
+    assert (by["A"]["band_high"] > by["A"]["band_low"]).all()
+    # all groups share one x grid, so they can be compared point by point
+    assert by["A"]["offset_mhz"].to_list() == by["B"]["offset_mhz"].to_list()
+    sem = group_curves(points, groups, band="sem").filter(pl.col("group") == "A")
+    assert sem["band_high"].mean() - sem["rel_noise_mean_db"].mean() < by["A"]["std"].mean()
+    none = group_curves(points, groups, band="none")
+    assert none["band_low"].null_count() == none.height
+    with pytest.raises(ValueError, match="band must be"):
+        group_curves(points, groups, band="wide")
+
+
+def test_single_run_group_has_a_mean_but_no_spread():
+    points, _ = _synthetic_sweeps()
+    solo = group_curves(points, {"A0": "solo", "A1": "pair", "A2": "pair"})
+    one = solo.filter(pl.col("group") == "solo")
+    assert one["n"].unique().to_list() == [1]
+    assert one["std"].null_count() == one.height
+    assert one["rel_noise_mean_db"].null_count() == 0
+
+
+def test_group_difference_flags_a_real_gap_and_not_noise():
+    points, groups = _synthetic_sweeps()
+    diff = group_difference(points, groups, "A", "B")
+    assert diff["delta"].mean() == pytest.approx(-1.0, abs=0.15)
+    assert diff["significant"].all()
+    assert (diff["delta_low"] < diff["delta"]).all()
+    quiet, same = _synthetic_sweeps(offsets=(-1.0, -1.0), seed=4)
+    assert group_difference(quiet, same, "A", "B")["significant"].mean() < 0.3
+    assert group_difference(points, groups, "B", "A")["delta"].mean() == pytest.approx(
+        -diff["delta"].mean()
+    )
+    with pytest.raises(ValueError, match="no usable runs"):
+        group_difference(points, groups, "A", "nope")
+
+
+def test_group_difference_needs_two_runs_per_group_to_flag_anything():
+    points, groups = _synthetic_sweeps(per_group=1)
+    diff = group_difference(points, groups, "A", "B")
+    assert diff["se"].null_count() == diff.height
+    assert not diff["significant"].any()
+
+
+def test_group_curves_ignore_ungrouped_runs_and_handle_empty_input():
+    points, groups = _synthetic_sweeps()
+    assert group_curves(points, {}).is_empty()
+    assert group_curves(points, {"A0": "x", "A1": "x"})["group"].unique().to_list() == ["x"]
+    assert group_summary(pl.DataFrame(), groups).is_empty()
+
+
+def test_with_groups_accepts_every_documented_form(catalog):
+    ws = Workset.from_catalog(catalog, kind="frequency")
+    a, b, c = ws.refs[:3]
+    by_run = ws.with_groups({a: "base", b: "pumped", c: "pumped"})
+    by_group = ws.with_groups({"base": [a], "pumped": [b, c]})
+    assert by_run.group_map == by_group.group_map
+    assert by_run.group_names == ["base", "pumped"]
+    assert ws.with_groups("kind").group_names == ["frequency"]
+    assert ws.with_groups(lambda row: "first" if row["ref"] == a else None).group_names == ["first"]
+    assert ws.with_groups({a: "  ", b: "x"}).group_names == ["x"]  # blank means no group
+    assert ws.group_map == {}  # the original is untouched
+    assert by_run.groups["group"].to_list() == ["base", "pumped", "pumped"]
+    with pytest.raises(ValueError, match="not in this working set"):
+        ws.with_groups({"#99": "x"})
+    with pytest.raises(ValueError, match="unknown column"):
+        ws.with_groups("nonsense")
+
+
+def test_groups_survive_subset_and_drive_plots_and_summary(catalog):
+    ws = Workset.from_catalog(catalog, kind="frequency")
+    a, b, c, d = ws.refs[:4]
+    grouped = ws.with_groups({a: "base", b: "base", c: "pumped", d: "pumped"})
+    assert grouped.subset(kind="frequency").group_map == grouped.group_map
+    only = grouped.subset(refs=[a, c])
+    assert set(only.group_map) == {
+        grouped.rows.filter(pl.col("ref") == r)["run_id"][0] for r in (a, c)
+    }
+    summary = grouped.group_summary()
+    assert summary["runs"].to_list() == [2, 2]
+    figure = grouped.plot_groups()
+    assert [t.get_text() for t in figure.legends[0].get_texts()] == ["base (n=2)", "pumped (n=2)"]
+    assert len(grouped.plot_group_diff("base", "pumped").axes) == 1
+    assert grouped.group_colors["base"] != grouped.group_colors["pumped"]
+    solo = ws.with_groups({a: "solo"}).plot_groups()  # one run: a mean line, no band
+    assert [t.get_text() for t in solo.legends[0].get_texts()] == ["solo (n=1)"]
+    assert not solo.axes[0].collections
+    with pytest.raises(ValueError, match="no grouped sweep has usable points"):
+        ws.plot_groups()
+
+
+def test_field_chart_draws_bands():
+    points, groups = _synthetic_sweeps()
+    curves = group_curves(points, groups)
+    figure = field_chart(
+        curves, x="offset_mhz", y="rel_noise_mean_db", color="group", band=("band_low", "band_high")
+    )
+    assert len(figure.axes[0].collections) == 2  # one shaded band per group
+    with pytest.raises(ValueError, match="not in the selected table"):
+        field_chart(curves, x="offset_mhz", y="rel_noise_mean_db", band=("nope", "band_high"))
+
+
+# --- saved sets ----------------------------------------------------------------------
+
+
+def test_store_round_trip_keeps_runs_and_groups(catalog, tmp_path):
+    store = WorksetStore(tmp_path / "config" / "worksets.json")
+    assert store.names() == [] and store.problem is None
+    ws = Workset.from_catalog(catalog, kind="frequency").with_groups("synthetic")
+    entry = store.save("  my   set  ", ws)
+    assert entry.name == "my set"
+    assert store.names() == ["my set"]
+    assert store.describe().row(0, named=True)["runs"] == len(ws)
+    back = Workset.from_saved(catalog, store.get("my set"))
+    assert back.paths == ws.paths and back.group_map == ws.group_map and back.missing == []
+    assert not list((tmp_path / "config").glob("*.tmp"))
+    assert store.delete("my set") and not store.delete("my set")
+    assert store.names() == []
+
+
+def test_store_rejects_bad_names_and_empty_sets(catalog, tmp_path):
+    store = WorksetStore(tmp_path / "w.json")
+    ws = Workset.from_catalog(catalog, kind="scope")
+    with pytest.raises(ValueError, match="give the working set a name"):
+        store.save("   ", ws)
+    with pytest.raises(ValueError, match="limited to 80"):
+        store.save("x" * 81, ws)
+    with pytest.raises(ValueError, match="empty"):
+        store.save("ok", ws.subset(kind="frequency"))
+    with pytest.raises(KeyError, match="no saved working set"):
+        store.get("missing")
+    assert not (tmp_path / "w.json").exists()
+
+
+def test_store_overwrites_by_name_and_drops_groups_of_absent_runs(catalog, tmp_path):
+    store = WorksetStore(tmp_path / "w.json")
+    ws = Workset.from_catalog(catalog, kind="frequency")
+    store.save("s", ws.subset(refs=ws.refs[:2]))
+    entry = store.save(
+        "s", ws.subset(refs=ws.refs[:3]), groups={"not-a-run": "x", ws.rows["run_id"][0]: "g"}
+    )
+    assert store.names() == ["s"] and len(entry.runs) == 3
+    assert list(entry.groups.values()) == ["g"]
+
+
+def test_saved_set_finds_moved_files_and_reports_missing_ones(catalog, tmp_path):
+    store = WorksetStore(tmp_path / "w.json")
+    store.save("s", Workset.from_catalog(catalog, kind="frequency"))
+    saved = store.get("s")
+    saved.runs[0]["path"] = "/moved/elsewhere.npz"  # path changed, run id still matches
+    saved.runs[1].update(path="/gone/1.npz", run_id="deleted")
+    ws = Workset.from_saved(catalog, saved)
+    assert len(ws) == len(saved.runs) - 1
+    assert len(ws.missing) == 1 and saved.runs[1]["ref"] in ws.missing[0]
+    with pytest.raises(ValueError, match="not in the catalog"):
+        Workset.from_saved(catalog, saved, strict=True)
+    assert isinstance(saved, SavedSet) and "SavedSet" in repr(saved)
+
+
+def test_corrupt_store_is_set_aside_not_overwritten(catalog, tmp_path):
+    path = tmp_path / "w.json"
+    path.write_text("{not json")
+    store = WorksetStore(path)
+    assert store.names() == [] and "cannot read" in store.problem
+    store.save("fresh", Workset.from_catalog(catalog, kind="scope"))
+    assert (tmp_path / "w.json.corrupt").read_text() == "{not json"
+    assert store.names() == ["fresh"]
+    path.write_text(json.dumps({"hello": "world"}))
+    assert store.names() == [] and "not a saved-sets file" in store.problem
+
+
+def test_default_store_follows_the_config_dir_and_env_override(monkeypatch, tmp_path):
+    monkeypatch.delenv("IYZEE_WORKSETS_FILE", raising=False)
+    monkeypatch.setenv("IYZEE_CONFIG", str(tmp_path / "cfg" / "config.toml"))
+    assert default_store_path() == tmp_path / "cfg" / "worksets.json"
+    monkeypatch.setenv("IYZEE_WORKSETS_FILE", str(tmp_path / "mine.json"))
+    assert default_store_path() == tmp_path / "mine.json"
+
+
+# --- selection polish ----------------------------------------------------------------
+
+
+def test_preview_facts_and_manifest(catalog):
+    row = catalog.row(0, named=True)
+    facts = dict(preview_facts(row))
+    assert row["ref"] in facts["Reference"] and "SYNTHETIC" in facts["Type"]
+    assert facts["File"] == row["path"]
+    assert isinstance(read_manifest(row["path"]), dict)
+    assert read_manifest(row["path"] + ".missing") == {}
+
+
+# --- the notebook, driven through its real button handlers ---------------------------
+
+
+def _boot_workbench(demo, monkeypatch, store_file):
+    monkeypatch.setenv("IYZEE_DATA_DIR", str(demo))
+    monkeypatch.setenv("IYZEE_WORKSETS_FILE", str(store_file))
+    spec = importlib.util.spec_from_file_location(
+        f"workbench_{id(store_file)}", NOTEBOOKS / "workbench.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.app.run()[1]
+
+
+def _click(button):
+    button._on_click(None)
+
+
+def test_workbench_selection_buttons_keep_the_working_set_consistent(demo, monkeypatch, tmp_path):
+    ui = _boot_workbench(demo, monkeypatch, tmp_path / "w.json")
+    catalog, current, table = ui["catalog"], ui["get_selection"], ui["catalog_table"]
+
+    def refs():
+        return sorted(catalog.filter(pl.col("path").is_in(current()))["ref"])
+
+    assert len(refs()) == 3  # starts with the newest three
+    _click(ui["clear_set"])
+    assert refs() == []
+    table._update(["0", "2"])
+    ticked = sorted(table.value["ref"].to_list())
+    _click(ui["add_ticked"])
+    _click(ui["add_ticked"])  # adding twice must not duplicate
+    assert refs() == ticked and len(current()) == 2
+    _click(ui["add_newest"])
+    assert len(refs()) >= 3
+    _click(ui["replace_ticked"])
+    assert refs() == ticked
+    _click(ui["add_shown"])
+    assert len(current()) == ui["visible"].height
+    ui["ws_table"]._update(["0"])
+    before = len(current())
+    _click(ui["remove_ticked"])
+    assert len(current()) == before - 1
+
+
+def test_workbench_saved_sets_round_trip_through_the_buttons(demo, monkeypatch, tmp_path):
+    store_file = tmp_path / "w.json"
+    ui = _boot_workbench(demo, monkeypatch, store_file)
+    editor = ui["group_editor"]
+    names = ["base", "pumped", "pumped"]
+    editor._on_change(editor.value.with_columns(pl.Series("group", names)))
+    assert sorted(ui["group_store"].values()) == sorted(names)
+
+    _click(ui["save_set"])
+    assert "give the working set a name" in ui["get_notice"]()
+    ui["set_name"]._update("October pairs")
+    _click(ui["save_set"])
+    assert "Saved" in ui["get_notice"]()
+    saved = json.loads(store_file.read_text())["sets"]["October pairs"]
+    assert len(saved["runs"]) == 3 and len(saved["groups"]) == 3
+
+    again = _boot_workbench(demo, monkeypatch, store_file)  # a fresh session sees the file
+    assert list(again["saved_pick"].options) == ["October pairs"]
+    _click(again["clear_set"])
+    again["group_store"].clear()
+    _click(again["load_set"])
+    assert len(again["get_selection"]()) == 3
+    assert sorted(set(again["group_store"].values())) == ["base", "pumped"]
+
+    _click(again["delete_set"])
+    assert "confirm" in again["get_notice"]() and store_file.exists()
+    assert "October pairs" in json.loads(store_file.read_text())["sets"]
+    again["confirm_delete"]._update(True)
+    _click(again["delete_set"])
+    assert json.loads(store_file.read_text())["sets"] == {}
+
+
+def test_workbench_fill_and_clear_groups(demo, monkeypatch, tmp_path):
+    ui = _boot_workbench(demo, monkeypatch, tmp_path / "w.json")
+    ui["auto_by"]._update(["type"])
+    _click(ui["fill_groups"])
+    assert set(ui["group_store"].values()) <= {"frequency", "scope", "bandwidth"}
+    assert ui["group_store"]
+    _click(ui["clear_groups"])
+    assert ui["group_store"] == {}
+
+
+def test_workbench_table_hover_shows_the_full_facts_on_the_ref_cell(demo, monkeypatch, tmp_path):
+    ui = _boot_workbench(demo, monkeypatch, tmp_path / "w.json")
+    table, visible = ui["catalog_table"], ui["visible"]
+    ref = visible["ref"][0]
+    hover = table._hover_cell("0", "ref", ref)
+    assert ref in hover and "Instrument:" in hover and "Checksum:" in hover
+    assert table._hover_cell("0", "name", "whatever") is None

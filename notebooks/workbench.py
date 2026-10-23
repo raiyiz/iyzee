@@ -33,26 +33,33 @@ def _():
         sys.path.insert(0, notebook_dir)
 
     from toolbox import (
+        BAND_CHOICES,
         KINDS,
         SWEEP_METRICS,
         default_selection,
         figure_bytes,
         pick,
+        preview_facts,
+        read_manifest,
         scan_catalog,
     )
-    from workset import Workset
+    from workset import Workset, WorksetStore
 
     return (
+        BAND_CHOICES,
         KINDS,
         Path,
         SWEEP_METRICS,
         Workset,
+        WorksetStore,
         data_root,
         default_selection,
         figure_bytes,
         mo,
         pick,
         pl,
+        preview_facts,
+        read_manifest,
         scan_catalog,
     )
 
@@ -146,32 +153,63 @@ def _(KINDS, catalog, mo):
         label="Find",
         debounce=True,
     )
+    _dates = catalog["started"].drop_nulls()
+    if _dates.is_empty():
+        date_bounds = None
+        date_filter = None
+    else:
+        date_bounds = (_dates.min().date(), _dates.max().date())
+        date_filter = mo.ui.date_range(
+            start=date_bounds[0], stop=date_bounds[1], value=date_bounds, label="Started"
+        )
+    only_in_set = mo.ui.checkbox(label="Only the working set")
     mo.vstack(
         [
             mo.md(
                 "## 2 · Select recordings\n"
                 "Filter the list, **tick rows**, then add them to the working set. "
                 "Filters never change the working set, so you can collect runs "
-                "of different types and dates."
+                "of different types and dates. Hover a `ref` for details; click a header "
+                "to sort; tick a row to preview it below."
             ),
-            mo.hstack([kind_filter, status_filter, origin_filter, text_filter], align="end"),
+            mo.hstack(
+                [kind_filter, status_filter, origin_filter, date_filter, text_filter, only_in_set],
+                align="end",
+                justify="start",
+                wrap=True,
+            ),
         ]
     )
-    return kind_filter, origin_filter, status_filter, text_filter
+    return (
+        date_bounds,
+        date_filter,
+        kind_filter,
+        only_in_set,
+        origin_filter,
+        status_filter,
+        text_filter,
+    )
 
 
 @app.cell
 def _(
     catalog,
+    date_bounds,
+    date_filter,
     get_selection,
     kind_filter,
     mo,
+    only_in_set,
     origin_filter,
     pick,
     pl,
+    preview_facts,
     status_filter,
     text_filter,
 ):
+    _chosen = list(get_selection())
+    _window = date_filter.value if date_filter is not None else None
+    _narrowed = _window is not None and tuple(_window) != date_bounds
     visible = pick(
         catalog,
         kind=kind_filter.value,
@@ -180,11 +218,34 @@ def _(
             origin_filter.value
         ],
         text=text_filter.value,
+        since=_window[0] if _narrowed else None,
+        until=_window[1] if _narrowed else None,
     )
-    _chosen = set(get_selection())
+    if only_in_set.value:
+        visible = visible.filter(pl.col("path").is_in(_chosen))
+
+    _hover = {
+        row["ref"]: "\n".join(f"{key}: {value}" for key, value in preview_facts(row))
+        for row in visible.iter_rows(named=True)
+    }
+
+    def _hover_cell(_row_id, column, value):
+        return _hover.get(value) if column == "ref" else None
+
+    def _style_cell(_row_id, column, value):
+        if column == "in set" and value:
+            return {"backgroundColor": "#d7efe0", "fontWeight": "bold", "textAlign": "center"}
+        if column == "warnings" and value:
+            return {"backgroundColor": "#fde8c8"}
+        if column == "status" and value not in {"completed", "acquired"}:
+            return {"color": "#b45309"}
+        if column == "synthetic" and value:
+            return {"fontStyle": "italic", "opacity": "0.75"}
+        return {}
+
     catalog_table = mo.ui.table(
         visible.select(
-            pl.when(pl.col("path").is_in(list(_chosen)))
+            pl.when(pl.col("path").is_in(_chosen))
             .then(pl.lit("✓"))
             .otherwise(pl.lit(""))
             .alias("in set"),
@@ -198,16 +259,34 @@ def _(
             "warnings",
             "size_kib",
             "digest",
+            "path",
         ),
         selection="multi",
         page_size=12,
         show_column_summaries=False,
+        freeze_columns_left=["in set", "ref"],
+        hidden_columns=["path"],
+        style_cell=_style_cell,
+        hover_template=_hover_cell,
+        format_mapping={
+            "started": lambda v: v.strftime("%Y-%m-%d %H:%M") if v else "",
+            "size_kib": lambda v: f"{v:,.0f}" if v is not None else "",
+        },
+        header_tooltip={
+            "in set": "✓ = already in the working set",
+            "ref": "Stable id: 01 is the oldest recording in the index",
+            "items": "Sweep points or scope channels stored in the file",
+            "warnings": "Warnings recorded by the acquisition",
+            "size_kib": "File size in KiB",
+            "digest": "Whether a SHA-256 is recorded in the sidecar",
+        },
     )
     mo.vstack(
         [
             mo.md(
                 f"**{visible.height:,} of {catalog.height:,} recordings shown** · "
-                f"{int(catalog['synthetic'].sum()) if catalog.height else 0} synthetic"
+                f"{int(catalog['synthetic'].sum()) if catalog.height else 0} synthetic · "
+                f"{len(_chosen)} in the working set"
             ),
             catalog_table,
         ]
@@ -244,6 +323,55 @@ def _(catalog, catalog_table, mo, set_selection, visible):
 
 
 @app.cell
+def _(Workset, catalog, catalog_table, mo, pl, preview_facts, read_manifest):
+    _value = catalog_table.value
+    _ticked_rows = _value.to_dicts() if hasattr(_value, "to_dicts") else list(_value or [])
+    if not _ticked_rows:
+        _view = mo.md(
+            "**Preview** · tick a row above to look inside a recording (facts, a thumbnail "
+            "of its data, its saved arrays and its sidecar) before adding it."
+        )
+    else:
+        _ref = _ticked_rows[0]["ref"]
+        _row = catalog.filter(pl.col("ref") == _ref).row(0, named=True)
+        _one = Workset.from_catalog(catalog, [_ref])
+        _facts = "| | |\n|---|---|\n" + "\n".join(
+            f"| **{key}** | {str(value).replace('|', '/')} |" for key, value in preview_facts(_row)
+        )
+        _thumb = _one.quick_plots(budget=800)
+        _more = (
+            f" · showing the first of {len(_ticked_rows)} ticked rows"
+            if len(_ticked_rows) > 1
+            else ""
+        )
+        _arrays = _one.array_inventory().drop("run", "run_id")
+        _view = mo.vstack(
+            [
+                mo.md(f"### Preview · {_ref} {_row['name']}{_more}"),
+                mo.hstack(
+                    [
+                        mo.md(_facts),
+                        _thumb[0][1] if _thumb else mo.md("_Nothing plottable in this file._"),
+                    ],
+                    justify="start",
+                    align="start",
+                    wrap=True,
+                ),
+                mo.accordion(
+                    {
+                        "Saved arrays (name, shape, dtype)": mo.ui.table(
+                            _arrays, selection=None, page_size=10
+                        ),
+                        "Sidecar JSON": mo.json(read_manifest(_row["path"])),
+                    }
+                ),
+            ]
+        )
+    _view
+    return
+
+
+@app.cell
 def _(Workset, catalog, get_selection, mo, pl):
     ws = Workset.from_catalog(catalog, get_selection(), strict=False)
     ws_table = mo.ui.table(
@@ -276,6 +404,119 @@ def _(mo, set_selection, ws, ws_table):
             ),
             ws_table,
             remove_ticked,
+        ]
+    )
+    return
+
+
+@app.cell
+def _(WorksetStore, mo):
+    # Saved working sets live in the user's iyzee config folder, never in the data directory.
+    store = WorksetStore()
+    get_saved_rev, set_saved_rev = mo.state(0)
+    get_notice, set_notice = mo.state("")
+    # run_id -> group label. A plain dict on purpose: editing groups must not re-run cells.
+    group_store: dict[str, str] = {}
+    get_group_rev, set_group_rev = mo.state(0)
+    return (
+        get_group_rev,
+        get_notice,
+        get_saved_rev,
+        group_store,
+        set_group_rev,
+        set_notice,
+        set_saved_rev,
+        store,
+    )
+
+
+@app.cell
+def _(get_saved_rev, mo, store):
+    get_saved_rev()  # rebuild the inputs after a save or delete
+    _names = store.names()
+    set_name = mo.ui.text(
+        label="Save current set as", placeholder="e.g. repeat scans", max_length=80
+    )
+    saved_pick = mo.ui.dropdown(
+        options=_names or ["(none saved)"],
+        value=(_names or ["(none saved)"])[0],
+        label="Saved sets",
+    )
+    confirm_delete = mo.ui.checkbox(label="confirm delete")
+    mo.vstack(
+        [
+            mo.md("### Saved working sets"),
+            mo.hstack(
+                [set_name, saved_pick, confirm_delete], align="end", justify="start", wrap=True
+            ),
+        ]
+    )
+    return confirm_delete, saved_pick, set_name
+
+
+@app.cell
+def _(
+    Workset,
+    catalog,
+    confirm_delete,
+    get_notice,
+    group_store,
+    mo,
+    saved_pick,
+    set_group_rev,
+    set_name,
+    set_notice,
+    set_saved_rev,
+    set_selection,
+    store,
+    ws,
+):
+    def _save():
+        try:
+            entry = store.save(set_name.value, ws, groups=dict(group_store))
+        except (ValueError, OSError) as exc:
+            set_notice(f"⚠ Not saved: {exc}")
+            return
+        set_saved_rev(lambda n: n + 1)
+        set_notice(f"Saved “{entry.name}”: {len(entry.runs)} runs, {len(entry.groups)} grouped.")
+
+    def _load():
+        name = saved_pick.value
+        if name not in store.names():
+            set_notice("⚠ Nothing to load: save a set first.")
+            return
+        loaded = Workset.from_saved(catalog, store.get(name))
+        group_store.clear()
+        group_store.update(loaded.group_map)
+        set_selection(loaded.paths)
+        set_group_rev(lambda n: n + 1)
+        gone = f" · **not found now:** {', '.join(loaded.missing)}" if loaded.missing else ""
+        set_notice(f"Loaded “{name}”: {len(loaded)} runs{gone}.")
+
+    def _delete():
+        name = saved_pick.value
+        if not confirm_delete.value:
+            set_notice("⚠ Tick “confirm delete” first.")
+        elif store.delete(name):
+            set_saved_rev(lambda n: n + 1)
+            set_notice(f"Deleted “{name}”.")
+
+    save_set = mo.ui.button(label="Save", on_click=lambda _: _save(), kind="success")
+    load_set = mo.ui.button(label="Load (replaces the working set)", on_click=lambda _: _load())
+    delete_set = mo.ui.button(label="Delete", on_click=lambda _: _delete(), kind="danger")
+    _table = store.describe()
+    mo.vstack(
+        [
+            mo.hstack([save_set, load_set, delete_set], justify="start"),
+            mo.md(get_notice() or " "),
+            mo.md(f"⚠ {store.problem}") if store.problem else mo.md(""),
+            mo.ui.table(_table, selection=None, page_size=5, show_column_summaries=False)
+            if not _table.is_empty()
+            else mo.md("_No saved sets yet._"),
+            mo.md(
+                f"<small>Stored in `{store.path}`. Sets are matched back to files by path, then "
+                "run id; `#refs` can shift when older recordings are added.</small>"
+            ),
         ]
     )
     return
@@ -675,6 +916,182 @@ def _(
 
 
 @app.cell
+def _(get_group_rev, group_store, mo, pl, ws):
+    get_group_rev()  # rebuild the editor after Load or "Fill groups"
+    _run_by_ref = dict(zip(ws.rows["ref"], ws.rows["run_id"], strict=True))
+
+    def _remember(edited):
+        rows = edited.to_dicts() if hasattr(edited, "to_dicts") else list(edited)
+        for row in rows:
+            run = _run_by_ref.get(row["ref"])
+            if run is None:
+                continue
+            label = str(row.get("group") or "").strip()
+            if label:
+                group_store[run] = label
+            else:
+                group_store.pop(run, None)
+
+    group_editor = mo.ui.data_editor(
+        ws.rows.select("ref", "name", "kind").with_columns(
+            pl.Series(
+                "group", [group_store.get(run, "") for run in ws.rows["run_id"]], dtype=pl.String
+            )
+        ),
+        editable_columns=["group"],
+        on_change=_remember,
+        pagination=False,
+    )
+    return (group_editor,)
+
+
+@app.cell
+def _(group_editor, ws):
+    # The groups in force: the typed labels, applied to the working set.
+    _edited = group_editor.value
+    _rows = _edited.to_dicts() if hasattr(_edited, "to_dicts") else list(_edited or [])
+    _run_by_ref = dict(zip(ws.rows["ref"], ws.rows["run_id"], strict=True))
+    ws_grouped = ws.with_groups(
+        {
+            _run_by_ref[row["ref"]]: str(row.get("group") or "").strip()
+            for row in _rows
+            if row["ref"] in _run_by_ref
+        }
+    )
+    return (ws_grouped,)
+
+
+@app.cell
+def _(BAND_CHOICES, SWEEP_METRICS, mo, pl, ws_grouped):
+    _in_groups = ws_grouped.points.filter(pl.col("run_id").is_in(list(ws_grouped.group_map)))
+    _kinds = sorted(_in_groups["kind"].unique().to_list()) if not _in_groups.is_empty() else []
+    _names = ws_grouped.group_names
+    _band_text = {
+        "std": "±1 standard deviation",
+        "sem": "±1 standard error",
+        "minmax": "min to max",
+        "none": "no band",
+    }
+    _band_labels = {_band_text[choice]: choice for choice in BAND_CHOICES}
+    group_kind = mo.ui.dropdown(
+        options=_kinds or ["(none)"], value=(_kinds or ["(none)"])[0], label="Sweep kind"
+    )
+    group_metric = mo.ui.dropdown(
+        options={label: key for key, label in SWEEP_METRICS.items()},
+        value=SWEEP_METRICS["rel_noise_mean_db"],
+        label="Metric",
+    )
+    group_band = mo.ui.dropdown(options=_band_labels, value="±1 standard deviation", label="Band")
+    group_a = mo.ui.dropdown(
+        options=_names or ["(none)"], value=(_names or ["(none)"])[0], label="A"
+    )
+    group_b = mo.ui.dropdown(
+        options=_names or ["(none)"],
+        value=(_names[1] if len(_names) > 1 else (_names or ["(none)"])[0]),
+        label="B",
+    )
+    auto_by = mo.ui.dropdown(
+        options=["recording name", "type", "status", "origin"],
+        value="recording name",
+        label="Fill groups from",
+    )
+    return auto_by, group_a, group_b, group_band, group_kind, group_metric
+
+
+@app.cell
+def _(auto_by, group_store, mo, set_group_rev, ws):
+    def _fill():
+        for row in ws.rows.iter_rows(named=True):
+            label = {
+                "recording name": row["name"],
+                "type": row["kind"],
+                "status": row["status"],
+                "origin": "synthetic" if row["synthetic"] else "measured",
+            }[auto_by.value]
+            if label:
+                group_store[row["run_id"]] = str(label)
+        set_group_rev(lambda n: n + 1)
+
+    def _clear():
+        group_store.clear()
+        set_group_rev(lambda n: n + 1)
+
+    fill_groups = mo.ui.button(label="Fill groups", on_click=lambda _: _fill())
+    clear_groups = mo.ui.button(
+        label="Clear all groups", on_click=lambda _: _clear(), kind="danger"
+    )
+    return clear_groups, fill_groups
+
+
+@app.cell
+def _(
+    group_a,
+    group_b,
+    group_band,
+    group_kind,
+    group_metric,
+    mo,
+    pl,
+    ws_grouped,
+):
+    _names = ws_grouped.group_names
+    _kind = None if group_kind.value == "(none)" else group_kind.value
+    if not _names:
+        groups_view = mo.md(
+            "_No groups yet. Type a label (for example `baseline`, `pumped`) into the **group** column "
+            "above for each run, or use **Fill groups**. Runs without a label are ignored here._"
+        )
+    else:
+        _metric = group_metric.value
+        _parts = [
+            mo.md("#### Per-group summary\nSpread of each run's **best** point within its group."),
+            mo.ui.table(
+                ws_grouped.group_summary(_metric),
+                selection=None,
+                page_size=8,
+                show_column_summaries=False,
+            ),
+        ]
+        try:
+            _parts += [
+                mo.md(
+                    "#### Group means\nEach run is interpolated onto one shared x grid (no extrapolation); "
+                    "a group needs **two or more runs** for a spread band."
+                ),
+                ws_grouped.plot_groups(_metric, _kind, group_band.value),
+            ]
+        except ValueError as exc:
+            _parts.append(mo.md(f"_No group means to draw: {exc}_"))
+        if len(_names) > 1 and group_a.value != group_b.value:
+            try:
+                _diff = ws_grouped.group_diff(group_a.value, group_b.value, _metric, _kind)
+            except ValueError as exc:
+                _parts.append(mo.md(f"_No A/B difference: {exc}_"))
+            else:
+                _flagged = int(_diff["significant"].sum())
+                _small = min(_diff["n_a"][0], _diff["n_b"][0]) < 3 if _diff.height else True
+                _parts += [
+                    mo.md(
+                        f"#### Difference: {group_a.value} minus {group_b.value}\n"
+                        f"**{_flagged} of {_diff.height}** shared x points differ by more than "
+                        '2 standard errors (Welch). This is a rough guide to "bigger than the run-to-run '
+                        'scatter", not a p-value.'
+                        + (
+                            " **With fewer than 3 runs in a group it is only indicative.**"
+                            if _small
+                            else ""
+                        )
+                    ),
+                    ws_grouped.plot_group_diff(group_a.value, group_b.value, _metric, _kind),
+                    mo.ui.table(_diff, selection=None, page_size=8, show_column_summaries=False),
+                ]
+        elif len(_names) > 1:
+            _parts.append(mo.md("_Pick two different groups for A and B to see their difference._"))
+        groups_view = mo.vstack(_parts)
+    return (groups_view,)
+
+
+@app.cell
 def _(mo):
     verify_button = mo.ui.run_button(label="Verify SHA-256 checksums of the working set")
     return (verify_button,)
@@ -738,6 +1155,11 @@ def _(mo):
     ws.point_traces(3)              # raw squeezing / shot-noise traces of point 3
     ws.array("trace_squeezing", 3)  # any saved array, overlaid across runs
 
+    g = ws.with_groups({"#02": "base", "#05": "pumped", "#07": "pumped"})
+    g.plot_groups(band="sem")       # group means with a spread band
+    g.group_diff("pumped", "base")  # difference, standard error, |t| > 2 flag
+    WorksetStore().save("my set", g)  # saved sets keep groups
+
     fig = ws.plot(ws.points, x="offset_mhz", y="rel_noise_min_db",
                   mark="points", facet="run")                 # colours follow the runs
     open("fig.png", "wb").write(ws.png(fig))
@@ -754,11 +1176,21 @@ def _(
     array_inventory_view,
     array_name,
     array_row,
+    auto_by,
+    clear_groups,
     delta_kind,
     delta_metric,
     delta_reference,
     delta_view,
     export_view,
+    fill_groups,
+    group_a,
+    group_b,
+    group_band,
+    group_editor,
+    group_kind,
+    group_metric,
+    groups_view,
     mo,
     plot_controls,
     plot_view,
@@ -789,6 +1221,21 @@ def _(
                             raw_view,
                             mo.md("#### Arrays in each file"),
                             array_inventory_view,
+                        ]
+                    ),
+                    "Groups and statistics (mean ± spread, A vs B)": mo.vstack(
+                        [
+                            mo.md(
+                                "Label runs with a **group** (editable column), then compare groups. "
+                                "Labels are kept when you change the working set and are saved with it."
+                            ),
+                            group_editor,
+                            mo.hstack(
+                                [auto_by, fill_groups, clear_groups], align="end", justify="start"
+                            ),
+                            mo.hstack([group_kind, group_metric, group_band], justify="start"),
+                            mo.hstack([group_a, group_b], justify="start"),
+                            groups_view,
                         ]
                     ),
                     "Compare against a reference run": mo.vstack(
