@@ -11,6 +11,7 @@ runs any of them. A new axis is one subclass, those three functions and an entry
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
@@ -50,6 +51,35 @@ class AnalyzerConfig:
     res_bw_hz: float = 10e4
     avg_type: str = "LOG"
     trig_source: str = "IMM"
+
+
+def read_analyzer_settings(mx: Any) -> dict[str, float | int]:
+    """Read back the MXA settings whose quantization affects saved data.
+
+    The duration returned by ``SWE:TIME?`` is stored in seconds; RBW is in
+    hertz and averaging count is unitless. A non-MXA test double without a
+    ``query`` method returns an empty mapping; a connected Keysight MXA must
+    answer all three queries or setup fails rather than recording requested
+    settings as if they were applied.
+    """
+    query = getattr(mx, "query", None)
+    if not callable(query):
+        return {}
+
+    rbw_hz = float(query("BWID?"))
+    sweep_duration_s = float(query("SWE:TIME?"))
+    average_count = float(query("AVER:COUN?"))
+    if not math.isfinite(rbw_hz) or rbw_hz <= 0:
+        raise ValueError(f"MXA returned invalid applied RBW {rbw_hz!r} Hz")
+    if not math.isfinite(sweep_duration_s) or sweep_duration_s <= 0:
+        raise ValueError(f"MXA returned invalid applied sweep duration {sweep_duration_s!r} s")
+    if not math.isfinite(average_count) or not average_count.is_integer() or average_count < 1:
+        raise ValueError(f"MXA returned invalid averaging count {average_count!r}")
+    return {
+        "rbw_hz": rbw_hz,
+        "sweep_duration_s": sweep_duration_s,
+        "average_count": int(average_count),
+    }
 
 
 def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
@@ -205,9 +235,37 @@ class BandwidthStep(SweepStep):
         return self.rbw_hz * 2
 
     def apply(self, ctx: ExperimentContext) -> dict[str, Any]:
-        ctx.mx.set_rbw(self.rbw_hz)
-        ctx.mx.set_vbw(self.vbw_hz, auto=False)
-        return {"rbw_hz": self.rbw_hz, "vbw_hz": self.vbw_hz}
+        requested_rbw_hz = self.rbw_hz
+        requested_vbw_hz = self.vbw_hz
+        ctx.mx.set_rbw(requested_rbw_hz)
+        ctx.mx.set_vbw(requested_vbw_hz, auto=False)
+
+        query = getattr(ctx.mx, "query", None)
+        if callable(query):
+            applied_rbw_hz = float(query("BWID?"))
+            applied_vbw_hz = float(query("BWID:VID?"))
+            if (
+                not math.isfinite(applied_rbw_hz)
+                or applied_rbw_hz <= 0
+                or not math.isfinite(applied_vbw_hz)
+                or applied_vbw_hz <= 0
+            ):
+                raise ValueError(
+                    f"MXA returned invalid bandwidths: RBW={applied_rbw_hz!r}, "
+                    f"VBW={applied_vbw_hz!r}"
+                )
+        else:
+            applied_rbw_hz, applied_vbw_hz = requested_rbw_hz, requested_vbw_hz
+
+        # The sweep's x coordinate must describe what the analyzer applied, not
+        # just the requested point that may have been quantized by the hardware.
+        self.rbw_hz = applied_rbw_hz
+        return {
+            "requested_rbw_hz": requested_rbw_hz,
+            "requested_vbw_hz": requested_vbw_hz,
+            "rbw_hz": applied_rbw_hz,
+            "vbw_hz": applied_vbw_hz,
+        }
 
 
 @dataclass
@@ -360,6 +418,7 @@ def run_sweep(
     )
     try:
         prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), sweep.config)
+        record.config["applied_settings"] = read_analyzer_settings(mx)
         results = run_sequence(
             sweep.steps, ctx, on_error=on_error, on_step=record.on_step
         )
