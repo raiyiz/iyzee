@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -37,6 +38,8 @@ class _Recorder:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.timeout_ms = 5000
+        self.instrument = object()
 
     def slow_write(self, tag: str) -> str:
         self.calls.append(f"start:{tag}")
@@ -47,6 +50,18 @@ class _Recorder:
     @property
     def not_callable(self) -> int:
         return 42
+
+
+def test_locked_proxy_forwards_attribute_writes_and_hides_raw_resource() -> None:
+    recorder = _Recorder()
+    proxy = LockedProxy(recorder, threading.RLock())
+
+    proxy.timeout_ms = 20_000
+    assert recorder.timeout_ms == 20_000
+    assert proxy.timeout_ms == 20_000
+    assert not hasattr(proxy, "instrument")
+    with pytest.raises(AttributeError, match="raw instrument access"):
+        proxy.instrument = object()
 
 
 def test_locked_proxy_serializes_calls_across_threads() -> None:
@@ -121,6 +136,7 @@ class _FakePsuDevice:
     def __init__(self, *, connected: bool = True) -> None:
         self.instrument: object | None = object() if connected else None
         self.commands: list[tuple[str, tuple[object, ...]]] = []
+        self.selected_channels: set[int] = set()
 
     def set_voltage(self, voltage: float, channel: int) -> None:
         self.commands.append(("volt", (channel, voltage)))
@@ -130,9 +146,16 @@ class _FakePsuDevice:
 
     def enable_output(self, channel: int) -> None:
         self.commands.append(("on", (channel,)))
+        self.selected_channels.add(channel)
 
     def disable_output(self, channel: int) -> None:
         self.commands.append(("off", (channel,)))
+        self.selected_channels.discard(channel)
+
+    def retrieve_state(self):
+        return SimpleNamespace(
+            channel=lambda number: SimpleNamespace(selected=number in self.selected_channels)
+        )
 
 
 class _FakePsuHandle:
@@ -155,6 +178,24 @@ def test_shutter_handle_is_a_channel_of_the_psu_it_is_built_on() -> None:
 
     handle.disconnect()  # closes the shutter, leaves the supply connected
     assert psu.commands[-1] == ("off", (3,)) and psu.instrument is not None
+
+
+def test_shutter_handle_retains_controller_when_safe_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    psu = _FakePsuDevice()
+    handle = ShutterHandle(cast(Any, _FakePsuHandle(psu)))
+    handle.connect()
+    shutter = handle.device
+    assert shutter is not None
+
+    def fail_close(self):
+        raise RuntimeError("PSU timeout")
+
+    monkeypatch.setattr(instruments_mod.ShutterControl, "safe_close", fail_close)
+    with pytest.raises(RuntimeError, match="PSU timeout"):
+        handle.disconnect()
+    assert handle.device is shutter
 
 
 def test_shutter_handle_needs_a_connected_psu_and_never_touches_a_closed_one() -> None:

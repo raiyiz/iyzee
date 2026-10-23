@@ -120,6 +120,14 @@ class _VisaHandle(_LockedHandle):
         super().__init__()
         self._device = device
 
+    @property
+    def alive(self) -> bool:
+        # VISA drivers drop this reference when an I/O error leaves the stream
+        # unreliable, so this remains a cheap check without probing hardware.
+        if hasattr(self._device, "instrument"):
+            return self._device.instrument is not None
+        return bool(getattr(self._device, "connected", True))
+
     def connect(self) -> None:
         self._device.connect()
 
@@ -175,9 +183,14 @@ class ShutterHandle(_LockedHandle):
 
     def disconnect(self) -> None:
         """Close the shutter (if the PSU can still be reached); never closes the PSU."""
-        shutter, self._shutter = self._shutter, None
-        if shutter is not None and shutter.psu.instrument is not None:
-            shutter.close()
+        shutter = self._shutter
+        if shutter is None:
+            return
+        if shutter.psu.instrument is not None:
+            # Keep the controller published if verification fails, so cleanup can
+            # be retried rather than forgetting that the shutter may be powered.
+            shutter.safe_close()
+        self._shutter = None
 
     def probe(self) -> str:
         return f"shutter ready on CH{self._chan}"
@@ -301,11 +314,16 @@ class LockedProxy:
         object.__setattr__(self, "_lock", lock)
 
     def __getattr__(self, name: str) -> Any:
+        if name == "instrument":
+            raise AttributeError(
+                "raw instrument access is unavailable through LockedProxy; use driver methods"
+            )
         target = object.__getattribute__(self, "_target")
-        value = getattr(target, name)
+        lock = object.__getattribute__(self, "_lock")
+        with lock:
+            value = getattr(target, name)
         if not callable(value):
             return value
-        lock = object.__getattribute__(self, "_lock")
 
         @functools.wraps(value)  # keep name/signature/docstring: `lab.mx.method?` must still help
         def _locked_call(*args: Any, **kwargs: Any) -> Any:
@@ -314,8 +332,23 @@ class LockedProxy:
 
         return _locked_call
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in {"_target", "_lock"}:
+            object.__setattr__(self, name, value)
+            return
+        if name == "instrument":
+            raise AttributeError(
+                "raw instrument access is unavailable through LockedProxy; use driver methods"
+            )
+        target = object.__getattribute__(self, "_target")
+        lock = object.__getattribute__(self, "_lock")
+        with lock:
+            setattr(target, name, value)
+
     def __dir__(self) -> list[str]:
-        return dir(object.__getattribute__(self, "_target"))
+        return [
+            name for name in dir(object.__getattribute__(self, "_target")) if name != "instrument"
+        ]
 
     def __repr__(self) -> str:
         return repr(object.__getattribute__(self, "_target"))
