@@ -70,6 +70,9 @@ class KeysightMXA(BaseDevice):
             response = self.query("*OPC?").strip()
             return response == "1"
         except pyvisa.errors.VisaIOError:
+            # A timed-out query may still have a late reply in the stream. Drop
+            # the resource rather than letting that reply corrupt the next query.
+            self.close()
             return False
         finally:
             self.instrument.timeout = old_timeout
