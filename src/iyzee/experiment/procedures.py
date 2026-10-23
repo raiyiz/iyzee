@@ -62,6 +62,9 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
         mx.set_trace_display(trace, True)
         mx.set_trace_mode(trace, "AVER")
 
+    errors = mx.get_errors()
+    if errors:
+        raise RuntimeError("MXA rejected analyzer configuration: " + "; ".join(errors))
     return mx
 
 
@@ -71,7 +74,13 @@ def acquire_trace(mx, trace_num):
     try:
         if not mx.single_sweep_wait():
             raise TimeoutError(f"MXA sweep for trace {trace_num} did not complete")
-        return mx.get_trace_data(trace_num=trace_num, binary=False)
+        data = mx.get_trace_data(trace_num=trace_num, binary=False)
+        errors = mx.get_errors()
+        if errors:
+            raise RuntimeError(
+                f"MXA reported errors while acquiring trace {trace_num}: " + "; ".join(errors)
+            )
+        return data
     finally:
         # A VISA timeout invalidates the MXA connection. Do not let cleanup try
         # another command on that already-dropped resource and mask the timeout.
