@@ -96,14 +96,24 @@ def acquire_trace(mx, trace_num):
             mx.set_trace_update(trace_num, False)
 
 
-def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
-    """Acquire squeezing and shot-noise traces, verifying the shutter transitions.
+#: Default optical shutter settling delay after a verified state transition.
+SHUTTER_SETTLE_TIME_S = 0.05
 
-    The shutter is open only around the squeezing acquisition and is closed again
-    before the shot-noise reference. A missing PSU master output or failed channel
-    transition must stop the measurement rather than silently recording shot noise
-    as squeezing.
+
+def acquire_pair(
+    mx: Any,
+    shutter: Any | None = None,
+    *,
+    settle_time_s: float = SHUTTER_SETTLE_TIME_S,
+) -> dict[str, Any]:
+    """Acquire squeezing and shot-noise traces, verifying shutter transitions.
+
+    A short settle delay is applied after a verified open and close transition.
+    The delay is configurable for experiments and should be verified against the
+    shutter's measured physical response time on the bench.
     """
+    if settle_time_s < 0:
+        raise ValueError(f"settle_time_s must be non-negative, got {settle_time_s}")
     try:
         if shutter is not None:
             shutter.open()
@@ -111,12 +121,16 @@ def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
                 raise RuntimeError(
                     "shutter did not open; check the PSU master output and shutter channel"
                 )
+            if settle_time_s:
+                time.sleep(settle_time_s)
         squeezing = acquire_trace(mx, TRACE_SQZ)
     finally:
         if shutter is not None:
             shutter.close()
             if shutter.is_open():
                 raise RuntimeError("shutter remained open after close")
+            if settle_time_s:
+                time.sleep(settle_time_s)
     return {"squeezing": squeezing, "shot_noise": acquire_trace(mx, TRACE_SHOT)}
 
 
