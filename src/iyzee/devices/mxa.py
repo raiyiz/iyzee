@@ -64,18 +64,27 @@ class KeysightMXA(BaseDevice):
         """Block until *OPC? explicitly returns 1."""
         if self.instrument is None:
             raise RuntimeError("Instrument not connected")
-        old_timeout = self.instrument.timeout
-        self.instrument.timeout = int(timeout_sec * 1000)
+        instrument = self.instrument
+        old_timeout = instrument.timeout
+        instrument.timeout = int(timeout_sec * 1000)
         try:
             response = self.query("*OPC?").strip()
             return response == "1"
         except pyvisa.errors.VisaIOError:
             # A timed-out query may still have a late reply in the stream. Drop
             # the resource rather than letting that reply corrupt the next query.
-            self.close()
+            try:
+                self.close()
+            except Exception:
+                # BaseDevice.close() clears the published handle before closing;
+                # a VISA cleanup error must not mask the acquisition timeout.
+                pass
             return False
         finally:
-            self.instrument.timeout = old_timeout
+            # A timed-out query has already dropped this resource. Restoring a
+            # timeout on it can raise and mask the original failure.
+            if self.instrument is instrument:
+                instrument.timeout = old_timeout
 
     def get_errors(self, max_entries: int = 100) -> list[str]:
         """Drain the SCPI error queue, with a hard cap for malformed replies."""
