@@ -7,6 +7,7 @@ from iyzee.experiment.core import ExperimentContext
 from iyzee.experiment.procedures import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
+    SHUTTER_SETTLE_TIME_S,
     SWEEP_KINDS,
     AnalyzerConfig,
     BandwidthStep,
@@ -208,7 +209,9 @@ def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter
         ("set", 377.1, 4),
         ("sleep", 0.5),
         ("read", 4),
+        ("sleep", SHUTTER_SETTLE_TIME_S),
         ("acquire", 1),
+        ("sleep", SHUTTER_SETTLE_TIME_S),
         ("acquire", 2),
     ]
     assert shutter.events == ["open", "close"]  # opened only for the squeezing trace
