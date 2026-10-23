@@ -37,6 +37,20 @@ def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog):
         run_sequence([], make_ctx(), on_error="bogus")
 
 
+def test_skip_policy_aborts_after_repeated_consecutive_failures():
+    steps = [RecordingStep(str(i), i, fail=True) for i in range(3)]
+    with pytest.raises(RuntimeError, match="3 consecutive step failures"):
+        run_sequence(steps, make_ctx(), on_error="skip", max_consecutive_failures=3)
+
+    # An isolated point failure remains skippable; a later success resets the counter.
+    results = run_sequence(
+        [RecordingStep("bad", 0, fail=True), RecordingStep("good", 1)],
+        make_ctx(),
+        on_error="skip",
+    )
+    assert [result.x_value for result in results] == [1]
+
+
 # -- RunRecord: how a run ended, saved beside its data -----------------------------------------
 
 
