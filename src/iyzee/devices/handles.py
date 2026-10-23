@@ -301,11 +301,16 @@ class LockedProxy:
         object.__setattr__(self, "_lock", lock)
 
     def __getattr__(self, name: str) -> Any:
+        if name == "instrument":
+            raise AttributeError(
+                "raw instrument access is unavailable through LockedProxy; use driver methods"
+            )
         target = object.__getattribute__(self, "_target")
-        value = getattr(target, name)
+        lock = object.__getattribute__(self, "_lock")
+        with lock:
+            value = getattr(target, name)
         if not callable(value):
             return value
-        lock = object.__getattribute__(self, "_lock")
 
         @functools.wraps(value)  # keep name/signature/docstring: `lab.mx.method?` must still help
         def _locked_call(*args: Any, **kwargs: Any) -> Any:
@@ -314,8 +319,21 @@ class LockedProxy:
 
         return _locked_call
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in {"_target", "_lock"}:
+            object.__setattr__(self, name, value)
+            return
+        if name == "instrument":
+            raise AttributeError(
+                "raw instrument access is unavailable through LockedProxy; use driver methods"
+            )
+        target = object.__getattribute__(self, "_target")
+        lock = object.__getattribute__(self, "_lock")
+        with lock:
+            setattr(target, name, value)
+
     def __dir__(self) -> list[str]:
-        return dir(object.__getattribute__(self, "_target"))
+        return [name for name in dir(object.__getattribute__(self, "_target")) if name != "instrument"]
 
     def __repr__(self) -> str:
         return repr(object.__getattribute__(self, "_target"))
