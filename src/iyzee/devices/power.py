@@ -71,7 +71,7 @@ class PSU(BaseDevice):
         """Best-effort close after VISA reports an unusable transport."""
         try:
             self.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - cleanup must not mask the I/O error
             # BaseDevice clears its published reference before closing the resource.
             pass
 
