@@ -25,6 +25,7 @@ from iyzee.experiment.procedures import (
     run_bandwidth_sweep,
     run_frequency_sweep,
     run_sweep,
+    read_analyzer_settings,
 )
 
 
@@ -185,8 +186,49 @@ def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(monkeypa
     assert mx.rbw_values == [1000] and mx.vbw_values == [(2000, False)]
     assert (result.x_value, result.x_unit) == (1000, "Hz")
     assert result.traces == {"squeezing": [1], "shot_noise": [2]}
-    assert result.meta == {"rbw_hz": 1000, "vbw_hz": 2000}
+    assert result.meta == {
+        "requested_rbw_hz": 1000,
+        "requested_vbw_hz": 2000,
+        "rbw_hz": 1000,
+        "vbw_hz": 2000,
+    }
     assert shutter.events == []
+
+
+def test_bandwidth_step_uses_applied_instrument_value_as_the_sweep_coordinate(monkeypatch):
+    monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
+
+    class QuantizingMXA(FakeMXA):
+        def query(self, command):
+            return {"BWID?": "976.0", "BWID:VID?": "1952.0"}[command]
+
+    result = BandwidthStep(1000).run(
+        ExperimentContext(mx=QuantizingMXA(), run_id="quantized")
+    )
+    assert result.x_value == 976.0
+    assert result.label == "rbw=976Hz"
+    assert result.meta == {
+        "requested_rbw_hz": 1000,
+        "requested_vbw_hz": 2000,
+        "rbw_hz": 976.0,
+        "vbw_hz": 1952.0,
+    }
+
+
+def test_read_analyzer_settings_records_values_reported_by_the_mxa():
+    class MXA:
+        def query(self, command):
+            return {
+                "BWID?": "976.0",
+                "SWE:TIME?": "0.01",
+                "AVER:COUN?": "200",
+            }[command]
+
+    assert read_analyzer_settings(MXA()) == {
+        "rbw_hz": 976.0,
+        "sweep_duration_s": 0.01,
+        "average_count": 200,
+    }
 
 
 def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter(monkeypatch):
