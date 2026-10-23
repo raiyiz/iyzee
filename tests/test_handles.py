@@ -37,6 +37,8 @@ class _Recorder:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.timeout_ms = 5000
+        self.instrument = object()
 
     def slow_write(self, tag: str) -> str:
         self.calls.append(f"start:{tag}")
@@ -47,6 +49,18 @@ class _Recorder:
     @property
     def not_callable(self) -> int:
         return 42
+
+
+def test_locked_proxy_forwards_attribute_writes_and_hides_raw_resource() -> None:
+    recorder = _Recorder()
+    proxy = LockedProxy(recorder, threading.RLock())
+
+    proxy.timeout_ms = 20_000
+    assert recorder.timeout_ms == 20_000
+    assert proxy.timeout_ms == 20_000
+    assert not hasattr(proxy, "instrument")
+    with pytest.raises(AttributeError, match="raw instrument access"):
+        proxy.instrument = object()
 
 
 def test_locked_proxy_serializes_calls_across_threads() -> None:
