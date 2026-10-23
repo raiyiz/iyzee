@@ -419,9 +419,7 @@ def run_sweep(
     try:
         prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), sweep.config)
         record.config["applied_settings"] = read_analyzer_settings(mx)
-        results = run_sequence(
-            sweep.steps, ctx, on_error=on_error, on_step=record.on_step
-        )
+        results = run_sequence(sweep.steps, ctx, on_error=on_error, on_step=record.on_step)
     except Exception:
         record.finish(failed=True)
         raise
