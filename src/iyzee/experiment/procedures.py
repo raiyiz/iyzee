@@ -112,8 +112,12 @@ def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
     return {"squeezing": squeezing, "shot_noise": acquire_trace(mx, TRACE_SHOT)}
 
 
-#: Seconds the laser gets to settle on a new PID setpoint before it is read.
+#: Minimum initial settle delay after a new PID setpoint.
 SETTLE_TIME_S = 0.5
+#: Stop the run rather than acquiring at a frequency that never reaches this tolerance.
+FREQUENCY_LOCK_TOLERANCE_THZ = 10e-6  # 10 MHz
+FREQUENCY_LOCK_TIMEOUT_S = 10.0
+FREQUENCY_LOCK_POLL_INTERVAL_S = 0.1
 DEFAULT_LASER_CENTER_THZ = 377.1052067
 
 
@@ -204,10 +208,24 @@ class FrequencyStep(SweepStep):
         wavemeter = ctx.wavemeter
         wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
         time.sleep(self.relax_time_s)
+
+        deadline = time.monotonic() + FREQUENCY_LOCK_TIMEOUT_S
+        while True:
+            measured = wavemeter.read_frequency(self.wavemeter_channel)
+            if abs(measured - self.frequency_thz) <= FREQUENCY_LOCK_TOLERANCE_THZ:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"laser did not reach {self.frequency_thz:.9f} THz within "
+                    f"{FREQUENCY_LOCK_TIMEOUT_S:g}s; last reading was {measured:.9f} THz"
+                )
+            time.sleep(min(FREQUENCY_LOCK_POLL_INTERVAL_S, remaining))
+
         return {
             "wavemeter_channel": self.wavemeter_channel,
             "relax_time_s": self.relax_time_s,
-            "measured_frequency_thz": wavemeter.read_frequency(self.wavemeter_channel),
+            "measured_frequency_thz": measured,
         }
 
 
