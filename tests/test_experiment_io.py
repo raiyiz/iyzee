@@ -66,6 +66,22 @@ def test_save_step_results_writes_a_pickle_free_data_and_metadata_pair(tmp_path)
     assert sidecar["run_metadata"] == {"software_revision": "abc123"}
 
 
+def test_save_step_results_uses_metadata_attached_to_sweep_results(tmp_path):
+    class SweepResults(list):
+        def __init__(self, results):
+            super().__init__(results)
+            self.run_metadata = {
+                "run_id": "run-1",
+                "status": "completed",
+                "config": {"avg_count": 10},
+            }
+
+    results = SweepResults([_result(1.0)])
+    path = save_step_results(results, tmp_path)
+    sidecar = json.loads(path.with_suffix(".json").read_text())
+    assert sidecar["run_metadata"] == results.run_metadata
+
+
 def test_save_step_results_aligns_traces_across_points(tmp_path):
     missing = [
         _result(1.0, squeezing=[1.0, 2.0], shot_noise=[3.0, 4.0]),

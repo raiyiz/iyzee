@@ -1,4 +1,5 @@
 import pytest
+import pyvisa
 
 from iyzee import IP, SHUTTER_CHANNEL_DEFAULT
 from iyzee.devices.power import PSU, ChannelState, PSUState, ShutterControl
@@ -194,6 +195,19 @@ def test_retrieve_state_reports_what_the_supply_says():
     assert state.is_live(3) and not state.is_live(1)
 
 
+def test_psu_drops_a_timed_out_session_and_does_not_restore_channel_on_closed_link():
+    supply = FakeHMP()
+    psu = _connected_psu(supply)
+
+    def timeout(command):
+        raise pyvisa.errors.VisaIOError(pyvisa.constants.StatusCode.error_timeout)
+
+    supply.query = timeout
+    with pytest.raises(pyvisa.errors.VisaIOError):
+        psu.retrieve_state([3])
+    assert psu.instrument is None
+
+
 def test_retrieve_state_only_asks_and_puts_the_selected_channel_back():
     supply = FakeHMP()
     psu = _connected_psu(supply)
@@ -243,6 +257,39 @@ def test_bad_channels_and_bad_replies_are_errors_never_guesses():
             supply.overrides[command] = reply
             with pytest.raises(ValueError, match="expected 0 or 1"):
                 psu.retrieve_state()
+
+
+def test_safe_close_verifies_the_channel_is_disarmed():
+    supply = FakeHMP()
+    shutter = ShutterControl(_connected_psu(supply), chan=3)
+    shutter.configure()
+    shutter.open()
+    assert supply.channels[3]["SEL"] == 1
+
+    shutter.safe_close()
+    assert supply.channels[3]["SEL"] == 0
+    assert not shutter.is_open()
+
+
+def test_safe_close_retries_when_the_channel_refuses_to_disarm(monkeypatch):
+    supply = FakeHMP()
+    psu = _connected_psu(supply)
+    shutter = ShutterControl(psu, chan=3)
+    shutter.configure()
+    shutter.open()
+    real_disable = psu.disable_output
+    attempts = []
+
+    def disable_once_fails(channel):
+        attempts.append(channel)
+        if len(attempts) == 1:
+            return
+        real_disable(channel)
+
+    monkeypatch.setattr(psu, "disable_output", disable_once_fails)
+    shutter.safe_close(retry_delay_s=0)
+    assert attempts == [3, 3]
+    assert supply.channels[3]["SEL"] == 0
 
 
 def test_the_shutter_reports_open_only_when_the_supply_says_it_is_powered():

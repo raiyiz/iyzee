@@ -8,6 +8,7 @@ The client is used directly from scripts and the console.
 from __future__ import annotations
 
 import logging
+import math
 import time
 
 import numpy as np
@@ -90,16 +91,21 @@ class Wavemeter:
         return f"<Wavemeter {self.base_url}>"
 
     def read_frequency(self, channel: int = DEFAULT_CHANNEL) -> float:
-        """Read the frequency of one wavemeter channel in THz."""
+        """Read a finite, positive frequency for one wavemeter channel in THz."""
         response = requests.get(
             f"{self.base_url}frequency/{channel}/",
             timeout=READ_TIMEOUT_S,
         )
         response.raise_for_status()
-        return float(response.text)
+        frequency = float(response.text)
+        if not math.isfinite(frequency) or frequency <= 0:
+            raise ValueError(f"wavemeter returned invalid frequency {response.text!r}")
+        return frequency
 
     def set_pid_setpoint(self, freq: float, channel: int = DEFAULT_CHANNEL) -> None:
-        """Set the PID lock setpoint of one channel, in THz."""
+        """Set a finite, positive PID lock setpoint for one channel, in THz."""
+        if not math.isfinite(freq) or freq <= 0:
+            raise ValueError(f"frequency setpoint must be finite and positive, got {freq!r}")
         response = requests.post(
             f"{self.base_url}set_pid/",
             data={"freq_thz": freq, "channel": channel},
@@ -119,7 +125,6 @@ def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, r
     # this module is also imported for its HTTP client by the TUI, where
     # pandas alone was a fifth of the startup time.
     import matplotlib.pyplot as plt
-    import pandas as pd
 
     # Initialize numpy arrays for time and frequency data
     times = np.array([])
@@ -181,9 +186,15 @@ def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, r
     plt.savefig(save_path + "/laser_frequency_plot.pdf", bbox_inches="tight", dpi=1500)
     plt.savefig(save_path + "/laser_frequency_plot.svg", bbox_inches="tight", dpi=1500)
 
-    # Save data to CSV file using pandas
-    data = pd.DataFrame({"tracking_time_s": times, "laser_frequency_thz": track_freq})
-    data.to_csv(save_path + "/laser_frequency_readout.csv", index=False)
+    # NumPy is already a required dependency; do not make successful tracking
+    # depend on the optional pandas package being installed.
+    np.savetxt(
+        save_path + "/laser_frequency_readout.csv",
+        np.column_stack((times, track_freq)),
+        delimiter=",",
+        header="tracking_time_s,laser_frequency_thz",
+        comments="",
+    )
 
     print(f"Laser Frequency data saved to {save_path}.")
     print("Mean Frequency (THz):", np.mean(track_freq))

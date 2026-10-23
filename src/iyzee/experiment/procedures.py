@@ -11,8 +11,8 @@ runs any of them. A new axis is one subclass, those three functions and an entry
 
 from __future__ import annotations
 
+import math
 import time
-import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar, TypedDict, Unpack
@@ -20,7 +20,16 @@ from typing import Any, ClassVar, TypedDict, Unpack
 from ..devices.mxa import KeysightMXA
 from ..devices.power import ShutterControl
 from ..devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
-from .core import ExperimentContext, StepResult, run_sequence
+from .core import ExperimentContext, RunRecord, StepResult, run_sequence
+
+
+class SweepResults(list[StepResult]):
+    """Step results carrying the run metadata needed for a self-describing save."""
+
+    def __init__(self, results: Sequence[StepResult], run_metadata: dict[str, Any]) -> None:
+        super().__init__(results)
+        self.run_metadata = run_metadata
+
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
@@ -44,6 +53,35 @@ class AnalyzerConfig:
     trig_source: str = "IMM"
 
 
+def read_analyzer_settings(mx: Any) -> dict[str, float | int]:
+    """Read back the MXA settings whose quantization affects saved data.
+
+    The duration returned by ``SWE:TIME?`` is stored in seconds; RBW is in
+    hertz and averaging count is unitless. A non-MXA test double without a
+    ``query`` method returns an empty mapping; a connected Keysight MXA must
+    answer all three queries or setup fails rather than recording requested
+    settings as if they were applied.
+    """
+    query = getattr(mx, "query", None)
+    if not callable(query):
+        return {}
+
+    rbw_hz = float(query("BWID?"))
+    sweep_duration_s = float(query("SWE:TIME?"))
+    average_count = float(query("AVER:COUN?"))
+    if not math.isfinite(rbw_hz) or rbw_hz <= 0:
+        raise ValueError(f"MXA returned invalid applied RBW {rbw_hz!r} Hz")
+    if not math.isfinite(sweep_duration_s) or sweep_duration_s <= 0:
+        raise ValueError(f"MXA returned invalid applied sweep duration {sweep_duration_s!r} s")
+    if not math.isfinite(average_count) or not average_count.is_integer() or average_count < 1:
+        raise ValueError(f"MXA returned invalid averaging count {average_count!r}")
+    return {
+        "rbw_hz": rbw_hz,
+        "sweep_duration_s": sweep_duration_s,
+        "average_count": int(average_count),
+    }
+
+
 def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
     """Configure an already-owned MXA for a measurement procedure."""
     config = config or AnalyzerConfig()
@@ -62,38 +100,80 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
         mx.set_trace_display(trace, True)
         mx.set_trace_mode(trace, "AVER")
 
+    errors = mx.get_errors()
+    if errors:
+        raise RuntimeError("MXA rejected analyzer configuration: " + "; ".join(errors))
     return mx
 
 
 def acquire_trace(mx, trace_num):
-    """Acquire one trace and return its data."""
+    """Acquire one trace and return its data, refusing an incomplete sweep."""
     mx.set_trace_update(trace_num, True)
     try:
-        mx.single_sweep_wait()
-        return mx.get_trace_data(trace_num=trace_num, binary=False)
+        if not mx.single_sweep_wait():
+            raise TimeoutError(f"MXA sweep for trace {trace_num} did not complete")
+        data = mx.get_trace_data(trace_num=trace_num, binary=False)
+        errors = mx.get_errors()
+        if errors:
+            raise RuntimeError(
+                f"MXA reported errors while acquiring trace {trace_num}: " + "; ".join(errors)
+            )
+        return data
     finally:
-        mx.set_trace_update(trace_num, False)
+        # A VISA timeout invalidates the MXA connection. Do not let cleanup try
+        # another command on that already-dropped resource and mask the timeout.
+        if getattr(mx, "instrument", object()) is not None:
+            mx.set_trace_update(trace_num, False)
 
 
-def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
-    """Acquire the squeezing and shot-noise traces, in that order.
+#: Default optical shutter settling delay after a verified state transition.
+SHUTTER_SETTLE_TIME_S = 0.05
 
-    A ``shutter`` is open only around the squeezing acquisition and is closed again (in a
-    ``finally``) before the shot-noise reference, which must not include the squeezed-light
-    path. Without one both traces are taken as the setup stands.
+
+def acquire_pair(
+    mx: Any,
+    shutter: Any | None = None,
+    *,
+    settle_time_s: float = SHUTTER_SETTLE_TIME_S,
+) -> dict[str, Any]:
+    """Acquire squeezing and shot-noise traces, verifying shutter transitions.
+
+    A short settle delay is applied after a verified open and close transition.
+    The delay is configurable for experiments and should be verified against the
+    shutter's measured physical response time on the bench.
     """
+    if settle_time_s < 0:
+        raise ValueError(f"settle_time_s must be non-negative, got {settle_time_s}")
     try:
         if shutter is not None:
             shutter.open()
+            if not shutter.is_open():
+                raise RuntimeError(
+                    "shutter did not open; check the PSU master output and shutter channel"
+                )
+            if settle_time_s:
+                time.sleep(settle_time_s)
         squeezing = acquire_trace(mx, TRACE_SQZ)
     finally:
         if shutter is not None:
-            shutter.close()
+            safe_close = getattr(shutter, "safe_close", None)
+            if callable(safe_close):
+                safe_close()
+            else:
+                shutter.close()
+                if shutter.is_open():
+                    raise RuntimeError("shutter remained open after close")
+            if settle_time_s:
+                time.sleep(settle_time_s)
     return {"squeezing": squeezing, "shot_noise": acquire_trace(mx, TRACE_SHOT)}
 
 
-#: Seconds the laser gets to settle on a new PID setpoint before it is read.
+#: Minimum initial settle delay after a new PID setpoint.
 SETTLE_TIME_S = 0.5
+#: Stop the run rather than acquiring at a frequency that never reaches this tolerance.
+FREQUENCY_LOCK_TOLERANCE_THZ = 10e-6  # 10 MHz
+FREQUENCY_LOCK_TIMEOUT_S = 10.0
+FREQUENCY_LOCK_POLL_INTERVAL_S = 0.1
 DEFAULT_LASER_CENTER_THZ = 377.1052067
 
 
@@ -155,9 +235,37 @@ class BandwidthStep(SweepStep):
         return self.rbw_hz * 2
 
     def apply(self, ctx: ExperimentContext) -> dict[str, Any]:
-        ctx.mx.set_rbw(self.rbw_hz)
-        ctx.mx.set_vbw(self.vbw_hz, auto=False)
-        return {"rbw_hz": self.rbw_hz, "vbw_hz": self.vbw_hz}
+        requested_rbw_hz = self.rbw_hz
+        requested_vbw_hz = self.vbw_hz
+        ctx.mx.set_rbw(requested_rbw_hz)
+        ctx.mx.set_vbw(requested_vbw_hz, auto=False)
+
+        query = getattr(ctx.mx, "query", None)
+        if callable(query):
+            applied_rbw_hz = float(query("BWID?"))
+            applied_vbw_hz = float(query("BWID:VID?"))
+            if (
+                not math.isfinite(applied_rbw_hz)
+                or applied_rbw_hz <= 0
+                or not math.isfinite(applied_vbw_hz)
+                or applied_vbw_hz <= 0
+            ):
+                raise ValueError(
+                    f"MXA returned invalid bandwidths: RBW={applied_rbw_hz!r}, "
+                    f"VBW={applied_vbw_hz!r}"
+                )
+        else:
+            applied_rbw_hz, applied_vbw_hz = requested_rbw_hz, requested_vbw_hz
+
+        # The sweep's x coordinate must describe what the analyzer applied, not
+        # just the requested point that may have been quantized by the hardware.
+        self.rbw_hz = applied_rbw_hz
+        return {
+            "requested_rbw_hz": requested_rbw_hz,
+            "requested_vbw_hz": requested_vbw_hz,
+            "rbw_hz": applied_rbw_hz,
+            "vbw_hz": applied_vbw_hz,
+        }
 
 
 @dataclass
@@ -184,10 +292,24 @@ class FrequencyStep(SweepStep):
         wavemeter = ctx.wavemeter
         wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
         time.sleep(self.relax_time_s)
+
+        deadline = time.monotonic() + FREQUENCY_LOCK_TIMEOUT_S
+        while True:
+            measured = wavemeter.read_frequency(self.wavemeter_channel)
+            if abs(measured - self.frequency_thz) <= FREQUENCY_LOCK_TOLERANCE_THZ:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"laser did not reach {self.frequency_thz:.9f} THz within "
+                    f"{FREQUENCY_LOCK_TIMEOUT_S:g}s; last reading was {measured:.9f} THz"
+                )
+            time.sleep(min(FREQUENCY_LOCK_POLL_INTERVAL_S, remaining))
+
         return {
             "wavemeter_channel": self.wavemeter_channel,
             "relax_time_s": self.relax_time_s,
-            "measured_frequency_thz": wavemeter.read_frequency(self.wavemeter_channel),
+            "measured_frequency_thz": measured,
         }
 
 
@@ -231,7 +353,8 @@ def frequency_sweep_steps(
 ) -> list[FrequencyStep]:
     """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
-        offsets_thz = [i * FREQUENCY_STEP_THZ for i in range(-1, 1)]
+        # Five points around the requested center: -2, -1, 0, +1, +2 steps.
+        offsets_thz = [i * FREQUENCY_STEP_THZ for i in range(-2, 3)]
     return [
         FrequencyStep(laser_center_thz + offset, wavemeter_channel, relax_time_s)
         for offset in offsets_thz
@@ -283,17 +406,25 @@ def run_sweep(
     shutter: ShutterControl | None = None,
     wavemeter: Wavemeter | None = None,
     on_error: str = "raise",
-) -> list[StepResult]:
-    """Configure the caller-owned MXA, build one run context, and run ``sweep``."""
-    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), sweep.config)
+) -> SweepResults:
+    """Run a sweep and attach the run record for automatic persistence by ``save_step_results``."""
+    record = RunRecord(config=asdict(sweep.config))
     ctx = ExperimentContext(
         mx=mx,
-        run_id=uuid.uuid4().hex[:8],
+        run_id=record.run_id,
         shutter=shutter,
-        config=asdict(sweep.config),
+        config=record.config,
         wavemeter=wavemeter,
     )
-    return run_sequence(sweep.steps, ctx, on_error=on_error)
+    try:
+        prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), sweep.config)
+        record.config["applied_settings"] = read_analyzer_settings(mx)
+        results = run_sequence(sweep.steps, ctx, on_error=on_error, on_step=record.on_step)
+    except Exception:
+        record.finish(failed=True)
+        raise
+    record.finish()
+    return SweepResults(results, record.as_metadata())
 
 
 def run_bandwidth_sweep(

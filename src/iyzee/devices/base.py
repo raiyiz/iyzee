@@ -43,10 +43,15 @@ class BaseDevice:
             self.instrument.write_termination = self.write_termination
 
     def close(self) -> None:
-        """Close the VISA resource, if it is open."""
-        if self.instrument is not None:
-            self.instrument.close()
-            self.instrument = None
+        """Close the VISA resource, if it is open.
+
+        Clear our reference before calling into VISA: even if the library's
+        close operation raises, callers must not reuse a resource whose state
+        is now uncertain.
+        """
+        instrument, self.instrument = self.instrument, None
+        if instrument is not None:
+            instrument.close()
 
     def __enter__(self):
         """Open the device at the explicit resource boundary."""

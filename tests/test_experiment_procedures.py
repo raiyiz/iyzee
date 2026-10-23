@@ -7,6 +7,7 @@ from iyzee.experiment.core import ExperimentContext
 from iyzee.experiment.procedures import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
+    SHUTTER_SETTLE_TIME_S,
     SWEEP_KINDS,
     AnalyzerConfig,
     BandwidthStep,
@@ -21,6 +22,7 @@ from iyzee.experiment.procedures import (
     build_frequency_sweep,
     frequency_sweep_config,
     frequency_sweep_steps,
+    read_analyzer_settings,
     run_bandwidth_sweep,
     run_frequency_sweep,
     run_sweep,
@@ -55,8 +57,10 @@ class BoomStep:
 class FakeShutterControl:
     """Stand-in for power.ShutterControl as a context manager."""
 
-    def __init__(self):
+    def __init__(self, *, can_open=True):
         self.events = []
+        self._open = False
+        self.can_open = can_open
 
     def __enter__(self):
         return self
@@ -66,9 +70,14 @@ class FakeShutterControl:
 
     def open(self):
         self.events.append("open")
+        self._open = True
 
     def close(self):
         self.events.append("close")
+        self._open = False
+
+    def is_open(self):
+        return self._open and self.can_open
 
 
 class FakeMXAForTraceAcquisition:
@@ -80,6 +89,20 @@ class FakeMXAForTraceAcquisition:
 
     def single_sweep_wait(self):
         raise RuntimeError("sweep failed")
+
+
+class FakeMXATimeout:
+    def __init__(self):
+        self.update_states = []
+
+    def set_trace_update(self, trace_num, state):
+        self.update_states.append((trace_num, state))
+
+    def single_sweep_wait(self):
+        return False
+
+    def get_trace_data(self, **kwargs):
+        pytest.fail("trace data must not be read after a sweep timeout")
 
 
 def _quiet(monkeypatch):
@@ -163,8 +186,47 @@ def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(monkeypa
     assert mx.rbw_values == [1000] and mx.vbw_values == [(2000, False)]
     assert (result.x_value, result.x_unit) == (1000, "Hz")
     assert result.traces == {"squeezing": [1], "shot_noise": [2]}
-    assert result.meta == {"rbw_hz": 1000, "vbw_hz": 2000}
+    assert result.meta == {
+        "requested_rbw_hz": 1000,
+        "requested_vbw_hz": 2000,
+        "rbw_hz": 1000,
+        "vbw_hz": 2000,
+    }
     assert shutter.events == []
+
+
+def test_bandwidth_step_uses_applied_instrument_value_as_the_sweep_coordinate(monkeypatch):
+    monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
+
+    class QuantizingMXA(FakeMXA):
+        def query(self, command):
+            return {"BWID?": "976.0", "BWID:VID?": "1952.0"}[command]
+
+    result = BandwidthStep(1000).run(ExperimentContext(mx=QuantizingMXA(), run_id="quantized"))
+    assert result.x_value == 976.0
+    assert result.label == "rbw=976Hz"
+    assert result.meta == {
+        "requested_rbw_hz": 1000,
+        "requested_vbw_hz": 2000,
+        "rbw_hz": 976.0,
+        "vbw_hz": 1952.0,
+    }
+
+
+def test_read_analyzer_settings_records_values_reported_by_the_mxa():
+    class MXA:
+        def query(self, command):
+            return {
+                "BWID?": "976.0",
+                "SWE:TIME?": "0.01",
+                "AVER:COUN?": "200",
+            }[command]
+
+    assert read_analyzer_settings(MXA()) == {
+        "rbw_hz": 976.0,
+        "sweep_duration_s": 0.01,
+        "average_count": 200,
+    }
 
 
 def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter(monkeypatch):
@@ -187,11 +249,28 @@ def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter
         ("set", 377.1, 4),
         ("sleep", 0.5),
         ("read", 4),
+        ("sleep", SHUTTER_SETTLE_TIME_S),
         ("acquire", 1),
+        ("sleep", SHUTTER_SETTLE_TIME_S),
         ("acquire", 2),
     ]
     assert shutter.events == ["open", "close"]  # opened only for the squeezing trace
     assert result.meta["measured_frequency_thz"] == pytest.approx(377.100002)
+
+
+def test_a_frequency_step_aborts_if_the_laser_never_reaches_its_setpoint(monkeypatch):
+    monkeypatch.setattr("iyzee.experiment.procedures.time.sleep", lambda _: None)
+    monkeypatch.setattr("iyzee.experiment.procedures.FREQUENCY_LOCK_TIMEOUT_S", 0.0)
+    events = []
+    ctx = ExperimentContext(
+        mx=FakeMXA(),
+        run_id="t",
+        shutter=FakeShutterControl(),
+        wavemeter=_wavemeter(events, 377.101),
+    )
+    with pytest.raises(TimeoutError, match="laser did not reach"):
+        FrequencyStep(frequency_thz=377.1, wavemeter_channel=4).apply(ctx)
+    assert events == [("set", 377.1, 4), ("read", 4)]
 
 
 def test_a_frequency_step_names_what_the_context_lacks_and_touches_nothing_without_it():
@@ -236,6 +315,10 @@ def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkey
     assert [e[0] for e in events] == ["set", "read"] and shutter.events == ["open", "close"]
     assert frequency[0].meta["measured_frequency_thz"] == 377.1
     assert prepared[0][0] is mx  # the caller's analyzer
+    assert frequency.run_metadata["status"] == "completed"
+    assert (
+        frequency.run_metadata["run_id"] and frequency.run_metadata["config"]["center_hz"] == 1.5e6
+    )
 
     monkeypatch.setattr(
         "iyzee.experiment.procedures.bandwidth_sweep_steps", lambda rbw_values_hz=None: [BoomStep()]
@@ -250,6 +333,11 @@ def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(monk
         acquire_trace(mx, 1)
     assert mx.update_states == [(1, True), (1, False)]
 
+    timed_out = FakeMXATimeout()
+    with pytest.raises(TimeoutError, match="did not complete"):
+        acquire_trace(timed_out, 1)
+    assert timed_out.update_states == [(1, True), (1, False)]
+
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
     plain = FakeMXA()
     assert acquire_pair(plain) == {"squeezing": [1], "shot_noise": [2]}  # no shutter: both traces
@@ -262,3 +350,9 @@ def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(monk
     with pytest.raises(RuntimeError, match="sweep failed"):
         acquire_pair(FakeMXA(), shutter)
     assert shutter.events == ["open", "close"]  # closed even though the trace failed
+
+    unavailable = FakeShutterControl(can_open=False)
+    with pytest.raises(RuntimeError, match="shutter did not open"):
+        acquire_pair(FakeMXA(), unavailable)
+    assert unavailable.events == ["open", "close"]
+    assert not unavailable.is_open()

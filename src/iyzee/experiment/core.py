@@ -156,6 +156,7 @@ def run_sequence(
     *,
     on_error: str = "raise",
     on_step: StepCallback | None = None,
+    max_consecutive_failures: int = 3,
 ) -> list[StepResult]:
     """Run ``steps`` in order against ``ctx``, returning their results.
 
@@ -164,9 +165,10 @@ def run_sequence(
     - ``"raise"`` (default): propagate immediately. This matches the
       historical behavior of the hand-written procedures, where a failed
       point aborted the whole scan.
-    - ``"skip"``: log the failure and continue with the remaining steps.
-      Useful for long unattended scans where losing one point is
-      preferable to losing the rest of the run.
+    - ``"skip"``: log an isolated failure and continue with the remaining steps.
+      After ``max_consecutive_failures`` failures in a row, raise instead: repeated
+      failures usually indicate a disconnected or unresponsive instrument, not bad
+      individual points.
 
     ``on_step``, if given, is called after every step is attempted (see
     :data:`StepCallback`). It is the hook a caller uses for live progress
@@ -182,9 +184,14 @@ def run_sequence(
     """
     if on_error not in ("raise", "skip"):
         raise ValueError(f"on_error must be 'raise' or 'skip', got {on_error!r}")
+    if max_consecutive_failures < 1:
+        raise ValueError(
+            f"max_consecutive_failures must be positive, got {max_consecutive_failures}"
+        )
 
     total = len(steps)
     results: list[StepResult] = []
+    consecutive_failures = 0
     for index, step in enumerate(steps):
         step_name = step_label(step, index)
         log.info("run %s: starting %s", ctx.run_id, step_name)
@@ -196,7 +203,14 @@ def run_sequence(
                 on_step(index, total, step, None, exc)
             if on_error == "raise":
                 raise
+            consecutive_failures += 1
+            if consecutive_failures >= max_consecutive_failures:
+                raise RuntimeError(
+                    f"aborting run {ctx.run_id} after {consecutive_failures} consecutive "
+                    f"step failures; last step {step_name!r} failed: {exc}"
+                ) from exc
             continue
+        consecutive_failures = 0
         log.info("run %s: finished %s", ctx.run_id, step_name)
         results.append(result)
         if on_step is not None:

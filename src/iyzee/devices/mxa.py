@@ -1,3 +1,4 @@
+import contextlib
 import time
 
 import pyvisa
@@ -26,15 +27,30 @@ class KeysightMXA(BaseDevice):
         """Backward-compatible alias for :meth:`close`."""
         self.close()
 
+    def _drop_after_io_error(self) -> None:
+        """Best-effort close after a VISA exchange leaves the stream unreliable."""
+        with contextlib.suppress(Exception):
+            self.close()
+
     def write(self, cmd: str):
-        if self.instrument is None:
+        instrument = self.instrument
+        if instrument is None:
             raise RuntimeError("Instrument not connected")
-        self.instrument.write(cmd)
+        try:
+            instrument.write(cmd)
+        except pyvisa.errors.VisaIOError:
+            self._drop_after_io_error()
+            raise
 
     def query(self, cmd: str) -> str:
-        if self.instrument is None:
+        instrument = self.instrument
+        if instrument is None:
             raise RuntimeError("Instrument not connected")
-        return self.instrument.query(cmd)
+        try:
+            return instrument.query(cmd)
+        except pyvisa.errors.VisaIOError:
+            self._drop_after_io_error()
+            raise
 
     def query_binary(
         self, cmd: str, datatype: str = "f", is_big_endian: bool = True
@@ -43,11 +59,16 @@ class KeysightMXA(BaseDevice):
         Query binary IEEE 488.2 block data.
         datatype='f' (float32) or 'd' (float64).
         """
-        if self.instrument is None:
+        instrument = self.instrument
+        if instrument is None:
             raise RuntimeError("Instrument not connected")
-        return self.instrument.query_binary_values(
-            cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
-        )
+        try:
+            return instrument.query_binary_values(
+                cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
+            )
+        except pyvisa.errors.VisaIOError:
+            self._drop_after_io_error()
+            raise
 
     # ------------------------------------------------------------------
     # System & Synchronization
@@ -64,25 +85,39 @@ class KeysightMXA(BaseDevice):
         """Block until *OPC? explicitly returns 1."""
         if self.instrument is None:
             raise RuntimeError("Instrument not connected")
-        old_timeout = self.instrument.timeout
-        self.instrument.timeout = int(timeout_sec * 1000)
+        instrument = self.instrument
+        old_timeout = instrument.timeout
+        instrument.timeout = int(timeout_sec * 1000)
         try:
             response = self.query("*OPC?").strip()
             return response == "1"
         except pyvisa.errors.VisaIOError:
+            # A timed-out query may still have a late reply in the stream. Drop
+            # the resource rather than letting that reply corrupt the next query.
+            self._drop_after_io_error()
             return False
         finally:
-            self.instrument.timeout = old_timeout
+            # A timed-out query has already dropped this resource. Restoring a
+            # timeout on it can raise and mask the original failure.
+            if self.instrument is instrument:
+                instrument.timeout = old_timeout
 
-    def get_errors(self) -> list[str]:
-        """Drain the SCPI error queue."""
-        errs = []
-        while True:
-            msg = self.query("SYST:ERR?")
-            if msg.startswith(("+0,", "0,")):
-                break
-            errs.append(msg)
-        return errs
+    def get_errors(self, max_entries: int = 100) -> list[str]:
+        """Drain the SCPI error queue, with a hard cap for malformed replies."""
+        if max_entries < 1:
+            raise ValueError(f"max_entries must be positive, got {max_entries}")
+
+        errors: list[str] = []
+        for _ in range(max_entries):
+            message = self.query("SYST:ERR?")
+            if message.startswith(("+0,", "0,")):
+                return errors
+            errors.append(message)
+
+        raise RuntimeError(
+            f"MXA error queue did not terminate after {max_entries} replies; "
+            f"last reply was {errors[-1]!r}"
+        )
 
     def set_display_update(self, state: bool):
         """Disable display updates to improve remote measurement speed."""
@@ -141,8 +176,9 @@ class KeysightMXA(BaseDevice):
     # ------------------------------------------------------------------
     # Sweep / Acquisition Control
     # ------------------------------------------------------------------
-    def set_sweep_duration(self, time: int):
-        self.write(f"SWE:TIME {time}ms")
+    def set_sweep_duration(self, duration_ms: float):
+        """Set the sweep duration in milliseconds without truncating fractions."""
+        self.write(f"SWE:TIME {duration_ms}ms")
 
     def set_sweep_points(self, points: int):
         self.write(f"SWE:POIN {points}")
