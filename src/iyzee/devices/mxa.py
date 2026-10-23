@@ -1,3 +1,4 @@
+import contextlib
 import time
 
 import pyvisa
@@ -28,11 +29,8 @@ class KeysightMXA(BaseDevice):
 
     def _drop_after_io_error(self) -> None:
         """Best-effort close after a VISA exchange leaves the stream unreliable."""
-        try:
+        with contextlib.suppress(Exception):
             self.close()
-        except Exception:  # noqa: BLE001 - cleanup must not mask the I/O error
-            # The BaseDevice reference is cleared before resource.close() is called.
-            pass
 
     def write(self, cmd: str):
         instrument = self.instrument
@@ -109,7 +107,7 @@ class KeysightMXA(BaseDevice):
         if max_entries < 1:
             raise ValueError(f"max_entries must be positive, got {max_entries}")
 
-        errors = []
+        errors: list[str] = []
         for _ in range(max_entries):
             message = self.query("SYST:ERR?")
             if message.startswith(("+0,", "0,")):
