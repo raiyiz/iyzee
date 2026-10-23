@@ -1,5 +1,7 @@
 import math
 import time
+
+import pyvisa
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -65,8 +67,33 @@ class PSU(BaseDevice):
         resource.read_termination = "\n"
         return resource
 
+    def _drop_after_io_error(self) -> None:
+        """Best-effort close after VISA reports an unusable transport."""
+        try:
+            self.close()
+        except Exception:
+            # BaseDevice clears its published reference before closing the resource.
+            pass
+
+    def _write(self, command: str) -> None:
+        instrument = self.instrument
+        if instrument is None:
+            raise RuntimeError("PSU not connected")
+        try:
+            instrument.write(command)
+        except pyvisa.errors.VisaIOError:
+            self._drop_after_io_error()
+            raise
+
     def _query(self, command: str) -> str:
-        return str(self.instrument.query(command)).strip()
+        instrument = self.instrument
+        if instrument is None:
+            raise RuntimeError("PSU not connected")
+        try:
+            return str(instrument.query(command)).strip()
+        except pyvisa.errors.VisaIOError:
+            self._drop_after_io_error()
+            raise
 
     def idn(self) -> str:
         """The supply's identification string (also proves it answers)."""
@@ -103,7 +130,7 @@ class PSU(BaseDevice):
         try:
             states = []
             for number in wanted:
-                self.instrument.write(f"INST:NSEL {number}")
+                self._write(f"INST:NSEL {number}")
                 states.append(
                     ChannelState(
                         channel=number,
@@ -115,30 +142,33 @@ class PSU(BaseDevice):
                     )
                 )
         finally:
-            self.instrument.write(f"INST:NSEL {previously_selected}")
+            # An I/O timeout drops the resource; do not mask it by attempting a
+            # selection restore over the already-closed connection.
+            if self.instrument is not None:
+                self._write(f"INST:NSEL {previously_selected}")
         return PSUState(general_output=general, channels=tuple(states))
 
     def set_voltage(self, voltage: float, channel: int):
-        self.instrument.write(f"INST:NSEL {channel}")
-        self.instrument.write(f"VOLT {voltage}")
+        self._write(f"INST:NSEL {channel}")
+        self._write(f"VOLT {voltage}")
 
     def enable_output(self, channel: int):
-        self.instrument.write(f"INST OUT{channel}")
-        self.instrument.write("OUTP:SEL 1")
+        self._write(f"INST OUT{channel}")
+        self._write("OUTP:SEL 1")
 
     def disable_output(self, channel: int):
-        self.instrument.write(f"INST OUT{channel}")
-        self.instrument.write("OUTP:SEL 0")
+        self._write(f"INST OUT{channel}")
+        self._write("OUTP:SEL 0")
 
     def set_current(self, current: float, channel: int):
-        self.instrument.write(f"INST:NSEL {channel}")
-        self.instrument.write(f"CURR {current}")
+        self._write(f"INST:NSEL {channel}")
+        self._write(f"CURR {current}")
 
     def enable_global_output(self):
-        self.instrument.write("OUTP:GEN 1")
+        self._write("OUTP:GEN 1")
 
     def disable_global_output(self):
-        self.instrument.write("OUTP:GEN 0")
+        self._write("OUTP:GEN 0")
 
 
 class ShutterControl:
