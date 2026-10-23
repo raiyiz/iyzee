@@ -363,7 +363,7 @@ def run_sweep(
         results = run_sequence(
             sweep.steps, ctx, on_error=on_error, on_step=record.on_step
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - attach run status before re-raising
         record.finish(failed=True)
         raise
     record.finish()
