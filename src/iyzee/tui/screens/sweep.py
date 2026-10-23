@@ -355,20 +355,21 @@ class SweepScreen(Page):
 
             try:
                 shutter = devices.get("shutter")
-                psu = getattr(shutter, "psu", None)
-                retrieve_state = getattr(psu, "retrieve_state", None)
-                if callable(retrieve_state):
-                    # Fail before the first point if the supply cannot power the
-                    # shutter, or if its channel is already armed unexpectedly.
-                    state = retrieve_state()
-                    if not state.general_output:
-                        raise RuntimeError(
-                            "PSU master output is off; enable it before sweeping"
-                        )
-                    if state.channel(shutter.chan).selected:
-                        raise RuntimeError(
-                            "shutter channel is already enabled; close it before sweeping"
-                        )
+                if shutter is not None:
+                    psu = getattr(shutter, "psu", None)
+                    retrieve_state = getattr(psu, "retrieve_state", None)
+                    if callable(retrieve_state):
+                        # Fail before the first point if the supply cannot power the
+                        # shutter, or if its channel is already armed unexpectedly.
+                        state = retrieve_state()
+                        if not state.general_output:
+                            raise RuntimeError(
+                                "PSU master output is off; enable it before sweeping"
+                            )
+                        if state.channel(shutter.chan).selected:
+                            raise RuntimeError(
+                                "shutter channel is already enabled; close it before sweeping"
+                            )
                 prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
                 applied_settings = read_analyzer_settings(mx)
             except Exception as exc:
