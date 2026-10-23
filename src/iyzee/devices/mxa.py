@@ -30,7 +30,7 @@ class KeysightMXA(BaseDevice):
         """Best-effort close after a VISA exchange leaves the stream unreliable."""
         try:
             self.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - cleanup must not mask the I/O error
             # The BaseDevice reference is cleared before resource.close() is called.
             pass
 
