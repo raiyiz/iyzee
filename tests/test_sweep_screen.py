@@ -419,6 +419,7 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
     assert meta["status"] == "completed_with_errors"
     assert meta["finished_at_utc"] and meta["started_at_utc"]
     assert meta["config"]["res_bw_hz"] > 0  # AnalyzerConfig, as the sweep used it
+    assert meta["config"]["applied_settings"] == {}
     assert [(f["index"], f["error_type"]) for f in meta["failed_steps"]] == [(1, "TimeoutError")]
 
 
