@@ -151,8 +151,9 @@ class KeysightMXA(BaseDevice):
     # ------------------------------------------------------------------
     # Sweep / Acquisition Control
     # ------------------------------------------------------------------
-    def set_sweep_duration(self, time: int):
-        self.write(f"SWE:TIME {time}ms")
+    def set_sweep_duration(self, duration_ms: float):
+        """Set the sweep duration in milliseconds without truncating fractions."""
+        self.write(f"SWE:TIME {duration_ms}ms")
 
     def set_sweep_points(self, points: int):
         self.write(f"SWE:POIN {points}")
