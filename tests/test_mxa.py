@@ -91,6 +91,18 @@ def test_get_errors_drains_scpi_error_queue():
     assert mxa.get_errors() == ["-100,Command error", "-200,Execution error"]
 
 
+def test_get_errors_stops_if_the_queue_never_reports_empty():
+    import pytest
+
+    mxa, instrument = make_mxa()
+    seen = []
+    instrument.query = lambda command: seen.append(command) or "-100,Command error"
+
+    with pytest.raises(RuntimeError, match="did not terminate after 3 replies"):
+        mxa.get_errors(max_entries=3)
+    assert seen == ["SYST:ERR?"] * 3
+
+
 def test_frequency_configuration_is_sent_to_instrument():
     mxa, instrument = make_mxa()
     mxa.set_center_freq(1e6)
