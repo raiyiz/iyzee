@@ -54,6 +54,7 @@ from ...experiment import (
     create_dirs,
     difference_series,
     prepare_analyzer,
+    read_analyzer_settings,
     run_sequence,
     save_step_results,
 )
@@ -366,12 +367,13 @@ class SweepScreen(Page):
                             "shutter channel is already enabled; close it before sweeping"
                         )
                 prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
+                applied_settings = read_analyzer_settings(mx)
             except Exception as exc:
                 log.exception("sweep: failed to configure analyzer")
                 self._ui(self._finish, kind, aborted=False, setup_error=exc)
                 return
 
-            record = RunRecord(config=asdict(config))
+            record = RunRecord(config={**asdict(config), "applied_settings": applied_settings})
             self._record = record
             ctx = ExperimentContext(
                 mx=mx,
