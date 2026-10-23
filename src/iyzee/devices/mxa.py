@@ -77,15 +77,22 @@ class KeysightMXA(BaseDevice):
         finally:
             self.instrument.timeout = old_timeout
 
-    def get_errors(self) -> list[str]:
-        """Drain the SCPI error queue."""
-        errs = []
-        while True:
-            msg = self.query("SYST:ERR?")
-            if msg.startswith(("+0,", "0,")):
-                break
-            errs.append(msg)
-        return errs
+    def get_errors(self, max_entries: int = 100) -> list[str]:
+        """Drain the SCPI error queue, with a hard cap for malformed replies."""
+        if max_entries < 1:
+            raise ValueError(f"max_entries must be positive, got {max_entries}")
+
+        errors = []
+        for _ in range(max_entries):
+            message = self.query("SYST:ERR?")
+            if message.startswith(("+0,", "0,")):
+                return errors
+            errors.append(message)
+
+        raise RuntimeError(
+            f"MXA error queue did not terminate after {max_entries} replies; "
+            f"last reply was {errors[-1]!r}"
+        )
 
     def set_display_update(self, state: bool):
         """Disable display updates to improve remote measurement speed."""
