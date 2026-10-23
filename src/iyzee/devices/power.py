@@ -1,4 +1,5 @@
 import math
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -189,3 +190,35 @@ class ShutterControl:
 
     def close(self):
         self.psu.disable_output(self.chan)
+
+    def safe_close(self, *, attempts: int = 3, retry_delay_s: float = 0.05) -> None:
+        """Disable the channel and verify the PSU reports it disarmed.
+
+        Retrying is useful during cleanup after a transient transport error. It
+        cannot guarantee closure if the PSU or network is unreachable; that case
+        raises rather than silently claiming the shutter is safe.
+        """
+        if attempts < 1:
+            raise ValueError(f"attempts must be positive, got {attempts}")
+        if retry_delay_s < 0:
+            raise ValueError(f"retry_delay_s must be non-negative, got {retry_delay_s}")
+
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                self.close()
+                if not self.retrieve_state().channel(self.chan).selected:
+                    return
+                last_error = RuntimeError(
+                    f"PSU still reports shutter channel {self.chan} enabled after close"
+                )
+            except Exception as exc:
+                last_error = exc
+
+            if attempt + 1 < attempts and retry_delay_s:
+                time.sleep(retry_delay_s)
+
+        raise RuntimeError(
+            f"could not verify that shutter channel {self.chan} is disabled "
+            f"after {attempts} attempts"
+        ) from last_error
