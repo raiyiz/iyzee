@@ -270,6 +270,8 @@ def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkey
     assert [e[0] for e in events] == ["set", "read"] and shutter.events == ["open", "close"]
     assert frequency[0].meta["measured_frequency_thz"] == 377.1
     assert prepared[0][0] is mx  # the caller's analyzer
+    assert frequency.run_metadata["status"] == "completed"
+    assert frequency.run_metadata["run_id"] and frequency.run_metadata["config"]["center_hz"] == 1.5e6
 
     monkeypatch.setattr(
         "iyzee.experiment.procedures.bandwidth_sweep_steps", lambda rbw_values_hz=None: [BoomStep()]
