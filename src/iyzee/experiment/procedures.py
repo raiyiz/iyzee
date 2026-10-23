@@ -20,7 +20,15 @@ from typing import Any, ClassVar, TypedDict, Unpack
 from ..devices.mxa import KeysightMXA
 from ..devices.power import ShutterControl
 from ..devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
-from .core import ExperimentContext, StepResult, run_sequence
+from .core import ExperimentContext, RunRecord, StepResult, run_sequence
+
+class SweepResults(list[StepResult]):
+    """Step results carrying the run metadata needed for a self-describing save."""
+
+    def __init__(self, results: Sequence[StepResult], run_metadata: dict[str, Any]) -> None:
+        super().__init__(results)
+        self.run_metadata = run_metadata
+
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
@@ -321,17 +329,26 @@ def run_sweep(
     shutter: ShutterControl | None = None,
     wavemeter: Wavemeter | None = None,
     on_error: str = "raise",
-) -> list[StepResult]:
-    """Configure the caller-owned MXA, build one run context, and run ``sweep``."""
-    prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), sweep.config)
+) -> SweepResults:
+    """Run a sweep and attach the run record for automatic persistence by ``save_step_results``."""
+    record = RunRecord(config=asdict(sweep.config))
     ctx = ExperimentContext(
         mx=mx,
-        run_id=uuid.uuid4().hex[:8],
+        run_id=record.run_id,
         shutter=shutter,
-        config=asdict(sweep.config),
+        config=record.config,
         wavemeter=wavemeter,
     )
-    return run_sequence(sweep.steps, ctx, on_error=on_error)
+    try:
+        prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), sweep.config)
+        results = run_sequence(
+            sweep.steps, ctx, on_error=on_error, on_step=record.on_step
+        )
+    except Exception:
+        record.finish(failed=True)
+        raise
+    record.finish()
+    return SweepResults(results, record.as_metadata())
 
 
 def run_bandwidth_sweep(
