@@ -82,7 +82,9 @@ def test_failures_are_raised_as_they_are_never_wrapped_or_swallowed(
         Wavemeter().read_frequency(1)
 
     for invalid in ("nan", "inf", "0", "-3.0"):
-        monkeypatch.setattr(wavemeter.requests, "get", lambda *a, value=invalid, **k: response(value))
+        monkeypatch.setattr(
+            wavemeter.requests, "get", lambda *a, value=invalid, **k: response(value)
+        )
         with pytest.raises(ValueError, match="invalid frequency"):
             Wavemeter().read_frequency(1)
 
