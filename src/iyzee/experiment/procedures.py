@@ -12,7 +12,6 @@ runs any of them. A new axis is one subclass, those three functions and an entry
 from __future__ import annotations
 
 import time
-import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar, TypedDict, Unpack
@@ -21,6 +20,7 @@ from ..devices.mxa import KeysightMXA
 from ..devices.power import ShutterControl
 from ..devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
 from .core import ExperimentContext, RunRecord, StepResult, run_sequence
+
 
 class SweepResults(list[StepResult]):
     """Step results carrying the run metadata needed for a self-describing save."""
