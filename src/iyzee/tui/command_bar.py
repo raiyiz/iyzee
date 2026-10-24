@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import typing
 from typing import ClassVar
 
 from textual.app import ComposeResult
@@ -37,7 +38,7 @@ class CommandInput(Input):
 
 
 class CommandBar(Horizontal):
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: typing.Any) -> None:
         super().__init__(**kwargs)
         self.history: list[str] = []
         self._position = 0

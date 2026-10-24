@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import typing
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _graph():
+def _graph() -> typing.Any:
     spec = importlib.util.spec_from_file_location("docs_index", ROOT / "scripts" / "docs_index.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

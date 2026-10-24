@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import threading
+import typing
 from pathlib import Path
 from typing import Any
 
@@ -240,7 +241,9 @@ async def test_a_run_gets_the_connected_devices_and_holds_every_lock_it_needs(
     devices = {key: object() for key in ("mxa", "shutter", "wavemeter")}
     seen: dict[str, Any] = {}
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(
+        steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
+    ) -> None:
         seen["ctx"] = ctx
         seen["held"] = {k for k in devices if _locked_by_someone_else(app.handles[k].lock)}
 
@@ -269,7 +272,9 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
 ) -> None:
     started, release = threading.Event(), threading.Event()
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(
+        steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
+    ) -> None:
         started.set()
         release.wait(2)
         on_step(0, 3, object(), _result(0), None)
@@ -302,7 +307,9 @@ async def test_points_are_on_disk_while_the_sweep_is_still_running(
 ) -> None:
     on_disk_after_each_step: list[int] = []
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(
+        steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
+    ) -> None:
         for index in range(3):
             on_step(index, 3, object(), _result(index), None)
             on_disk_after_each_step.append(_points_on_disk(tmp_path))
@@ -323,12 +330,14 @@ async def test_a_failing_save_is_reported_once_and_does_not_stop_the_run(
 ) -> None:
     steps_run: list[int] = []
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(
+        steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
+    ) -> None:
         for index in range(3):
             on_step(index, 3, object(), _result(index), None)
             steps_run.append(index)
 
-    def broken_save(*args, **kwargs):
+    def broken_save(*args: typing.Any, **kwargs: typing.Any) -> None:
         raise OSError("No space left on device [/data]")
 
     app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
@@ -400,7 +409,9 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
     """Saved sweeps used to carry run_metadata=null: no run id, no analyzer settings."""
     seen: list[str] = []
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(
+        steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
+    ) -> None:
         seen.append(ctx.run_id)
         on_step(0, 2, object(), _result(0), None)
         # while it is running the file must already say so
@@ -423,7 +434,9 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
 async def test_an_aborted_sweep_is_marked_aborted_in_the_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(
+        steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
+    ) -> None:
         screen = app.query_one(sweep_mod.SweepScreen)
         screen._abort_event.set()
         on_step(0, 3, object(), _result(0), None)  # raises SweepAborted after the point is kept
@@ -439,7 +452,9 @@ async def test_an_aborted_sweep_is_marked_aborted_in_the_file(
 async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(
+        steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
+    ) -> None:
         on_step(0, 3, object(), _result(0), None)
         raise RuntimeError("scheduler exploded")
 
@@ -451,6 +466,8 @@ async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
 
 
 # -- a worker that dies with something that is not an Exception ----------------------------------
+
+
 #
 # Textual handles Exception (and cancellation) from a worker thread, nothing else: a
 # KeyboardInterrupt or SystemExit escaping one ends the whole app with no message, and a
@@ -468,7 +485,9 @@ def _log_text(screen: SweepScreen) -> str:
 async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exc_type: type[BaseException]
 ) -> None:
-    def dying_run_sequence(steps, ctx, *, on_error, on_step):
+    def dying_run_sequence(
+        steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
+    ) -> None:
         for index in range(2):
             on_step(index, 5, steps[index], _result(index), None)
         raise exc_type()
@@ -499,7 +518,7 @@ async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_
 async def test_a_capture_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
     monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
 ) -> None:
-    def dying_acquire(mx, trace_num):
+    def dying_acquire(mx: typing.Any, trace_num: int) -> None:
         raise exc_type()
 
     monkeypatch.setattr(sweep_mod, "acquire_trace", dying_acquire)

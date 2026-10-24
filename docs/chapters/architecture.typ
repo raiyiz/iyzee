@@ -679,7 +679,7 @@ would not freeze, the trigger mode could not be restored, `*IDN?` did not answer
 are collected in `ScopeAcquisition.warnings` and written to the manifest, so a
 recording says honestly how trustworthy it is.
 
-#tested-by("test_acquisition_failures_raise_and_restore_the_trigger_mode", "test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_first_failure", "test_freeze_restore_and_identity_failures_are_warnings_and_the_download_still_happens")
+#tested-by("test_acquisition_failures_raise_and_restore_the_trigger_mode", "test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_first_failure", "test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_one_is_left_alone")
 
 = The scope transport: VISA over VXI-11 <arch-scope-transport>
 

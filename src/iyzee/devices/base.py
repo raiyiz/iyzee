@@ -1,6 +1,9 @@
 """Shared device infrastructure for laboratory instruments."""
 
-from typing import Any
+from __future__ import annotations
+
+from types import TracebackType
+from typing import Any, Literal, Self
 
 import pyvisa
 
@@ -15,11 +18,11 @@ class BaseDevice:
     def __init__(
         self,
         ip: IP | str | None = None,
-        resource_manager=None,
+        resource_manager: Any | None = None,
         timeout_ms: int = 10_000,
         read_termination: str | None = None,
         write_termination: str | None = None,
-    ):
+    ) -> None:
         self.ip = ip
         self.timeout_ms = timeout_ms
         self.read_termination = read_termination
@@ -28,7 +31,7 @@ class BaseDevice:
         self.instrument: Any = None
         self.visa_address = f"TCPIP0::{self.ip}::inst0::INSTR"
 
-    def open(self):
+    def open(self) -> Any:
         return self.rm.open_resource(self.visa_address)
 
     def connect(self) -> None:
@@ -48,12 +51,17 @@ class BaseDevice:
             self.instrument.close()
             self.instrument = None
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Open the device at the explicit resource boundary."""
         self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> Literal[False]:
         """Close the VISA resource when leaving the context."""
         self.close()
         return False

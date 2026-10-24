@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import typing
 
 import pytest
 from helpers import async_test, wait_until
@@ -45,7 +46,7 @@ async def test_log_screen_shows_buffered_live_filtered_and_exception_records() -
 
 @async_test
 async def test_log_screen_can_browse_a_rotated_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: typing.Any
 ) -> None:
     from iyzee.tui import logging_support
 

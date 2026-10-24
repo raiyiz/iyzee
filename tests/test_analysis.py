@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import typing
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,9 @@ def _saved_sweep(tmp_path: Path, results: list[StepResult], *, name: str) -> Rec
     return load_recording(path)
 
 
-def test_a_bandwidth_sweep_reports_requested_setpoints_and_relative_noise(tmp_path):
+def test_a_bandwidth_sweep_reports_requested_setpoints_and_relative_noise(
+    tmp_path: typing.Any,
+) -> None:
     recording = _saved_sweep(
         tmp_path,
         [
@@ -42,7 +45,7 @@ def test_a_bandwidth_sweep_reports_requested_setpoints_and_relative_noise(tmp_pa
     assert sweep.points[0].x == 20e3
 
 
-def test_a_frequency_sweep_plots_at_the_measured_frequency(tmp_path):
+def test_a_frequency_sweep_plots_at_the_measured_frequency(tmp_path: typing.Any) -> None:
     recording = _saved_sweep(
         tmp_path,
         [
@@ -75,7 +78,9 @@ def test_a_frequency_sweep_plots_at_the_measured_frequency(tmp_path):
     assert sweep.points[1].x == 377.2
 
 
-def test_sweep_summaries_honour_the_statistic_and_survive_thin_recordings(tmp_path):
+def test_sweep_summaries_honour_the_statistic_and_survive_thin_recordings(
+    tmp_path: typing.Any,
+) -> None:
     recording = _saved_sweep(
         tmp_path,
         [StepResult("p", 1.0, "Hz", {"squeezing": [-61.0, -50.0], "shot_noise": [-58.0, -58.0]})],
@@ -103,7 +108,7 @@ def test_sweep_summaries_honour_the_statistic_and_survive_thin_recordings(tmp_pa
     assert summarize_sweep(Recording(Path("x.npz"), {}, {})).points == ()  # no x values: no points
 
 
-def _scope_recording(**metadata) -> Recording:
+def _scope_recording(**metadata: typing.Any) -> Recording:
     return Recording(Path("scope.npz"), {}, metadata)
 
 
@@ -111,7 +116,7 @@ def _trace(label: str) -> Trace:
     return Trace(label, np.zeros(2), np.zeros(2), "S", "V")
 
 
-def test_a_scope_summary_collects_identity_stats_and_timebase():
+def test_a_scope_summary_collects_identity_stats_and_timebase() -> None:
     waveform = {
         "channel": "C1",
         "time_offset": -5e-6,
@@ -141,7 +146,7 @@ def test_a_scope_summary_collects_identity_stats_and_timebase():
     assert (timebase.offset, timebase.interval, timebase.samples) == (-5e-6, 1e-9, 10)
 
 
-def test_scope_timebases_are_grouped_and_a_damaged_manifest_never_breaks_the_summary():
+def test_scope_timebases_are_grouped_and_a_damaged_manifest_never_breaks_the_summary() -> None:
     def waveform(channel: str) -> dict:
         return {
             "channel": channel,

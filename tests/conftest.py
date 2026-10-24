@@ -1,4 +1,5 @@
 import sys
+import typing
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from iyzee.tui import logging_support  # noqa: E402 - see sys.path setup above
 
 
 @pytest.fixture(autouse=True)
-def _isolated_log_root(tmp_path, monkeypatch):
+def _isolated_log_root(tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Redirect logging_support.LOG_ROOT to this test's own tmp_path.
 
     Nearly every test in this suite constructs its own ``IyzeeApp()``, and

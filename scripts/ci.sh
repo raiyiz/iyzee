@@ -34,7 +34,12 @@ doc_links() {
 notebooks() {
     uv sync --locked --group dev --group notebooks
     uv run --locked --group notebooks marimo check --strict notebooks/workbench.py notebooks/sweep_scope_analysis.py notebooks/reproduce_frequency_sweep.py
-    uv run --locked --group notebooks pytest tests/test_notebook_toolbox.py tests/test_notebook_workset.py
+    uv run --locked --group notebooks pytest tests/test_notebook_toolbox.py
+}
+
+typecheck() {
+    sync
+    uv run --locked mypy --disallow-untyped-defs src tests
 }
 
 all() {
@@ -42,7 +47,7 @@ all() {
     uv run --locked pytest
     uv run --locked ruff check .
     uv run --locked ruff format --check .
-    uv run --locked mypy src tests
+    uv run --locked mypy --disallow-untyped-defs src tests
     uv run --locked scripts/check_doc_links.py
     notebooks
     docs
@@ -87,7 +92,7 @@ case "${1:-}" in
     #   scripts/ci.sh hardware --hardware-actuate -m 'not scope'
     hardware)  sync; shift; uv run --locked pytest tests/hardware --hardware "$@" ;;
     lint)      sync; uv run --locked ruff check .; uv run --locked ruff format --check . ;;
-    typecheck) sync; uv run --locked mypy src tests ;;
+    typecheck) typecheck ;;
     doc-links) sync; doc_links ;;
     notebooks)  notebooks ;;
     docs-index) sync; docs_index ;;

@@ -6,8 +6,7 @@ Plain functions and dataclasses, no Textual import — the same operations
 the IPython console::
 
     from iyzee.devices.scope import Channel, Coupling, LeCroy
-    from iyzee.scope_workflows import ChannelSettings, apply_channel_settings
-
+    from iyzee.scope_workflows import apply_channel_settings, ChannelSettings
     scope = LeCroy("10.0.0.5")
     scope.connect()
     apply_channel_settings(scope, [ChannelSettings(Channel.C1, True, 0.5, 0.0, Coupling.DC_1M)])
@@ -48,19 +47,59 @@ from __future__ import annotations
 import logging
 import platform
 import re
+import threading
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 
-from .devices.scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
+from .devices.scope import (
+    Channel,
+    Coupling,
+    DetailedWaveformData,
+    TriggerCoupling,
+    TriggerMode,
+    TriggerSlope,
+)
 from .experiment.core import utc_now
 from .experiment.io import save_numeric_recording
 
 log = logging.getLogger("iyzee.scope_workflows")
+
+
+class ScopeDriver(Protocol):
+    """Structural scope interface shared by the LeCroy driver and test doubles."""
+
+    @property
+    def transaction_lock(self) -> threading.RLock: ...
+
+    def query(self, command: str) -> str: ...
+    def get_volts_per_div(self, channel: Channel) -> str: ...
+    def get_offset(self, channel: Channel) -> str: ...
+    def get_coupling(self, channel: Channel) -> str: ...
+    def get_trace_display(self, channel: Channel) -> str: ...
+    def set_volts_per_div(self, channel: Channel, value: float) -> None: ...
+    def set_offset(self, channel: Channel, value: float) -> None: ...
+    def set_coupling(self, channel: Channel, value: Coupling) -> None: ...
+    def set_trace_display(self, channel: Channel, value: bool) -> None: ...
+    def get_trigger_source(self) -> str: ...
+    def set_trigger_source(self, source: Channel) -> None: ...
+    def get_trigger_mode(self) -> str: ...
+    def set_trigger_mode(self, mode: TriggerMode) -> None: ...
+    def get_trigger_slope(self, source: Channel) -> str: ...
+    def set_trigger_slope(self, source: Channel, slope: TriggerSlope) -> None: ...
+    def get_trigger_coupling(self, source: Channel) -> str: ...
+    def set_trigger_coupling(self, source: Channel, coupling: TriggerCoupling) -> None: ...
+    def get_trigger_level(self, source: Channel) -> str: ...
+    def set_trigger_level(self, source: Channel, level: float) -> None: ...
+    def get_time_per_div(self) -> str: ...
+    def set_time_per_div(self, seconds: float) -> None: ...
+    def getHorProperties(self, channel: Channel | str) -> tuple[str, float, float]: ...
+    def getDataFloatsDetailed(self, channel: Channel | str, block: str) -> DetailedWaveformData: ...
 
 
 @dataclass(frozen=True)
@@ -264,7 +303,7 @@ def _trigger_source(raw: str) -> str:
     return fields[2]
 
 
-def read_channel_settings(scope: LeCroy, channels: Sequence[Channel]) -> list[ChannelSettings]:
+def read_channel_settings(scope: ScopeDriver, channels: Sequence[Channel]) -> list[ChannelSettings]:
     """Read every channel's current vertical settings back from the scope.
 
     One locked batch; the first failure raises. The result has the same shape
@@ -283,7 +322,7 @@ def read_channel_settings(scope: LeCroy, channels: Sequence[Channel]) -> list[Ch
 
 
 def apply_channel_settings(
-    scope: LeCroy,
+    scope: ScopeDriver,
     settings: Sequence[ChannelSettings],
     *,
     current_settings: Mapping[Channel, ChannelSettings] | Sequence[ChannelSettings] | None = None,
@@ -331,7 +370,7 @@ def apply_channel_settings(
 
 
 def apply_trigger_settings(
-    scope: LeCroy,
+    scope: ScopeDriver,
     settings: TriggerSettings,
     *,
     current_settings: TriggerSettings | None = None,
@@ -379,7 +418,7 @@ def apply_trigger_settings(
             scope.set_trigger_mode(settings.mode)
 
 
-def read_trigger_settings(scope: LeCroy) -> TriggerSettings:
+def read_trigger_settings(scope: ScopeDriver) -> TriggerSettings:
     """Read the scope's current trigger configuration back.
 
     The read counterpart of :func:`apply_trigger_settings`; raises on failure.
@@ -394,7 +433,7 @@ def read_trigger_settings(scope: LeCroy) -> TriggerSettings:
     return TriggerSettings(source, mode, slope, coupling, level_volts, time_per_div)
 
 
-def _download_waveform(scope: LeCroy, channel: Channel) -> ScopeWaveform:
+def _download_waveform(scope: ScopeDriver, channel: Channel) -> ScopeWaveform:
     """Download one channel's ``DAT1`` block with its own timebase (caller holds the lock)."""
     time_unit, time_offset, time_interval = scope.getHorProperties(channel=channel)
     data = scope.getDataFloatsDetailed(channel=channel, block="DAT1")
@@ -422,7 +461,7 @@ def _download_waveform(scope: LeCroy, channel: Channel) -> ScopeWaveform:
 
 
 def acquire_scope_recording(
-    scope: LeCroy,
+    scope: ScopeDriver,
     channels: Sequence[Channel],
     *,
     channel_settings: Sequence[ChannelSettings] = (),

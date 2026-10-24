@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import math
+import typing
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -58,7 +59,6 @@ from .page import FieldError, Page, _field, _finite_float, _positive_float
 
 if TYPE_CHECKING:
     from ...devices.handles import InstrumentHandle
-
 log = logging.getLogger("iyzee.tui")
 
 CHANNELS: tuple[Channel, ...] = (Channel.C1, Channel.C2, Channel.C3, Channel.C4)
@@ -132,7 +132,7 @@ class ScopeScreen(Page):
     action that records the selected waveforms before plotting them.
     """
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         super().__init__(*args, **kwargs)
         # Set here, not in on_mount: refresh_readiness() can run before the page is mounted.
         # What the scope itself last reported (None until a successful Retrieve).

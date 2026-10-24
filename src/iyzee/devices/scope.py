@@ -11,6 +11,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import StrEnum
+from typing import Any, TypedDict
 
 import numpy as np
 import pyvisa
@@ -18,6 +19,16 @@ from pyvisa.constants import StatusCode
 
 from ..config import IP, address
 from .base import BaseDevice
+
+
+class DetailedWaveformData(TypedDict):
+    """Calibrated LeCroy waveform data, including the raw ADC codes."""
+
+    unit: str
+    values: np.ndarray
+    raw_codes: np.ndarray
+    vertical_gain: float
+    vertical_offset: float
 
 
 class LeCroyTimeoutError(TimeoutError):
@@ -164,8 +175,8 @@ class LeCroy(BaseDevice):
         self,
         ip: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
-        resource_manager=None,
-    ):
+        resource_manager: Any | None = None,
+    ) -> None:
         super().__init__(
             ip=ip or address(IP.SCOPE),
             resource_manager=resource_manager,
@@ -270,13 +281,13 @@ class LeCroy(BaseDevice):
         """Return the scope's ``*IDN?`` identification string."""
         return self.query("*IDN?", timeout=timeout)
 
-    def _inspect(self, channel: Channel, field: str) -> str:
+    def _inspect(self, channel: Channel | str, field: str) -> str:
         return self.query(f'{_ident(channel, "channel")}:INSPECT? "{field}"')
 
-    def _inspect_number(self, channel: Channel, field: str) -> float:
+    def _inspect_number(self, channel: Channel | str, field: str) -> float:
         return float(self._inspect(channel, field).split(":")[-1].strip().strip('"').strip())
 
-    def _inspect_unit(self, channel: Channel, field: str) -> str:
+    def _inspect_unit(self, channel: Channel | str, field: str) -> str:
         return self._inspect(channel, field).split("Unit Name = ")[-1].strip().strip('"')
 
     # ------------------------------------------------------------------
@@ -417,7 +428,9 @@ class LeCroy(BaseDevice):
             raise LeCroyProtocolError(f"odd number of waveform bytes received: {len(data)}")
         return np.frombuffer(data, dtype="<i2").astype(np.int16)
 
-    def getDataFloatsDetailed(self, channel="C1", block="DAT1"):
+    def getDataFloatsDetailed(
+        self, channel: Channel | str = "C1", block: str = "DAT1"
+    ) -> DetailedWaveformData:
         """Return calibrated waveform data together with raw ADC codes."""
         with self._lock:
             word_values = self._read_words(channel, block)
@@ -433,7 +446,7 @@ class LeCroy(BaseDevice):
                 "vertical_offset": vertical_offset,
             }
 
-    def getHorProperties(self, channel="C1"):
+    def getHorProperties(self, channel: Channel | str = "C1") -> tuple[str, float, float]:
         """Return the horizontal unit, offset, and sample interval."""
         with self._lock:
             horunit = self._inspect_unit(channel, "HORUNIT")

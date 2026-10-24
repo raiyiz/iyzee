@@ -111,6 +111,12 @@ class _FakeVisaDeviceNoIdn:
     def __init__(self, ip: str) -> None:
         self.ip = ip
 
+    def connect(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
 
 # -- ShutterHandle ----------------------------------------------------------
 
@@ -179,7 +185,7 @@ def test_wavemeter_handle_probe_reads_the_default_channel_and_propagates_errors(
 ) -> None:
     seen: list[int] = []
 
-    def read(self, channel: int = DEFAULT_CHANNEL):
+    def read(self: instruments_mod.Wavemeter, channel: int = DEFAULT_CHANNEL) -> float:
         seen.append(channel)
         return 377.105
 
@@ -190,7 +196,7 @@ def test_wavemeter_handle_probe_reads_the_default_channel_and_propagates_errors(
 
     failure = OSError("switch unreachable")
 
-    def fail(self, channel: int = 4) -> float:
+    def fail(self: instruments_mod.Wavemeter, channel: int = 4) -> float:
         raise failure
 
     monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", fail)

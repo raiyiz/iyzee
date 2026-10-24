@@ -12,6 +12,8 @@ import atexit
 import io
 import sys
 import time
+import typing
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -97,7 +99,7 @@ def test_keys_encode_to_what_prompt_toolkit_decodes_and_edge_cases() -> None:
 # -- the IPython session -----------------------------------------------------------------
 
 
-async def _until(screen_text, needle: str, timeout: float = 10.0) -> bool:
+async def _until(screen_text: typing.Any, needle: str, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if needle in screen_text():
@@ -158,7 +160,9 @@ async def test_session_runs_a_real_ipython_in_process() -> None:
     assert sys.stdout is real_stdout, "stdout is restored on close"
 
 
-def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(monkeypatch) -> None:
+def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     virtual_output: list[str] = []
     session = IPythonSession(FakeApp(), on_output=virtual_output.append)
     atexit.unregister(session._run_shell_atexit_operations)
@@ -174,17 +178,21 @@ def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(monkeypatch) -> No
     assert "\x1b[0 q" in "".join(virtual_output)
 
 
-def _prompt_line(screen_text) -> str:
+def _prompt_line(screen_text: typing.Any) -> str:
     lines = [line for line in screen_text().splitlines() if "In [" in line]
     return lines[-1].strip() if lines else ""
 
 
 @async_test
-async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_path) -> None:
+async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(
+    tmp_path: typing.Any,
+) -> None:
     """Regression: history_load_length = 0 gave IPython's prompt an *empty*
     recall list, so Up/Down/Ctrl+R found nothing — even in the same session."""
 
-    async def session_run(history_file, commands, check) -> None:
+    async def session_run(
+        history_file: typing.Any, commands: typing.Any, check: typing.Any
+    ) -> None:
         screen = VTermScreen(90, 24)
         text = lambda: "\n".join(screen.text_lines())  # noqa: E731
         session = IPythonSession(
@@ -200,7 +208,7 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
         finally:
             session.close()
 
-    async def prompt_has(text, needle: str) -> bool:
+    async def prompt_has(text: Callable[[], str], needle: str) -> bool:
         # Poll the *prompt line*, not the whole screen: earlier cells that
         # contain the same text are still visible above it.
         deadline = time.monotonic() + 8
@@ -210,7 +218,7 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
             await asyncio.sleep(0.03)
         return False
 
-    async def recalls(session, text) -> None:
+    async def recalls(session: typing.Any, text: Callable[[], str]) -> None:
         session.send(b"\x1b[A")
         assert await prompt_has(text, "y = 22"), text()
         session.send(b"\x1b[A")
@@ -218,7 +226,7 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
         session.send(b"\x1b[B")  # Down goes forward again
         assert await prompt_has(text, "y = 22"), text()
 
-    async def recalls_after_restart(session, text) -> None:
+    async def recalls_after_restart(session: typing.Any, text: Callable[[], str]) -> None:
         session.send(b"\x1b[A")
         assert await prompt_has(text, "b = 2"), text()
 
@@ -228,7 +236,7 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
     await session_run(history, [], recalls_after_restart)  # a fresh session, same file
 
 
-async def _noop(session, text) -> None:
+async def _noop(session: typing.Any, text: str) -> None:
     return None
 
 
@@ -244,7 +252,7 @@ def _console_text(app: IyzeeApp) -> str:
     return "\n".join(app.screen.query_one(TerminalView).text_lines())
 
 
-async def _wait(pilot, app, needle: str, timeout: float = 10.0) -> bool:
+async def _wait(pilot: typing.Any, app: typing.Any, needle: str, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         await pilot.pause(0.05)
@@ -318,6 +326,8 @@ async def test_console_interrupt_scrollback_and_shutdown() -> None:
 
 
 # -- an interrupt must never be aimed at a thread that is not the shell ------------------------------
+
+
 #
 # The OS hands a finished thread's id to the next thread that starts (checked: every time, for
 # both a plain thread and an executor worker). interrupt() injects a KeyboardInterrupt by
@@ -325,7 +335,7 @@ async def test_console_interrupt_scrollback_and_shutdown() -> None:
 # a KeyboardInterrupt in that ends the whole app.
 
 
-def _session_whose_shell_thread_ends_at_once(monkeypatch: pytest.MonkeyPatch):
+def _session_whose_shell_thread_ends_at_once(monkeypatch: pytest.MonkeyPatch) -> typing.Any:
     session = IPythonSession(FakeApp(), rows=24, cols=90, on_output=VTermScreen(90, 24).feed)
     monkeypatch.setattr(session.shell, "mainloop", lambda: None)
     injected: list[int] = []
