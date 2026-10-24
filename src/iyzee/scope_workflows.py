@@ -51,7 +51,7 @@ import re
 import uuid
 from collections.abc import Mapping, Sequence
 from types import TracebackType
-from typing import Literal, Protocol
+from typing import Protocol
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -76,11 +76,8 @@ class ScopeLock(Protocol):
 
     def __enter__(self) -> object: ...
     def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> Literal[False]: ...
+        self, exc_type: object, exc_val: object, exc_tb: object
+    ) -> None: ...
 
 
 class ScopeDriver(Protocol):
