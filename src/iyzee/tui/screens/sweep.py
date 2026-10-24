@@ -21,6 +21,7 @@ from functools import partial
 from threading import Event
 from time import monotonic
 from typing import TYPE_CHECKING, Any
+import typing
 
 import numpy as np
 from rich.markup import escape
@@ -68,7 +69,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("iyzee.tui")
 
-
 # Upper bound on "Steps" / "Points". Each step is a full analyzer averaging
 # run (seconds), so 1000 is already a multi-minute measurement; the cap
 # exists to turn a stray extra zero (or 10**9) into a clear message instead
@@ -79,7 +79,6 @@ LIVE_PLOT_INTERVAL_S = 0.1
 # How each instrument key a sweep ``requires`` is named in "connect the ..." messages.
 _INSTRUMENT_NAMES = {"mxa": "MXA", "shutter": "shutter", "wavemeter": "wavemeter"}
 
-
 class SweepAborted(Exception):
     """Raised from inside the progress callback to stop a running sweep.
 
@@ -88,7 +87,6 @@ class SweepAborted(Exception):
     "stop after the current step" abort possible without touching
     ``run_sequence`` itself.
     """
-
 
 class SweepScreen(Page):
     """Pick a sweep type, configure it, run it, and watch it live.
@@ -371,7 +369,7 @@ class SweepScreen(Page):
 
             next_live_plot = monotonic()
 
-            def on_step(index, total, step, result, error) -> None:
+            def on_step(index: int, total: int, step: Step, result: StepResult | None, error: BaseException | None) -> None:
                 nonlocal next_live_plot
                 record.on_step(index, total, step, result, error)
                 display_series = None
@@ -424,11 +422,11 @@ class SweepScreen(Page):
 
     def _on_step(
         self,
-        index,
-        total,
+        index: int,
+        total: int,
         step: Step,
         result: StepResult | None,
-        error,
+        error: BaseException | None,
         display_series: tuple[list[float], list[float], str | None] | None,
     ) -> None:
         self.query_one("#sweep-progress", ProgressBar).update(progress=index + 1)
@@ -460,7 +458,7 @@ class SweepScreen(Page):
         self._capture(mx_handle.device)
 
     @work(thread=True, exclusive=True, group="capture", exit_on_error=False)
-    def _capture(self, mx) -> None:
+    def _capture(self, mx: typing.Any) -> None:
         try:
             self._capture_trace(mx)
         except BaseException as exc:
@@ -469,7 +467,7 @@ class SweepScreen(Page):
             )
             self._ui(self._finish_capture, error=exc, freq=None, power=None)
 
-    def _capture_trace(self, mx) -> None:
+    def _capture_trace(self, mx: typing.Any) -> None:
         # Deliberately does *not* call prepare_analyzer() first, unlike a
         # sweep — this captures whatever the analyzer is currently showing
         # (RBW, center freq, etc. left exactly as they are), not a
