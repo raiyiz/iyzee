@@ -50,6 +50,7 @@ def test_the_standalone_validators_accept_good_input_and_name_the_field_on_bad()
     with pytest.raises(ValueError, match=f"at most {MAX_POINTS}"):
         _positive_int(str(MAX_POINTS + 1), "field", maximum=MAX_POINTS)
 
+
 # -- the mounted form ---------------------------------------------------------------------
 
 
@@ -115,6 +116,7 @@ async def test_an_invalid_field_is_named_marked_and_focused() -> None:
             field.value = good  # editing clears the marker
             await pilot.pause()
             assert not field.has_class("-invalid")
+
 
 # -- pre-flight guards and the "not ready" banner ------------------------------------------
 
@@ -182,6 +184,7 @@ async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
         app.instruments_changed()
         await pilot.pause()
         assert banner.display and "MXA" in plain(banner)
+
 
 # -- running a (fake) sweep: abort, and saving as it goes ----------------------------------
 
@@ -355,7 +358,9 @@ async def test_a_failing_save_is_reported_once_and_does_not_stop_the_run(
     assert app.last_run is not None and len(app.last_run.results) == 3
     assert app.last_run.path is None
 
+
 # -- "Capture trace" ---------------------------------------------------------------------
+
 
 class _FakeMxaForCapture:
     """A fake MXA supporting exactly what acquire_trace()/get_frequency_axis()
@@ -395,7 +400,9 @@ async def test_capture_trace_plots_power_vs_frequency() -> None:
         )
         assert "Captured 3 point(s)" in log
 
+
 # -- the saved file says how the run ended ------------------------------------------------
+
 
 def _saved_run_metadata(directory: Path) -> dict[str, Any]:
     import json
@@ -467,7 +474,10 @@ async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
     assert _saved_run_metadata(tmp_path)["status"] == "failed"
     assert _points_on_disk(tmp_path) == 1
 
+
 # -- a worker that dies with something that is not an Exception ----------------------------------
+
+
 #
 # Textual handles Exception (and cancellation) from a worker thread, nothing else: a
 # KeyboardInterrupt or SystemExit escaping one ends the whole app with no message, and a
