@@ -3,23 +3,23 @@ import typing
 
 import pytest
 
-from iyzee.experiment.core import ExperimentContext, StepResult, run_sequence
+from iyzee.experiment.core import ExperimentContext, RunRecord, StepResult, run_sequence
 
 class RecordingStep:
-    def __init__(self, label: str, value: typing.Any, fail: bool=False) -> None:
+    def __init__(self, label: str, value: float, fail: bool = False) -> None:
         self.label = label
         self.value = value
         self.fail = fail
 
-    def run(self, ctx: typing.Any) -> typing.Any:
+    def run(self, ctx: ExperimentContext) -> StepResult:
         if self.fail:
             raise RuntimeError(f"{self.label} failed")
         return StepResult(label=self.label, x_value=self.value, x_unit="a.u.", traces={})
 
-def make_ctx() -> typing.Any:
+def make_ctx() -> ExperimentContext:
     return ExperimentContext(mx=object(), run_id="test-run")
 
-def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog: typing.Any) -> None:
+def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO, logger="iyzee.experiment")
     results = run_sequence([RecordingStep("a", 1), RecordingStep("b", 2)], make_ctx())
     assert [r.x_value for r in results] == [1, 2]
@@ -36,7 +36,7 @@ def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog: typin
 
 # -- RunRecord: how a run ended, saved beside its data -----------------------------------------
 
-def _record_with(*outcomes: Exception | None) -> typing.Any:
+def _record_with(*outcomes: Exception | None) -> RunRecord:
     from iyzee.experiment.core import RunRecord
 
     record = RunRecord(config={"center_hz": 1e6})
@@ -76,7 +76,7 @@ def test_run_record_can_be_fed_by_run_sequence() -> None:
     class Boom:
         label = "bad point"
 
-        def run(self, ctx: typing.Any) -> None:
+        def run(self, ctx: ExperimentContext) -> NoReturn:
             raise RuntimeError("no lock")
 
     record = RunRecord()
