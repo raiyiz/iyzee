@@ -9,6 +9,7 @@ from helpers import FakeHandle
 
 from iyzee.lab import InstrumentSpec, Lab, NotConnectedError
 
+
 def make_lab(*handles: FakeHandle, keys: typing.Any=("a", "b")) -> Lab:
     queue = list(handles)
     specs = [InstrumentSpec(k, k.upper(), lambda: queue.pop(0)) for k in keys]

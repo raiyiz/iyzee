@@ -5,6 +5,7 @@ import pytest
 
 from iyzee.experiment.core import ExperimentContext, RunRecord, StepResult, run_sequence
 
+
 class RecordingStep:
     def __init__(self, label: str, value: float, fail: bool = False) -> None:
         self.label = label
@@ -38,7 +39,6 @@ def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog: pytes
 
 def _record_with(*outcomes: Exception | None) -> RunRecord:
     from iyzee.experiment.core import RunRecord
-
     record = RunRecord(config={"center_hz": 1e6})
     for index, error in enumerate(outcomes):
         result = None if error else StepResult(f"p{index}", 0.0, "Hz", {})
@@ -47,7 +47,6 @@ def _record_with(*outcomes: Exception | None) -> RunRecord:
 
 def test_a_run_record_reports_how_the_run_ended_and_names_failed_steps_as_plain_json() -> None:
     import json
-
     for outcomes, finish, status in (
         ((None, None), {}, "completed"),
         ((None, RuntimeError("x")), {}, "completed_with_errors"),
@@ -72,7 +71,6 @@ def test_a_run_record_reports_how_the_run_ended_and_names_failed_steps_as_plain_
 
 def test_run_record_can_be_fed_by_run_sequence() -> None:
     from iyzee.experiment.core import RunRecord
-
     class Boom:
         label = "bad point"
 

@@ -1,7 +1,7 @@
 import hashlib
 import json
-from datetime import datetime
 import typing
+from datetime import datetime
 
 import numpy as np
 import pytest
@@ -17,6 +17,7 @@ from iyzee.experiment.io import (
     multiplot,
     save_step_results,
 )
+
 
 def test_data_lives_at_the_project_root_in_one_dir_per_month(tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch) -> None:
     # A sibling of src/, not e.g. src/iyzee/data: a regression here would put runs back inside

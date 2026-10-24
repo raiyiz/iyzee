@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import contextlib
 import io
+import typing
 from dataclasses import dataclass
 from pathlib import Path
-import typing
 
 import pytest
 from helpers import FakeApp, FakeHandle, history_manager
@@ -23,6 +23,7 @@ from iyzee.devices.wavemeter import Wavemeter
 from iyzee.experiment import StepResult
 from iyzee.tui.ipython import LabProxy, default_history_file, lab_namespace, shell_config
 from iyzee.tui.workers import LastRun
+
 
 @dataclass
 class _Result:

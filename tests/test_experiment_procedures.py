@@ -6,7 +6,6 @@ from typing import Any, Literal, NoReturn
 import pytest
 
 from iyzee.experiment.core import ExperimentContext
-from iyzee.experiment.procedures import Analyzer, TraceAcquisition
 from iyzee.experiment.procedures import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
@@ -28,6 +27,8 @@ from iyzee.experiment.procedures import (
     run_frequency_sweep,
     run_sweep,
 )
+from iyzee.experiment.procedures import Analyzer, TraceAcquisition
+
 
 class FakeMXA:
     def __init__(self) -> None:
