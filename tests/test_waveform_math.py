@@ -132,9 +132,11 @@ def test_background_correction_by_region_or_reference_and_its_input_checks() -> 
     dark = _trace("dark", [0.0, 2.0], [0.0, 2.0])  # interpolates to [0, 1, 2]
     np.testing.assert_allclose(subtract_background(flat, reference=dark).values, [10.0, 9.0, 8.0])
 
-    for kwargs in ({}, {"region": (0.0, 1.0), "reference": dark}):  # exactly one mode
-        with pytest.raises(ValueError, match="exactly one"):
-            subtract_background(flat, **kwargs)
+    # Exactly one background selection mode is required.
+    with pytest.raises(ValueError, match="exactly one"):
+        subtract_background(flat)
+    with pytest.raises(ValueError, match="exactly one"):
+        subtract_background(flat, region=(0.0, 1.0), reference=dark)
 
 def test_scale_trace_is_affine_defaults_to_identity_and_refuses_bad_scales() -> None:
     trace = _trace("C1", [0.0, 1.0, 2.0], [1.0, 2.0, 3.0])
@@ -148,13 +150,12 @@ def test_scale_trace_is_affine_defaults_to_identity_and_refuses_bad_scales() -> 
     np.testing.assert_array_equal(same.values, trace.values)
     assert same.label == trace.label  # no transform applied -> no change noted
 
-    for kwargs, message in (
-        ({"x_scale": 0.0}, "nonzero"),
-        ({"y_scale": 0.0}, "nonzero"),
-        ({"x_scale": float("nan")}, "finite"),
-    ):
-        with pytest.raises(ValueError, match=message):
-            scale_trace(trace, **kwargs)
+    with pytest.raises(ValueError, match="nonzero"):
+        scale_trace(trace, x_scale=0.0)
+    with pytest.raises(ValueError, match="nonzero"):
+        scale_trace(trace, y_scale=0.0)
+    with pytest.raises(ValueError, match="finite"):
+        scale_trace(trace, x_scale=float("nan"))
 
 # -- figures -----------------------------------------------------------------------------------
 
