@@ -179,7 +179,7 @@ def test_wavemeter_handle_probe_reads_the_default_channel_and_propagates_errors(
 ) -> None:
     seen: list[int] = []
 
-    def read(self, channel: int = DEFAULT_CHANNEL):
+    def read(self, channel: int = DEFAULT_CHANNEL) -> float:
         seen.append(channel)
         return 377.105
 
