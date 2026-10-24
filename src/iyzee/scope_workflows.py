@@ -61,7 +61,6 @@ from .devices.scope import (
     Channel,
     Coupling,
     DetailedWaveformData,
-    LeCroy,
     TriggerCoupling,
     TriggerMode,
     TriggerSlope,
@@ -337,7 +336,7 @@ def read_channel_settings(scope: ScopeDriver, channels: Sequence[Channel]) -> li
 
 
 def apply_channel_settings(
-    scope: LeCroy,
+    scope: ScopeDriver,
     settings: Sequence[ChannelSettings],
     *,
     current_settings: Mapping[Channel, ChannelSettings] | Sequence[ChannelSettings] | None = None,
@@ -385,7 +384,7 @@ def apply_channel_settings(
 
 
 def apply_trigger_settings(
-    scope: LeCroy,
+    scope: ScopeDriver,
     settings: TriggerSettings,
     *,
     current_settings: TriggerSettings | None = None,
@@ -433,7 +432,7 @@ def apply_trigger_settings(
             scope.set_trigger_mode(settings.mode)
 
 
-def read_trigger_settings(scope: LeCroy) -> TriggerSettings:
+def read_trigger_settings(scope: ScopeDriver) -> TriggerSettings:
     """Read the scope's current trigger configuration back.
 
     The read counterpart of :func:`apply_trigger_settings`; raises on failure.
@@ -448,7 +447,7 @@ def read_trigger_settings(scope: LeCroy) -> TriggerSettings:
     return TriggerSettings(source, mode, slope, coupling, level_volts, time_per_div)
 
 
-def _download_waveform(scope: LeCroy, channel: Channel) -> ScopeWaveform:
+def _download_waveform(scope: ScopeDriver, channel: Channel) -> ScopeWaveform:
     """Download one channel's ``DAT1`` block with its own timebase (caller holds the lock)."""
     time_unit, time_offset, time_interval = scope.getHorProperties(channel=channel)
     data = scope.getDataFloatsDetailed(channel=channel, block="DAT1")
@@ -476,7 +475,7 @@ def _download_waveform(scope: LeCroy, channel: Channel) -> ScopeWaveform:
 
 
 def acquire_scope_recording(
-    scope: LeCroy,
+    scope: ScopeDriver,
     channels: Sequence[Channel],
     *,
     channel_settings: Sequence[ChannelSettings] = (),
