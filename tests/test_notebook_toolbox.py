@@ -88,6 +88,7 @@ def _save_sweep(
         path=path,
     )
 
+
 def test_array_frame_selects_a_row_and_rejects_ambiguous_shapes() -> None:
     frame = array_frame(np.array([[1.0, 2.0], [3.0, 4.0]]), index=1)
     assert frame["sample"].to_list() == [0, 1]
@@ -95,6 +96,7 @@ def test_array_frame_selects_a_row_and_rejects_ambiguous_shapes() -> None:
 
     with pytest.raises(ValueError, match="1-D or 2-D"):
         array_frame(np.zeros((2, 3, 4)))
+
 
 def test_catalog_uses_sidecars_and_marks_synthetic_data(tmp_path: typing.Any) -> None:
     _save_sweep(tmp_path, "frequency-a", [377.1, 377.10001], [-2.0, -1.0], kind="frequency")
@@ -109,6 +111,7 @@ def test_catalog_uses_sidecars_and_marks_synthetic_data(tmp_path: typing.Any) ->
     assert all(catalog["label"].str.contains("Oct 18").to_list())
     assert all(catalog["label"].str.contains("SYNTHETIC").to_list())
     assert set(catalog["name"]) == {"frequency-a", "rbw-baseline"}
+
 
 def test_frequency_offsets_share_one_reference_between_runs(tmp_path: typing.Any) -> None:
     _save_sweep(
@@ -136,6 +139,7 @@ def test_frequency_offsets_share_one_reference_between_runs(tmp_path: typing.Any
     assert first["synthetic"].to_list() == [True, True]
     assert all(label.startswith("SYNTHETIC · ") for label in first["run"].to_list())
 
+
 def test_best_points_and_reference_differences_do_not_extrapolate(tmp_path: typing.Any) -> None:
     _save_sweep(tmp_path, "rbw-a", [20e3, 40e3, 60e3], [-2.0, 1.0, -3.0])
     _save_sweep(tmp_path, "rbw-b", [20e3, 40e3, 60e3], [-1.0, 0.0, -2.0])
@@ -152,6 +156,7 @@ def test_best_points_and_reference_differences_do_not_extrapolate(tmp_path: typi
     assert delta["synthetic"].to_list() == [True, True, True]
     assert "delta_db" in delta.columns
 
+
 def test_plot_builder_accepts_tidy_tables_and_exports_csv(tmp_path: typing.Any) -> None:
     _save_sweep(tmp_path, "rbw-a", [20e3, 40e3, 60e3], [-2.0, 1.0, -3.0])
     points = sweep_points(scan_catalog(tmp_path))
@@ -165,6 +170,7 @@ def test_plot_builder_accepts_tidy_tables_and_exports_csv(tmp_path: typing.Any) 
     assert figure.axes[0].get_title(loc="left") == "A reusable plot"
     assert b"rel_noise_mean_db" in csv_bytes(points)
 
+
 def test_verification_reports_digest_mismatch(tmp_path: typing.Any) -> None:
     _save_sweep(tmp_path, "rbw-a", [20e3], [-2.0])
     catalog = scan_catalog(tmp_path)
@@ -173,6 +179,7 @@ def test_verification_reports_digest_mismatch(tmp_path: typing.Any) -> None:
     path = Path(catalog[0, "path"])
     path.write_bytes(path.read_bytes() + b"modified")
     assert verify(catalog)["integrity"].to_list() == ["MISMATCH"]
+
 
 def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch: pytest.MonkeyPatch, tmp_path: typing.Any) -> None:
     path = tmp_path / "scope.npz"
@@ -223,6 +230,7 @@ def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch: pyte
     assert first["synthetic"].to_list() == [True] * first.height
     assert second["synthetic"].to_list() == [True] * second.height
 
+
 def test_scope_decimation_preserves_extrema_within_the_point_budget() -> None:
     time = np.arange(1000, dtype=float)
     values = np.zeros(1000)
@@ -235,6 +243,7 @@ def test_scope_decimation_preserves_extrema_within_the_point_budget() -> None:
     assert len(reduced_time) == len(reduced_values)
     assert reduced_values.max() == 25.0
     assert reduced_values.min() == -22.0
+
 
 def test_synthetic_scope_recordings_flow_through_analysis_helpers(tmp_path: typing.Any) -> None:
     paths = write_demo(
