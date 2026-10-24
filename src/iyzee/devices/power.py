@@ -56,7 +56,7 @@ class PSU(BaseDevice):
 
     def open(self) -> typing.Any:
         port = 5025
-        resource = self.rm.open_resource(f"TCPIP::{self.ip}::{port}::SOCKET")
+        resource: Any = self.rm.open_resource(f"TCPIP::{self.ip}::{port}::SOCKET")
         # A raw socket has no message framing of its own. Without this a query would wait for
         # the VISA timeout instead of returning at the end of the reply line.
         resource.read_termination = "\n"
