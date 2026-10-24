@@ -235,6 +235,9 @@ def save_step_results(
     one custom ``Step`` put something unexpected in there would be a far
     worse outcome than that one field round-tripping as text.
 
+    ``run_metadata`` defaults to the ``record`` that ``run_sweep`` attaches to its results, so a
+    scripted run is saved with its configuration and outcome like a TUI run.
+
     By default a new file pair is created in ``savedir``, named from the
     current time, ``name`` if given, and a short random suffix (see
     ``_new_stem``). Pass ``path`` (the ``.npz`` path returned by an
@@ -254,6 +257,8 @@ def save_step_results(
     module is the only writer, so that stale-for-an-instant window isn't
     worth a heavier two-phase commit here.
     """
+    if run_metadata is None and (record := getattr(results, "record", None)) is not None:
+        run_metadata = record.as_metadata()
     if path is None:
         path = savedir / f"{_new_stem(name)}.npz"
     trace_names = list(dict.fromkeys(name for result in results for name in result.traces))

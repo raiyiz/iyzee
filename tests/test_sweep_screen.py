@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import threading
+import types
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from helpers import FakeHandle, async_test, make_result, notifications, plain, w
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, RichLog, Select, Static
 
+from iyzee.experiment import TooManyFailures, build_frequency_sweep
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens import sweep as sweep_mod
@@ -237,7 +239,8 @@ def _locked_by_someone_else(lock: Any) -> bool:
 async def test_a_run_gets_the_connected_devices_and_holds_every_lock_it_needs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, needed: set[str]
 ) -> None:
-    devices = {key: object() for key in ("mxa", "shutter", "wavemeter")}
+    devices: dict[str, Any] = {key: object() for key in ("mxa", "shutter", "wavemeter")}
+    devices["shutter"] = types.SimpleNamespace(master_output_on=lambda: True)  # passes preflight
     seen: dict[str, Any] = {}
 
     def fake_run_sequence(steps, ctx, *, on_error, on_step):
@@ -448,6 +451,52 @@ async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
 
     assert _saved_run_metadata(tmp_path)["status"] == "failed"
     assert _points_on_disk(tmp_path) == 1
+
+
+@async_test
+async def test_a_frequency_sweep_is_refused_up_front_when_the_shutter_cannot_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Master output off: say so once, instead of failing (or lying) at every point."""
+    ran: list[bool] = []
+    app = _sweep_app(monkeypatch, tmp_path, lambda *a, **k: ran.append(True))
+    app.handles["shutter"] = FakeHandle()
+    app.handles["wavemeter"] = FakeHandle()
+    shutter = types.SimpleNamespace(master_output_on=lambda: False)
+    devices = {"mxa": object(), "shutter": shutter, "wavemeter": object()}
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await pilot.pause()
+        screen = app.query_one(sweep_mod.SweepScreen)
+        await asyncio.to_thread(
+            screen._run_sweep, build_frequency_sweep(offsets_thz=[0.0]), devices
+        )
+        await pilot.pause()
+
+        assert ran == []  # not a single point was attempted
+        assert "master output is off" in _log_text(screen)
+        assert app.last_run is None and not app.sweep_running
+        assert not list(tmp_path.glob("*.npz"))
+
+
+@async_test
+async def test_a_sweep_that_gives_up_on_a_dead_instrument_says_so_and_keeps_its_points(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+        on_step(0, 9, object(), _result(0), None)
+        for i in range(1, 6):
+            on_step(i, 9, object(), None, TimeoutError("no answer"))
+        raise TooManyFailures(5, TimeoutError("no answer"), [])
+
+    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
+    await _press_run_and_wait(app)
+
+    screen = app.query_one(sweep_mod.SweepScreen)
+    assert _saved_run_metadata(tmp_path)["status"] == "failed"
+    assert _points_on_disk(tmp_path) == 1
+    assert "stopped after 5 failed steps in a row" in _log_text(screen)
+    assert "stopped early" in _log_text(screen)  # not reported as a normal finish
 
 
 # -- a worker that dies with something that is not an Exception ----------------------------------

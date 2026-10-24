@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 from platformdirs import user_data_dir
 from traitlets.config import Config
 
-from ..devices.handles import LockedProxy
+from ..devices.handles import LockedProxy, put_in_safe_state
 from ..devices.wavemeter import Wavemeter
 
 if TYPE_CHECKING:
@@ -153,7 +153,16 @@ class LabProxy:
         # now, so `lab.<Tab>` in the console shows what's *possible*
         # (mx/psu/shutter/scope), not just what happens to be connected at
         # this exact moment.
-        return sorted({*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected"})
+        return sorted({*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected", "safe_state"})
+
+    def safe_state(self, *, timeout: float = 5.0, force: bool = False) -> dict[str, str]:
+        """Close the shutter and have the supply confirm it; returns what happened.
+
+        ``lab.safe_state()``. If a sweep holds the supply this reports "busy" rather than
+        waiting for ever; abort the sweep, or pass ``force=True`` to close regardless.
+        """
+        app = object.__getattribute__(self, "_app")
+        return put_in_safe_state(app.handles, timeout=timeout, force=force)
 
     @property
     def connected(self) -> tuple[str, ...]:

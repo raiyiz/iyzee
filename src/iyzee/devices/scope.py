@@ -178,10 +178,6 @@ class LeCroy(BaseDevice):
         self._lock = threading.RLock()
 
     @property
-    def connected(self) -> bool:
-        return self.instrument is not None
-
-    @property
     def address(self) -> str:
         return str(self.ip)
 
@@ -214,12 +210,6 @@ class LeCroy(BaseDevice):
     def disconnect(self) -> None:
         """Close the connection (idempotent)."""
         self.close()
-
-    def _drop(self) -> None:
-        try:
-            self.close()
-        except Exception:  # noqa: BLE001 - disconnect is best effort after transport failure
-            self.instrument = None
 
     def _translate(self, exc: pyvisa.errors.VisaIOError) -> Exception:
         if exc.error_code == StatusCode.error_timeout:

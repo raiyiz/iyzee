@@ -60,6 +60,30 @@ class ExperimentContext:
     wavemeter: Any = None
 
 
+class AcquisitionError(RuntimeError):
+    """A measurement could not be trusted, so no data is returned for it.
+
+    Raised instead of returning a trace that would be partial, stale or taken with the
+    hardware in the wrong state (for example the shutter not actually open). A step that
+    raises it is recorded as failed like any other; nothing is saved for that point.
+    """
+
+
+class TooManyFailures(RuntimeError):
+    """``run_sequence(on_error="skip")`` gave up: too many steps in a row failed.
+
+    A dead instrument fails every remaining step the same way, and carrying on would only
+    spend the run's time (and the lab's) producing nothing. ``results`` holds the points
+    measured before it stopped; ``on_step`` saw every one, including the failures.
+    """
+
+    def __init__(self, count: int, last: BaseException, results: list[StepResult]) -> None:
+        super().__init__(f"stopped after {count} failed steps in a row; the last: {last}")
+        self.count = count
+        self.last = last
+        self.results = results
+
+
 class Step(Protocol):
     """A single reproducible measurement point in an experiment sequence."""
 
@@ -67,6 +91,9 @@ class Step(Protocol):
 
 
 log = logging.getLogger("iyzee.experiment")
+
+#: Consecutive failed steps after which ``run_sequence(on_error="skip")`` stops.
+DEFAULT_MAX_CONSECUTIVE_FAILURES = 5
 
 
 def step_label(step: object, index: int) -> str:
@@ -142,6 +169,19 @@ class RunRecord:
         }
 
 
+class SweepResults(list["StepResult"]):
+    """The ``StepResult`` list of a scripted run, plus the :class:`RunRecord` that describes it.
+
+    A plain list in every other respect. ``save_step_results`` saves ``record`` as the run
+    metadata when none is given, which is what makes a saved scripted run say how it was
+    configured and whether it finished.
+    """
+
+    def __init__(self, results: Sequence[StepResult] = (), *, record: RunRecord | None = None):
+        super().__init__(results)
+        self.record = record
+
+
 # Called after each step is attempted, whether it succeeded or failed:
 # on_step(index, total, step, result, error). Exactly one of
 # ``result``/``error`` is not None. This is the seam a UI (or any other
@@ -156,6 +196,7 @@ def run_sequence(
     *,
     on_error: str = "raise",
     on_step: StepCallback | None = None,
+    max_consecutive_failures: int | None = DEFAULT_MAX_CONSECUTIVE_FAILURES,
 ) -> list[StepResult]:
     """Run ``steps`` in order against ``ctx``, returning their results.
 
@@ -167,6 +208,10 @@ def run_sequence(
     - ``"skip"``: log the failure and continue with the remaining steps.
       Useful for long unattended scans where losing one point is
       preferable to losing the rest of the run.
+
+    In ``"skip"`` mode, ``max_consecutive_failures`` steps failing in a row raise
+    :class:`TooManyFailures` (``None`` never gives up): the failures are not independent bad
+    points but, in practice, an instrument that is gone. A success resets the count.
 
     ``on_step``, if given, is called after every step is attempted (see
     :data:`StepCallback`). It is the hook a caller uses for live progress
@@ -183,8 +228,12 @@ def run_sequence(
     if on_error not in ("raise", "skip"):
         raise ValueError(f"on_error must be 'raise' or 'skip', got {on_error!r}")
 
+    if max_consecutive_failures is not None and max_consecutive_failures < 1:
+        raise ValueError("max_consecutive_failures must be at least 1, or None")
+
     total = len(steps)
     results: list[StepResult] = []
+    failures_in_a_row = 0
     for index, step in enumerate(steps):
         step_name = step_label(step, index)
         log.info("run %s: starting %s", ctx.run_id, step_name)
@@ -196,7 +245,14 @@ def run_sequence(
                 on_step(index, total, step, None, exc)
             if on_error == "raise":
                 raise
+            failures_in_a_row += 1
+            if (
+                max_consecutive_failures is not None
+                and failures_in_a_row >= max_consecutive_failures
+            ):
+                raise TooManyFailures(failures_in_a_row, exc, results) from exc
             continue
+        failures_in_a_row = 0
         log.info("run %s: finished %s", ctx.run_id, step_name)
         results.append(result)
         if on_step is not None:
