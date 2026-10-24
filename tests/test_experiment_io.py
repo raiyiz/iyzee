@@ -53,7 +53,9 @@ def _result(
     )
 
 
-def test_save_step_results_writes_a_pickle_free_data_and_metadata_pair(tmp_path: typing.Any) -> None:
+def test_save_step_results_writes_a_pickle_free_data_and_metadata_pair(
+    tmp_path: typing.Any,
+) -> None:
     results = [_result(1.0, squeezing=[3.0, 4.0], shot_noise=[1.0, 1.0], rbw_hz=1000.0)]
     path = save_step_results(results, tmp_path, run_metadata={"software_revision": "abc123"})
 
@@ -90,7 +92,9 @@ def test_save_step_results_aligns_traces_across_points(tmp_path: typing.Any) -> 
         save_step_results(ragged, tmp_path)
 
 
-def test_save_step_results_names_files_safely_uniquely_or_exactly_as_asked(tmp_path: typing.Any) -> None:
+def test_save_step_results_names_files_safely_uniquely_or_exactly_as_asked(
+    tmp_path: typing.Any,
+) -> None:
     first = save_step_results([_result(1.0)], tmp_path, name="bandwidth sweep/#1")
     second = save_step_results([_result(1.0)], tmp_path, name="bandwidth sweep/#1")
     match = STEM_PATTERN.match(first.stem)
