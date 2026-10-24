@@ -21,15 +21,16 @@ import functools
 import logging
 import threading
 import time
-import typing
+
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
-from ..config import IP, address
+from ..config import address, IP
 from .base import SHUTTER_CHANNEL_DEFAULT
 from .power import ShutterControl
 from .scope import LeCroy, LeCroyTimeoutError
 from .wavemeter import Wavemeter
+
 
 log = logging.getLogger("iyzee.instruments")
 

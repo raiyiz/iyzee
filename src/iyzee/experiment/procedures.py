@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import time
 import uuid
+
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from typing import Any, ClassVar, Generic, Protocol, TypeVar, TypedDict, Unpack
+from typing import Any, ClassVar, Generic, Protocol, TypedDict, TypeVar, Unpack
 
 from ..devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
-from .core import ExperimentContext, StepResult, run_sequence
+from .core import ExperimentContext, run_sequence, StepResult
+
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
@@ -226,11 +228,8 @@ class FrequencyStep(SweepStep):
 SWEEP_KINDS: dict[str, type[SweepStep]] = {c.kind: c for c in (BandwidthStep, FrequencyStep)}
 
 
-StepT = TypeVar("StepT", bound=SweepStep)
-
-
 @dataclass(frozen=True)
-class Sweep(Generic[StepT]):
+class Sweep[StepT: SweepStep]:
     """A sweep ready to run: its points and the analyzer setup they need."""
 
     kind: str
@@ -312,7 +311,7 @@ def build_frequency_sweep(
     return Sweep("frequency", steps, frequency_sweep_config(**config))
 
 
-def run_sweep(
+def run_sweep[StepT: SweepStep](
     mx: Analyzer,
     sweep: Sweep[StepT],
     *,

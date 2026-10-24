@@ -6,8 +6,7 @@ Plain functions and dataclasses, no Textual import — the same operations
 the IPython console::
 
     from iyzee.devices.scope import Channel, Coupling, LeCroy
-    from iyzee.scope_workflows import ChannelSettings, apply_channel_settings
-
+    from iyzee.scope_workflows import apply_channel_settings, ChannelSettings
     scope = LeCroy("10.0.0.5")
     scope.connect()
     apply_channel_settings(scope, [ChannelSettings(Channel.C1, True, 0.5, 0.0, Coupling.DC_1M)])
@@ -47,14 +46,16 @@ from __future__ import annotations
 
 import logging
 import platform
-import threading
 import re
+import threading
 import uuid
+
 from collections.abc import Mapping, Sequence
-from typing import Protocol
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Protocol
+
 import numpy as np
 
 from .devices.scope import (
@@ -67,6 +68,7 @@ from .devices.scope import (
 )
 from .experiment.core import utc_now
 from .experiment.io import save_numeric_recording
+
 
 log = logging.getLogger("iyzee.scope_workflows")
 

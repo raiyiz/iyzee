@@ -3,8 +3,9 @@ import typing
 
 import pyvisa
 
-from ..config import IP, address
+from ..config import address, IP
 from .base import BaseDevice
+
 
 class KeysightMXA(BaseDevice):
     """

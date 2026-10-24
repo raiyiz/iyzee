@@ -20,6 +20,7 @@ import hashlib
 import json
 import re
 import secrets
+
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -27,11 +28,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 import numpy as np
 
 from ..config import data_root
 from .core import StepResult
+from matplotlib.figure import Figure
+
 
 # Where all measurement runs are written and (in the TUI) read back from —
 # <project root>/data, i.e. a sibling of src/, not inside the installed
