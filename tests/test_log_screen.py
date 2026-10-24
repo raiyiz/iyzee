@@ -49,6 +49,7 @@ async def test_log_screen_can_browse_a_rotated_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: typing.Any
 ) -> None:
     from iyzee.tui import logging_support
+
     log_root = tmp_path / "logs"
     log_root.mkdir()
     (log_root / "iyzee.log.1").write_text("2026-01-01 00:00:00 WARNING iyzee.tui: an old record\n")
