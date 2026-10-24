@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import typing
+
 import numpy as np
 from helpers import async_test
 from textual.app import App
@@ -15,12 +17,10 @@ from iyzee.tui.plotting import (
     prepare_series,
 )
 
-
 class _PlotApp(App):
-    def compose(self):
+    def compose(self) -> typing.Iterator[typing.Any]:
         yield PlotextPlot(id="plot")
         yield Label("placeholder")
-
 
 @async_test
 async def test_draw_series_plots_each_series_and_sets_labels() -> None:
@@ -41,29 +41,28 @@ async def test_draw_series_plots_each_series_and_sets_labels() -> None:
         # changed rather than asserting on plotext internals.
         assert plot.plt.build() != ""
 
-
 def test_figure_series_extracts_lines_and_axis_labels() -> None:
     class _Line:
-        def __init__(self, x, y, label) -> None:
+        def __init__(self, x: typing.Any, y: typing.Any, label: str) -> None:
             self._x, self._y, self._label = x, y, label
 
-        def get_xdata(self):
+        def get_xdata(self) -> typing.Any:
             return self._x
 
-        def get_ydata(self):
+        def get_ydata(self) -> typing.Any:
             return self._y
 
-        def get_label(self):
+        def get_label(self) -> typing.Any:
             return self._label
 
     class _Axis:
         def __init__(self) -> None:
             self.lines = [_Line([0, 1], [2, 3], "a")]
 
-        def get_xlabel(self):
+        def get_xlabel(self) -> str:
             return "x"
 
-        def get_ylabel(self):
+        def get_ylabel(self) -> str:
             return "y"
 
     class _Figure:
@@ -74,7 +73,6 @@ def test_figure_series_extracts_lines_and_axis_labels() -> None:
 
     assert lines == [([0, 1], [2, 3], "a")]
     assert labels == {"xlabel": "x", "ylabel": "y"}
-
 
 def test_prepare_series_keeps_short_series_and_caps_long_ones_without_losing_the_shape() -> None:
     x = np.arange(5, dtype=float)
