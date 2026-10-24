@@ -76,7 +76,7 @@ def test_run_record_can_be_fed_by_run_sequence() -> None:
     class Boom:
         label = "bad point"
 
-        def run(self, ctx: ExperimentContext) -> NoReturn:
+        def run(self, ctx: ExperimentContext) -> typing.NoReturn:
             raise RuntimeError("no lock")
 
     record = RunRecord()
