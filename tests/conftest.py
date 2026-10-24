@@ -40,6 +40,7 @@ def _isolated_log_root(tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch) ->
 
 HARDWARE_DIR = Path(__file__).parent / "hardware"
 
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("hardware", "real-instrument tests")
     group.addoption(
@@ -57,9 +58,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "(open the shutter, run sweeps, move the laser). Requires --hardware.",
     )
 
+
 def pytest_configure(config: pytest.Config) -> None:
     if config.getoption("--hardware-actuate") and not config.getoption("--hardware"):
         raise pytest.UsageError("--hardware-actuate requires --hardware")
+
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     run_hardware = config.getoption("--hardware")
@@ -78,6 +81,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
                     reason="changes instrument state: also pass --hardware-actuate to run"
                 )
             )
+
 
 def pytest_report_header(config: pytest.Config) -> list[str] | None:
     """Say exactly which machines a hardware run will talk to, before it does."""
