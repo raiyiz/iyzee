@@ -101,6 +101,7 @@ TRIGGER_COUPLING_CHOICES = [
     ("LF reject", TriggerCoupling.LF_REJECT.value),
 ]
 
+
 def _channel_panel(channel: Channel) -> Vertical:
     color = CHANNEL_COLORS[channel]
     return Vertical(
@@ -120,6 +121,7 @@ def _channel_panel(channel: Channel) -> Vertical:
         classes="channel-panel",
         id=f"{channel}-panel",
     )
+
 
 class ScopeScreen(Page):
     """Configure the scope, record enabled channels, then plot the result.
