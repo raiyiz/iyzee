@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import typing
 
 import pytest
 from helpers import async_test, wait_until
@@ -8,7 +9,6 @@ from textual.widgets import RichLog, Select
 
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens.log import LogScreen
-
 
 @async_test
 async def test_log_screen_shows_buffered_live_filtered_and_exception_records() -> None:
@@ -42,10 +42,9 @@ async def test_log_screen_shows_buffered_live_filtered_and_exception_records() -
         )
         assert any("a warning while on the log page" in line.text for line in view.lines)
 
-
 @async_test
 async def test_log_screen_can_browse_a_rotated_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: typing.Any
 ) -> None:
     from iyzee.tui import logging_support
 
