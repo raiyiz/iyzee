@@ -1,14 +1,17 @@
-import typing
+from collections.abc import Iterator
+
+import pytest
+
 from iyzee.devices.mxa import KeysightMXA
 
 class FakeInstrument:
     def __init__(self) -> None:
-        self.commands = []
-        self.timeout = None
-        self.read_termination = None
-        self.write_termination = None
+        self.commands: list[str] = []
+        self.timeout: int | None = None
+        self.read_termination: str | None = None
+        self.write_termination: str | None = None
         self.close_count = 0
-        self.responses = {
+        self.responses: dict[str, str] = {
             "FREQ:STAR?": "100.0",
             "FREQ:STOP?": "200.0",
             "SWE:POIN?": "3",
@@ -19,10 +22,10 @@ class FakeInstrument:
     def write(self, command: str) -> None:
         self.commands.append(command)
 
-    def query(self, command: str) -> typing.Any:
+    def query(self, command: str) -> str:
         return self.responses[command]
 
-    def query_binary_values(self, command: str, **kwargs: typing.Any) -> list[typing.Any]:
+    def query_binary_values(self, command: str, **kwargs: object) -> list[float]:
         self.commands.append(command)
         return [1.0, 2.0, 3.0]
 
@@ -32,14 +35,14 @@ class FakeInstrument:
 
 class FakeResourceManager:
     def __init__(self) -> None:
-        self.opened = []
+        self.opened: list[tuple[str, FakeInstrument]] = []
 
-    def open_resource(self, address: typing.Any) -> typing.Any:
+    def open_resource(self, address: str) -> FakeInstrument:
         instrument = FakeInstrument()
         self.opened.append((address, instrument))
         return instrument
 
-def make_mxa() -> typing.Any:
+def make_mxa() -> tuple[KeysightMXA, FakeInstrument]:
     instrument = FakeInstrument()
     mxa = KeysightMXA.__new__(KeysightMXA)
     mxa.instrument = instrument
@@ -78,10 +81,10 @@ def test_wait_opc_requires_explicit_completion_response() -> None:
     instrument.responses["*OPC?"] = "0"
     assert mxa.wait_opc() is False
 
-def test_get_errors_drains_scpi_error_queue() -> None:
+def test_get_errors_drains_scpi_error_queue(monkeypatch: pytest.MonkeyPatch) -> None:
     mxa, instrument = make_mxa()
     responses = iter(["-100,Command error", "-200,Execution error", "0,No error"])
-    instrument.query = lambda command: next(responses)
+    monkeypatch.setattr(instrument, "query", lambda command: next(responses))
 
     assert mxa.get_errors() == ["-100,Command error", "-200,Execution error"]
 
