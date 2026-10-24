@@ -1,4 +1,3 @@
-
 import pytest
 import pyvisa
 
@@ -13,6 +12,7 @@ class FakeInstrument:
     def close(self) -> None:
         self.close_calls += 1
 
+
 class FakeResourceManager:
     def __init__(self) -> None:
         self.open_calls: int = 0
@@ -21,6 +21,7 @@ class FakeResourceManager:
     def open_resource(self, address: str) -> FakeInstrument:
         self.open_calls += 1
         return self.instrument
+
 
 def test_base_device_accepts_injected_resource_manager() -> None:
     resource_manager = FakeResourceManager()
@@ -39,6 +40,7 @@ def test_base_device_accepts_injected_resource_manager() -> None:
     device.close()
     assert resource_manager.instrument.close_calls == 1
 
+
 def test_base_device_does_not_open_more_than_once(monkeypatch: pytest.MonkeyPatch) -> None:
     resource_manager = FakeResourceManager()
     monkeypatch.setattr(pyvisa, "ResourceManager", lambda: resource_manager)
@@ -54,6 +56,7 @@ def test_base_device_does_not_open_more_than_once(monkeypatch: pytest.MonkeyPatc
         assert resource_manager.open_calls == 1
 
     assert resource_manager.instrument.close_calls == 1
+
 
 def test_base_device_can_reconnect_after_close(monkeypatch: pytest.MonkeyPatch) -> None:
     resource_manager = FakeResourceManager()
@@ -72,6 +75,7 @@ def test_base_device_can_reconnect_after_close(monkeypatch: pytest.MonkeyPatch) 
 
     device.connect()
     assert resource_manager.open_calls == 2
+
 
 def test_base_device_closes_when_the_with_block_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     resource_manager = FakeResourceManager()
