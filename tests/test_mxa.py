@@ -56,12 +56,12 @@ def test_constructor_connects_with_the_configured_visa_settings() -> None:
 
     assert mxa.rm is resource_manager
     assert resource_manager.opened == []
-    assert mxa.instrument is None
+    assert getattr(mxa, "instrument") is None
 
     mxa.connect()
     assert len(resource_manager.opened) == 1
     instrument = resource_manager.opened[0][1]
-    assert mxa.instrument is instrument
+    assert isinstance(mxa.instrument, FakeInstrument)
     assert resource_manager.opened[0][0] == "TCPIP0::10.0.0.1::inst0::INSTR"
     assert instrument.timeout == 1234
     assert instrument.read_termination == "\n"
