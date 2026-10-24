@@ -106,7 +106,9 @@ def test_scope_recordings_become_traces_with_units_and_applied_settings() -> Non
     other = Recording(path=Path("fake.npz"), arrays={}, metadata={"kind": "sweep"})
     assert traces_from_scope_recording(other) == []  # not a scope recording: no traces
 
+
 # -- subtract_traces / subtract_background ----------------------------------------------------
+
 
 def test_subtract_traces_is_exact_resamples_and_never_mutates_or_mixes_units() -> None:
     a = _trace("C1", [0.0, 1.0, 2.0], [5.0, 6.0, 7.0])
@@ -173,7 +175,9 @@ def test_scale_trace_is_affine_defaults_to_identity_and_refuses_bad_scales() -> 
     with pytest.raises(ValueError, match="finite"):
         scale_trace(trace, x_scale=float("nan"))
 
+
 # -- figures -----------------------------------------------------------------------------------
+
 
 @contextlib.contextmanager
 def _figure(traces: typing.Any, **kwargs: typing.Any) -> typing.Iterator[typing.Any]:
