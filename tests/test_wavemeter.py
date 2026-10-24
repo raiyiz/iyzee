@@ -16,11 +16,13 @@ def response(body: str, status: int = 200) -> requests.Response:
     result.encoding = "ascii"
     return result
 
+
 def raising(failure: BaseException) -> typing.Any:
     def fail(*args: Any, **kwargs: Any) -> requests.Response:
         raise failure
 
     return fail
+
 
 def test_read_frequency_uses_the_requested_and_default_channel(
     monkeypatch: pytest.MonkeyPatch,
@@ -42,6 +44,7 @@ def test_read_frequency_uses_the_requested_and_default_channel(
         (f"{client.base_url}frequency/{wavemeter.DEFAULT_CHANNEL}/", timeout),
     ]
 
+
 def test_host_uses_the_configured_address(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("IYZEE_WAVEMETER_IP", "192.0.2.7")
     client = Wavemeter()
@@ -49,6 +52,7 @@ def test_host_uses_the_configured_address(monkeypatch: pytest.MonkeyPatch) -> No
 
     explicit = Wavemeter(host="198.51.100.1")
     assert explicit.base_url == f"http://198.51.100.1:{wavemeter.WAVEMETER_PORT}/api/"
+
 
 def test_failures_are_raised_as_they_are_never_wrapped_or_swallowed(
     monkeypatch: pytest.MonkeyPatch,
@@ -77,6 +81,7 @@ def test_failures_are_raised_as_they_are_never_wrapped_or_swallowed(
     monkeypatch.setattr(wavemeter.requests, "get", lambda *a, **k: response("not-a-frequency"))
     with pytest.raises(ValueError, match="not-a-frequency"):  # an unparseable reading
         Wavemeter().read_frequency(1)
+
 
 def test_set_pid_setpoint_posts_the_expected_form(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[dict[str, Any]] = []
