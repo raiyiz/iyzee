@@ -1,5 +1,6 @@
 import itertools
 from types import SimpleNamespace
+import typing
 
 import pytest
 
@@ -26,78 +27,69 @@ from iyzee.experiment.procedures import (
     run_sweep,
 )
 
-
 class FakeMXA:
-    def __init__(self):
+    def __init__(self) -> None:
         self.rbw_values = []
         self.vbw_values = []
         self.trace_calls = []
 
-    def set_rbw(self, rbw_hz):
+    def set_rbw(self, rbw_hz: typing.Any) -> None:
         self.rbw_values.append(rbw_hz)
 
-    def set_vbw(self, vbw_hz, auto=False):
+    def set_vbw(self, vbw_hz: typing.Any, auto: bool=False) -> None:
         self.vbw_values.append((vbw_hz, auto))
 
-
-def fake_acquire_trace(mx, trace_num):
+def fake_acquire_trace(mx: typing.Any, trace_num: int) -> list[typing.Any]:
     mx.trace_calls.append(trace_num)
     return [trace_num]
-
 
 class BoomStep:
     label = "boom"
 
-    def run(self, ctx):
+    def run(self, ctx: typing.Any) -> None:
         raise RuntimeError("boom")
-
 
 class FakeShutterControl:
     """Stand-in for power.ShutterControl as a context manager."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.events = []
 
-    def __enter__(self):
+    def __enter__(self) -> typing.Any:
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: typing.Any, exc_val: typing.Any, exc_tb: typing.Any) -> bool:
         return False
 
-    def open(self):
+    def open(self) -> None:
         self.events.append("open")
 
-    def close(self):
+    def close(self) -> None:
         self.events.append("close")
 
-
 class FakeMXAForTraceAcquisition:
-    def __init__(self):
+    def __init__(self) -> None:
         self.update_states = []
 
-    def set_trace_update(self, trace_num, state):
+    def set_trace_update(self, trace_num: int, state: typing.Any) -> None:
         self.update_states.append((trace_num, state))
 
-    def single_sweep_wait(self):
+    def single_sweep_wait(self) -> None:
         raise RuntimeError("sweep failed")
 
-
-def _quiet(monkeypatch):
+def _quiet(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
     monkeypatch.setattr("iyzee.experiment.procedures.time.sleep", lambda s: None)
 
-
-def _wavemeter(events, frequency=377.1):
+def _wavemeter(events: typing.Any, frequency: float=377.1) -> typing.Any:
     return SimpleNamespace(
         set_pid_setpoint=lambda freq, channel: events.append(("set", freq, channel)),
         read_frequency=lambda channel: events.append(("read", channel)) or frequency,
     )
 
-
 # -- builders and defaults ----------------------------------------------------------------------
 
-
-def test_the_builders_and_their_defaults():
+def test_the_builders_and_their_defaults() -> None:
     steps = bandwidth_sweep_steps()
     assert [s.rbw_hz for s in steps] == [20e3 * i for i in range(1, 20)]
 
@@ -137,8 +129,7 @@ def test_the_builders_and_their_defaults():
     assert gaps and all(gap == pytest.approx(10e-6) for gap in gaps)
     assert 377.0 in [pytest.approx(s.frequency_thz) for s in freq_steps]  # still from the centre
 
-
-def test_every_sweep_kind_is_a_step_that_names_itself_and_declares_what_it_needs():
+def test_every_sweep_kind_is_a_step_that_names_itself_and_declares_what_it_needs() -> None:
     assert set(SWEEP_KINDS) == {"bandwidth", "frequency"}
     for kind, step_type in SWEEP_KINDS.items():
         assert issubclass(step_type, SweepStep) and step_type.kind == kind
@@ -149,11 +140,9 @@ def test_every_sweep_kind_is_a_step_that_names_itself_and_declares_what_it_needs
         assert isinstance(sweep, Sweep) and sweep.requires == SWEEP_KINDS[sweep.kind].requires
         assert sweep.steps and all(isinstance(s, SWEEP_KINDS[sweep.kind]) for s in sweep.steps)
 
-
 # -- steps --------------------------------------------------------------------------------------
 
-
-def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(monkeypatch):
+def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
     mx, shutter = FakeMXA(), FakeShutterControl()
     ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter)
@@ -166,8 +155,7 @@ def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(monkeypa
     assert result.meta == {"rbw_hz": 1000, "vbw_hz": 2000}
     assert shutter.events == []
 
-
-def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter(monkeypatch):
+def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter(monkeypatch: pytest.MonkeyPatch) -> None:
     events = []
     monkeypatch.setattr(
         "iyzee.experiment.procedures.time.sleep", lambda s: events.append(("sleep", s))
@@ -193,8 +181,7 @@ def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter
     assert shutter.events == ["open", "close"]  # opened only for the squeezing trace
     assert result.meta["measured_frequency_thz"] == pytest.approx(377.100002)
 
-
-def test_a_frequency_step_names_what_the_context_lacks_and_touches_nothing_without_it():
+def test_a_frequency_step_names_what_the_context_lacks_and_touches_nothing_without_it() -> None:
     with pytest.raises(ValueError, match=r"ctx\.shutter, ctx\.wavemeter"):
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1).run(
             ExperimentContext(mx=FakeMXA(), run_id="t")
@@ -206,11 +193,9 @@ def test_a_frequency_step_names_what_the_context_lacks_and_touches_nothing_witho
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
     assert shutter.events == [] and mx.trace_calls == []
 
-
 # -- running a sweep ----------------------------------------------------------------------------
 
-
-def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkeypatch):
+def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkeypatch: pytest.MonkeyPatch) -> None:
     _quiet(monkeypatch)
     prepared = []
     monkeypatch.setattr(
@@ -243,8 +228,7 @@ def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkey
     with pytest.raises(RuntimeError, match="boom"):  # a failure propagates; nothing is disconnected
         run_bandwidth_sweep(mx)
 
-
-def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(monkeypatch):
+def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(monkeypatch: pytest.MonkeyPatch) -> None:
     mx = FakeMXAForTraceAcquisition()
     with pytest.raises(RuntimeError, match="sweep failed"):
         acquire_trace(mx, 1)
@@ -254,7 +238,7 @@ def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(monk
     plain = FakeMXA()
     assert acquire_pair(plain) == {"squeezing": [1], "shot_noise": [2]}  # no shutter: both traces
 
-    def failing(mx, trace_num):
+    def failing(mx: typing.Any, trace_num: int) -> None:
         raise RuntimeError("sweep failed")
 
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", failing)
