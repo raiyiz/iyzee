@@ -43,6 +43,7 @@ async def test_log_screen_shows_buffered_live_filtered_and_exception_records() -
         )
         assert any("a warning while on the log page" in line.text for line in view.lines)
 
+
 @async_test
 async def test_log_screen_can_browse_a_rotated_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: typing.Any
