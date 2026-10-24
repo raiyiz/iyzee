@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-import typing
+from collections.abc import Callable
+
 
 import pytest
 
 from iyzee.tui.commands import Command, CommandError, CommandRegistry, parse_si
 
-def make_registry(calls: list) -> CommandRegistry:
-    def record(name: str) -> typing.Any:
-        return lambda args: calls.append((name, args)) or f"{name} ok"
+def make_registry(calls: list[tuple[str, list[str]]]) -> CommandRegistry:
+    def record(name: str) -> Callable[[list[str]], str]:
+        def handler(args: list[str]) -> str:
+            calls.append((name, args))
+            return f"{name} ok"
+
+        return handler
 
     return CommandRegistry(
         [
