@@ -38,7 +38,12 @@ class IyzeeIPython:
     uses, with a ``run``-and-capture ``execute``. The terminal shell itself
     is covered in test_ipython_session.py."""
 
-    def __init__(self, app: typing.Any, namespace: typing.Any=None, history_file: typing.Any=None) -> None:
+    def __init__(
+        self,
+        app: typing.Any,
+        namespace: typing.Any = None,
+        history_file: typing.Any = None,
+    ) -> None:
         self.shell = InteractiveShell(
             config=shell_config(history_file), user_ns=lab_namespace(app, namespace)
         )
@@ -113,7 +118,9 @@ def test_lab_reflects_the_current_handles_live_lists_every_name_and_is_read_only
         lab.mx = "nope"
 
 
-def test_the_wavemeter_is_on_lab_before_connecting_and_behind_the_lock_after(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_wavemeter_is_on_lab_before_connecting_and_behind_the_lock_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
 
     lab = LabProxy(FakeApp())  # not connected: a plain client is still there
