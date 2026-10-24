@@ -15,10 +15,10 @@ class FakeInstrument:
 
 class FakeResourceManager:
     def __init__(self) -> None:
-        self.open_calls = 0
+        self.open_calls: int = 0
         self.instrument = FakeInstrument()
 
-    def open_resource(self, address: typing.Any) -> typing.Any:
+    def open_resource(self, address: str) -> FakeInstrument:
         self.open_calls += 1
         return self.instrument
 
