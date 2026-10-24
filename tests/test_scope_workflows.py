@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import replace
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 import typing
 
 import numpy as np
@@ -266,7 +266,7 @@ def test_apply_trigger_settings_writes_every_field_or_only_what_changed() -> Non
     apply_trigger_settings(scope, replace(baseline, time_per_div=5e-6), current_settings=baseline)
     assert read_trigger_settings(scope).time_per_div == 5e-6
 
-def test_read_trigger_settings_reads_the_armed_source_and_failures_raise() -> None:
+def test_read_trigger_settings_reads_the_armed_source_and_failures_raise(monkeypatch: pytest.MonkeyPatch) -> None:
     scope = FakeScope()
     scope.trigger_state = TriggerSettings(
         source=Channel.C2,
@@ -280,10 +280,10 @@ def test_read_trigger_settings_reads_the_armed_source_and_failures_raise() -> No
     assert ("get_trigger_slope", Channel.C2) in scope.calls  # off the armed source, not C1
 
     # One trigger, so nothing can partially succeed: a failure just raises.
-    scope.set_trigger_mode = lambda mode: (_ for _ in ()).throw(RuntimeError("nope"))
+    monkeypatch.setattr(scope, "set_trigger_mode", lambda mode: (_ for _ in ()).throw(RuntimeError("nope")))
     with pytest.raises(RuntimeError, match="nope"):
         apply_trigger_settings(scope, scope.trigger_state)
-    scope.get_trigger_mode = lambda: (_ for _ in ()).throw(RuntimeError("nope"))
+    monkeypatch.setattr(scope, "get_trigger_mode", lambda: (_ for _ in ()).throw(RuntimeError("nope")))
     with pytest.raises(RuntimeError, match="nope"):
         read_trigger_settings(scope)
 
@@ -426,7 +426,7 @@ def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_
     assert all(c[1] == Channel.C1 for c in _set_calls(scope))
     assert not any(c[0].startswith("get_") for c in scope.calls)  # no read-back after a failure
 
-def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_first_failure() -> None:
+def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_first_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     scope = FakeScope()
     scope.channel_state[Channel.C1] = _settings(
         Channel.C1, enabled=False, volts_per_div=1.0, offset=-0.25, coupling=Coupling.DC_50
@@ -436,8 +436,8 @@ def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_f
     ]
 
     scope = FakeScope()
-    scope.get_volts_per_div = lambda channel: f"{channel}:VOLT_DIV 200E-3 V"
-    scope.get_offset = lambda channel: f"{channel}:OFFSET -500mV"
+    monkeypatch.setattr(scope, "get_volts_per_div", lambda channel: f"{channel}:VOLT_DIV 200E-3 V")
+    monkeypatch.setattr(scope, "get_offset", lambda channel: f"{channel}:OFFSET -500mV")
     assert read_channel_settings(scope, [Channel.C1]) == [
         ChannelSettings(Channel.C1, True, 0.2, -0.5, Coupling.DC_1M)
     ]
@@ -447,20 +447,22 @@ def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_f
         read_channel_settings(scope, [Channel.C1, Channel.C2])
     assert {c[1] for c in scope.calls} == {Channel.C1}
 
-def test_batches_hold_the_driver_lock_throughout() -> None:
+def test_batches_hold_the_driver_lock_throughout(monkeypatch: pytest.MonkeyPatch) -> None:
     scope = StatefulScope()
     held: list[bool] = []
     original = scope.get_volts_per_div
-    scope.get_volts_per_div = lambda ch: (
-        held.append(scope.transaction_lock._is_owned()),
-        original(ch),
-    )[1]
-    scope.set_offset = lambda ch, v: held.append(scope.transaction_lock._is_owned())
+    lock_owned = lambda: cast(Any, scope.transaction_lock)._is_owned()
+    monkeypatch.setattr(
+        scope,
+        "get_volts_per_div",
+        lambda ch: (held.append(lock_owned()), original(ch))[1],
+    )
+    monkeypatch.setattr(scope, "set_offset", lambda ch, v: held.append(lock_owned()))
 
     apply_channel_settings(scope, [_settings(Channel.C1), _settings(Channel.C2)])
 
     assert held and all(held)
-    assert not scope.transaction_lock._is_owned()
+    assert not lock_owned()
 
 # -- acquisition failures ---------------------------------------------------------------------
 
