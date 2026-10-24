@@ -30,7 +30,7 @@ from iyzee.experiment.procedures import (
 
 class FakeMXA:
     def __init__(self) -> None:
-        self.rbw_values: list[float] = []
+        self.rbw_values: list[float | None] = []
         self.vbw_values: list[tuple[float | None, bool]] = []
         self.trace_calls: list[int] = []
 
@@ -76,9 +76,9 @@ class FakeMXA:
     def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> list[float]:
         return [float(trace_num)]
 
-def fake_acquire_trace(mx: TraceAcquisition, trace_num: int) -> list[float]:
+def fake_acquire_trace(mx: FakeMXA, trace_num: int) -> list[float]:
     mx.trace_calls.append(trace_num)
-    return [trace_num]
+    return [float(trace_num)]
 
 class BoomStep:
     label = "boom"
@@ -121,10 +121,17 @@ def _quiet(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
     monkeypatch.setattr("iyzee.experiment.procedures.time.sleep", lambda s: None)
 
-def _wavemeter(events: list[tuple[str, str | float | int]], frequency: float = 377.1) -> Any:
+def _wavemeter(events: list[tuple[object, ...]], frequency: float = 377.1) -> Any:
+    def set_pid_setpoint(freq: float, channel: int) -> None:
+        events.append(("set", freq, channel))
+
+    def read_frequency(channel: int) -> float:
+        events.append(("read", channel))
+        return frequency
+
     return SimpleNamespace(
-        set_pid_setpoint=lambda freq, channel: events.append(("set", freq, channel)),
-        read_frequency=lambda channel: events.append(("read", channel)) or frequency,
+        set_pid_setpoint=set_pid_setpoint,
+        read_frequency=read_frequency,
     )
 
 # -- builders and defaults ----------------------------------------------------------------------
@@ -196,7 +203,7 @@ def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(monkeypa
     assert shutter.events == []
 
 def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter(monkeypatch: pytest.MonkeyPatch) -> None:
-    events: list[tuple[str, str | float | int]] = []
+    events: list[tuple[object, ...]] = []
     monkeypatch.setattr(
         "iyzee.experiment.procedures.time.sleep", lambda s: events.append(("sleep", s))
     )
@@ -239,10 +246,11 @@ def test_a_frequency_step_names_what_the_context_lacks_and_touches_nothing_witho
 def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkeypatch: pytest.MonkeyPatch) -> None:
     _quiet(monkeypatch)
     prepared: list[tuple[object, AnalyzerConfig]] = []
-    monkeypatch.setattr(
-        "iyzee.experiment.procedures.prepare_analyzer",
-        lambda analyzer, traces, config: prepared.append((analyzer, config)),
-    )
+    def prepare(analyzer: Analyzer, traces: list[int] | tuple[int, ...], config: AnalyzerConfig | None = None) -> Analyzer:
+        prepared.append((analyzer, config or AnalyzerConfig()))
+        return analyzer
+
+    monkeypatch.setattr("iyzee.experiment.procedures.prepare_analyzer", prepare)
     monkeypatch.setattr(
         "iyzee.experiment.procedures.Wavemeter",
         lambda *a, **k: pytest.fail("a client was built although one was passed"),
