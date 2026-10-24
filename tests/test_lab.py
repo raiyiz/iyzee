@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import threading
 import time
+import typing
 
 import pytest
 from helpers import FakeHandle
 
 from iyzee.lab import InstrumentSpec, Lab, NotConnectedError
 
-
-def make_lab(*handles: FakeHandle, keys=("a", "b")) -> Lab:
+def make_lab(*handles: FakeHandle, keys: typing.Any=("a", "b")) -> Lab:
     queue = list(handles)
     specs = [InstrumentSpec(k, k.upper(), lambda: queue.pop(0)) for k in keys]
     return Lab(specs)
 
-
-def test_connect_registers_the_handle_and_returns_the_probe_detail():
+def test_connect_registers_the_handle_and_returns_the_probe_detail() -> None:
     handle = FakeHandle()
     lab = make_lab(handle)
 
@@ -24,8 +23,7 @@ def test_connect_registers_the_handle_and_returns_the_probe_detail():
     assert lab.connected == ("a",) and lab["a"] is handle
     assert detail == handle.probe()
 
-
-def test_a_failed_connect_closes_the_half_open_link_and_registers_nothing():
+def test_a_failed_connect_closes_the_half_open_link_and_registers_nothing() -> None:
     handle = FakeHandle(connect_error="no route")
     lab = make_lab(handle)
 
@@ -34,8 +32,7 @@ def test_a_failed_connect_closes_the_half_open_link_and_registers_nothing():
 
     assert lab.connected == () and handle.disconnected
 
-
-def test_disconnect_unregisters_closes_and_tolerates_unknown_keys():
+def test_disconnect_unregisters_closes_and_tolerates_unknown_keys() -> None:
     handle = FakeHandle()
     lab = make_lab(handle)
     lab.connect("a")
@@ -47,8 +44,7 @@ def test_disconnect_unregisters_closes_and_tolerates_unknown_keys():
     with pytest.raises(NotConnectedError):
         lab["a"]
 
-
-def test_drop_dead_links_unregisters_only_the_dead_ones_and_releases_them():
+def test_drop_dead_links_unregisters_only_the_dead_ones_and_releases_them() -> None:
     alive, dead = FakeHandle(), FakeHandle()
     lab = make_lab(alive, dead)
     lab.connect("a")
@@ -62,8 +58,7 @@ def test_drop_dead_links_unregisters_only_the_dead_ones_and_releases_them():
         time.sleep(0.01)
     assert dead.disconnected and not alive.disconnected
 
-
-def test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument():
+def test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument() -> None:
     busy, idle = FakeHandle(), FakeHandle()
     lab = make_lab(busy, idle)
     lab.connect("a")
@@ -71,7 +66,7 @@ def test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument():
     release = threading.Event()
     held = threading.Event()
 
-    def hold():
+    def hold() -> None:
         with busy.lock:
             held.set()
             release.wait(5)
@@ -89,8 +84,7 @@ def test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument():
     assert idle.disconnected and not busy.disconnected
     assert lab.connected == ()
 
-
-def test_device_returns_the_driver_and_a_missing_instrument_says_so():
+def test_device_returns_the_driver_and_a_missing_instrument_says_so() -> None:
     handle = FakeHandle(device="the driver")
     lab = make_lab(handle)
     with pytest.raises(NotConnectedError, match="not connected"):
@@ -98,14 +92,12 @@ def test_device_returns_the_driver_and_a_missing_instrument_says_so():
     lab.connect("a")
     assert lab.device("a") == "the driver"
 
-
 # -- instruments that are a part of another (the shutter on the PSU) -------------------
-
 
 class PartHandle(FakeHandle):
     """A part of a parent instrument: shares its lock, records what it was built on."""
 
-    def __init__(self, parent: FakeHandle, events: list[str], **kwargs) -> None:
+    def __init__(self, parent: FakeHandle, events: list[str], **kwargs: typing.Any) -> None:
         super().__init__(**kwargs)
         self.parent = parent
         self.lock = parent.lock  # one link, one lock
@@ -116,8 +108,7 @@ class PartHandle(FakeHandle):
         self.events.append(f"part closes (parent disconnected: {self.parent.disconnected})")
         super().disconnect()
 
-
-def make_parent_lab(parent: FakeHandle | None = None, part: PartHandle | None = None):
+def make_parent_lab(parent: FakeHandle | None = None, part: PartHandle | None = None) -> typing.Any:
     events: list[str] = []
     parent = parent or FakeHandle()
     built: list[FakeHandle] = []
@@ -134,8 +125,7 @@ def make_parent_lab(parent: FakeHandle | None = None, part: PartHandle | None = 
     )
     return lab, parent, built, events
 
-
-def test_connecting_a_part_connects_its_parent_once_and_builds_it_on_the_parent_handle():
+def test_connecting_a_part_connects_its_parent_once_and_builds_it_on_the_parent_handle() -> None:
     lab, parent, built, _ = make_parent_lab()
 
     lab.connect("shutter")
@@ -150,8 +140,7 @@ def test_connecting_a_part_connects_its_parent_once_and_builds_it_on_the_parent_
         failing.connect("shutter")
     assert failing.connected == ()  # neither registered
 
-
-def test_a_part_is_closed_before_its_parent_however_they_are_released():
+def test_a_part_is_closed_before_its_parent_however_they_are_released() -> None:
     for release in (lambda lab: lab.disconnect("psu"), lambda lab: lab.close_all()):
         lab, parent, _, events = make_parent_lab()
         lab.connect("shutter")
