@@ -9,7 +9,7 @@ import typing
 import numpy as np
 import pytest
 
-from iyzee.devices.scope import Channel, Coupling, TriggerCoupling, TriggerMode, TriggerSlope
+from iyzee.devices.scope import Channel, Coupling, DetailedWaveformData, TriggerCoupling, TriggerMode, TriggerSlope
 from iyzee.scope_workflows import (
     ChannelSettings,
     TriggerSettings,
@@ -30,16 +30,16 @@ class FakeScope:
     def __init__(
         self,
         *,
-        fail_channels: frozenset = frozenset(),
+        fail_channels: frozenset[Channel] = frozenset(),
         fail_hor: bool = False,
-        fail_reads: frozenset = frozenset(),
+        fail_reads: frozenset[Channel] = frozenset(),
     ):
-        self.calls: list[tuple] = []
+        self.calls: list[tuple[object, ...]] = []
         self.transaction_lock = threading.RLock()
         self._fail_channels = fail_channels
         self._fail_hor = fail_hor
         self._fail_reads = fail_reads
-        self._data = {
+        self._data: dict[Channel, list[float]] = {
             Channel.C1: [1.0, 2.0, 3.0],
             Channel.C2: [4.0, 5.0, 6.0],
             Channel.C3: [7.0, 8.0],
@@ -62,95 +62,95 @@ class FakeScope:
     def query(self, command: str) -> str:
         return "LECROY,FAKE,SN0,0.0"
 
-    def set_volts_per_div(self, channel: typing.Any, value: typing.Any) -> None:
+    def set_volts_per_div(self, channel: Channel, value: float) -> None:
         self.calls.append(("set_volts_per_div", channel, value))
         if channel in self._fail_channels:
             raise RuntimeError(f"{channel} refused volts/div")
 
-    def set_offset(self, channel: typing.Any, value: typing.Any) -> None:
+    def set_offset(self, channel: Channel, value: float) -> None:
         self.calls.append(("set_offset", channel, value))
 
-    def set_coupling(self, channel: typing.Any, value: typing.Any) -> None:
+    def set_coupling(self, channel: Channel, value: Coupling) -> None:
         self.calls.append(("set_coupling", channel, value))
 
-    def set_trace_display(self, channel: typing.Any, value: typing.Any) -> None:
+    def set_trace_display(self, channel: Channel, value: bool) -> None:
         self.calls.append(("set_trace_display", channel, value))
 
-    def set_trigger_mode(self, mode: str) -> None:
+    def set_trigger_mode(self, mode: TriggerMode) -> None:
         self.calls.append(("set_trigger_mode", mode))
 
-    def set_trigger_source(self, source: typing.Any) -> None:
+    def set_trigger_source(self, source: Channel) -> None:
         self.calls.append(("set_trigger_source", source))
 
-    def set_trigger_slope(self, source: typing.Any, slope: typing.Any) -> None:
+    def set_trigger_slope(self, source: Channel, slope: TriggerSlope) -> None:
         self.calls.append(("set_trigger_slope", source, slope))
 
-    def set_trigger_coupling(self, source: typing.Any, coupling: typing.Any) -> None:
+    def set_trigger_coupling(self, source: Channel, coupling: TriggerCoupling) -> None:
         self.calls.append(("set_trigger_coupling", source, coupling))
 
-    def set_trigger_level(self, source: typing.Any, level: typing.Any) -> None:
+    def set_trigger_level(self, source: Channel, level: float) -> None:
         self.calls.append(("set_trigger_level", source, level))
 
     def _check_readable(self, channel: Channel) -> None:
         if channel in self._fail_reads:
             raise RuntimeError(f"{channel} did not respond to the query")
 
-    def get_volts_per_div(self, channel: typing.Any) -> typing.Any:
+    def get_volts_per_div(self, channel: Channel) -> str:
         self.calls.append(("get_volts_per_div", channel))
         self._check_readable(channel)
         return f"{channel}:VOLT_DIV {self.channel_state[channel].volts_per_div:.2E}V"
 
-    def get_offset(self, channel: typing.Any) -> typing.Any:
+    def get_offset(self, channel: Channel) -> str:
         self.calls.append(("get_offset", channel))
         self._check_readable(channel)
         return f"{channel}:OFFSET {self.channel_state[channel].offset:.2E}V"
 
-    def get_coupling(self, channel: typing.Any) -> typing.Any:
+    def get_coupling(self, channel: Channel) -> str:
         self.calls.append(("get_coupling", channel))
         self._check_readable(channel)
         return f"{channel}:COUPLING {self.channel_state[channel].coupling.value}"
 
-    def get_trace_display(self, channel: typing.Any) -> typing.Any:
+    def get_trace_display(self, channel: Channel) -> str:
         self.calls.append(("get_trace_display", channel))
         self._check_readable(channel)
         state = "ON" if self.channel_state[channel].enabled else "OFF"
         return f"{channel}:TRACE {state}"
 
-    def get_trigger_source(self) -> typing.Any:
+    def get_trigger_source(self) -> str:
         self.calls.append(("get_trigger_source",))
         return f"TRIG_SELECT EDGE,SR,{self.trigger_state.source},HT,OFF"
 
-    def get_trigger_mode(self) -> typing.Any:
+    def get_trigger_mode(self) -> str:
         self.calls.append(("get_trigger_mode",))
         return f"TRIG_MODE {self.trigger_state.mode.value}"
 
-    def get_trigger_slope(self, source: typing.Any) -> typing.Any:
+    def get_trigger_slope(self, source: Channel) -> str:
         self.calls.append(("get_trigger_slope", source))
         return f"{source}:TRIG_SLOPE {self.trigger_state.slope.value}"
 
-    def get_trigger_coupling(self, source: typing.Any) -> typing.Any:
+    def get_trigger_coupling(self, source: Channel) -> str:
         self.calls.append(("get_trigger_coupling", source))
         return f"{source}:TRIG_COUPLING {self.trigger_state.coupling.value}"
 
-    def set_time_per_div(self, seconds: typing.Any) -> None:
+    def set_time_per_div(self, seconds: float) -> None:
         self.calls.append(("set_time_per_div", seconds))
         self.trigger_state = replace(self.trigger_state, time_per_div=seconds)
 
-    def get_time_per_div(self) -> typing.Any:
+    def get_time_per_div(self) -> str:
         self.calls.append(("get_time_per_div",))
         return f"TDIV {self.trigger_state.time_per_div or 1e-6:.2E} S"
 
-    def get_trigger_level(self, source: typing.Any) -> typing.Any:
+    def get_trigger_level(self, source: Channel) -> str:
         self.calls.append(("get_trigger_level", source))
         return f"{source}:TRIG_LEVEL {self.trigger_state.level_volts:.2E}V"
 
-    def getHorProperties(self, channel: typing.Any) -> tuple[typing.Any, ...]:
+    def getHorProperties(self, channel: Channel | str) -> tuple[str, float, float]:
         self.calls.append(("getHorProperties", channel))
         if self._fail_hor:
             raise RuntimeError("scope did not respond")
         return ("S", 0.0, 1e-6)
 
-    def getDataFloatsDetailed(self, channel: typing.Any, block: str="DAT1") -> dict[typing.Any, typing.Any]:
+    def getDataFloatsDetailed(self, channel: Channel | str, block: str = "DAT1") -> DetailedWaveformData:
         self.calls.append(("getDataFloatsDetailed", channel))
         if channel in self._fail_channels:
             raise RuntimeError(f"{channel} refused to send data")
@@ -163,7 +163,7 @@ class FakeScope:
             "vertical_offset": 0.5,
         }
 
-def _settings(channel: Channel, **overrides: typing.Any) -> ChannelSettings:
+def _settings(channel: Channel, **overrides: Any) -> ChannelSettings:
     defaults: dict[str, Any] = dict(
         channel=channel, enabled=True, volts_per_div=0.5, offset=0.0, coupling=Coupling.DC_1M
     )
