@@ -30,6 +30,7 @@ import math
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
+import typing
 
 from rich.markup import escape
 from textual import work
@@ -101,7 +102,6 @@ TRIGGER_COUPLING_CHOICES = [
     ("LF reject", TriggerCoupling.LF_REJECT.value),
 ]
 
-
 def _channel_panel(channel: Channel) -> Vertical:
     color = CHANNEL_COLORS[channel]
     return Vertical(
@@ -122,7 +122,6 @@ def _channel_panel(channel: Channel) -> Vertical:
         id=f"{channel}-panel",
     )
 
-
 class ScopeScreen(Page):
     """Configure the scope, record enabled channels, then plot the result.
 
@@ -132,7 +131,7 @@ class ScopeScreen(Page):
     action that records the selected waveforms before plotting them.
     """
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         super().__init__(*args, **kwargs)
         # Set here, not in on_mount: refresh_readiness() can run before the page is mounted.
         # What the scope itself last reported (None until a successful Retrieve).
