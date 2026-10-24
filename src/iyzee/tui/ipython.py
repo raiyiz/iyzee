@@ -153,7 +153,9 @@ class LabProxy:
         # now, so `lab.<Tab>` in the console shows what's *possible*
         # (mx/psu/shutter/scope), not just what happens to be connected at
         # this exact moment.
-        return sorted({*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected", "safe_state"})
+        return sorted(
+            {*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected", "safe_state"}
+        )
 
     def safe_state(self, *, timeout: float = 5.0, force: bool = False) -> dict[str, str]:
         """Close the shutter and have the supply confirm it; returns what happened.

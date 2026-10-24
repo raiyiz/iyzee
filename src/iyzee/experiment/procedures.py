@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import time
-import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar, TypedDict, Unpack

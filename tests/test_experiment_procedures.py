@@ -469,10 +469,17 @@ def test_a_scripted_run_carries_its_record_and_saving_it_stores_it(monkeypatch, 
 
     _quiet(monkeypatch)
     mx = FakeMXA()
-    for name in (
-        "set_center_freq set_span set_attenuation_auto set_trigger_source set_sweep_duration "
-        "set_average_count set_average_type set_trace_display set_trace_mode"
-    ).split():
+    for name in [
+        "set_center_freq",
+        "set_span",
+        "set_attenuation_auto",
+        "set_trigger_source",
+        "set_sweep_duration",
+        "set_average_count",
+        "set_average_type",
+        "set_trace_display",
+        "set_trace_mode",
+    ]:
         setattr(mx, name, lambda *a, **k: None)
 
     results = run_bandwidth_sweep(mx, [20_000.0, 40_000.0], avg_count=7)
@@ -493,4 +500,6 @@ def test_an_explicit_run_metadata_still_wins_over_the_attached_record(tmp_path):
     point = StepResult("rbw=1Hz", 1.0, "Hz", {"squeezing": [1.0], "shot_noise": [2.0]}, {})
     results = SweepResults([point], record=RunRecord(run_id="from-record"))
     path = save_step_results(results, tmp_path, run_metadata={"run_id": "explicit"})
-    assert json.loads(path.with_suffix(".json").read_text())["run_metadata"] == {"run_id": "explicit"}
+    assert json.loads(path.with_suffix(".json").read_text())["run_metadata"] == {
+        "run_id": "explicit"
+    }
