@@ -23,6 +23,7 @@ import threading
 import time
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
+import typing
 
 from ..config import IP, address
 from .base import SHUTTER_CHANNEL_DEFAULT
@@ -31,7 +32,6 @@ from .scope import LeCroy, LeCroyTimeoutError
 from .wavemeter import Wavemeter
 
 log = logging.getLogger("iyzee.instruments")
-
 
 class InstrumentHandle(Protocol):
     """What the Connect screen — and anything else that talks to this
@@ -90,7 +90,6 @@ class InstrumentHandle(Protocol):
         """
         ...
 
-
 class _LockedHandle:
     """Base for handles whose instrument access must be serialized.
 
@@ -112,11 +111,10 @@ class _LockedHandle:
         # Overridden by adapters whose driver can tell (see ScopeHandle).
         return True
 
-
 class _VisaHandle(_LockedHandle):
     """Adapter for any :class:`~iyzee.devices.base.BaseDevice` (MXA, raw PSU)."""
 
-    def __init__(self, device) -> None:
+    def __init__(self, device: typing.Any) -> None:
         super().__init__()
         self._device = device
 
@@ -133,10 +131,9 @@ class _VisaHandle(_LockedHandle):
         return f"connected @ {self._device.ip}"
 
     @property
-    def device(self):
+    def device(self) -> typing.Any:
         """The wrapped device (e.g. a live :class:`~iyzee.devices.mxa.KeysightMXA`)."""
         return self._device
-
 
 class ShutterHandle(_LockedHandle):
     """Adapter for :class:`~iyzee.devices.power.ShutterControl`, a channel of the PSU.
@@ -187,7 +184,6 @@ class ShutterHandle(_LockedHandle):
         """The live shutter controller, once connected."""
         return self._shutter
 
-
 class WavemeterHandle(_LockedHandle):
     """Adapter for the wavemeter's stateless HTTP API.
 
@@ -214,7 +210,6 @@ class WavemeterHandle(_LockedHandle):
     def probe(self) -> str:
         freq = self._client.read_frequency()
         return f"wavemeter = {freq:.6f} THz"
-
 
 class ScopeHandle(_LockedHandle):
     """Adapter for the :class:`~iyzee.devices.scope.LeCroy` VISA (VXI-11) driver."""
@@ -268,7 +263,6 @@ class ScopeHandle(_LockedHandle):
     def device(self) -> LeCroy:
         """The underlying live LeCroy driver."""
         return self._scope
-
 
 class LockedProxy:
     """Serializes calls to a live device shared between a screen worker
