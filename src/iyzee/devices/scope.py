@@ -11,7 +11,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import StrEnum
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
 import pyvisa
@@ -19,6 +19,16 @@ from pyvisa.constants import StatusCode
 
 from ..config import IP, address
 from .base import BaseDevice
+
+
+class DetailedWaveformData(TypedDict):
+    """Calibrated LeCroy waveform data, including the raw ADC codes."""
+
+    unit: str
+    values: np.ndarray
+    raw_codes: np.ndarray
+    vertical_gain: float
+    vertical_offset: float
 
 
 class LeCroyTimeoutError(TimeoutError):
@@ -420,7 +430,7 @@ class LeCroy(BaseDevice):
 
     def getDataFloatsDetailed(
         self, channel: Channel | str = "C1", block: str = "DAT1"
-    ) -> dict[str, str | float | np.ndarray]:
+    ) -> DetailedWaveformData:
         """Return calibrated waveform data together with raw ADC codes."""
         with self._lock:
             word_values = self._read_words(channel, block)
