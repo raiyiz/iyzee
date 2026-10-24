@@ -1,6 +1,7 @@
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
+import typing
 
 from ..config import IP, address
 from .base import SHUTTER_CHANNEL_DEFAULT, BaseDevice
@@ -13,7 +14,6 @@ CHANNELS = (1, 2, 3, 4)
 VOLTAGE_MAX = 32.0
 CURRENT_MAX = 10.0
 
-
 @dataclass(frozen=True)
 class ChannelState:
     """What the supply itself reports for one channel (nothing here is remembered by us)."""
@@ -24,7 +24,6 @@ class ChannelState:
     voltage_measured: float  # V, at the terminals
     current_measured: float  # A, drawn right now
     selected: bool  # ``OUTP:SEL``: the channel is armed to follow the master output
-
 
 @dataclass(frozen=True)
 class PSUState:
@@ -45,18 +44,17 @@ class PSUState:
         """Whether channel ``number`` is actually powered: armed *and* the master output is on."""
         return self.general_output and self.channel(number).selected
 
-
 class PSU(BaseDevice):
     """Rohde & Schwarz HMP4040 power-supply controller."""
 
-    def __init__(self, ip: str | None = None, resource_manager=None, timeout_ms: int = 10_000):
+    def __init__(self, ip: str | None = None, resource_manager: typing.Any=None, timeout_ms: int = 10_000) -> None:
         super().__init__(
             ip=ip or address(IP.POWER_SUPPLY),
             resource_manager=resource_manager,
             timeout_ms=timeout_ms,
         )
 
-    def open(self):
+    def open(self) -> typing.Any:
         port = 5025
         resource = self.rm.open_resource(f"TCPIP::{self.ip}::{port}::SOCKET")
         # A raw socket has no message framing of its own. Without this a query would wait for
@@ -117,28 +115,27 @@ class PSU(BaseDevice):
             self.instrument.write(f"INST:NSEL {previously_selected}")
         return PSUState(general_output=general, channels=tuple(states))
 
-    def set_voltage(self, voltage: float, channel: int):
+    def set_voltage(self, voltage: float, channel: int) -> None:
         self.instrument.write(f"INST:NSEL {channel}")
         self.instrument.write(f"VOLT {voltage}")
 
-    def enable_output(self, channel: int):
+    def enable_output(self, channel: int) -> None:
         self.instrument.write(f"INST OUT{channel}")
         self.instrument.write("OUTP:SEL 1")
 
-    def disable_output(self, channel: int):
+    def disable_output(self, channel: int) -> None:
         self.instrument.write(f"INST OUT{channel}")
         self.instrument.write("OUTP:SEL 0")
 
-    def set_current(self, current: float, channel: int):
+    def set_current(self, current: float, channel: int) -> None:
         self.instrument.write(f"INST:NSEL {channel}")
         self.instrument.write(f"CURR {current}")
 
-    def enable_global_output(self):
+    def enable_global_output(self) -> None:
         self.instrument.write("OUTP:GEN 1")
 
-    def disable_global_output(self):
+    def disable_global_output(self) -> None:
         self.instrument.write("OUTP:GEN 0")
-
 
 class ShutterControl:
     """The optical shutter: one channel of a :class:`PSU`, which it borrows.
@@ -184,8 +181,8 @@ class ShutterControl:
         """Whether the shutter's channel is powered, according to the supply (not our memory)."""
         return self.retrieve_state().is_live(self.chan)
 
-    def open(self):
+    def open(self) -> typing.Any:
         self.psu.enable_output(self.chan)
 
-    def close(self):
+    def close(self) -> None:
         self.psu.disable_output(self.chan)
