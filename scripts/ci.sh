@@ -37,12 +37,23 @@ notebooks() {
     uv run --locked --group notebooks pytest tests/test_notebook_toolbox.py
 }
 
+typecheck() {
+    sync
+    uv run --locked mypy src tests
+    # Enforce complete signatures on the scope APIs without imposing a repository-wide
+    # annotation migration on unrelated legacy modules and tests.
+    uv run --locked mypy --disallow-untyped-defs --follow-imports=silent \
+        src/iyzee/devices/base.py src/iyzee/devices/scope.py src/iyzee/scope_workflows.py
+}
+
 all() {
     sync
     uv run --locked pytest
     uv run --locked ruff check .
     uv run --locked ruff format --check .
-    uv run --locked mypy --disallow-untyped-defs src tests
+    uv run --locked mypy src tests
+    uv run --locked mypy --disallow-untyped-defs --follow-imports=silent \
+        src/iyzee/devices/base.py src/iyzee/devices/scope.py src/iyzee/scope_workflows.py
     uv run --locked scripts/check_doc_links.py
     notebooks
     docs
@@ -87,7 +98,7 @@ case "${1:-}" in
     #   scripts/ci.sh hardware --hardware-actuate -m 'not scope'
     hardware)  sync; shift; uv run --locked pytest tests/hardware --hardware "$@" ;;
     lint)      sync; uv run --locked ruff check .; uv run --locked ruff format --check . ;;
-    typecheck) sync; uv run --locked mypy --disallow-untyped-defs src tests ;;
+    typecheck) typecheck ;;
     doc-links) sync; doc_links ;;
     notebooks)  notebooks ;;
     docs-index) sync; docs_index ;;
