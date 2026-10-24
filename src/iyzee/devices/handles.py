@@ -21,12 +21,12 @@ import functools
 import logging
 import threading
 import time
+import typing
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
-import typing
 
 from ..config import IP, address
-from .base import SHUTTER_CHANNEL_DEFAULT
+from .base import SHUTTER_CHANNEL_DEFAULT, BaseDevice
 from .power import ShutterControl
 from .scope import LeCroy, LeCroyTimeoutError
 from .wavemeter import Wavemeter
@@ -114,7 +114,7 @@ class _LockedHandle:
 class _VisaHandle(_LockedHandle):
     """Adapter for any :class:`~iyzee.devices.base.BaseDevice` (MXA, raw PSU)."""
 
-    def __init__(self, device: typing.Any) -> None:
+    def __init__(self, device: BaseDevice) -> None:
         super().__init__()
         self._device = device
 
@@ -131,7 +131,7 @@ class _VisaHandle(_LockedHandle):
         return f"connected @ {self._device.ip}"
 
     @property
-    def device(self) -> typing.Any:
+    def device(self) -> BaseDevice:
         """The wrapped device (e.g. a live :class:`~iyzee.devices.mxa.KeysightMXA`)."""
         return self._device
 
