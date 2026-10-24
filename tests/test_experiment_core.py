@@ -1,27 +1,25 @@
 import logging
+import typing
 
 import pytest
 
 from iyzee.experiment.core import ExperimentContext, StepResult, run_sequence
 
-
 class RecordingStep:
-    def __init__(self, label, value, fail=False):
+    def __init__(self, label: str, value: typing.Any, fail: bool=False) -> None:
         self.label = label
         self.value = value
         self.fail = fail
 
-    def run(self, ctx):
+    def run(self, ctx: typing.Any) -> typing.Any:
         if self.fail:
             raise RuntimeError(f"{self.label} failed")
         return StepResult(label=self.label, x_value=self.value, x_unit="a.u.", traces={})
 
-
-def make_ctx():
+def make_ctx() -> typing.Any:
     return ExperimentContext(mx=object(), run_id="test-run")
 
-
-def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog):
+def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog: typing.Any) -> None:
     caplog.set_level(logging.INFO, logger="iyzee.experiment")
     results = run_sequence([RecordingStep("a", 1), RecordingStep("b", 2)], make_ctx())
     assert [r.x_value for r in results] == [1, 2]
@@ -36,11 +34,9 @@ def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog):
     with pytest.raises(ValueError):
         run_sequence([], make_ctx(), on_error="bogus")
 
-
 # -- RunRecord: how a run ended, saved beside its data -----------------------------------------
 
-
-def _record_with(*outcomes: Exception | None):
+def _record_with(*outcomes: Exception | None) -> typing.Any:
     from iyzee.experiment.core import RunRecord
 
     record = RunRecord(config={"center_hz": 1e6})
@@ -49,8 +45,7 @@ def _record_with(*outcomes: Exception | None):
         record.on_step(index, len(outcomes), object(), result, error)
     return record
 
-
-def test_a_run_record_reports_how_the_run_ended_and_names_failed_steps_as_plain_json():
+def test_a_run_record_reports_how_the_run_ended_and_names_failed_steps_as_plain_json() -> None:
     import json
 
     for outcomes, finish, status in (
@@ -75,14 +70,13 @@ def test_a_run_record_reports_how_the_run_ended_and_names_failed_steps_as_plain_
     ]
     assert meta["config"] == {"center_hz": 1e6} and meta["run_id"] == record.run_id
 
-
-def test_run_record_can_be_fed_by_run_sequence():
+def test_run_record_can_be_fed_by_run_sequence() -> None:
     from iyzee.experiment.core import RunRecord
 
     class Boom:
         label = "bad point"
 
-        def run(self, ctx):
+        def run(self, ctx: typing.Any) -> None:
             raise RuntimeError("no lock")
 
     record = RunRecord()
