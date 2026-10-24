@@ -21,12 +21,14 @@ from iyzee.scope_workflows import (
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "docs" / "examples"
 
+
 @pytest.fixture
 def data_dir(tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch) -> typing.Any:
     monkeypatch.setenv("IYZEE_DATA_DIR", str(tmp_path))
     month = tmp_path / "2026-01"
     month.mkdir()
     return month
+
 
 def test_load_sweep_example_reads_what_save_step_results_wrote(data_dir: typing.Any, capsys: typing.Any) -> None:
     results = [
@@ -43,6 +45,7 @@ def test_load_sweep_example_reads_what_save_step_results_wrote(data_dir: typing.
     assert "completed, 0 failed" in out
     assert "-3.00 dB" in out
     assert "no data" in out  # a point without a shot-noise trace is reported, not invented
+
 
 def test_load_scope_example_reads_what_save_scope_acquisition_wrote(data_dir: typing.Any, capsys: typing.Any) -> None:
     time = np.arange(4, dtype=np.float64) * 1e-6
@@ -85,6 +88,7 @@ def test_load_scope_example_reads_what_save_scope_acquisition_wrote(data_dir: ty
     assert "could not freeze" in out
     assert "C1: 4 samples" in out
 
+
 def test_detuning_example_reports_distance_to_the_nearest_rubidium_line(data_dir: typing.Any, capsys: typing.Any) -> None:
     from iyzee.devices.wavemeter import Rb_transitions
     label, line = next(t for t in Rb_transitions if t[0] == "D1 - Rb87_F22")
@@ -106,6 +110,7 @@ def test_detuning_example_reports_distance_to_the_nearest_rubidium_line(data_dir
     assert f"from {label}" in out
     assert "+5.0 MHz" in out
     assert "-3.00 dB" in out
+
 
 def test_the_readme_library_snippet_runs(tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """The 'Use it as a library' block in the README is real: run it with a fake analyzer."""
