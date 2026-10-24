@@ -47,11 +47,11 @@ from __future__ import annotations
 
 import logging
 import platform
+import threading
 import re
 import uuid
 from collections.abc import Mapping, Sequence
-from types import TracebackType
-from typing import Protocol, Self
+from typing import Protocol
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -71,23 +71,11 @@ from .experiment.io import save_numeric_recording
 log = logging.getLogger("iyzee.scope_workflows")
 
 
-class ScopeLock(Protocol):
-    """Minimal context-manager contract implemented by the driver's RLock."""
-
-    def __enter__(self) -> Self: ...
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None: ...
-
-
 class ScopeDriver(Protocol):
     """Structural scope interface shared by the LeCroy driver and test doubles."""
 
     @property
-    def transaction_lock(self) -> ScopeLock: ...
+    def transaction_lock(self) -> threading.RLock: ...
 
     def query(self, command: str) -> str: ...
     def get_volts_per_div(self, channel: Channel) -> str: ...
