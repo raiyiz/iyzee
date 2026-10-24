@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import typing
+
 import pytest
 
 from iyzee.tui.commands import Command, CommandError, CommandRegistry, parse_si
 
-
 def make_registry(calls: list) -> CommandRegistry:
-    def record(name):
+    def record(name: str) -> typing.Any:
         return lambda args: calls.append((name, args)) or f"{name} ok"
 
     return CommandRegistry(
@@ -24,8 +25,7 @@ def make_registry(calls: list) -> CommandRegistry:
         ]
     )
 
-
-def test_parse_si_understands_suffixes_and_rejects_garbage():
+def test_parse_si_understands_suffixes_and_rejects_garbage() -> None:
     for text, value in (
         ("2u", 2e-6),
         ("500ns", 500e-9),
@@ -39,8 +39,7 @@ def test_parse_si_understands_suffixes_and_rejects_garbage():
     with pytest.raises(CommandError, match="not a number"):
         parse_si("fast")
 
-
-def test_exact_name_alias_and_unique_prefix_resolve_and_pass_arguments():
+def test_exact_name_alias_and_unique_prefix_resolve_and_pass_arguments() -> None:
     calls: list = []
     registry = make_registry(calls)
 
@@ -55,38 +54,33 @@ def test_exact_name_alias_and_unique_prefix_resolve_and_pass_arguments():
         ("quit", []),
     ]
 
-
-def test_an_exact_alias_beats_prefix_matching_and_blank_lines_do_nothing():
+def test_an_exact_alias_beats_prefix_matching_and_blank_lines_do_nothing() -> None:
     calls: list = []
     registry = make_registry(calls)
     registry.execute("s")  # would be ambiguous as a prefix of sweep/... only if aliases didn't win
     assert calls == [("sweep", [])]
     assert registry.execute("  :  ") is None
 
-
-def test_ambiguous_and_unknown_commands_are_user_errors():
+def test_ambiguous_and_unknown_commands_are_user_errors() -> None:
     registry = make_registry([])
     with pytest.raises(CommandError, match=r"ambiguous :con.*connect, console"):
         registry.execute("con")
     with pytest.raises(CommandError, match="unknown command :zap"):
         registry.execute("zap")
 
-
-def test_quoted_arguments_stay_together_and_bad_quoting_is_an_error():
+def test_quoted_arguments_stay_together_and_bad_quoting_is_an_error() -> None:
     calls: list = []
     make_registry(calls).execute('connect "a b" c')
     assert calls == [("connect", ["a b", "c"])]
     with pytest.raises(CommandError, match="cannot parse"):
         make_registry([]).execute('connect "oops')
 
-
-def test_a_later_registration_shadows_an_earlier_one():
+def test_a_later_registration_shadows_an_earlier_one() -> None:
     registry = make_registry([])
     registry.add(Command("sweep", lambda args: "page-specific", "shadow"))
     assert registry.execute("sweep") == "page-specific"
 
-
-def test_tab_completion_of_command_words_and_arguments():
+def test_tab_completion_of_command_words_and_arguments() -> None:
     registry = make_registry([])
     assert registry.complete("swe") == ("sweep ", ["sweep"])
     line, candidates = registry.complete("con")
@@ -100,8 +94,7 @@ def test_tab_completion_of_command_words_and_arguments():
     ]  # already-given ones are skipped
     assert registry.complete("zzz") == ("zzz", [])
 
-
-def test_help_lists_every_command_and_details_one():
+def test_help_lists_every_command_and_details_one() -> None:
     registry = make_registry([])
     listing = registry.help_text()
     assert all(f":{name}" in listing for name in registry.names)
