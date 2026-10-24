@@ -181,7 +181,9 @@ def test_verification_reports_digest_mismatch(tmp_path: typing.Any) -> None:
     assert verify(catalog)["integrity"].to_list() == ["MISMATCH"]
 
 
-def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch: pytest.MonkeyPatch, tmp_path: typing.Any) -> None:
+def test_scope_trace_decoding_is_cached_across_display_options(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: typing.Any
+) -> None:
     path = tmp_path / "scope.npz"
     np.savez(path, placeholder=np.arange(4))
     calls = 0
