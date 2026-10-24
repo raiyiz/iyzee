@@ -26,7 +26,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
 from ..config import IP, address
-from .base import SHUTTER_CHANNEL_DEFAULT, BaseDevice
+from .base import SHUTTER_CHANNEL_DEFAULT
 from .power import ShutterControl
 from .scope import LeCroy, LeCroyTimeoutError
 from .wavemeter import Wavemeter
@@ -111,10 +111,19 @@ class _LockedHandle:
         # Overridden by adapters whose driver can tell (see ScopeHandle).
         return True
 
+class _VisaDevice(Protocol):
+    """Shared lifecycle surface of the raw VISA drivers."""
+
+    ip: IP | str | None
+
+    def connect(self) -> None: ...
+    def close(self) -> None: ...
+
+
 class _VisaHandle(_LockedHandle):
     """Adapter for any :class:`~iyzee.devices.base.BaseDevice` (MXA, raw PSU)."""
 
-    def __init__(self, device: BaseDevice) -> None:
+    def __init__(self, device: _VisaDevice) -> None:
         super().__init__()
         self._device = device
 
@@ -131,7 +140,7 @@ class _VisaHandle(_LockedHandle):
         return f"connected @ {self._device.ip}"
 
     @property
-    def device(self) -> BaseDevice:
+    def device(self) -> _VisaDevice:
         """The wrapped device (e.g. a live :class:`~iyzee.devices.mxa.KeysightMXA`)."""
         return self._device
 
