@@ -160,7 +160,9 @@ async def test_session_runs_a_real_ipython_in_process() -> None:
     assert sys.stdout is real_stdout, "stdout is restored on close"
 
 
-def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(\n    monkeypatch: pytest.MonkeyPatch,\n) -> None:
+def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     virtual_output: list[str] = []
     session = IPythonSession(FakeApp(), on_output=virtual_output.append)
     atexit.unregister(session._run_shell_atexit_operations)
@@ -182,11 +184,15 @@ def _prompt_line(screen_text: typing.Any) -> str:
 
 
 @async_test
-async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(\n    tmp_path: typing.Any,\n) -> None:
+async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(
+    tmp_path: typing.Any,
+) -> None:
     """Regression: history_load_length = 0 gave IPython's prompt an *empty*
     recall list, so Up/Down/Ctrl+R found nothing — even in the same session."""
 
-    async def session_run(\n        history_file: typing.Any, commands: typing.Any, check: typing.Any\n    ) -> None:
+    async def session_run(
+        history_file: typing.Any, commands: typing.Any, check: typing.Any
+    ) -> None:
         screen = VTermScreen(90, 24)
         text = lambda: "\n".join(screen.text_lines())  # noqa: E731
         session = IPythonSession(
