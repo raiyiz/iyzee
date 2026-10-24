@@ -276,6 +276,7 @@ def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(
 ) -> None:
     _quiet(monkeypatch)
     prepared: list[tuple[object, AnalyzerConfig]] = []
+
     def prepare(
         analyzer: Analyzer, traces: Sequence[int], config: AnalyzerConfig | None = None
     ) -> Analyzer:
