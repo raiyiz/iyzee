@@ -334,6 +334,7 @@ async def test_console_interrupt_scrollback_and_shutdown() -> None:
 # thread id, so a stale id would hit whatever thread now owns it -- a sweep's worker, say, and
 # a KeyboardInterrupt in that ends the whole app.
 
+
 def _session_whose_shell_thread_ends_at_once(monkeypatch: pytest.MonkeyPatch) -> typing.Any:
     session = IPythonSession(FakeApp(), rows=24, cols=90, on_output=VTermScreen(90, 24).feed)
     monkeypatch.setattr(session.shell, "mainloop", lambda: None)
