@@ -370,7 +370,13 @@ class SweepScreen(Page):
 
             next_live_plot = monotonic()
 
-            def on_step(index: int, total: int, step: Step, result: StepResult | None, error: BaseException | None) -> None:
+            def on_step(
+                index: int,
+                total: int,
+                step: Step,
+                result: StepResult | None,
+                error: BaseException | None,
+            ) -> None:
                 nonlocal next_live_plot
                 record.on_step(index, total, step, result, error)
                 display_series = None

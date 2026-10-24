@@ -30,6 +30,7 @@ def _isolated_log_root(tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch) ->
     """
     monkeypatch.setattr(logging_support, "LOG_ROOT", tmp_path / "logs")
 
+
 # -- real-hardware tests ------------------------------------------------------------------
 #
 # Everything under tests/hardware talks to real instruments. It is skipped unless
@@ -88,6 +89,7 @@ def pytest_report_header(config: pytest.Config) -> list[str] | None:
     if not config.getoption("--hardware"):
         return None
     from iyzee.config import IP, ConfigError, address
+
     try:
         targets = ", ".join(f"{ip.name.lower()}={address(ip)}" for ip in IP)
     except ConfigError as exc:

@@ -19,7 +19,9 @@ def _saved_sweep(tmp_path: Path, results: list[StepResult], *, name: str) -> Rec
     return load_recording(path)
 
 
-def test_a_bandwidth_sweep_reports_requested_setpoints_and_relative_noise(tmp_path: typing.Any) -> None:
+def test_a_bandwidth_sweep_reports_requested_setpoints_and_relative_noise(
+    tmp_path: typing.Any,
+) -> None:
     recording = _saved_sweep(
         tmp_path,
         [
@@ -76,7 +78,9 @@ def test_a_frequency_sweep_plots_at_the_measured_frequency(tmp_path: typing.Any)
     assert sweep.points[1].x == 377.2
 
 
-def test_sweep_summaries_honour_the_statistic_and_survive_thin_recordings(tmp_path: typing.Any) -> None:
+def test_sweep_summaries_honour_the_statistic_and_survive_thin_recordings(
+    tmp_path: typing.Any,
+) -> None:
     recording = _saved_sweep(
         tmp_path,
         [StepResult("p", 1.0, "Hz", {"squeezing": [-61.0, -50.0], "shot_noise": [-58.0, -58.0]})],

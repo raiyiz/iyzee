@@ -66,7 +66,9 @@ async def test_unknown_and_page_specific_commands_report_errors_not_crashes() ->
 
 
 @async_test
-async def test_connect_and_disconnect_commands_drive_the_lab(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_connect_and_disconnect_commands_drive_the_lab(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     handle = FakeHandle()
     app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
