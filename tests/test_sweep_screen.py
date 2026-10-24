@@ -473,6 +473,7 @@ async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
 # KeyboardInterrupt or SystemExit escaping one ends the whole app with no message, and a
 # swallowed CancelledError leaves the page "running" for good.
 
+
 def _log_text(screen: SweepScreen) -> str:
     return " ".join(
         str(seg) for line in screen.query_one("#sweep-log", RichLog).lines for seg in line
