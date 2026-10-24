@@ -111,6 +111,12 @@ class _FakeVisaDeviceNoIdn:
     def __init__(self, ip: str) -> None:
         self.ip = ip
 
+    def connect(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
 
 # -- ShutterHandle ----------------------------------------------------------
 
