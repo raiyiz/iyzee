@@ -113,10 +113,20 @@ class _LockedHandle:
         return True
 
 
+class _VisaDevice(Protocol):
+    """Shared lifecycle surface of the raw VISA drivers."""
+
+    @property
+    def ip(self) -> IP | str | None: ...
+
+    def connect(self) -> None: ...
+    def close(self) -> None: ...
+
+
 class _VisaHandle(_LockedHandle):
     """Adapter for any :class:`~iyzee.devices.base.BaseDevice` (MXA, raw PSU)."""
 
-    def __init__(self, device) -> None:
+    def __init__(self, device: _VisaDevice) -> None:
         super().__init__()
         self._device = device
 
@@ -133,7 +143,7 @@ class _VisaHandle(_LockedHandle):
         return f"connected @ {self._device.ip}"
 
     @property
-    def device(self):
+    def device(self) -> _VisaDevice:
         """The wrapped device (e.g. a live :class:`~iyzee.devices.mxa.KeysightMXA`)."""
         return self._device
 

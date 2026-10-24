@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import typing
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ def quiet_data_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(results_mod, "_DATA_ROOT", tmp_path)  # never read the real data dir
 
 
-async def run(pilot, line: str) -> None:
+async def run(pilot: typing.Any, line: str) -> None:
     await pilot.press(":")
     await pilot.press(*line)
     await pilot.press("enter")
@@ -24,7 +25,7 @@ async def run(pilot, line: str) -> None:
 
 
 @async_test
-async def test_colon_opens_the_bar_and_escape_closes_it_returning_focus():
+async def test_colon_opens_the_bar_and_escape_closes_it_returning_focus() -> None:
     app = app_mod.IyzeeApp()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -38,7 +39,7 @@ async def test_colon_opens_the_bar_and_escape_closes_it_returning_focus():
 
 
 @async_test
-async def test_a_page_name_switches_pages_and_q_quits():
+async def test_a_page_name_switches_pages_and_q_quits() -> None:
     app = app_mod.IyzeeApp()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -53,7 +54,7 @@ async def test_a_page_name_switches_pages_and_q_quits():
 
 
 @async_test
-async def test_unknown_and_page_specific_commands_report_errors_not_crashes():
+async def test_unknown_and_page_specific_commands_report_errors_not_crashes() -> None:
     app = app_mod.IyzeeApp()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -65,7 +66,7 @@ async def test_unknown_and_page_specific_commands_report_errors_not_crashes():
 
 
 @async_test
-async def test_connect_and_disconnect_commands_drive_the_lab(monkeypatch: pytest.MonkeyPatch):
+async def test_connect_and_disconnect_commands_drive_the_lab(monkeypatch: pytest.MonkeyPatch) -> None:
     handle = FakeHandle()
     app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
@@ -85,7 +86,7 @@ async def test_connect_and_disconnect_commands_drive_the_lab(monkeypatch: pytest
 
 
 @async_test
-async def test_results_commands_exist_only_on_the_results_page():
+async def test_results_commands_exist_only_on_the_results_page() -> None:
     app = app_mod.IyzeeApp(prefs_file=None)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -98,7 +99,7 @@ async def test_results_commands_exist_only_on_the_results_page():
 
 
 @async_test
-async def test_history_and_tab_completion():
+async def test_history_and_tab_completion() -> None:
     app = app_mod.IyzeeApp()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -115,7 +116,7 @@ async def test_history_and_tab_completion():
 
 
 @async_test
-async def test_scope_commands_report_why_they_cannot_run_without_a_scope():
+async def test_scope_commands_report_why_they_cannot_run_without_a_scope() -> None:
     app = app_mod.IyzeeApp()
     async with app.run_test() as pilot:
         await pilot.pause()

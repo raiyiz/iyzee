@@ -1,5 +1,6 @@
 import hashlib
 import json
+import typing
 from datetime import datetime
 
 import numpy as np
@@ -18,7 +19,9 @@ from iyzee.experiment.io import (
 )
 
 
-def test_data_lives_at_the_project_root_in_one_dir_per_month(tmp_path, monkeypatch):
+def test_data_lives_at_the_project_root_in_one_dir_per_month(
+    tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # A sibling of src/, not e.g. src/iyzee/data: a regression here would put runs back inside
     # the package (every other test monkeypatches DATA_ROOT, so none would notice).
     assert (DATA_ROOT.parent / "pyproject.toml").is_file()
@@ -29,11 +32,15 @@ def test_data_lives_at_the_project_root_in_one_dir_per_month(tmp_path, monkeypat
     assert first == second and first.is_dir() and first.parent == tmp_path
     assert first.name == datetime.now().astimezone().strftime("%Y-%m")
 
-
 # -- save_step_results: the numeric .npz + JSON sidecar pair -----------------------------
 
-
-def _result(x_value=1.0, *, squeezing=None, shot_noise=None, **meta) -> StepResult:
+def _result(
+    x_value: float = 1.0,
+    *,
+    squeezing: typing.Any = None,
+    shot_noise: typing.Any = None,
+    **meta: typing.Any,
+) -> StepResult:
     traces = {}
     if squeezing is not None:
         traces["squeezing"] = squeezing
@@ -44,7 +51,7 @@ def _result(x_value=1.0, *, squeezing=None, shot_noise=None, **meta) -> StepResu
     )
 
 
-def test_save_step_results_writes_a_pickle_free_data_and_metadata_pair(tmp_path):
+def test_save_step_results_writes_a_pickle_free_data_and_metadata_pair(tmp_path: typing.Any) -> None:
     results = [_result(1.0, squeezing=[3.0, 4.0], shot_noise=[1.0, 1.0], rbw_hz=1000.0)]
     path = save_step_results(results, tmp_path, run_metadata={"software_revision": "abc123"})
 
@@ -66,7 +73,7 @@ def test_save_step_results_writes_a_pickle_free_data_and_metadata_pair(tmp_path)
     assert sidecar["run_metadata"] == {"software_revision": "abc123"}
 
 
-def test_save_step_results_aligns_traces_across_points(tmp_path):
+def test_save_step_results_aligns_traces_across_points(tmp_path: typing.Any) -> None:
     missing = [
         _result(1.0, squeezing=[1.0, 2.0], shot_noise=[3.0, 4.0]),
         _result(2.0, squeezing=[5.0, 6.0]),  # no shot_noise for this point
@@ -81,7 +88,7 @@ def test_save_step_results_aligns_traces_across_points(tmp_path):
         save_step_results(ragged, tmp_path)
 
 
-def test_save_step_results_names_files_safely_uniquely_or_exactly_as_asked(tmp_path):
+def test_save_step_results_names_files_safely_uniquely_or_exactly_as_asked(tmp_path: typing.Any) -> None:
     first = save_step_results([_result(1.0)], tmp_path, name="bandwidth sweep/#1")
     second = save_step_results([_result(1.0)], tmp_path, name="bandwidth sweep/#1")
     match = STEM_PATTERN.match(first.stem)
@@ -95,11 +102,9 @@ def test_save_step_results_names_files_safely_uniquely_or_exactly_as_asked(tmp_p
     with np.load(target, allow_pickle=False) as archive:
         assert len(archive["x_values"]) == 2
 
-
 # -- multiplot / difference_series -------------------------------------------------------
 
-
-def test_difference_statistics_and_series_handle_unusable_traces():
+def test_difference_statistics_and_series_handle_unusable_traces() -> None:
     assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "mean") == pytest.approx(2.5)
     assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "minimum") == pytest.approx(2.0)
     assert io.difference_statistic([np.nan, 4.0], [1.0, 1.0], "mean") == pytest.approx(3.0)
@@ -122,24 +127,24 @@ def test_difference_statistics_and_series_handle_unusable_traces():
     ) == [([0, 1], [2.0, 3.0], "first"), ([0, 1], [3.0, 4.0], "third")]
 
 
-def test_multiplot_plots_each_result(monkeypatch):
+def test_multiplot_plots_each_result(monkeypatch: pytest.MonkeyPatch) -> None:
     plotted = []
 
     class FakeAx:
-        def plot(self, x_values, values):
+        def plot(self, x_values: typing.Any, values: typing.Any) -> None:
             plotted.append((list(x_values), list(values)))
 
-        def legend(self, *a, **k):
+        def legend(self, *a: typing.Any, **k: typing.Any) -> None:
             pass
 
-        def set_xlabel(self, *a, **k):
+        def set_xlabel(self, *a: typing.Any, **k: typing.Any) -> None:
             pass
 
-        def set_ylabel(self, *a, **k):
+        def set_ylabel(self, *a: typing.Any, **k: typing.Any) -> None:
             pass
 
     class FakeFig:
-        def tight_layout(self):
+        def tight_layout(self) -> None:
             pass
 
     monkeypatch.setattr("iyzee.experiment.io.plt.subplots", lambda: (FakeFig(), FakeAx()))

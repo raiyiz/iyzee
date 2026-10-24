@@ -5,32 +5,33 @@ from iyzee import IP, BaseDevice
 
 
 class FakeInstrument:
-    def __init__(self):
+    def __init__(self) -> None:
         self.close_calls = 0
         self.timeout = None
 
-    def close(self):
+    def close(self) -> None:
         self.close_calls += 1
 
 
 class FakeResourceManager:
-    def __init__(self):
-        self.open_calls = 0
+    def __init__(self) -> None:
+        self.open_calls: int = 0
         self.instrument = FakeInstrument()
 
-    def open_resource(self, address):
+    def open_resource(self, address: str) -> FakeInstrument:
         self.open_calls += 1
         return self.instrument
 
 
-def test_base_device_accepts_injected_resource_manager():
+def test_base_device_accepts_injected_resource_manager() -> None:
     resource_manager = FakeResourceManager()
 
     device = BaseDevice(ip=IP.POWER_SUPPLY, resource_manager=resource_manager)
 
     assert device.rm is resource_manager
     assert resource_manager.open_calls == 0
-    assert device.instrument is None
+    instrument_before_connect = device.instrument
+    assert instrument_before_connect is None
 
     device.connect()
     assert resource_manager.open_calls == 1
@@ -40,7 +41,7 @@ def test_base_device_accepts_injected_resource_manager():
     assert resource_manager.instrument.close_calls == 1
 
 
-def test_base_device_does_not_open_more_than_once(monkeypatch):
+def test_base_device_does_not_open_more_than_once(monkeypatch: pytest.MonkeyPatch) -> None:
     resource_manager = FakeResourceManager()
     monkeypatch.setattr(pyvisa, "ResourceManager", lambda: resource_manager)
 
@@ -57,7 +58,7 @@ def test_base_device_does_not_open_more_than_once(monkeypatch):
     assert resource_manager.instrument.close_calls == 1
 
 
-def test_base_device_can_reconnect_after_close(monkeypatch):
+def test_base_device_can_reconnect_after_close(monkeypatch: pytest.MonkeyPatch) -> None:
     resource_manager = FakeResourceManager()
     monkeypatch.setattr(pyvisa, "ResourceManager", lambda: resource_manager)
 
@@ -76,7 +77,7 @@ def test_base_device_can_reconnect_after_close(monkeypatch):
     assert resource_manager.open_calls == 2
 
 
-def test_base_device_closes_when_the_with_block_raises(monkeypatch):
+def test_base_device_closes_when_the_with_block_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     resource_manager = FakeResourceManager()
     monkeypatch.setattr(pyvisa, "ResourceManager", lambda: resource_manager)
     device = BaseDevice(ip=IP.POWER_SUPPLY)

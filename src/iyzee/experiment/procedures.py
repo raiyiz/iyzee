@@ -15,10 +15,8 @@ import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from typing import Any, ClassVar, TypedDict, Unpack
+from typing import Any, ClassVar, Protocol, TypedDict, Unpack
 
-from ..devices.mxa import KeysightMXA
-from ..devices.power import ShutterControl
 from ..devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
 from .core import ExperimentContext, StepResult, run_sequence
 
@@ -29,6 +27,37 @@ TRACE_SHOT = 2
 DEFAULT_SWEEP_DURATION_MS = 10
 #: Default spacing of a frequency scan: 10 MHz, in THz (the unit the laser is set in).
 FREQUENCY_STEP_THZ = 10e-6
+
+
+class TraceAcquisition(Protocol):
+    """The MXA operations required to acquire one trace."""
+
+    def set_trace_update(self, trace_num: int, state: bool = True) -> None: ...
+    def single_sweep_wait(self, timeout_sec: float = 30.0) -> bool: ...
+    def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> list[float]: ...
+
+
+class Analyzer(TraceAcquisition, Protocol):
+    """MXA operations needed to prepare and run a measurement sweep."""
+
+    def set_center_freq(self, freq_hz: float) -> None: ...
+    def set_span(self, span_hz: float) -> None: ...
+    def set_rbw(self, rbw_hz: float | None = None, auto: bool = False) -> None: ...
+    def set_vbw(self, vbw_hz: float | None = None, auto: bool = False) -> None: ...
+    def set_attenuation_auto(self, state: bool = True) -> None: ...
+    def set_trigger_source(self, source: str) -> None: ...
+    def set_sweep_duration(self, time: int) -> None: ...
+    def set_average_count(self, count: int) -> None: ...
+    def set_average_type(self, avg_type: str) -> None: ...
+    def set_trace_display(self, trace_num: int | str, state: bool = True) -> None: ...
+    def set_trace_mode(self, trace_num: int | str, mode: str) -> None: ...
+
+
+class Shutter(Protocol):
+    """The shutter operations a frequency step needs."""
+
+    def open(self) -> None: ...
+    def close(self) -> None: ...
 
 
 @dataclass(slots=True)
@@ -44,7 +73,9 @@ class AnalyzerConfig:
     trig_source: str = "IMM"
 
 
-def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
+def prepare_analyzer(
+    mx: Analyzer, traces: Sequence[int], config: AnalyzerConfig | None = None
+) -> Analyzer:
     """Configure an already-owned MXA for a measurement procedure."""
     config = config or AnalyzerConfig()
 
@@ -65,7 +96,7 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
     return mx
 
 
-def acquire_trace(mx, trace_num):
+def acquire_trace(mx: TraceAcquisition, trace_num: int) -> list[float]:
     """Acquire one trace and return its data."""
     mx.set_trace_update(trace_num, True)
     try:
@@ -75,7 +106,7 @@ def acquire_trace(mx, trace_num):
         mx.set_trace_update(trace_num, False)
 
 
-def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
+def acquire_pair(mx: TraceAcquisition, shutter: Shutter | None = None) -> dict[str, Any]:
     """Acquire the squeezing and shot-noise traces, in that order.
 
     A ``shutter`` is open only around the squeezing acquisition and is closed again (in a
@@ -196,11 +227,11 @@ SWEEP_KINDS: dict[str, type[SweepStep]] = {c.kind: c for c in (BandwidthStep, Fr
 
 
 @dataclass(frozen=True)
-class Sweep:
+class Sweep[StepT: SweepStep]:
     """A sweep ready to run: its points and the analyzer setup they need."""
 
     kind: str
-    steps: Sequence[SweepStep]
+    steps: Sequence[StepT]
     config: AnalyzerConfig
 
     @property
@@ -216,7 +247,7 @@ class ConfigOptions(TypedDict, total=False):
     res_bw_hz: float
 
 
-def bandwidth_sweep_steps(rbw_values_hz=None) -> list[BandwidthStep]:
+def bandwidth_sweep_steps(rbw_values_hz: Sequence[float] | None = None) -> list[BandwidthStep]:
     """Build the standard 20 kHz-stepped RBW sweep, or a custom one."""
     if rbw_values_hz is None:
         rbw_values_hz = [2 * i * 1e4 for i in range(1, 20)]
@@ -227,7 +258,7 @@ def frequency_sweep_steps(
     laser_center_thz: float = DEFAULT_LASER_CENTER_THZ,
     wavemeter_channel: int = DEFAULT_CHANNEL,
     relax_time_s: float = SETTLE_TIME_S,
-    offsets_thz=None,
+    offsets_thz: Sequence[float] | None = None,
 ) -> list[FrequencyStep]:
     """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
@@ -252,7 +283,9 @@ def frequency_sweep_config(
     return AnalyzerConfig(1.5e6, 0, 150, sweep_duration_ms, res_bw_hz)
 
 
-def build_bandwidth_sweep(rbw_values_hz=None, **config: Unpack[ConfigOptions]) -> Sweep:
+def build_bandwidth_sweep(
+    rbw_values_hz: Sequence[float] | None = None, **config: Unpack[ConfigOptions]
+) -> Sweep[BandwidthStep]:
     """Build an RBW sweep and the analyzer configuration it needs."""
     return Sweep(
         "bandwidth", bandwidth_sweep_steps(rbw_values_hz), bandwidth_sweep_config(**config)
@@ -262,11 +295,11 @@ def build_bandwidth_sweep(rbw_values_hz=None, **config: Unpack[ConfigOptions]) -
 def build_frequency_sweep(
     laser_center_thz: float = DEFAULT_LASER_CENTER_THZ,
     wavemeter_channel: int = DEFAULT_CHANNEL,
-    offsets_thz=None,
+    offsets_thz: Sequence[float] | None = None,
     *,
     relax_time_s: float = SETTLE_TIME_S,
     **config: Unpack[ConfigOptions],
-) -> Sweep:
+) -> Sweep[FrequencyStep]:
     """Build a frequency sweep and the analyzer configuration it needs.
 
     The settle time is the laser's, not the analyzer's: every acquisition restarts the
@@ -276,11 +309,11 @@ def build_frequency_sweep(
     return Sweep("frequency", steps, frequency_sweep_config(**config))
 
 
-def run_sweep(
-    mx,
-    sweep: Sweep,
+def run_sweep[StepT: SweepStep](
+    mx: Analyzer,
+    sweep: Sweep[StepT],
     *,
-    shutter: ShutterControl | None = None,
+    shutter: Shutter | None = None,
     wavemeter: Wavemeter | None = None,
     on_error: str = "raise",
 ) -> list[StepResult]:
@@ -297,15 +330,19 @@ def run_sweep(
 
 
 def run_bandwidth_sweep(
-    mx, rbw_values_hz=None, *, on_error: str = "raise", **config: Unpack[ConfigOptions]
+    mx: Analyzer,
+    rbw_values_hz: Sequence[float] | None = None,
+    *,
+    on_error: str = "raise",
+    **config: Unpack[ConfigOptions],
 ) -> list[StepResult]:
     """Measure squeezing/shot-noise traces using the caller-owned MXA."""
     return run_sweep(mx, build_bandwidth_sweep(rbw_values_hz, **config), on_error=on_error)
 
 
 def run_frequency_sweep(
-    mx,
-    shutter: ShutterControl,
+    mx: Analyzer,
+    shutter: Shutter,
     *args: Any,
     wavemeter: Wavemeter | None = None,
     on_error: str = "raise",

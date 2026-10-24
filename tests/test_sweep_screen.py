@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import threading
+import typing
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +34,6 @@ from iyzee.tui.screens.sweep import (
 
 # -- standalone validators ---------------------------------------------------------------
 
-
 def test_the_standalone_validators_accept_good_input_and_name_the_field_on_bad() -> None:
     assert _positive_float("20000", "field") == 20000.0 and _positive_float("0.5", "field") == 0.5
     for raw in ("0", "-5", "abc"):
@@ -48,9 +48,7 @@ def test_the_standalone_validators_accept_good_input_and_name_the_field_on_bad()
     with pytest.raises(ValueError, match=f"at most {MAX_POINTS}"):
         _positive_int(str(MAX_POINTS + 1), "field", maximum=MAX_POINTS)
 
-
 # -- the mounted form ---------------------------------------------------------------------
-
 
 async def _open_sweep_screen(pilot: Pilot[Any]) -> SweepScreen:
     await pilot.press("s")
@@ -115,9 +113,7 @@ async def test_an_invalid_field_is_named_marked_and_focused() -> None:
             await pilot.pause()
             assert not field.has_class("-invalid")
 
-
 # -- pre-flight guards and the "not ready" banner ------------------------------------------
-
 
 @async_test
 async def test_starting_without_the_needed_instrument_notifies_and_launches_nothing() -> None:
@@ -183,9 +179,7 @@ async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
         await pilot.pause()
         assert banner.display and "MXA" in plain(banner)
 
-
 # -- running a (fake) sweep: abort, and saving as it goes ----------------------------------
-
 
 def _sweep_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_run_sequence: Any) -> IyzeeApp:
     """An app wired so pressing Run drives fake_run_sequence instead of hardware."""
@@ -233,6 +227,8 @@ def _locked_by_someone_else(lock: Any) -> bool:
     "kind,needed",
     [("bandwidth", {"mxa"}), ("frequency", {"mxa", "shutter", "wavemeter"})],
 )
+
+
 @async_test
 async def test_a_run_gets_the_connected_devices_and_holds_every_lock_it_needs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, needed: set[str]
@@ -240,7 +236,7 @@ async def test_a_run_gets_the_connected_devices_and_holds_every_lock_it_needs(
     devices = {key: object() for key in ("mxa", "shutter", "wavemeter")}
     seen: dict[str, Any] = {}
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any) -> None:
         seen["ctx"] = ctx
         seen["held"] = {k for k in devices if _locked_by_someone_else(app.handles[k].lock)}
 
@@ -269,7 +265,7 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
 ) -> None:
     started, release = threading.Event(), threading.Event()
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any) -> None:
         started.set()
         release.wait(2)
         on_step(0, 3, object(), _result(0), None)
@@ -302,7 +298,7 @@ async def test_points_are_on_disk_while_the_sweep_is_still_running(
 ) -> None:
     on_disk_after_each_step: list[int] = []
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any) -> None:
         for index in range(3):
             on_step(index, 3, object(), _result(index), None)
             on_disk_after_each_step.append(_points_on_disk(tmp_path))
@@ -323,12 +319,12 @@ async def test_a_failing_save_is_reported_once_and_does_not_stop_the_run(
 ) -> None:
     steps_run: list[int] = []
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any) -> None:
         for index in range(3):
             on_step(index, 3, object(), _result(index), None)
             steps_run.append(index)
 
-    def broken_save(*args, **kwargs):
+    def broken_save(*args: typing.Any, **kwargs: typing.Any) -> None:
         raise OSError("No space left on device [/data]")
 
     app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
@@ -340,9 +336,7 @@ async def test_a_failing_save_is_reported_once_and_does_not_stop_the_run(
     assert app.last_run is not None and len(app.last_run.results) == 3
     assert app.last_run.path is None
 
-
 # -- "Capture trace" ---------------------------------------------------------------------
-
 
 class _FakeMxaForCapture:
     """A fake MXA supporting exactly what acquire_trace()/get_frequency_axis()
@@ -382,13 +376,10 @@ async def test_capture_trace_plots_power_vs_frequency() -> None:
         )
         assert "Captured 3 point(s)" in log
 
-
 # -- the saved file says how the run ended ------------------------------------------------
-
 
 def _saved_run_metadata(directory: Path) -> dict[str, Any]:
     import json
-
     (sidecar,) = directory.glob("*.json")
     return json.loads(sidecar.read_text())["run_metadata"]
 
@@ -400,7 +391,7 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
     """Saved sweeps used to carry run_metadata=null: no run id, no analyzer settings."""
     seen: list[str] = []
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any) -> None:
         seen.append(ctx.run_id)
         on_step(0, 2, object(), _result(0), None)
         # while it is running the file must already say so
@@ -423,7 +414,7 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
 async def test_an_aborted_sweep_is_marked_aborted_in_the_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any) -> None:
         screen = app.query_one(sweep_mod.SweepScreen)
         screen._abort_event.set()
         on_step(0, 3, object(), _result(0), None)  # raises SweepAborted after the point is kept
@@ -439,7 +430,7 @@ async def test_an_aborted_sweep_is_marked_aborted_in_the_file(
 async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any) -> None:
         on_step(0, 3, object(), _result(0), None)
         raise RuntimeError("scheduler exploded")
 
@@ -449,13 +440,11 @@ async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
     assert _saved_run_metadata(tmp_path)["status"] == "failed"
     assert _points_on_disk(tmp_path) == 1
 
-
 # -- a worker that dies with something that is not an Exception ----------------------------------
 #
 # Textual handles Exception (and cancellation) from a worker thread, nothing else: a
 # KeyboardInterrupt or SystemExit escaping one ends the whole app with no message, and a
 # swallowed CancelledError leaves the page "running" for good.
-
 
 def _log_text(screen: SweepScreen) -> str:
     return " ".join(
@@ -464,11 +453,13 @@ def _log_text(screen: SweepScreen) -> str:
 
 
 @pytest.mark.parametrize("exc_type", [asyncio.CancelledError])
+
+
 @async_test
 async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exc_type: type[BaseException]
 ) -> None:
-    def dying_run_sequence(steps, ctx, *, on_error, on_step):
+    def dying_run_sequence(steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any) -> None:
         for index in range(2):
             on_step(index, 5, steps[index], _result(index), None)
         raise exc_type()
@@ -495,11 +486,13 @@ async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_
 
 
 @pytest.mark.parametrize("exc_type", [SystemExit])
+
+
 @async_test
 async def test_a_capture_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
     monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
 ) -> None:
-    def dying_acquire(mx, trace_num):
+    def dying_acquire(mx: typing.Any, trace_num: int) -> None:
         raise exc_type()
 
     monkeypatch.setattr(sweep_mod, "acquire_trace", dying_acquire)

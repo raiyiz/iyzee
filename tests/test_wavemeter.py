@@ -1,3 +1,4 @@
+import typing
 from typing import Any
 
 import pytest
@@ -16,7 +17,7 @@ def response(body: str, status: int = 200) -> requests.Response:
     return result
 
 
-def raising(failure: BaseException):
+def raising(failure: BaseException) -> typing.Any:
     def fail(*args: Any, **kwargs: Any) -> requests.Response:
         raise failure
 

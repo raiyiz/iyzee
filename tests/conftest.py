@@ -1,4 +1,5 @@
 import sys
+import typing
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from iyzee.tui import logging_support  # noqa: E402 - see sys.path setup above
 
 
 @pytest.fixture(autouse=True)
-def _isolated_log_root(tmp_path, monkeypatch):
+def _isolated_log_root(tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Redirect logging_support.LOG_ROOT to this test's own tmp_path.
 
     Nearly every test in this suite constructs its own ``IyzeeApp()``, and
@@ -28,7 +29,6 @@ def _isolated_log_root(tmp_path, monkeypatch):
     reason to know or care about.
     """
     monkeypatch.setattr(logging_support, "LOG_ROOT", tmp_path / "logs")
-
 
 # -- real-hardware tests ------------------------------------------------------------------
 #
@@ -88,7 +88,6 @@ def pytest_report_header(config: pytest.Config) -> list[str] | None:
     if not config.getoption("--hardware"):
         return None
     from iyzee.config import IP, ConfigError, address
-
     try:
         targets = ", ".join(f"{ip.name.lower()}={address(ip)}" for ip in IP)
     except ConfigError as exc:

@@ -9,6 +9,7 @@ path to catch any schema drift between the writer and this module's reader.
 from __future__ import annotations
 
 import contextlib
+import typing
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -30,7 +31,15 @@ from iyzee.waveform_math import (
 )
 
 
-def _trace(label: str, time, values, *, time_unit="S", value_unit="V", **meta) -> Trace:
+def _trace(
+    label: str,
+    time: typing.Any,
+    values: typing.Any,
+    *,
+    time_unit: str = "S",
+    value_unit: str = "V",
+    **meta: typing.Any,
+) -> Trace:
     return Trace(
         label=label,
         time=np.asarray(time, dtype=np.float64),
@@ -41,7 +50,9 @@ def _trace(label: str, time, values, *, time_unit="S", value_unit="V", **meta) -
     )
 
 
-def _recording(waveforms: list[dict], applied: list[dict] | None = None, **extra) -> Recording:
+def _recording(
+    waveforms: list[dict], applied: list[dict] | None = None, **extra: typing.Any
+) -> Recording:
     """A hand-built Recording matching save_scope_acquisition's schema."""
     arrays: dict[str, np.ndarray] = {}
     manifest_waveforms = []
@@ -63,11 +74,9 @@ def _recording(waveforms: list[dict], applied: list[dict] | None = None, **extra
     }
     return Recording(path=Path("fake.npz"), arrays=arrays, metadata=metadata)
 
-
 # -- traces_from_scope_recording ------------------------------------------------------------
 
-
-def test_scope_recordings_become_traces_with_units_and_applied_settings():
+def test_scope_recordings_become_traces_with_units_and_applied_settings() -> None:
     recording = _recording(
         [
             {
@@ -95,11 +104,9 @@ def test_scope_recordings_become_traces_with_units_and_applied_settings():
     other = Recording(path=Path("fake.npz"), arrays={}, metadata={"kind": "sweep"})
     assert traces_from_scope_recording(other) == []  # not a scope recording: no traces
 
-
 # -- subtract_traces / subtract_background ----------------------------------------------------
 
-
-def test_subtract_traces_is_exact_resamples_and_never_mutates_or_mixes_units():
+def test_subtract_traces_is_exact_resamples_and_never_mutates_or_mixes_units() -> None:
     a = _trace("C1", [0.0, 1.0, 2.0], [5.0, 6.0, 7.0])
     b = _trace("C2", [0.0, 1.0, 2.0], [1.0, 1.0, 1.0])
     a_before, b_before = a.values.copy(), b.values.copy()
@@ -123,7 +130,7 @@ def test_subtract_traces_is_exact_resamples_and_never_mutates_or_mixes_units():
             operation(volts, amps)
 
 
-def test_background_correction_by_region_or_reference_and_its_input_checks():
+def test_background_correction_by_region_or_reference_and_its_input_checks() -> None:
     trace = _trace("C1", [0.0, 1.0, 2.0, 3.0], [10.0, 12.0, 100.0, 100.0])
 
     result = subtract_background(trace, region=(0.0, 1.0))  # mean of [10, 12] == 11
@@ -138,12 +145,14 @@ def test_background_correction_by_region_or_reference_and_its_input_checks():
     dark = _trace("dark", [0.0, 2.0], [0.0, 2.0])  # interpolates to [0, 1, 2]
     np.testing.assert_allclose(subtract_background(flat, reference=dark).values, [10.0, 9.0, 8.0])
 
-    for kwargs in ({}, {"region": (0.0, 1.0), "reference": dark}):  # exactly one mode
-        with pytest.raises(ValueError, match="exactly one"):
-            subtract_background(flat, **kwargs)
+    # Exactly one background selection mode is required.
+    with pytest.raises(ValueError, match="exactly one"):
+        subtract_background(flat)
+    with pytest.raises(ValueError, match="exactly one"):
+        subtract_background(flat, region=(0.0, 1.0), reference=dark)
 
 
-def test_scale_trace_is_affine_defaults_to_identity_and_refuses_bad_scales():
+def test_scale_trace_is_affine_defaults_to_identity_and_refuses_bad_scales() -> None:
     trace = _trace("C1", [0.0, 1.0, 2.0], [1.0, 2.0, 3.0])
 
     result = scale_trace(trace, x_scale=2.0, x_offset=1.0, y_scale=1000.0, y_offset=-5.0)
@@ -155,20 +164,17 @@ def test_scale_trace_is_affine_defaults_to_identity_and_refuses_bad_scales():
     np.testing.assert_array_equal(same.values, trace.values)
     assert same.label == trace.label  # no transform applied -> no change noted
 
-    for kwargs, message in (
-        ({"x_scale": 0.0}, "nonzero"),
-        ({"y_scale": 0.0}, "nonzero"),
-        ({"x_scale": float("nan")}, "finite"),
-    ):
-        with pytest.raises(ValueError, match=message):
-            scale_trace(trace, **kwargs)
-
+    with pytest.raises(ValueError, match="nonzero"):
+        scale_trace(trace, x_scale=0.0)
+    with pytest.raises(ValueError, match="nonzero"):
+        scale_trace(trace, y_scale=0.0)
+    with pytest.raises(ValueError, match="finite"):
+        scale_trace(trace, x_scale=float("nan"))
 
 # -- figures -----------------------------------------------------------------------------------
 
-
 @contextlib.contextmanager
-def _figure(traces, **kwargs):
+def _figure(traces: typing.Any, **kwargs: typing.Any) -> typing.Iterator[typing.Any]:
     """A built waveform figure, always closed afterwards."""
     fig = build_waveform_figure(traces, **kwargs)
     try:
@@ -177,7 +183,7 @@ def _figure(traces, **kwargs):
         plt.close(fig)
 
 
-def test_waveform_figures_label_lines_and_axes_without_guessing_units():
+def test_waveform_figures_label_lines_and_axes_without_guessing_units() -> None:
     traces = [
         _trace("C1", [0.0, 1.0], [1.0, 2.0], volts_per_div=0.5, coupling="D1M"),
         _trace("C2", [0.0, 1.0], [3.0, 4.0]),
@@ -200,7 +206,7 @@ def test_waveform_figures_label_lines_and_axes_without_guessing_units():
         assert len(fig.axes[0].lines) == 0
 
 
-def test_save_waveform_figure_writes_a_real_png_and_closes_the_figure(tmp_path):
+def test_save_waveform_figure_writes_a_real_png_and_closes_the_figure(tmp_path: typing.Any) -> None:
     traces = [_trace("C1", [0.0, 1.0, 2.0], [1.0, 2.0, 1.0])]
     open_before = len(plt.get_fignums())
 
@@ -212,7 +218,7 @@ def test_save_waveform_figure_writes_a_real_png_and_closes_the_figure(tmp_path):
     assert len(plt.get_fignums()) == open_before  # no leaked figures after repeated saves
 
 
-def test_end_to_end_acquire_save_load_and_subtract(tmp_path):
+def test_end_to_end_acquire_save_load_and_subtract(tmp_path: typing.Any) -> None:
     scope = FakeScope()
 
     recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
