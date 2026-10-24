@@ -226,10 +226,10 @@ class FrequencyStep(SweepStep):
 SWEEP_KINDS: dict[str, type[SweepStep]] = {c.kind: c for c in (BandwidthStep, FrequencyStep)}
 
 
-@dataclass(frozen=True)
 StepT = TypeVar("StepT", bound=SweepStep)
 
 
+@dataclass(frozen=True)
 class Sweep(Generic[StepT]):
     """A sweep ready to run: its points and the analyzer setup they need."""
 
@@ -250,7 +250,7 @@ class ConfigOptions(TypedDict, total=False):
     res_bw_hz: float
 
 
-def bandwidth_sweep_steps(rbw_values_hz: Sequence[float] | None=None) -> list[BandwidthStep]:
+def bandwidth_sweep_steps(rbw_values_hz: Sequence[float] | None = None) -> list[BandwidthStep]:
     """Build the standard 20 kHz-stepped RBW sweep, or a custom one."""
     if rbw_values_hz is None:
         rbw_values_hz = [2 * i * 1e4 for i in range(1, 20)]
@@ -286,7 +286,9 @@ def frequency_sweep_config(
     return AnalyzerConfig(1.5e6, 0, 150, sweep_duration_ms, res_bw_hz)
 
 
-def build_bandwidth_sweep(rbw_values_hz: Sequence[float] | None=None, **config: Unpack[ConfigOptions]) -> Sweep:
+def build_bandwidth_sweep(
+    rbw_values_hz: Sequence[float] | None = None, **config: Unpack[ConfigOptions]
+) -> Sweep[BandwidthStep]:
     """Build an RBW sweep and the analyzer configuration it needs."""
     return Sweep(
         "bandwidth", bandwidth_sweep_steps(rbw_values_hz), bandwidth_sweep_config(**config)
@@ -311,10 +313,10 @@ def build_frequency_sweep(
 
 
 def run_sweep(
-    mx: KeysightMXA,
-    sweep: Sweep,
+    mx: Analyzer,
+    sweep: Sweep[StepT],
     *,
-    shutter: ShutterControl | None = None,
+    shutter: Shutter | None = None,
     wavemeter: Wavemeter | None = None,
     on_error: str = "raise",
 ) -> list[StepResult]:
