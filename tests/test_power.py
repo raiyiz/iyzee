@@ -1,4 +1,3 @@
-
 import pytest
 
 from iyzee import IP, SHUTTER_CHANNEL_DEFAULT
