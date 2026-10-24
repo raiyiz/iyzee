@@ -381,7 +381,7 @@ def difference_values_many(
     ]
 
 
-def build_figure(results: list[StepResult]):
+def build_figure(results: list[StepResult]) -> Any:
     """Build (but do not display) the squeezing-minus-shot-noise figure.
 
     Split out of :func:`multiplot` so non-interactive callers — saving to
