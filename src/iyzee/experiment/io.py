@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import numpy as np
 
 from ..config import data_root
@@ -381,7 +382,7 @@ def difference_values_many(
     ]
 
 
-def build_figure(results: list[StepResult]) -> Any:
+def build_figure(results: list[StepResult]) -> Figure:
     """Build (but do not display) the squeezing-minus-shot-noise figure.
 
     Split out of :func:`multiplot` so non-interactive callers — saving to
