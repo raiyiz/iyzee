@@ -11,16 +11,25 @@ runs any of them. A new axis is one subclass, those three functions and an entry
 
 from __future__ import annotations
 
+import logging
 import time
-import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar, TypedDict, Unpack
 
 from ..devices.mxa import KeysightMXA
-from ..devices.power import ShutterControl
+from ..devices.power import ShutterControl, ShutterError
 from ..devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
-from .core import ExperimentContext, StepResult, run_sequence
+from .core import (
+    AcquisitionError,
+    ExperimentContext,
+    RunRecord,
+    StepResult,
+    SweepResults,
+    run_sequence,
+)
+
+log = logging.getLogger("iyzee.experiment")
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
@@ -45,8 +54,17 @@ class AnalyzerConfig:
 
 
 def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
-    """Configure an already-owned MXA for a measurement procedure."""
+    """Configure an already-owned MXA for a measurement procedure.
+
+    The analyzer does not refuse a setting it dislikes: it queues an error and keeps the old
+    one. So errors left from before are discarded first, and any queued by this setup raise
+    :class:`~iyzee.devices.base.InstrumentError` rather than letting the run start on
+    settings that are not the ones recorded.
+    """
     config = config or AnalyzerConfig()
+
+    if stale := mx.get_errors():
+        log.warning("discarding %d analyzer error(s) queued before setup: %s", len(stale), stale)
 
     mx.set_center_freq(config.center_hz)
     mx.set_span(config.span_hz)
@@ -62,17 +80,56 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
         mx.set_trace_display(trace, True)
         mx.set_trace_mode(trace, "AVER")
 
+    mx.check_errors("configuring the analyzer")
     return mx
 
 
 def acquire_trace(mx, trace_num):
-    """Acquire one trace and return its data."""
+    """Acquire one trace and return its data.
+
+    Raises :class:`AcquisitionError` if the analyzer does not report the sweep complete in
+    time: reading the trace then would return partial or stale data that looks valid.
+    """
     mx.set_trace_update(trace_num, True)
     try:
-        mx.single_sweep_wait()
+        if not mx.single_sweep_wait():
+            raise AcquisitionError(
+                f"trace {trace_num}: the analyzer did not report its sweep complete in time"
+            )
         return mx.get_trace_data(trace_num=trace_num, binary=False)
     finally:
         mx.set_trace_update(trace_num, False)
+
+
+def check_shutter_ready(shutter: Any | None) -> None:
+    """Fail before a run if the shutter cannot open (the supply's master output is off).
+
+    Without this every point of a run would be taken with the light path closed and
+    recorded as squeezing. ``None`` (a sweep without a shutter) always passes.
+    """
+    if shutter is not None and not shutter.master_output_on():
+        raise AcquisitionError(
+            "the power supply's master output is off, so the shutter cannot open; "
+            "switch it on (Power page) and start again"
+        )
+
+
+def _open_shutter(shutter: Any) -> None:
+    """Open the shutter and confirm with the supply that it is really powered."""
+    shutter.open()
+    if not shutter.is_open():
+        raise AcquisitionError(
+            "the shutter was told to open but the supply does not report it powered "
+            "(is the master output on?)"
+        )
+
+
+def _close_shutter(shutter: Any) -> None:
+    """Close the shutter and confirm it (see ``ShutterControl.close_verified``)."""
+    try:
+        shutter.close_verified()
+    except ShutterError as exc:
+        raise AcquisitionError(str(exc)) from exc
 
 
 def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
@@ -80,15 +137,17 @@ def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
 
     A ``shutter`` is open only around the squeezing acquisition and is closed again (in a
     ``finally``) before the shot-noise reference, which must not include the squeezed-light
-    path. Without one both traces are taken as the setup stands.
+    path. Both transitions are confirmed with the supply, and a shutter that did not open
+    or close raises :class:`AcquisitionError`. Without a shutter both traces are taken as
+    the setup stands.
     """
     try:
         if shutter is not None:
-            shutter.open()
+            _open_shutter(shutter)
         squeezing = acquire_trace(mx, TRACE_SQZ)
     finally:
         if shutter is not None:
-            shutter.close()
+            _close_shutter(shutter)
     return {"squeezing": squeezing, "shot_noise": acquire_trace(mx, TRACE_SHOT)}
 
 
@@ -135,8 +194,19 @@ class SweepStep:
             )
         uses_shutter = "shutter" in self.requires
         meta = self.apply(ctx)
+        # What the analyzer is really using, not what was asked for: it rounds (an RBW), and
+        # a setting it rejected only shows in its error queue. Checked before the traces so
+        # a rejected setting fails the point instead of being measured under the old one.
+        actual = ctx.mx.read_back()
+        ctx.mx.check_errors(f"setting up {self.label}")
+        meta["analyzer"] = actual
+        self.verify(actual)
         traces = acquire_pair(ctx.mx, ctx.shutter if uses_shutter else None)
+        ctx.mx.check_errors(f"measuring {self.label}")
         return StepResult(self.label, self.x_value, self.x_unit, traces, meta)
+
+    def verify(self, actual: dict[str, Any]) -> None:
+        """Compare what the analyzer reports using with this point's request (default: nothing)."""
 
 
 @dataclass
@@ -158,6 +228,17 @@ class BandwidthStep(SweepStep):
         ctx.mx.set_rbw(self.rbw_hz)
         ctx.mx.set_vbw(self.vbw_hz, auto=False)
         return {"rbw_hz": self.rbw_hz, "vbw_hz": self.vbw_hz}
+
+    def verify(self, actual: dict[str, Any]) -> None:
+        """The analyzer rounds a bandwidth to one it has; say so when that is more than 1 %."""
+        got = actual.get("rbw_hz")
+        if isinstance(got, float) and abs(got - self.rbw_hz) > 0.01 * self.rbw_hz:
+            log.warning(
+                "%s: asked for RBW %g Hz, the analyzer is using %g Hz (see meta['analyzer'])",
+                self.label,
+                self.rbw_hz,
+                got,
+            )
 
 
 @dataclass
@@ -283,22 +364,31 @@ def run_sweep(
     shutter: ShutterControl | None = None,
     wavemeter: Wavemeter | None = None,
     on_error: str = "raise",
-) -> list[StepResult]:
-    """Configure the caller-owned MXA, build one run context, and run ``sweep``."""
+) -> SweepResults:
+    """Configure the caller-owned MXA, build one run context, and run ``sweep``.
+
+    The returned list carries the run's :class:`RunRecord` (``results.record``: id, the
+    analyzer configuration, how it ended), and ``save_step_results`` saves it with the data,
+    so a scripted run is as self-describing as one made in the TUI.
+    """
+    check_shutter_ready(shutter)
     prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), sweep.config)
+    record = RunRecord(config=asdict(sweep.config))
     ctx = ExperimentContext(
         mx=mx,
-        run_id=uuid.uuid4().hex[:8],
+        run_id=record.run_id,
         shutter=shutter,
-        config=asdict(sweep.config),
+        config=record.config,
         wavemeter=wavemeter,
     )
-    return run_sequence(sweep.steps, ctx, on_error=on_error)
+    done = run_sequence(sweep.steps, ctx, on_error=on_error, on_step=record.on_step)
+    record.finish()
+    return SweepResults(done, record=record)
 
 
 def run_bandwidth_sweep(
     mx, rbw_values_hz=None, *, on_error: str = "raise", **config: Unpack[ConfigOptions]
-) -> list[StepResult]:
+) -> SweepResults:
     """Measure squeezing/shot-noise traces using the caller-owned MXA."""
     return run_sweep(mx, build_bandwidth_sweep(rbw_values_hz, **config), on_error=on_error)
 
@@ -310,7 +400,7 @@ def run_frequency_sweep(
     wavemeter: Wavemeter | None = None,
     on_error: str = "raise",
     **kwargs: Any,
-) -> list[StepResult]:
+) -> SweepResults:
     """Measure squeezing/shot-noise traces using caller-owned devices.
 
     ``wavemeter`` defaults to a client for the configured server; everything else after

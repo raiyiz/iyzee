@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
+import types
 from typing import Any, cast
 
 import pytest
@@ -134,6 +135,10 @@ class _FakePsuDevice:
     def disable_output(self, channel: int) -> None:
         self.commands.append(("off", (channel,)))
 
+    def retrieve_state(self, channels: list[int]) -> Any:
+        # What the supply reports once the channel has been switched off: not live.
+        return types.SimpleNamespace(is_live=lambda channel: False, general_output=True)
+
 
 class _FakePsuHandle:
     def __init__(self, device: _FakePsuDevice | None) -> None:
@@ -169,6 +174,110 @@ def test_shutter_handle_needs_a_connected_psu_and_never_touches_a_closed_one() -
     psu.commands.clear()
     handle.disconnect()
     assert psu.commands == []
+
+
+def test_the_proxy_forwards_attribute_writes_to_the_device_and_guards_the_raw_resource() -> None:
+    class Resource:
+        def __init__(self) -> None:
+            self.timeout = 5000
+            self.writes: list[tuple[str, bool]] = []
+
+        def write(self, command: str) -> None:
+            self.writes.append((command, lock_state["held"]))
+
+    class Device:
+        def __init__(self) -> None:
+            self.timeout_ms = 5000
+            self.instrument = Resource()
+
+    lock_state = {"held": False}
+
+    class SpyLock:
+        def __enter__(self) -> None:
+            lock_state["held"] = True
+
+        def __exit__(self, *exc: object) -> None:
+            lock_state["held"] = False
+
+    device = Device()
+    proxy = LockedProxy(device, SpyLock())
+
+    proxy.timeout_ms = 20000
+    assert device.timeout_ms == 20000 and proxy.timeout_ms == 20000  # one truth, not two
+
+    proxy.instrument.write("INIT:IMM")  # was: the raw resource, no lock held
+    assert device.instrument.writes == [("INIT:IMM", True)]
+    proxy.instrument.timeout = 1000
+    assert device.instrument.timeout == 1000
+
+
+class _SafeShutter:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.closed = 0
+
+    def close_verified(self) -> None:
+        if self.error is not None:
+            raise self.error
+        self.closed += 1
+
+
+class _SafeHandle:
+    def __init__(self, shutter: _SafeShutter | None) -> None:
+        self.device = shutter
+        self.lock = threading.RLock()
+
+
+def test_safe_state_closes_the_shutter_and_says_what_happened() -> None:
+    from iyzee.devices.handles import put_in_safe_state
+
+    shutter = _SafeShutter()
+    assert put_in_safe_state({"shutter": _SafeHandle(shutter)}) == {
+        "shutter": "closed (confirmed by the supply)"
+    }
+    assert shutter.closed == 1
+
+    assert "not connected" in put_in_safe_state({})["shutter"]
+    assert "not connected" in put_in_safe_state({"shutter": _SafeHandle(None)})["shutter"]
+
+
+def test_safe_state_reports_a_shutter_it_could_not_close_instead_of_raising() -> None:
+    from iyzee.devices.handles import put_in_safe_state
+
+    handle = _SafeHandle(_SafeShutter(RuntimeError("still powered after close")))
+    report = put_in_safe_state({"shutter": handle})["shutter"]
+    assert report.startswith("NOT closed") and "still powered after close" in report
+    acquired: list[bool] = []  # an RLock re-enters for its owner, so ask from another thread
+    other = threading.Thread(target=lambda: acquired.append(handle.lock.acquire(blocking=False)))
+    other.start()
+    other.join()
+    assert acquired == [True]  # the lock was released
+
+
+def test_safe_state_does_not_wait_forever_on_a_busy_supply_unless_forced() -> None:
+    from iyzee.devices.handles import put_in_safe_state
+
+    shutter = _SafeShutter()
+    handle = _SafeHandle(shutter)
+    held, release = threading.Event(), threading.Event()
+
+    def sweep_holding_the_supply() -> None:
+        with handle.lock:
+            held.set()
+            release.wait(5)
+
+    worker = threading.Thread(target=sweep_holding_the_supply)
+    worker.start()
+    try:
+        held.wait(5)
+        busy = put_in_safe_state({"shutter": handle}, timeout=0.05)["shutter"]
+        assert busy.startswith("NOT closed") and "busy" in busy and shutter.closed == 0
+
+        forced = put_in_safe_state({"shutter": handle}, timeout=0.05, force=True)["shutter"]
+        assert forced.startswith("closed") and shutter.closed == 1
+    finally:
+        release.set()
+        worker.join()
 
 
 # -- WavemeterHandle ----------------------------------------------------------
@@ -250,6 +359,20 @@ def test_scope_handle_identifies_the_scope_reports_a_silent_one_and_follows_its_
         silent.probe()
 
     assert instruments_mod._LockedHandle().alive is True  # handles that cannot tell report alive
+
+
+def test_a_visa_handle_reports_a_link_its_driver_dropped_as_lost() -> None:
+    class Device:
+        connected = True
+
+    device = Device()
+    handle = instruments_mod._VisaHandle(device)
+    assert handle.alive
+
+    device.connected = False  # e.g. the driver dropped it after a failed exchange
+    assert not handle.alive
+
+    assert instruments_mod._VisaHandle(object()).alive  # a device that cannot tell: alive
 
 
 # -- registry ----------------------------------------------------------

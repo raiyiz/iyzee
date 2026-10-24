@@ -9,12 +9,15 @@ machinery rather than hand-written loops.
 """
 
 from .core import (
+    AcquisitionError,
     ExperimentContext,
     RunRecord,
     Step,
     StepCallback,
     StepFailure,
     StepResult,
+    SweepResults,
+    TooManyFailures,
     run_sequence,
 )
 from .io import (
@@ -45,6 +48,7 @@ from .procedures import (
     bandwidth_sweep_steps,
     build_bandwidth_sweep,
     build_frequency_sweep,
+    check_shutter_ready,
     frequency_sweep_steps,
     prepare_analyzer,
     run_bandwidth_sweep,
@@ -58,6 +62,7 @@ __all__ = [
     "SWEEP_KINDS",
     "TRACE_SHOT",
     "TRACE_SQZ",
+    "AcquisitionError",
     "AnalyzerConfig",
     "BandwidthStep",
     "ExperimentContext",
@@ -69,13 +74,16 @@ __all__ = [
     "StepFailure",
     "StepResult",
     "Sweep",
+    "SweepResults",
     "SweepStep",
+    "TooManyFailures",
     "acquire_pair",
     "acquire_trace",
     "bandwidth_sweep_steps",
     "build_bandwidth_sweep",
     "build_figure",
     "build_frequency_sweep",
+    "check_shutter_ready",
     "create_dirs",
     "difference_series",
     "difference_series_many",

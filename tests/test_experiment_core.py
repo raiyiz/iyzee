@@ -2,7 +2,12 @@ import logging
 
 import pytest
 
-from iyzee.experiment.core import ExperimentContext, StepResult, run_sequence
+from iyzee.experiment.core import (
+    ExperimentContext,
+    StepResult,
+    TooManyFailures,
+    run_sequence,
+)
 
 
 class RecordingStep:
@@ -35,6 +40,57 @@ def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog):
     assert [r.x_value for r in skipped] == [2]
     with pytest.raises(ValueError):
         run_sequence([], make_ctx(), on_error="bogus")
+
+
+# -- giving up on an instrument that is gone ----------------------------------------------------
+
+
+def _steps(pattern: str) -> list[RecordingStep]:
+    """``"ok"``/``"x"`` per step: a step that fails is ``x``."""
+    return [RecordingStep(f"s{i}", i, fail=c == "x") for i, c in enumerate(pattern)]
+
+
+def test_skip_mode_gives_up_after_consecutive_failures_and_keeps_what_was_measured():
+    seen: list[tuple[int, bool]] = []
+    steps = _steps("oo" + "xxx" + "oo")  # 2 good points, then 3 failures in a row
+    with pytest.raises(TooManyFailures, match=r"3 failed steps in a row.*s4 failed") as caught:
+        run_sequence(
+            steps,
+            make_ctx(),
+            on_error="skip",
+            max_consecutive_failures=3,
+            on_step=lambda i, n, step, result, error: seen.append((i, error is not None)),
+        )
+
+    assert [r.x_value for r in caught.value.results] == [0, 1]  # the good points are not lost
+    assert caught.value.count == 3
+    assert seen == [(0, False), (1, False), (2, True), (3, True), (4, True)]  # all reported
+    # and the two steps after the failures were never attempted
+    assert [i for i, _ in seen][-1] == 4
+
+
+def test_a_success_resets_the_count_so_scattered_failures_do_not_trip_it():
+    results = run_sequence(
+        _steps("xxoxxoxx"), make_ctx(), on_error="skip", max_consecutive_failures=3
+    )
+    assert [r.x_value for r in results] == [2, 5]
+
+
+def test_the_limit_can_be_switched_off_and_does_not_apply_to_raise_mode():
+    results = run_sequence(
+        _steps("x" * 20 + "o"), make_ctx(), on_error="skip", max_consecutive_failures=None
+    )
+    assert [r.x_value for r in results] == [20]
+    with pytest.raises(RuntimeError, match="s0 failed") as caught:  # still the first failure
+        run_sequence(_steps("xx"), make_ctx(), on_error="raise", max_consecutive_failures=1)
+    assert not isinstance(caught.value, TooManyFailures)
+
+
+def test_the_default_gives_up_after_five_and_a_nonsense_limit_is_refused():
+    with pytest.raises(TooManyFailures, match="5 failed steps"):
+        run_sequence(_steps("x" * 9), make_ctx(), on_error="skip")
+    with pytest.raises(ValueError, match="at least 1"):
+        run_sequence(_steps("o"), make_ctx(), on_error="skip", max_consecutive_failures=0)
 
 
 # -- RunRecord: how a run ended, saved beside its data -----------------------------------------

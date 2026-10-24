@@ -50,7 +50,8 @@ from iyzee.experiment import create_dirs, run_bandwidth_sweep, save_step_results
 with KeysightMXA() as mx:  # connects on entry, closes on exit
     results = run_bandwidth_sweep(mx)  # a list of StepResult, one per RBW
 
-save_step_results(results, create_dirs())  # the same .npz + .json pair the TUI writes
+save_step_results(results, create_dirs())  # the same .npz + .json pair the TUI writes,
+# including the run's configuration and how it ended (results.record)
 ~~~
 
 The [guide](docs/chapters/tui-and-devices.typ) compares the two ways of working, and `docs/examples/` has scripts for loading and checking saved recordings.

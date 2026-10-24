@@ -21,6 +21,7 @@ import functools
 import logging
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
@@ -126,6 +127,13 @@ class _VisaHandle(_LockedHandle):
     def disconnect(self) -> None:
         self._device.close()
 
+    @property
+    def alive(self) -> bool:
+        # The driver drops its link when an exchange fails (see BaseDevice), so a dead or
+        # power-cycled instrument is reported as lost instead of "connected" until the next
+        # command fails.
+        return bool(getattr(self._device, "connected", True))
+
     def probe(self) -> str:
         idn = getattr(self._device, "idn", None)
         if idn is not None:
@@ -177,7 +185,7 @@ class ShutterHandle(_LockedHandle):
         """Close the shutter (if the PSU can still be reached); never closes the PSU."""
         shutter, self._shutter = self._shutter, None
         if shutter is not None and shutter.psu.instrument is not None:
-            shutter.close()
+            shutter.close_verified()
 
     def probe(self) -> str:
         return f"shutter ready on CH{self._chan}"
@@ -303,9 +311,13 @@ class LockedProxy:
     def __getattr__(self, name: str) -> Any:
         target = object.__getattribute__(self, "_target")
         value = getattr(target, name)
+        lock = object.__getattribute__(self, "_lock")
+        if name == "instrument" and value is not None:
+            # The raw VISA resource would let a console cell talk to the instrument with no
+            # lock held; hand it out behind the same lock as everything else.
+            return LockedProxy(value, lock)
         if not callable(value):
             return value
-        lock = object.__getattribute__(self, "_lock")
 
         @functools.wraps(value)  # keep name/signature/docstring: `lab.mx.method?` must still help
         def _locked_call(*args: Any, **kwargs: Any) -> Any:
@@ -314,8 +326,46 @@ class LockedProxy:
 
         return _locked_call
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Without this, ``mx.timeout_ms = 20000`` set the attribute on the proxy itself, and
+        # the device kept its old value while the proxy read back the new one.
+        with object.__getattribute__(self, "_lock"):
+            setattr(object.__getattribute__(self, "_target"), name, value)
+
     def __dir__(self) -> list[str]:
         return dir(object.__getattribute__(self, "_target"))
 
     def __repr__(self) -> str:
         return repr(object.__getattribute__(self, "_target"))
+
+
+def put_in_safe_state(
+    handles: Mapping[str, Any], *, timeout: float = 5.0, force: bool = False
+) -> dict[str, str]:
+    """Put the hardware in its safe state: the shutter closed, confirmed by the supply.
+
+    For when something went wrong and the light path must be known closed (the console's
+    ``lab.safe_state()``). It takes the supply's lock so it cannot interleave with a sweep's
+    commands; if the lock is not free within ``timeout`` seconds it reports that and does
+    nothing, unless ``force`` is set, which closes without it (the sweep's own commands may
+    then interleave, so abort the sweep first where you can). Never raises: every outcome is
+    in the returned text, one entry per instrument touched.
+    """
+    handle = handles.get("shutter")
+    shutter = getattr(handle, "device", None)
+    if handle is None or shutter is None:
+        return {"shutter": "not connected: nothing to close from here"}
+    got_lock = handle.lock.acquire(timeout=timeout)
+    if not got_lock and not force:
+        return {
+            "shutter": f"NOT closed: the supply stayed busy for {timeout:g} s (a sweep?); "
+            "abort it, or call safe_state(force=True)"
+        }
+    try:
+        shutter.close_verified()
+    except Exception as exc:  # noqa: BLE001 - the answer is the report, whatever went wrong
+        return {"shutter": f"NOT closed: {exc}"}
+    finally:
+        if got_lock:
+            handle.lock.release()
+    return {"shutter": "closed (confirmed by the supply)"}

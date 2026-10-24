@@ -48,9 +48,11 @@ from ...experiment import (
     Step,
     StepResult,
     Sweep,
+    TooManyFailures,
     acquire_trace,
     build_bandwidth_sweep,
     build_frequency_sweep,
+    check_shutter_ready,
     create_dirs,
     difference_series,
     prepare_analyzer,
@@ -353,9 +355,10 @@ class SweepScreen(Page):
                 stack.enter_context(lock)
 
             try:
+                check_shutter_ready(devices.get("shutter"))
                 prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
             except Exception as exc:
-                log.exception("sweep: failed to configure analyzer")
+                log.exception("sweep: setup failed (shutter or analyzer)")
                 self._ui(self._finish, kind, aborted=False, setup_error=exc)
                 return
 
@@ -404,10 +407,14 @@ class SweepScreen(Page):
                     raise SweepAborted()
 
             aborted = failed = False
+            gave_up: TooManyFailures | None = None
             try:
                 run_sequence(steps, ctx, on_error="skip", on_step=on_step)
             except SweepAborted:
                 aborted = True
+            except TooManyFailures as exc:  # an instrument that is gone, not bad points
+                log.error("sweep: %s", exc)
+                failed, gave_up = True, exc
             except Exception:  # last-resort net; specific errors are
                 # already handled per-step by run_sequence(on_error="skip") plus
                 # on_step above, so anything reaching here is unexpected.
@@ -420,7 +427,7 @@ class SweepScreen(Page):
             if self._collected:
                 self._checkpoint(kind)
 
-        self._ui(self._finish, kind, aborted=aborted, setup_error=None)
+        self._ui(self._finish, kind, aborted=aborted, setup_error=None, died=gave_up)
 
     def _on_step(
         self,
@@ -574,11 +581,9 @@ class SweepScreen(Page):
         log = self.query_one("#sweep-log", RichLog)
 
         if setup_error is not None:
-            log.write(
-                f"[red]Could not configure the analyzer: {escape(one_line(setup_error))}[/red]"
-            )
+            log.write(f"[red]Could not start the sweep: {escape(one_line(setup_error))}[/red]")
             self.notify(
-                f"Analyzer setup failed: {one_line(setup_error)}", severity="error", markup=False
+                f"Sweep setup failed: {one_line(setup_error)}", severity="error", markup=False
             )
             return
 

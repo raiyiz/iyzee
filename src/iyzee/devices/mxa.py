@@ -1,9 +1,18 @@
+import logging
 import time
 
 import pyvisa
+from pyvisa.constants import StatusCode
 
 from ..config import IP, address
-from .base import BaseDevice
+from .base import BaseDevice, InstrumentError
+
+log = logging.getLogger("iyzee.devices")
+
+#: Most entries ``SYST:ERR?`` is asked for before the queue is declared not to drain.
+ERROR_QUEUE_LIMIT = 100
+#: VISA timeout for the check that proves the link is back in step after a timeout.
+RESYNC_TIMEOUT_MS = 2_000
 
 
 class KeysightMXA(BaseDevice):
@@ -27,14 +36,10 @@ class KeysightMXA(BaseDevice):
         self.close()
 
     def write(self, cmd: str):
-        if self.instrument is None:
-            raise RuntimeError("Instrument not connected")
-        self.instrument.write(cmd)
+        self._exchange(lambda inst: inst.write(cmd))
 
     def query(self, cmd: str) -> str:
-        if self.instrument is None:
-            raise RuntimeError("Instrument not connected")
-        return self.instrument.query(cmd)
+        return self._exchange(lambda inst: inst.query(cmd))
 
     def query_binary(
         self, cmd: str, datatype: str = "f", is_big_endian: bool = True
@@ -43,10 +48,10 @@ class KeysightMXA(BaseDevice):
         Query binary IEEE 488.2 block data.
         datatype='f' (float32) or 'd' (float64).
         """
-        if self.instrument is None:
-            raise RuntimeError("Instrument not connected")
-        return self.instrument.query_binary_values(
-            cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
+        return self._exchange(
+            lambda inst: inst.query_binary_values(
+                cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
+            )
         )
 
     # ------------------------------------------------------------------
@@ -61,28 +66,92 @@ class KeysightMXA(BaseDevice):
         self.write("*CLS")
 
     def wait_opc(self, timeout_sec: float = 30.0) -> bool:
-        """Block until *OPC? explicitly returns 1."""
-        if self.instrument is None:
-            raise RuntimeError("Instrument not connected")
-        old_timeout = self.instrument.timeout
-        self.instrument.timeout = int(timeout_sec * 1000)
-        try:
-            response = self.query("*OPC?").strip()
-            return response == "1"
-        except pyvisa.errors.VisaIOError:
-            return False
-        finally:
-            self.instrument.timeout = old_timeout
+        """Block until *OPC? returns 1; False if it did not within ``timeout_sec``.
 
-    def get_errors(self) -> list[str]:
-        """Drain the SCPI error queue."""
-        errs = []
-        while True:
-            msg = self.query("SYST:ERR?")
-            if msg.startswith(("+0,", "0,")):
-                break
-            errs.append(msg)
-        return errs
+        A timeout leaves the ``*OPC?`` answer pending, which would be read as the answer to
+        the next query. So after one the link is resynchronised (see :meth:`_resync`) or
+        dropped before this returns False. Any other I/O failure drops the link and raises.
+        """
+        inst = self.instrument
+        if inst is None:
+            raise RuntimeError("Instrument not connected")
+        old_timeout = inst.timeout
+        inst.timeout = int(timeout_sec * 1000)
+        try:
+            try:
+                return str(inst.query("*OPC?")).strip() == "1"
+            except pyvisa.errors.VisaIOError as exc:
+                if exc.error_code != StatusCode.error_timeout:
+                    self._drop()
+                    raise
+                self._resync()
+                return False
+        finally:
+            if self.instrument is inst:  # not if it was dropped meanwhile
+                inst.timeout = old_timeout
+
+    def _resync(self) -> bool:
+        """Prove the link is back in step after a timed-out ``*OPC?``, else drop it.
+
+        Device clear empties the analyzer's input buffer and output queue (this discards the
+        stale answer); ``ABOR`` stops a sweep that is still running, which would otherwise
+        hold up the check; and an ``*OPC?`` that answers ``1`` shows commands and replies
+        pair up again.
+        """
+        inst = self.instrument
+        try:
+            if inst is None:
+                return False
+            inst.clear()
+            inst.write("ABOR")
+            inst.timeout = RESYNC_TIMEOUT_MS
+            if str(inst.query("*OPC?")).strip() == "1":
+                return True
+        except Exception:
+            log.warning(
+                "MXA did not resynchronise after a timeout; dropping the link", exc_info=True
+            )
+        self._drop()
+        return False
+
+    def get_errors(self, limit: int = ERROR_QUEUE_LIMIT) -> list[str]:
+        """Drain the SCPI error queue (oldest first).
+
+        Raises :class:`InstrumentError` if the queue does not report empty within ``limit``
+        entries or a reply is not ``<code>,<message>``: an analyzer answering like that is
+        not one to keep polling.
+        """
+        errors: list[str] = []
+        for _ in range(limit + 1):
+            msg = str(self.query("SYST:ERR?")).strip()
+            try:
+                code = int(msg.split(",", 1)[0])
+            except ValueError:
+                raise InstrumentError(f"unreadable reply to SYST:ERR?: {msg!r}") from None
+            if code == 0:
+                return errors
+            errors.append(msg)
+        raise InstrumentError(f"the error queue did not drain within {limit} entries")
+
+    def check_errors(self, context: str = "") -> None:
+        """Raise :class:`InstrumentError` if the analyzer has queued any error.
+
+        SCPI setters do not fail: a rejected value just queues an error and the instrument
+        carries on with the old setting. This is how a caller finds out.
+        """
+        if errors := self.get_errors():
+            where = f" while {context}" if context else ""
+            raise InstrumentError(f"the analyzer reported {'; '.join(errors)}{where}")
+
+    def read_back(self) -> dict[str, float | str]:
+        """The settings the analyzer is actually using (it may round what was requested)."""
+        return {
+            "rbw_hz": float(self.query("BWID?")),
+            "vbw_hz": float(self.query("BWID:VID?")),
+            "sweep_time_s": float(self.query("SWE:TIME?")),
+            "avg_count": int(float(self.query("AVER:COUN?"))),
+            "avg_type": str(self.query("AVER:TYPE?")).strip(),
+        }
 
     def set_display_update(self, state: bool):
         """Disable display updates to improve remote measurement speed."""

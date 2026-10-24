@@ -71,6 +71,25 @@ def test_the_trace_on_screen_matches_the_frequency_axis(mx: KeysightMXA) -> None
     assert mx.get_errors() == []
 
 
+def test_check_errors_reports_a_command_the_analyzer_rejects(mx: KeysightMXA) -> None:
+    from iyzee.devices.base import InstrumentError
+
+    mx.get_errors()
+    mx.write("IYZEE:NOT:A:COMMAND")  # changes nothing; queues an error such as -113
+    with pytest.raises(InstrumentError, match="analyzer reported"):
+        mx.check_errors("probing")
+    assert mx.get_errors() == []  # and the check drained it
+
+
+def test_read_back_matches_direct_queries(mx: KeysightMXA) -> None:
+    actual = mx.read_back()
+    assert actual["rbw_hz"] == float(mx.query("BWID?"))
+    assert actual["vbw_hz"] == float(mx.query("BWID:VID?"))
+    assert actual["sweep_time_s"] == float(mx.query("SWE:TIME?"))
+    assert actual["avg_type"] in {"RMS", "LOG", "SCAL"}
+    assert mx.get_errors() == []
+
+
 # -- state-changing ---------------------------------------------------------------------------
 
 
@@ -78,8 +97,8 @@ def test_the_trace_on_screen_matches_the_frequency_axis(mx: KeysightMXA) -> None
 def test_prepare_analyzer_is_applied_as_requested(mx: KeysightMXA) -> None:
     """The analyzer ends up configured as asked, and says nothing is wrong about it.
 
-    ``prepare_analyzer`` only writes; this is the read-back and error-queue check it does not
-    do itself. RBW is compared loosely because the analyzer rounds it to a step it has.
+    ``prepare_analyzer`` checks the error queue itself; this also reads every value back
+    independently. RBW is compared loosely because the analyzer rounds it to a step it has.
     """
     config = AnalyzerConfig(
         center_hz=1e6, span_hz=0, avg_count=50, sweep_duration_ms=10, res_bw_hz=24e3
@@ -143,3 +162,29 @@ def test_a_bandwidth_sweep_runs_end_to_end_and_round_trips_to_disk(
     recording = load_recording(path)
     assert recording.arrays["trace_squeezing"].shape == (2, points)
     assert recording.metadata["data_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.actuates
+def test_a_timed_out_wait_never_leaves_a_link_that_is_connected_but_out_of_step(
+    mx: KeysightMXA,
+) -> None:
+    """After an ``*OPC?`` timeout the link is either proved in step or dropped.
+
+    The sweep below takes far longer than the wait, so ``*OPC?`` times out with its answer
+    still pending. A driver that kept using that link would hand the stale ``1`` to the next
+    query. Either outcome of the resync is acceptable; "connected but shifted" is not.
+    """
+    prepare_analyzer(mx, (TRACE_SQZ,), AnalyzerConfig(avg_count=1000, sweep_duration_ms=100))
+    mx.set_trace_update(TRACE_SQZ, True)
+
+    assert mx.single_sweep_wait(timeout_sec=0.5) is False, "a 100 s sweep finished in 0.5 s?"
+
+    if mx.connected:
+        fields = [f.strip() for f in mx.idn().split(",")]
+        assert len(fields) == 4, f"link is out of step: *IDN? answered {fields}"
+        assert mx.query("*OPC?").strip() == "1"
+        assert mx.get_sweep_points() > 0
+    else:
+        mx.connect()  # dropped, which is also correct; reconnect so the restore can run
+    mx.abort_sweep()
+    mx.set_trace_update(TRACE_SQZ, False)

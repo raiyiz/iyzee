@@ -65,7 +65,10 @@ class PSU(BaseDevice):
         return resource
 
     def _query(self, command: str) -> str:
-        return str(self.instrument.query(command)).strip()
+        return str(self._exchange(lambda inst: inst.query(command))).strip()
+
+    def _write(self, command: str) -> None:
+        self._exchange(lambda inst: inst.write(command))
 
     def idn(self) -> str:
         """The supply's identification string (also proves it answers)."""
@@ -102,7 +105,7 @@ class PSU(BaseDevice):
         try:
             states = []
             for number in wanted:
-                self.instrument.write(f"INST:NSEL {number}")
+                self._write(f"INST:NSEL {number}")
                 states.append(
                     ChannelState(
                         channel=number,
@@ -114,30 +117,35 @@ class PSU(BaseDevice):
                     )
                 )
         finally:
-            self.instrument.write(f"INST:NSEL {previously_selected}")
+            if self.connected:  # a failed exchange dropped the link: nothing to restore
+                self._write(f"INST:NSEL {previously_selected}")
         return PSUState(general_output=general, channels=tuple(states))
 
     def set_voltage(self, voltage: float, channel: int):
-        self.instrument.write(f"INST:NSEL {channel}")
-        self.instrument.write(f"VOLT {voltage}")
+        self._write(f"INST:NSEL {channel}")
+        self._write(f"VOLT {voltage}")
 
     def enable_output(self, channel: int):
-        self.instrument.write(f"INST OUT{channel}")
-        self.instrument.write("OUTP:SEL 1")
+        self._write(f"INST OUT{channel}")
+        self._write("OUTP:SEL 1")
 
     def disable_output(self, channel: int):
-        self.instrument.write(f"INST OUT{channel}")
-        self.instrument.write("OUTP:SEL 0")
+        self._write(f"INST OUT{channel}")
+        self._write("OUTP:SEL 0")
 
     def set_current(self, current: float, channel: int):
-        self.instrument.write(f"INST:NSEL {channel}")
-        self.instrument.write(f"CURR {current}")
+        self._write(f"INST:NSEL {channel}")
+        self._write(f"CURR {current}")
 
     def enable_global_output(self):
-        self.instrument.write("OUTP:GEN 1")
+        self._write("OUTP:GEN 1")
 
     def disable_global_output(self):
-        self.instrument.write("OUTP:GEN 0")
+        self._write("OUTP:GEN 0")
+
+
+class ShutterError(RuntimeError):
+    """The shutter is not in the state it was told to be in."""
 
 
 class ShutterControl:
@@ -183,6 +191,39 @@ class ShutterControl:
     def is_open(self) -> bool:
         """Whether the shutter's channel is powered, according to the supply (not our memory)."""
         return self.retrieve_state().is_live(self.chan)
+
+    def close_verified(self) -> None:
+        """Close the shutter and confirm with the supply that it is closed.
+
+        One retry, then :class:`ShutterError`: a shutter that may still be open must never be
+        taken for a closed one. A Ctrl+C that arrives while closing does not abandon it: the
+        close is finished (and confirmed) first, then the interrupt is raised again.
+        """
+        interrupted: KeyboardInterrupt | None = None
+        while True:
+            try:
+                self._close_and_confirm()
+                break
+            except KeyboardInterrupt as exc:  # keep closing; report the interrupt afterwards
+                interrupted = exc
+        if interrupted is not None:
+            raise interrupted
+
+    def _close_and_confirm(self) -> None:
+        self.close()
+        if self.is_open():
+            self.close()
+            if self.is_open():
+                raise ShutterError(
+                    "the shutter is still powered after close; check the supply before continuing"
+                )
+
+    def master_output_on(self) -> bool:
+        """Whether the supply's master output (``OUTP:GEN``) is on, according to the supply.
+
+        With it off, arming the channel powers nothing: the shutter cannot open.
+        """
+        return self.retrieve_state().general_output
 
     def open(self):
         self.psu.enable_output(self.chan)

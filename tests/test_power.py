@@ -109,6 +109,7 @@ class FakeHMP:
         self.general = 0
         self.channels = {n: {"VOLT": 0.0, "CURR": 0.1, "SEL": 0} for n in (1, 2, 3, 4)}
         self.overrides = {}
+        self.stuck = set()  # channels whose OUTP:SEL 0 the supply ignores (a relay that sticks)
         self.log = []
         self.read_termination = None
         self.timeout = None
@@ -126,6 +127,8 @@ class FakeHMP:
         elif head in ("VOLT", "CURR"):
             self.channels[self.selected][head] = float(argument)
         elif head == "OUTP:SEL":
+            if int(argument) == 0 and self.selected in self.stuck:
+                return
             self.channels[self.selected]["SEL"] = int(argument)
         elif head == "OUTP:GEN":
             self.general = int(argument)
@@ -261,3 +264,94 @@ def test_the_shutter_reports_open_only_when_the_supply_says_it_is_powered():
     shutter.open()
     shutter.psu.disable_global_output()  # armed, but the master switch cuts the power
     assert shutter.is_open() is False
+
+
+def test_the_shutter_reports_the_master_output_and_whether_it_is_really_live():
+    from iyzee.devices.power import ShutterControl
+
+    supply = FakeHMP()
+    shutter = ShutterControl(_connected_psu(supply), 3)
+
+    assert not shutter.master_output_on()
+    shutter.open()  # armed, but with the master output off nothing is powered
+    assert not shutter.is_open()
+
+    supply.general = 1
+    assert shutter.master_output_on() and shutter.is_open()
+    shutter.close()
+    assert not shutter.is_open()
+
+
+def test_a_real_shutter_on_a_supply_with_its_master_off_fails_the_acquisition(monkeypatch):
+    """End to end on the PSU model: the failure that used to record shot noise as squeezing."""
+    from iyzee.devices.power import ShutterControl
+    from iyzee.experiment import AcquisitionError, acquire_pair, check_shutter_ready
+
+    taken = []
+    monkeypatch.setattr(
+        "iyzee.experiment.procedures.acquire_trace", lambda mx, n: taken.append(n) or [n]
+    )
+    supply = FakeHMP()
+    shutter = ShutterControl(_connected_psu(supply), 3)
+
+    with pytest.raises(AcquisitionError, match="master output is off"):
+        check_shutter_ready(shutter)
+    with pytest.raises(AcquisitionError, match="master output"):
+        acquire_pair(object(), shutter)
+    assert taken == [] and not supply.channels[3]["SEL"]  # nothing measured, left disarmed
+
+    supply.general = 1
+    assert acquire_pair(object(), shutter) == {"squeezing": [1], "shot_noise": [2]}
+    assert not supply.channels[3]["SEL"]
+
+
+def test_close_verified_closes_and_the_supply_confirms_it():
+    from iyzee.devices.power import ShutterControl
+
+    supply = FakeHMP()
+    supply.general = 1
+    shutter = ShutterControl(_connected_psu(supply), 3)
+    shutter.open()
+    assert shutter.is_open()
+
+    shutter.close_verified()
+    assert not shutter.is_open() and supply.channels[3]["SEL"] == 0
+
+
+def test_a_shutter_that_stays_powered_is_retried_once_then_reported():
+    from iyzee.devices.power import ShutterControl, ShutterError
+
+    supply = FakeHMP()
+    supply.general = 1
+    supply.stuck.add(3)
+    shutter = ShutterControl(_connected_psu(supply), 3)
+    shutter.open()
+
+    with pytest.raises(ShutterError, match="still powered after close"):
+        shutter.close_verified()
+    assert supply.log.count("OUTP:SEL 0") == 2  # asked twice, not endlessly
+
+
+def test_a_ctrl_c_while_closing_does_not_abandon_the_close():
+    from iyzee.devices.power import ShutterControl
+
+    supply = FakeHMP()
+    supply.general = 1
+    shutter = ShutterControl(_connected_psu(supply), 3)
+    shutter.open()
+
+    real_write = supply.write
+    interrupts = []
+
+    def write_then_interrupt_once(command):
+        if command == "OUTP:SEL 0" and not interrupts:
+            interrupts.append(command)
+            raise KeyboardInterrupt  # delivered before the close took effect
+        real_write(command)
+
+    supply.write = write_then_interrupt_once
+
+    with pytest.raises(KeyboardInterrupt):  # the interrupt is still reported afterwards...
+        shutter.close_verified()
+    assert supply.channels[3]["SEL"] == 0  # ...but only once the shutter really is closed
+    assert not shutter.is_open()
