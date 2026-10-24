@@ -152,9 +152,10 @@ class FakeScope:
 
     def getDataFloatsDetailed(self, channel: Channel | str, block: str = "DAT1") -> DetailedWaveformData:
         self.calls.append(("getDataFloatsDetailed", channel))
-        if channel in self._fail_channels:
+        key = Channel(channel)
+        if key in self._fail_channels:
             raise RuntimeError(f"{channel} refused to send data")
-        values = self._data[channel]
+        values = self._data[key]
         return {
             "unit": "V",
             "values": np.asarray(values, dtype=np.float64),
@@ -424,7 +425,7 @@ def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_
     with pytest.raises(RuntimeError, match="C1 refused"):
         apply_channel_settings(scope, [_settings(Channel.C1), _settings(Channel.C2)])
     assert all(c[1] == Channel.C1 for c in _set_calls(scope))
-    assert not any(c[0].startswith("get_") for c in scope.calls)  # no read-back after a failure
+    assert not any(isinstance(c[0], str) and c[0].startswith("get_") for c in scope.calls)  # no read-back after a failure
 
 def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_first_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     scope = FakeScope()
@@ -452,12 +453,15 @@ def test_batches_hold_the_driver_lock_throughout(monkeypatch: pytest.MonkeyPatch
     held: list[bool] = []
     original = scope.get_volts_per_div
     lock_owned = lambda: cast(Any, scope.transaction_lock)._is_owned()
-    monkeypatch.setattr(
-        scope,
-        "get_volts_per_div",
-        lambda ch: (held.append(lock_owned()), original(ch))[1],
-    )
-    monkeypatch.setattr(scope, "set_offset", lambda ch, v: held.append(lock_owned()))
+    def read_vdiv(channel: Channel) -> str:
+        held.append(lock_owned())
+        return original(channel)
+
+    def note_offset(channel: Channel, value: float) -> None:
+        held.append(lock_owned())
+
+    monkeypatch.setattr(scope, "get_volts_per_div", read_vdiv)
+    monkeypatch.setattr(scope, "set_offset", note_offset)
 
     apply_channel_settings(scope, [_settings(Channel.C1), _settings(Channel.C2)])
 
@@ -477,11 +481,13 @@ def test_acquisition_failures_raise_and_restore_the_trigger_mode() -> None:
         acquire_scope_recording(FakeScope(fail_hor=True), [Channel.C1, Channel.C2])
 
     class Empty(FakeScope):
-        def getDataFloatsDetailed(self, channel: typing.Any, block: str="DAT1") -> dict[typing.Any, typing.Any]:
+        def getDataFloatsDetailed(
+            self, channel: Channel | str, block: str = "DAT1"
+        ) -> DetailedWaveformData:
             return {
                 "unit": "V",
-                "values": [],
-                "raw_codes": [],
+                "values": np.asarray([], dtype=np.float64),
+                "raw_codes": np.asarray([], dtype=np.int16),
                 "vertical_gain": 1.0,
                 "vertical_offset": 0.0,
             }
