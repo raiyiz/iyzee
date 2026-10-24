@@ -1,8 +1,9 @@
 import sys
-from pathlib import Path
 import typing
+from pathlib import Path
 
 import pytest
+
 
 # The project uses a src layout. Make the `iyzee` package importable (as
 # `iyzee`, `iyzee.devices.mxa`, etc.) even when the package has not been pip-installed,
@@ -11,6 +12,7 @@ src_dir = Path(__file__).parents[1] / "src"
 sys.path.insert(0, str(src_dir))
 
 from iyzee.tui import logging_support  # noqa: E402 - see sys.path setup above
+
 
 @pytest.fixture(autouse=True)
 def _isolated_log_root(tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,7 +85,6 @@ def pytest_report_header(config: pytest.Config) -> list[str] | None:
     if not config.getoption("--hardware"):
         return None
     from iyzee.config import IP, ConfigError, address
-
     try:
         targets = ", ".join(f"{ip.name.lower()}={address(ip)}" for ip in IP)
     except ConfigError as exc:

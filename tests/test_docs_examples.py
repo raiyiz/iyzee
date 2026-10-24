@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import runpy
-from pathlib import Path
 import typing
+from pathlib import Path
 
 import numpy as np
 import pytest
+import runpy
 
 from iyzee.devices.scope import Channel, Coupling, TriggerCoupling, TriggerMode, TriggerSlope
 from iyzee.experiment import StepResult, save_step_results
@@ -18,6 +18,7 @@ from iyzee.scope_workflows import (
     TriggerSettings,
     save_scope_acquisition,
 )
+
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "docs" / "examples"
 
@@ -87,7 +88,6 @@ def test_load_scope_example_reads_what_save_scope_acquisition_wrote(data_dir: ty
 
 def test_detuning_example_reports_distance_to_the_nearest_rubidium_line(data_dir: typing.Any, capsys: typing.Any) -> None:
     from iyzee.devices.wavemeter import Rb_transitions
-
     label, line = next(t for t in Rb_transitions if t[0] == "D1 - Rb87_F22")
     measured = line + 5e-6  # 5 MHz above the line
     results = [
@@ -113,9 +113,8 @@ def test_the_readme_library_snippet_runs(tmp_path: typing.Any, monkeypatch: pyte
     import re
 
     import iyzee.devices.mxa as mxa_module
-    import iyzee.experiment as experiment
     import iyzee.experiment.io as io_module
-
+    import iyzee.experiment as experiment
     readme = (EXAMPLES.parent.parent / "README.md").read_text(encoding="utf-8")
     section = readme.split("### Use it as a library", 1)[1]
     block = re.search(r"~~~python\n(.*?)~~~", section, re.S)

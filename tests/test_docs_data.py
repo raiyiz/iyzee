@@ -8,11 +8,12 @@ be internally consistent with the hyperfine physics the guide describes.
 from __future__ import annotations
 
 import importlib.util
+import typing
 from collections import defaultdict
 from pathlib import Path
-import typing
 
 import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "export_rb_data.py"

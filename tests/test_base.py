@@ -1,9 +1,9 @@
-import typing
 
 import pytest
 import pyvisa
 
 from iyzee import IP, BaseDevice
+
 
 class FakeInstrument:
     def __init__(self) -> None:
@@ -29,11 +29,12 @@ def test_base_device_accepts_injected_resource_manager() -> None:
 
     assert device.rm is resource_manager
     assert resource_manager.open_calls == 0
-    assert getattr(device, "instrument") is None
+    instrument_before_connect = device.instrument
+    assert instrument_before_connect is None
 
     device.connect()
     assert resource_manager.open_calls == 1
-    assert isinstance(device.instrument, FakeInstrument)
+    assert device.instrument is resource_manager.instrument
 
     device.close()
     assert resource_manager.instrument.close_calls == 1

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
 import typing
+from pathlib import Path
 
 import pytest
-from helpers import FakeHandle, async_test, connect_app, notifications, wait_until
 from textual.widgets import ContentSwitcher, DataTable, Input
 
-from iyzee.tui import app as app_mod
+from helpers import FakeHandle, async_test, connect_app, notifications, wait_until
 from iyzee.tui.command_bar import CommandBar, CommandInput
 from iyzee.tui.screens import results as results_mod
+from iyzee.tui import app as app_mod
+
 
 @pytest.fixture(autouse=True)
 def quiet_data_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

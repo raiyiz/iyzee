@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-
 import pytest
 
 from iyzee.tui.commands import Command, CommandError, CommandRegistry, parse_si
+
 
 def make_registry(calls: list[tuple[str, list[str]]]) -> CommandRegistry:
     def record(name: str) -> Callable[[list[str]], str]:

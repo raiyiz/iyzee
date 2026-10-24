@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import typing
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from iyzee.analysis import summarize_scope, summarize_sweep
-from iyzee.experiment import StepResult, load_recording, save_step_results
 from iyzee.experiment.io import Recording
+from iyzee.experiment import StepResult, load_recording, save_step_results
 from iyzee.waveform_math import Trace
+
 
 def _saved_sweep(tmp_path: Path, results: list[StepResult], *, name: str) -> Recording:
     path = save_step_results(results, tmp_path, {"status": "completed"}, name=name)
