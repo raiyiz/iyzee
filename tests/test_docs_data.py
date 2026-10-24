@@ -66,7 +66,9 @@ def test_table_is_ground_offset_plus_excited_offset(export: typing.Any) -> None:
 
 
 @pytest.mark.parametrize(("isotope", "splitting_ghz"), [("85", 3.035732439), ("87", 6.834682611)])
-def test_ground_state_hyperfine_splitting_matches_steck(export: typing.Any, isotope: typing.Any, splitting_ghz: typing.Any) -> None:
+def test_ground_state_hyperfine_splitting_matches_steck(
+    export: typing.Any, isotope: typing.Any, splitting_ghz: typing.Any
+) -> None:
     ground = export.build()["levels_ghz"][isotope]["ground"]
     assert max(ground.values()) - min(ground.values()) == pytest.approx(splitting_ghz, abs=2e-6)
 
