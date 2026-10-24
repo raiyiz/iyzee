@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from typing import ClassVar
+import typing
 
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widget import Widget
 from textual.widgets import Input, Static
-
 
 class CommandInput(Input):
     BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
@@ -35,9 +35,8 @@ class CommandInput(Input):
     def action_history(self, step: int) -> None:
         self.bar.history_step(step)
 
-
 class CommandBar(Horizontal):
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: typing.Any) -> None:
         super().__init__(**kwargs)
         self.history: list[str] = []
         self._position = 0
