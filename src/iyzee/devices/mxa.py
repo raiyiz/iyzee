@@ -14,7 +14,12 @@ class KeysightMXA(BaseDevice):
     triggering synchronization, and binary data transfer.
     """
 
-    def __init__(self, ip: str | None = None, timeout_ms: int = 5_000, resource_manager: typing.Any=None) -> None:
+    def __init__(
+        self,
+        ip: str | None = None,
+        timeout_ms: int = 5_000,
+        resource_manager: typing.Any = None,
+    ) -> None:
         super().__init__(
             ip=ip or address(IP.NOISE_ANALYZER),
             resource_manager=resource_manager,
