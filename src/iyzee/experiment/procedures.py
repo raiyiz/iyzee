@@ -334,7 +334,7 @@ def run_bandwidth_sweep(
     rbw_values_hz: Sequence[float] | None = None,
     *,
     on_error: str = "raise",
-    **config: Unpack[ConfigOptions]
+    **config: Unpack[ConfigOptions],
 ) -> list[StepResult]:
     """Measure squeezing/shot-noise traces using the caller-owned MXA."""
     return run_sweep(mx, build_bandwidth_sweep(rbw_values_hz, **config), on_error=on_error)
