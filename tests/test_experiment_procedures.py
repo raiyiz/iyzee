@@ -1,4 +1,5 @@
 import itertools
+from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Any, Literal, NoReturn
 
@@ -246,7 +247,7 @@ def test_a_frequency_step_names_what_the_context_lacks_and_touches_nothing_witho
 def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkeypatch: pytest.MonkeyPatch) -> None:
     _quiet(monkeypatch)
     prepared: list[tuple[object, AnalyzerConfig]] = []
-    def prepare(analyzer: Analyzer, traces: list[int] | tuple[int, ...], config: AnalyzerConfig | None = None) -> Analyzer:
+    def prepare(analyzer: Analyzer, traces: Sequence[int], config: AnalyzerConfig | None = None) -> Analyzer:
         prepared.append((analyzer, config or AnalyzerConfig()))
         return analyzer
 
