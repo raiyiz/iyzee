@@ -16,16 +16,16 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import typing
 from dataclasses import asdict
 from functools import partial
 from threading import Event
 from time import monotonic
 from typing import TYPE_CHECKING, Any
-import typing
 
 import numpy as np
 from rich.markup import escape
-from textual import work
+from textual_plotext import PlotextPlot
 from textual.app import ComposeResult
 from textual.containers import Grid, Vertical
 from textual.widgets import (
@@ -36,7 +36,7 @@ from textual.widgets import (
     Select,
     Static,
 )
-from textual_plotext import PlotextPlot
+from textual import work
 
 from ...experiment import (
     DEFAULT_SWEEP_DURATION_MS,
@@ -64,9 +64,9 @@ from ..text import one_line
 from ..workers import LastRun
 from .page import FieldError, Page, _field, _positive_float, _positive_int
 
+
 if TYPE_CHECKING:
     from pathlib import Path
-
 log = logging.getLogger("iyzee.tui")
 
 # Upper bound on "Steps" / "Points". Each step is a full analyzer averaging

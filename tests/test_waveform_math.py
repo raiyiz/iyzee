@@ -9,8 +9,8 @@ path to catch any schema drift between the writer and this module's reader.
 from __future__ import annotations
 
 import contextlib
-from pathlib import Path
 import typing
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,6 +29,7 @@ from iyzee.waveform_math import (
     subtract_traces,
     traces_from_scope_recording,
 )
+
 
 def _trace(label: str, time: typing.Any, values: typing.Any, *, time_unit: str="S", value_unit: str="V", **meta: typing.Any) -> Trace:
     return Trace(

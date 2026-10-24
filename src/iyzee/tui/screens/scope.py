@@ -27,17 +27,17 @@ from __future__ import annotations
 
 import logging
 import math
+import typing
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
-import typing
 
 from rich.markup import escape
-from textual import work
+from textual_plotext import PlotextPlot
 from textual.app import ComposeResult
 from textual.containers import Grid, Vertical
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
-from textual_plotext import PlotextPlot
+from textual import work
 
 from ...devices.scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from ...experiment import create_dirs
@@ -57,9 +57,9 @@ from ..plotting import describe_timebase, draw_series, format_si, time_series
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
 
+
 if TYPE_CHECKING:
     from ...devices.handles import InstrumentHandle
-
 log = logging.getLogger("iyzee.tui")
 
 CHANNELS: tuple[Channel, ...] = (Channel.C1, Channel.C2, Channel.C3, Channel.C4)

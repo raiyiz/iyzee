@@ -1,11 +1,12 @@
-from typing import Any
 import typing
+from typing import Any
 
 import pytest
 import requests
 
 import iyzee.devices.wavemeter as wavemeter
 from iyzee.devices.wavemeter import Wavemeter
+
 
 def response(body: str, status: int = 200) -> requests.Response:
     result = requests.Response()

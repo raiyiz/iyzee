@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
 import typing
+from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widget import Widget
 from textual.widgets import Input, Static
+
 
 class CommandInput(Input):
     BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
