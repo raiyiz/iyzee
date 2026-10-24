@@ -44,7 +44,7 @@ class AnalyzerConfig:
     trig_source: str = "IMM"
 
 
-def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
+def prepare_analyzer(mx: KeysightMXA, traces: Sequence[int], config: AnalyzerConfig | None = None) -> KeysightMXA:
     """Configure an already-owned MXA for a measurement procedure."""
     config = config or AnalyzerConfig()
 
@@ -65,7 +65,7 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
     return mx
 
 
-def acquire_trace(mx, trace_num):
+def acquire_trace(mx: KeysightMXA, trace_num: int) -> list[float]:
     """Acquire one trace and return its data."""
     mx.set_trace_update(trace_num, True)
     try:
@@ -216,7 +216,7 @@ class ConfigOptions(TypedDict, total=False):
     res_bw_hz: float
 
 
-def bandwidth_sweep_steps(rbw_values_hz=None) -> list[BandwidthStep]:
+def bandwidth_sweep_steps(rbw_values_hz: Sequence[float] | None=None) -> list[BandwidthStep]:
     """Build the standard 20 kHz-stepped RBW sweep, or a custom one."""
     if rbw_values_hz is None:
         rbw_values_hz = [2 * i * 1e4 for i in range(1, 20)]
@@ -227,7 +227,7 @@ def frequency_sweep_steps(
     laser_center_thz: float = DEFAULT_LASER_CENTER_THZ,
     wavemeter_channel: int = DEFAULT_CHANNEL,
     relax_time_s: float = SETTLE_TIME_S,
-    offsets_thz=None,
+    offsets_thz: Sequence[float] | None=None,
 ) -> list[FrequencyStep]:
     """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
@@ -252,7 +252,7 @@ def frequency_sweep_config(
     return AnalyzerConfig(1.5e6, 0, 150, sweep_duration_ms, res_bw_hz)
 
 
-def build_bandwidth_sweep(rbw_values_hz=None, **config: Unpack[ConfigOptions]) -> Sweep:
+def build_bandwidth_sweep(rbw_values_hz: Sequence[float] | None=None, **config: Unpack[ConfigOptions]) -> Sweep:
     """Build an RBW sweep and the analyzer configuration it needs."""
     return Sweep(
         "bandwidth", bandwidth_sweep_steps(rbw_values_hz), bandwidth_sweep_config(**config)
@@ -262,7 +262,7 @@ def build_bandwidth_sweep(rbw_values_hz=None, **config: Unpack[ConfigOptions]) -
 def build_frequency_sweep(
     laser_center_thz: float = DEFAULT_LASER_CENTER_THZ,
     wavemeter_channel: int = DEFAULT_CHANNEL,
-    offsets_thz=None,
+    offsets_thz: Sequence[float] | None=None,
     *,
     relax_time_s: float = SETTLE_TIME_S,
     **config: Unpack[ConfigOptions],
@@ -277,7 +277,7 @@ def build_frequency_sweep(
 
 
 def run_sweep(
-    mx,
+    mx: KeysightMXA,
     sweep: Sweep,
     *,
     shutter: ShutterControl | None = None,
@@ -297,14 +297,14 @@ def run_sweep(
 
 
 def run_bandwidth_sweep(
-    mx, rbw_values_hz=None, *, on_error: str = "raise", **config: Unpack[ConfigOptions]
+    mx: KeysightMXA, rbw_values_hz: Sequence[float] | None=None, *, on_error: str = "raise", **config: Unpack[ConfigOptions]
 ) -> list[StepResult]:
     """Measure squeezing/shot-noise traces using the caller-owned MXA."""
     return run_sweep(mx, build_bandwidth_sweep(rbw_values_hz, **config), on_error=on_error)
 
 
 def run_frequency_sweep(
-    mx,
+    mx: KeysightMXA,
     shutter: ShutterControl,
     *args: Any,
     wavemeter: Wavemeter | None = None,
