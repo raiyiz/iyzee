@@ -74,7 +74,9 @@ def _recording(
     }
     return Recording(path=Path("fake.npz"), arrays=arrays, metadata=metadata)
 
+
 # -- traces_from_scope_recording ------------------------------------------------------------
+
 
 def test_scope_recordings_become_traces_with_units_and_applied_settings() -> None:
     recording = _recording(
