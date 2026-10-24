@@ -158,7 +158,9 @@ class FakeScope:
             raise RuntimeError("scope did not respond")
         return ("S", 0.0, 1e-6)
 
-    def getDataFloatsDetailed(self, channel: Channel | str, block: str = "DAT1") -> DetailedWaveformData:
+    def getDataFloatsDetailed(
+        self, channel: Channel | str, block: str = "DAT1"
+    ) -> DetailedWaveformData:
         self.calls.append(("getDataFloatsDetailed", channel))
         key = Channel(channel)
         if key in self._fail_channels:
@@ -172,12 +174,14 @@ class FakeScope:
             "vertical_offset": 0.5,
         }
 
+
 def _settings(channel: Channel, **overrides: Any) -> ChannelSettings:
     defaults: dict[str, Any] = dict(
         channel=channel, enabled=True, volts_per_div=0.5, offset=0.0, coupling=Coupling.DC_1M
     )
     defaults.update(overrides)
     return ChannelSettings(**defaults)
+
 
 def test_acquire_scope_recording_retains_calibration_and_statistics() -> None:
     scope = FakeScope()
@@ -213,6 +217,7 @@ def test_acquire_scope_recording_retains_calibration_and_statistics() -> None:
     assert waveform.stats["max_time"] == pytest.approx(2e-6)
     assert waveform.stats["min"] == 1.0
     assert waveform.stats["peak_to_peak"] == 2.0
+
 
 def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path: typing.Any) -> None:
     scope = FakeScope()
@@ -274,6 +279,7 @@ def test_apply_trigger_settings_writes_every_field_or_only_what_changed() -> Non
     assert not any(call[0] == "set_time_per_div" for call in scope.calls)
     apply_trigger_settings(scope, replace(baseline, time_per_div=5e-6), current_settings=baseline)
     assert read_trigger_settings(scope).time_per_div == 5e-6
+
 
 def test_read_trigger_settings_reads_the_armed_source_and_failures_raise(monkeypatch: pytest.MonkeyPatch) -> None:
     scope = FakeScope()
@@ -339,6 +345,7 @@ class TimebaseScope(FakeScope):
         self.calls.append(("getHorProperties", channel))
         return ("S", 0.0, self.INTERVALS[channel])
 
+
 def test_each_channel_gets_a_time_axis_from_its_own_timebase() -> None:
     scope = TimebaseScope()
 
@@ -348,8 +355,10 @@ def test_each_channel_gets_a_time_axis_from_its_own_timebase() -> None:
     assert c1.time_interval == 1e-6 and c2.time_interval == 5e-6
     np.testing.assert_allclose(c2.time, [0.0, 5e-6, 10e-6])
 
+
 def _mode_calls(scope: typing.Any) -> list[typing.Any]:
     return [c for c in scope.calls if c[0] == "set_trigger_mode"]
+
 
 def test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_one_is_left_alone() -> None:
     for mode in (TriggerMode.AUTO, TriggerMode.NORMAL):
@@ -382,6 +391,7 @@ def test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_on
     recording = acquire_scope_recording(scope, [Channel.C1], freeze=False)
     assert _mode_calls(scope) == [] and not any(c[0] == "get_trigger_mode" for c in scope.calls)
     assert recording.frozen is False
+
 
 def _set_calls(scope: typing.Any) -> list[typing.Any]:
     return [c for c in scope.calls if c[0].startswith("set_")]
@@ -416,6 +426,7 @@ def test_apply_channel_settings_writes_every_field_or_only_what_changed() -> Non
         )
     assert scope.calls == []
 
+
 def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_first_failure() -> None:
     scope = StatefulScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
     c1, c2 = apply_channel_settings(
@@ -433,6 +444,7 @@ def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_
         apply_channel_settings(scope, [_settings(Channel.C1), _settings(Channel.C2)])
     assert all(c[1] == Channel.C1 for c in _set_calls(scope))
     assert not any(isinstance(c[0], str) and c[0].startswith("get_") for c in scope.calls)  # no read-back after a failure
+
 
 def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_first_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     scope = FakeScope()
@@ -454,6 +466,7 @@ def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_f
     with pytest.raises(RuntimeError, match="did not respond"):
         read_channel_settings(scope, [Channel.C1, Channel.C2])
     assert {c[1] for c in scope.calls} == {Channel.C1}
+
 
 def test_batches_hold_the_driver_lock_throughout(monkeypatch: pytest.MonkeyPatch) -> None:
     scope = StatefulScope()
