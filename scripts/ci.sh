@@ -42,7 +42,7 @@ all() {
     uv run --locked pytest
     uv run --locked ruff check .
     uv run --locked ruff format --check .
-    uv run --locked mypy src tests
+    uv run --locked mypy --untyped-defs src tests
     uv run --locked scripts/check_doc_links.py
     notebooks
     docs
@@ -87,7 +87,7 @@ case "${1:-}" in
     #   scripts/ci.sh hardware --hardware-actuate -m 'not scope'
     hardware)  sync; shift; uv run --locked pytest tests/hardware --hardware "$@" ;;
     lint)      sync; uv run --locked ruff check .; uv run --locked ruff format --check . ;;
-    typecheck) sync; uv run --locked mypy src tests ;;
+    typecheck) sync; uv run --locked mypy --untyped-defs src tests ;;
     doc-links) sync; doc_links ;;
     notebooks)  notebooks ;;
     docs-index) sync; docs_index ;;
