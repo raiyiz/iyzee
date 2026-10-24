@@ -14,6 +14,7 @@ CHANNELS = (1, 2, 3, 4)
 VOLTAGE_MAX = 32.0
 CURRENT_MAX = 10.0
 
+
 @dataclass(frozen=True)
 class ChannelState:
     """What the supply itself reports for one channel (nothing here is remembered by us)."""
@@ -24,6 +25,7 @@ class ChannelState:
     voltage_measured: float  # V, at the terminals
     current_measured: float  # A, drawn right now
     selected: bool  # ``OUTP:SEL``: the channel is armed to follow the master output
+
 
 @dataclass(frozen=True)
 class PSUState:
@@ -44,10 +46,16 @@ class PSUState:
         """Whether channel ``number`` is actually powered: armed *and* the master output is on."""
         return self.general_output and self.channel(number).selected
 
+
 class PSU(BaseDevice):
     """Rohde & Schwarz HMP4040 power-supply controller."""
 
-    def __init__(self, ip: str | None = None, resource_manager: typing.Any=None, timeout_ms: int = 10_000) -> None:
+    def __init__(
+        self,
+        ip: str | None = None,
+        resource_manager: typing.Any = None,
+        timeout_ms: int = 10_000,
+    ) -> None:
         super().__init__(
             ip=ip or address(IP.POWER_SUPPLY),
             resource_manager=resource_manager,
@@ -136,6 +144,7 @@ class PSU(BaseDevice):
 
     def disable_global_output(self) -> None:
         self.instrument.write("OUTP:GEN 0")
+
 
 class ShutterControl:
     """The optical shutter: one channel of a :class:`PSU`, which it borrows.
