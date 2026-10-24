@@ -109,7 +109,7 @@ class Wavemeter:
         log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
 
 
-def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, reference_f=0):
+def track_frequency(total_time: float, time_step: float, save_path: str, channel: int=DEFAULT_CHANNEL, reference_f: float=0) -> tuple[np.ndarray, np.ndarray]:
     """Live-plot one channel for `total_time` s, then save the plot and a CSV to `save_path`.
 
     A failed read skips that sample (logged with the raw error) instead of
@@ -194,7 +194,7 @@ def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, r
     return times, track_freq
 
 
-def monitoring_frequencies(channels):
+def monitoring_frequencies(channels: list[int] | tuple[int, ...]) -> None:
     from tabulate import tabulate  # lazy: see track_frequency
 
     channels = list(channels)
@@ -211,7 +211,7 @@ def monitoring_frequencies(channels):
     print(tabulate(rows, headers=header, tablefmt="psql", floatfmt="+.7f"))
 
 
-def main():
+def main() -> None:
     """Run the wavemeter frequency monitoring utility."""
     monitoring_frequencies([0, 1])
 
