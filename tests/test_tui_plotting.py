@@ -6,9 +6,9 @@ import typing
 
 import numpy as np
 from helpers import async_test
-from textual_plotext import PlotextPlot
 from textual.app import App
 from textual.widgets import Label
+from textual_plotext import PlotextPlot
 
 from iyzee.tui.plotting import (
     MAX_DISPLAY_POINTS,
