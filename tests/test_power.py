@@ -7,8 +7,8 @@ from iyzee.devices.power import PSU, ChannelState, PSUState, ShutterControl
 
 class FakeInstrument:
     def __init__(self) -> None:
-        self.commands = []
-        self.timeout = None
+        self.commands: list[str] = []
+        self.timeout: int | None = None
         self.close_calls = 0
 
     def write(self, command: str) -> None:
@@ -19,9 +19,9 @@ class FakeInstrument:
 
 class FakeResourceManager:
     def __init__(self) -> None:
-        self.opened = []
+        self.opened: list[tuple[str, FakeInstrument]] = []
 
-    def open_resource(self, address: typing.Any) -> typing.Any:
+    def open_resource(self, address: str) -> FakeInstrument:
         instrument = FakeInstrument()
         self.opened.append((address, instrument))
         return instrument
@@ -105,12 +105,12 @@ class FakeHMP:
         self.selected = 1
         self.general = 0
         self.channels = {n: {"VOLT": 0.0, "CURR": 0.1, "SEL": 0} for n in (1, 2, 3, 4)}
-        self.overrides = {}
-        self.log = []
+        self.overrides: dict[str, str] = {}
+        self.log: list[str] = []
         self.read_termination = None
         self.timeout = None
 
-    def _live(self) -> typing.Any:
+    def _live(self) -> bool:
         return bool(self.general and self.channels[self.selected]["SEL"])
 
     def write(self, command: str) -> None:
@@ -127,7 +127,7 @@ class FakeHMP:
         elif head == "OUTP:GEN":
             self.general = int(argument)
 
-    def query(self, command: str) -> typing.Any:
+    def query(self, command: str) -> str:
         self.log.append(command)
         if command in self.overrides:
             return self.overrides[command]
@@ -147,13 +147,13 @@ class FakeHMP:
         pass
 
 class FakeHMPResourceManager:
-    def __init__(self, supply: typing.Any) -> None:
+    def __init__(self, supply: FakeHMP) -> None:
         self.supply = supply
 
-    def open_resource(self, address: typing.Any) -> typing.Any:
+    def open_resource(self, address: str) -> FakeHMP:
         return self.supply
 
-def _connected_psu(supply: typing.Any) -> typing.Any:
+def _connected_psu(supply: FakeHMP) -> PSU:
     psu = PSU(ip="192.0.2.1", resource_manager=FakeHMPResourceManager(supply))
     psu.connect()
     return psu
