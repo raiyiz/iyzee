@@ -8,10 +8,10 @@ Guide: :guide:`arch-scope-transport`
 import math
 import re
 import threading
-from typing import Any
 from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import StrEnum
+from typing import Any
 
 import numpy as np
 import pyvisa
