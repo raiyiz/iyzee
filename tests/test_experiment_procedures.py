@@ -231,6 +231,7 @@ def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter
     monkeypatch.setattr(
         "iyzee.experiment.procedures.time.sleep", lambda s: events.append(("sleep", s))
     )
+
     def fake_acquire(mx: TraceAcquisition, trace_num: int) -> list[float]:
         events.append(("acquire", trace_num))
         return [float(trace_num)]
@@ -270,10 +271,14 @@ def test_a_frequency_step_names_what_the_context_lacks_and_touches_nothing_witho
 # -- running a sweep ----------------------------------------------------------------------------
 
 
-def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _quiet(monkeypatch)
     prepared: list[tuple[object, AnalyzerConfig]] = []
-    def prepare(analyzer: Analyzer, traces: Sequence[int], config: AnalyzerConfig | None = None) -> Analyzer:
+    def prepare(
+        analyzer: Analyzer, traces: Sequence[int], config: AnalyzerConfig | None = None
+    ) -> Analyzer:
         prepared.append((analyzer, config or AnalyzerConfig()))
         return analyzer
 
@@ -306,7 +311,9 @@ def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkey
         run_bandwidth_sweep(mx)
 
 
-def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     mx = FakeMXAForTraceAcquisition()
     with pytest.raises(RuntimeError, match="sweep failed"):
         acquire_trace(mx, 1)
