@@ -381,7 +381,9 @@ def _mode_calls(scope: typing.Any) -> list[typing.Any]:
     return [c for c in scope.calls if c[0] == "set_trigger_mode"]
 
 
-def test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_one_is_left_alone() -> (\n    None\n):
+def test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_one_is_left_alone() -> (
+    None
+):
     for mode in (TriggerMode.AUTO, TriggerMode.NORMAL):
         scope = FakeScope()
         scope.trigger_state = TriggerSettings(
@@ -450,7 +452,9 @@ def test_apply_channel_settings_writes_every_field_or_only_what_changed() -> Non
     assert scope.calls == []
 
 
-def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_first_failure() -> (\n    None\n):
+def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_first_failure() -> (
+    None
+):
     scope = StatefulScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
     c1, c2 = apply_channel_settings(
         scope,
@@ -466,10 +470,14 @@ def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_
     with pytest.raises(RuntimeError, match="C1 refused"):
         apply_channel_settings(scope, [_settings(Channel.C1), _settings(Channel.C2)])
     assert all(c[1] == Channel.C1 for c in _set_calls(scope))
-    assert not any(\n        isinstance(c[0], str) and c[0].startswith("get_") for c in scope.calls\n    )  # no read-back after a failure
+    assert not any(
+        isinstance(c[0], str) and c[0].startswith("get_") for c in scope.calls
+    )  # no read-back after a failure
 
 
-def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_first_failure(\n    monkeypatch: pytest.MonkeyPatch,\n) -> None:
+def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_first_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     scope = FakeScope()
     scope.channel_state[Channel.C1] = _settings(
         Channel.C1, enabled=False, volts_per_div=1.0, offset=-0.25, coupling=Coupling.DC_50
