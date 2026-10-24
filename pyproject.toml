@@ -67,6 +67,11 @@ select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF", "S", "BLE", "T20"
 python_version = "3.14"
 ignore_missing_imports = true
 
+# Require complete signatures for the scope-facing device and workflow APIs.
+[[tool.mypy.overrides]]
+module = ["iyzee.devices.base", "iyzee.devices.scope", "iyzee.scope_workflows"]
+disallow_untyped_defs = true
+
 [dependency-groups]
 dev = [
     "ipdb>=0.13.13",
