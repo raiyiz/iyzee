@@ -32,7 +32,9 @@ def test_data_lives_at_the_project_root_in_one_dir_per_month(
     assert first == second and first.is_dir() and first.parent == tmp_path
     assert first.name == datetime.now().astimezone().strftime("%Y-%m")
 
+
 # -- save_step_results: the numeric .npz + JSON sidecar pair -----------------------------
+
 
 def _result(
     x_value: float = 1.0,
@@ -102,7 +104,9 @@ def test_save_step_results_names_files_safely_uniquely_or_exactly_as_asked(tmp_p
     with np.load(target, allow_pickle=False) as archive:
         assert len(archive["x_values"]) == 2
 
+
 # -- multiplot / difference_series -------------------------------------------------------
+
 
 def test_difference_statistics_and_series_handle_unusable_traces() -> None:
     assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "mean") == pytest.approx(2.5)
