@@ -32,6 +32,7 @@ from .wavemeter import Wavemeter
 
 log = logging.getLogger("iyzee.instruments")
 
+
 class InstrumentHandle(Protocol):
     """What the Connect screen — and anything else that talks to this
     instrument, TUI or not — needs from any device adapter."""
@@ -89,6 +90,7 @@ class InstrumentHandle(Protocol):
         """
         ...
 
+
 class _LockedHandle:
     """Base for handles whose instrument access must be serialized.
 
@@ -109,6 +111,7 @@ class _LockedHandle:
     def alive(self) -> bool:
         # Overridden by adapters whose driver can tell (see ScopeHandle).
         return True
+
 
 class _VisaDevice(Protocol):
     """Shared lifecycle surface of the raw VISA drivers."""
@@ -143,6 +146,7 @@ class _VisaHandle(_LockedHandle):
     def device(self) -> _VisaDevice:
         """The wrapped device (e.g. a live :class:`~iyzee.devices.mxa.KeysightMXA`)."""
         return self._device
+
 
 class ShutterHandle(_LockedHandle):
     """Adapter for :class:`~iyzee.devices.power.ShutterControl`, a channel of the PSU.
@@ -193,6 +197,7 @@ class ShutterHandle(_LockedHandle):
         """The live shutter controller, once connected."""
         return self._shutter
 
+
 class WavemeterHandle(_LockedHandle):
     """Adapter for the wavemeter's stateless HTTP API.
 
@@ -219,6 +224,7 @@ class WavemeterHandle(_LockedHandle):
     def probe(self) -> str:
         freq = self._client.read_frequency()
         return f"wavemeter = {freq:.6f} THz"
+
 
 class ScopeHandle(_LockedHandle):
     """Adapter for the :class:`~iyzee.devices.scope.LeCroy` VISA (VXI-11) driver."""
@@ -272,6 +278,7 @@ class ScopeHandle(_LockedHandle):
     def device(self) -> LeCroy:
         """The underlying live LeCroy driver."""
         return self._scope
+
 
 class LockedProxy:
     """Serializes calls to a live device shared between a screen worker
