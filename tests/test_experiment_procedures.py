@@ -148,18 +148,18 @@ def test_the_builders_and_their_defaults() -> None:
     assert (config.res_bw_hz, config.trig_source) == (24e3, "IMM")
 
     # The frequency scan settles for the laser, not for the analyzer's workload.
-    sweep = build_frequency_sweep(
+    frequency_sweep = build_frequency_sweep(
         laser_center_thz=377.1,
         wavemeter_channel=4,
         offsets_thz=[-1e-9, 0.0, 1e-9],
         sweep_duration_ms=10,
     )
-    assert sweep.kind == "frequency"
-    assert [step.frequency_thz for step in sweep.steps] == pytest.approx(
+    assert frequency_sweep.kind == "frequency"
+    assert [step.frequency_thz for step in frequency_sweep.steps] == pytest.approx(
         [377.099999999, 377.1, 377.100000001]
     )
-    assert [step.relax_time_s for step in sweep.steps] == [0.5, 0.5, 0.5]
-    assert sweep.config.avg_count == 150
+    assert [step.relax_time_s for step in frequency_sweep.steps] == [0.5, 0.5, 0.5]
+    assert frequency_sweep.config.avg_count == 150
     assert build_frequency_sweep(offsets_thz=[0.0], relax_time_s=2.0).steps[0].relax_time_s == 2.0
 
     assert DEFAULT_SWEEP_DURATION_MS == 10  # everywhere, and overridable
@@ -258,7 +258,7 @@ def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkey
         raising=False,
     )
     mx, shutter = FakeMXA(), FakeShutterControl()
-    events: list[tuple[str, str | float | int]] = []
+    events: list[tuple[object, ...]] = []
 
     bandwidth = run_sweep(mx, build_bandwidth_sweep([1e3, 2e3]))
     frequency = run_frequency_sweep(
