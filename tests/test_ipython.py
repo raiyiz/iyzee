@@ -11,6 +11,7 @@ import contextlib
 import io
 from dataclasses import dataclass
 from pathlib import Path
+import typing
 
 import pytest
 from helpers import FakeApp, FakeHandle, history_manager
@@ -23,13 +24,11 @@ from iyzee.experiment import StepResult
 from iyzee.tui.ipython import LabProxy, default_history_file, lab_namespace, shell_config
 from iyzee.tui.workers import LastRun
 
-
 @dataclass
 class _Result:
     stdout: str
     stderr: str
     success: bool
-
 
 class IyzeeIPython:
     """Minimal test harness: a plain InteractiveShell built from the same
@@ -37,7 +36,7 @@ class IyzeeIPython:
     uses, with a ``run``-and-capture ``execute``. The terminal shell itself
     is covered in test_ipython_session.py."""
 
-    def __init__(self, app, namespace=None, history_file=None) -> None:
+    def __init__(self, app: typing.Any, namespace: typing.Any=None, history_file: typing.Any=None) -> None:
         self.shell = InteractiveShell(
             config=shell_config(history_file), user_ns=lab_namespace(app, namespace)
         )
@@ -69,7 +68,6 @@ class IyzeeIPython:
     def close(self) -> None:
         self.shell.atexit_operations()
 
-
 def test_ipython_keeps_its_namespace_and_a_users_own_variables_never_collide_with_lab() -> None:
     marker = object()
     shell = IyzeeIPython(FakeApp(), namespace={"instrument": marker})
@@ -85,7 +83,6 @@ def test_ipython_keeps_its_namespace_and_a_users_own_variables_never_collide_wit
     shell.execute("mx = 5")  # shadowing lab.mx's old bare name is an ordinary variable
     assert "10" in shell.execute("mx * 2").stdout
     assert isinstance(shell.shell.user_ns["lab"], LabProxy)  # lab is untouched
-
 
 def test_lab_reflects_the_current_handles_live_lists_every_name_and_is_read_only() -> None:
     device = object()
@@ -111,8 +108,7 @@ def test_lab_reflects_the_current_handles_live_lists_every_name_and_is_read_only
     with pytest.raises(AttributeError):
         lab.mx = "nope"
 
-
-def test_the_wavemeter_is_on_lab_before_connecting_and_behind_the_lock_after(monkeypatch) -> None:
+def test_the_wavemeter_is_on_lab_before_connecting_and_behind_the_lock_after(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
 
     lab = LabProxy(FakeApp())  # not connected: a plain client is still there
@@ -125,7 +121,6 @@ def test_the_wavemeter_is_on_lab_before_connecting_and_behind_the_lock_after(mon
     app = FakeApp(handles={"wavemeter": FakeHandle(device=Wavemeter())})  # connected
     assert LabProxy(app).wavemeter.read_frequency(4) == pytest.approx(377.105)
 
-
 def test_lab_results_and_last_run_reflect_the_latest_sweep() -> None:
     app = FakeApp()
     lab = LabProxy(app)
@@ -137,7 +132,6 @@ def test_lab_results_and_last_run_reflect_the_latest_sweep() -> None:
     last_run = lab.last_run
     assert last_run is not None
     assert last_run.kind == "bandwidth"
-
 
 def test_lab_tab_completion_lists_lab_attributes_and_device_methods() -> None:
     """Jedi (IPython's default completer) does static analysis and can't see
@@ -160,14 +154,12 @@ def test_lab_tab_completion_lists_lab_attributes_and_device_methods() -> None:
     matches = shell.complete("lab.mx.si", len("lab.mx.si"))
     assert ".single_sweep_wait" in matches
 
-
 def test_history_skips_repeated_commands() -> None:
     shell = IyzeeIPython(FakeApp())
     for src in ["x = 1", "y = 2", "y = 2", "z = x + y"]:
         shell.execute(src)
 
     assert shell.history == ["x = 1", "y = 2", "z = x + y"]
-
 
 def test_memory_history_is_private_to_each_shell_instance() -> None:
     """A fresh shell must not inherit input history from another instance.
@@ -185,7 +177,6 @@ def test_memory_history_is_private_to_each_shell_instance() -> None:
 
     second = IyzeeIPython(FakeApp())
     assert second.history == []
-
 
 def test_file_history_persists_and_creates_its_parent(tmp_path: Path) -> None:
     """An explicit history file is opt-in and must survive a shell restart.
@@ -208,7 +199,6 @@ def test_file_history_persists_and_creates_its_parent(tmp_path: Path) -> None:
     assert history_file.parent.exists()
     assert second_run.history == ["yesterday = 1", "today = 2"]
 
-
 def test_default_history_file_is_under_a_per_user_data_directory() -> None:
     """Deliberately *not* IPython's own default location
     (`~/.ipython/profile_default/history.sqlite`) -- that one's shared by
@@ -220,7 +210,6 @@ def test_default_history_file_is_under_a_per_user_data_directory() -> None:
 
     assert path.name == "console_history.sqlite"
     assert ".ipython" not in path.parts
-
 
 def test_help_syntax_does_not_hit_the_interactive_pager() -> None:
     """Regression test: `name?`/`name??` route through IPython's own pager
