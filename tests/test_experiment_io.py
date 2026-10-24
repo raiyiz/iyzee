@@ -19,7 +19,9 @@ from iyzee.experiment.io import (
 )
 
 
-def test_data_lives_at_the_project_root_in_one_dir_per_month(tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_data_lives_at_the_project_root_in_one_dir_per_month(
+    tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # A sibling of src/, not e.g. src/iyzee/data: a regression here would put runs back inside
     # the package (every other test monkeypatches DATA_ROOT, so none would notice).
     assert (DATA_ROOT.parent / "pyproject.toml").is_file()
@@ -32,7 +34,13 @@ def test_data_lives_at_the_project_root_in_one_dir_per_month(tmp_path: typing.An
 
 # -- save_step_results: the numeric .npz + JSON sidecar pair -----------------------------
 
-def _result(x_value: float=1.0, *, squeezing: typing.Any=None, shot_noise: typing.Any=None, **meta: typing.Any) -> StepResult:
+def _result(
+    x_value: float = 1.0,
+    *,
+    squeezing: typing.Any = None,
+    shot_noise: typing.Any = None,
+    **meta: typing.Any,
+) -> StepResult:
     traces = {}
     if squeezing is not None:
         traces["squeezing"] = squeezing
@@ -41,6 +49,7 @@ def _result(x_value: float=1.0, *, squeezing: typing.Any=None, shot_noise: typin
     return StepResult(
         label=f"x={x_value}", x_value=x_value, x_unit="Hz", traces=traces, meta=dict(meta)
     )
+
 
 def test_save_step_results_writes_a_pickle_free_data_and_metadata_pair(tmp_path: typing.Any) -> None:
     results = [_result(1.0, squeezing=[3.0, 4.0], shot_noise=[1.0, 1.0], rbw_hz=1000.0)]
@@ -63,6 +72,7 @@ def test_save_step_results_writes_a_pickle_free_data_and_metadata_pair(tmp_path:
     assert sidecar["points"] == [{"label": "x=1.0", "x_unit": "Hz", "rbw_hz": 1000.0}]
     assert sidecar["run_metadata"] == {"software_revision": "abc123"}
 
+
 def test_save_step_results_aligns_traces_across_points(tmp_path: typing.Any) -> None:
     missing = [
         _result(1.0, squeezing=[1.0, 2.0], shot_noise=[3.0, 4.0]),
@@ -76,6 +86,7 @@ def test_save_step_results_aligns_traces_across_points(tmp_path: typing.Any) -> 
     ragged = [_result(1.0, squeezing=[1.0, 2.0, 3.0]), _result(2.0, squeezing=[1.0, 2.0])]
     with pytest.raises(ValueError, match=r"squeezing.*inconsistent lengths"):
         save_step_results(ragged, tmp_path)
+
 
 def test_save_step_results_names_files_safely_uniquely_or_exactly_as_asked(tmp_path: typing.Any) -> None:
     first = save_step_results([_result(1.0)], tmp_path, name="bandwidth sweep/#1")
@@ -114,6 +125,7 @@ def test_difference_statistics_and_series_handle_unusable_traces() -> None:
         [[1.0, 1.0], [1.0, 1.0], [2.0, 2.0]],
         ["first", "missing", "third"],
     ) == [([0, 1], [2.0, 3.0], "first"), ([0, 1], [3.0, 4.0], "third")]
+
 
 def test_multiplot_plots_each_result(monkeypatch: pytest.MonkeyPatch) -> None:
     plotted = []
