@@ -32,7 +32,6 @@ from iyzee.tui.screens.sweep import (
     _positive_int,
 )
 
-
 # -- standalone validators ---------------------------------------------------------------
 
 
