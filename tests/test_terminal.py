@@ -59,7 +59,9 @@ def test_vterm_scrollback_colours_and_cursor() -> None:
         s.style and s.style.reverse for s in screen.row_segments(0, offset=1, cursor=True)
     )
 
+
 # -- key encoding -----------------------------------------------------------------------
+
 
 def test_keys_encode_to_what_prompt_toolkit_decodes_and_edge_cases() -> None:
     for key, character, expected in (
@@ -94,7 +96,9 @@ def test_keys_encode_to_what_prompt_toolkit_decodes_and_edge_cases() -> None:
     assert key_to_bytes("ctrl+z") is None
     assert key_to_bytes("some-unknown-key") is None
 
+
 # -- the IPython session -----------------------------------------------------------------
+
 
 async def _until(screen_text: typing.Any, needle: str, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
@@ -230,7 +234,9 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
 async def _noop(session: typing.Any, text: str) -> None:
     return None
 
+
 # -- the page, end to end through real key presses ---------------------------------------
+
 
 def _keys(text: str) -> list[str]:
     names = {" ": "space", "+": "plus", "(": "left_parenthesis", ")": "right_parenthesis"}
@@ -313,7 +319,10 @@ async def test_console_interrupt_scrollback_and_shutdown() -> None:
         "leaving the app closes the shell"
     )
 
+
 # -- an interrupt must never be aimed at a thread that is not the shell ------------------------------
+
+
 #
 # The OS hands a finished thread's id to the next thread that starts (checked: every time, for
 # both a plain thread and an executor worker). interrupt() injects a KeyboardInterrupt by
