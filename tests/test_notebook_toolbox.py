@@ -16,7 +16,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-
 pl = pytest.importorskip("polars")
 
 ROOT = Path(__file__).parents[1]

@@ -12,7 +12,6 @@ import sys
 import typing
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 
 def _graph() -> typing.Any:

@@ -21,7 +21,9 @@ from helpers import FakeHandle, async_test, make_result, notifications, plain, w
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, RichLog, Select, Static
 
+from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
+from iyzee.tui.screens import sweep as sweep_mod
 from iyzee.tui.screens.sweep import (
     MAX_POINTS,
     FieldError,
@@ -29,8 +31,6 @@ from iyzee.tui.screens.sweep import (
     _positive_float,
     _positive_int,
 )
-from iyzee.tui.screens import sweep as sweep_mod
-from iyzee.tui import app as app_mod
 
 
 # -- standalone validators ---------------------------------------------------------------
