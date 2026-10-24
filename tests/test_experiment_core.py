@@ -17,8 +17,10 @@ class RecordingStep:
             raise RuntimeError(f"{self.label} failed")
         return StepResult(label=self.label, x_value=self.value, x_unit="a.u.", traces={})
 
+
 def make_ctx() -> ExperimentContext:
     return ExperimentContext(mx=object(), run_id="test-run")
+
 
 def test_run_sequence_runs_in_order_and_handles_failures_by_policy(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO, logger="iyzee.experiment")
@@ -45,6 +47,7 @@ def _record_with(*outcomes: Exception | None) -> RunRecord:
         record.on_step(index, len(outcomes), object(), result, error)
     return record
 
+
 def test_a_run_record_reports_how_the_run_ended_and_names_failed_steps_as_plain_json() -> None:
     import json
     for outcomes, finish, status in (
@@ -68,6 +71,7 @@ def test_a_run_record_reports_how_the_run_ended_and_names_failed_steps_as_plain_
         {"index": 1, "label": "step[1]", "error_type": "ValueError", "error": "wavemeter said no"}
     ]
     assert meta["config"] == {"center_hz": 1e6} and meta["run_id"] == record.run_id
+
 
 def test_run_record_can_be_fed_by_run_sequence() -> None:
     from iyzee.experiment.core import RunRecord
