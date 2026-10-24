@@ -7,7 +7,6 @@ The client is used directly from scripts and the console.
 
 from __future__ import annotations
 
-import csv
 import logging
 import time
 from pathlib import Path
@@ -117,9 +116,11 @@ def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, r
     A failed read skips that sample (logged with the raw error) instead of
     ending a long run and losing the data collected so far.
     """
-    # Plotting is only needed here. Imported lazily because this module is also imported for
-    # its HTTP client by the TUI, where importing it eagerly cost a large share of startup.
+    # Plotting and the CSV export are only needed here. Imported lazily because this module is
+    # also imported for its HTTP client by the TUI, where importing them eagerly cost a large
+    # share of startup.
     import matplotlib.pyplot as plt
+    import polars as pl
 
     # Initialize numpy arrays for time and frequency data
     times = np.array([])
@@ -182,12 +183,10 @@ def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, r
     plt.savefig(out_dir / "laser_frequency_plot.pdf", bbox_inches="tight", dpi=1500)
     plt.savefig(out_dir / "laser_frequency_plot.svg", bbox_inches="tight", dpi=1500)
 
-    # The standard library is enough for a two-column CSV (pandas was never a dependency,
-    # so this used to fail with ModuleNotFoundError after the whole tracking period).
-    with (out_dir / "laser_frequency_readout.csv").open("w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["tracking_time_s", "laser_frequency_thz"])
-        writer.writerows(zip(times.tolist(), track_freq.tolist(), strict=True))
+    # polars is a declared dependency (this used to import pandas, which was not, and failed
+    # with ModuleNotFoundError after the whole tracking period).
+    data = pl.DataFrame({"tracking_time_s": times, "laser_frequency_thz": track_freq})
+    data.write_csv(out_dir / "laser_frequency_readout.csv")
 
     print(f"Laser Frequency data saved to {save_path}.")
     print("Mean Frequency (THz):", np.mean(track_freq))

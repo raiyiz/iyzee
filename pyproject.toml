@@ -12,6 +12,7 @@ dependencies = [
     "matplotlib>=3.11.1",
     "numpy>=2.5.2",
     "platformdirs>=4.0",
+    "polars>=2.0.0",
     "prompt-toolkit>=3.0.41",
     "pyte>=0.8.2",
     "pyvisa>=1.16.2",
@@ -78,5 +79,4 @@ dev = [
 ]
 notebooks = [
     "marimo>=0.25.1",
-    "polars>=2.0.0",
 ]
