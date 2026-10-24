@@ -1,8 +1,8 @@
+import typing
 from iyzee.devices.mxa import KeysightMXA
 
-
 class FakeInstrument:
-    def __init__(self):
+    def __init__(self) -> None:
         self.commands = []
         self.timeout = None
         self.read_termination = None
@@ -16,40 +16,37 @@ class FakeInstrument:
             ":TRACe:DATA? TRACe1": "1.0,2.0,3.0",
         }
 
-    def write(self, command):
+    def write(self, command: str) -> None:
         self.commands.append(command)
 
-    def query(self, command):
+    def query(self, command: str) -> typing.Any:
         return self.responses[command]
 
-    def query_binary_values(self, command, **kwargs):
+    def query_binary_values(self, command: str, **kwargs: typing.Any) -> list[typing.Any]:
         self.commands.append(command)
         return [1.0, 2.0, 3.0]
 
-    def close(self):
+    def close(self) -> None:
         self.close_count += 1
         self.commands.append("<CLOSE>")
 
-
 class FakeResourceManager:
-    def __init__(self):
+    def __init__(self) -> None:
         self.opened = []
 
-    def open_resource(self, address):
+    def open_resource(self, address: typing.Any) -> typing.Any:
         instrument = FakeInstrument()
         self.opened.append((address, instrument))
         return instrument
 
-
-def make_mxa():
+def make_mxa() -> typing.Any:
     instrument = FakeInstrument()
     mxa = KeysightMXA.__new__(KeysightMXA)
     mxa.instrument = instrument
     mxa.timeout_ms = 5000
     return mxa, instrument
 
-
-def test_constructor_connects_with_the_configured_visa_settings():
+def test_constructor_connects_with_the_configured_visa_settings() -> None:
     resource_manager = FakeResourceManager()
 
     mxa = KeysightMXA("10.0.0.1", timeout_ms=1234, resource_manager=resource_manager)
@@ -74,24 +71,21 @@ def test_constructor_connects_with_the_configured_visa_settings():
     assert mxa.instrument is None
     assert instrument.close_count == 1
 
-
-def test_wait_opc_requires_explicit_completion_response():
+def test_wait_opc_requires_explicit_completion_response() -> None:
     mxa, instrument = make_mxa()
     assert mxa.wait_opc() is True
 
     instrument.responses["*OPC?"] = "0"
     assert mxa.wait_opc() is False
 
-
-def test_get_errors_drains_scpi_error_queue():
+def test_get_errors_drains_scpi_error_queue() -> None:
     mxa, instrument = make_mxa()
     responses = iter(["-100,Command error", "-200,Execution error", "0,No error"])
     instrument.query = lambda command: next(responses)
 
     assert mxa.get_errors() == ["-100,Command error", "-200,Execution error"]
 
-
-def test_frequency_configuration_is_sent_to_instrument():
+def test_frequency_configuration_is_sent_to_instrument() -> None:
     mxa, instrument = make_mxa()
     mxa.set_center_freq(1e6)
     mxa.set_span(100e3)
