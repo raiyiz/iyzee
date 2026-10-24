@@ -243,9 +243,7 @@ async def test_a_run_gets_the_connected_devices_and_holds_every_lock_it_needs(
     seen: dict[str, Any] = {}
 
     def fake_run_sequence(
-
         steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
-
     ) -> None:
         seen["ctx"] = ctx
         seen["held"] = {k for k in devices if _locked_by_someone_else(app.handles[k].lock)}
@@ -276,9 +274,7 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
     started, release = threading.Event(), threading.Event()
 
     def fake_run_sequence(
-
         steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
-
     ) -> None:
         started.set()
         release.wait(2)
@@ -313,9 +309,7 @@ async def test_points_are_on_disk_while_the_sweep_is_still_running(
     on_disk_after_each_step: list[int] = []
 
     def fake_run_sequence(
-
         steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
-
     ) -> None:
         for index in range(3):
             on_step(index, 3, object(), _result(index), None)
@@ -338,9 +332,7 @@ async def test_a_failing_save_is_reported_once_and_does_not_stop_the_run(
     steps_run: list[int] = []
 
     def fake_run_sequence(
-
         steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
-
     ) -> None:
         for index in range(3):
             on_step(index, 3, object(), _result(index), None)
@@ -418,9 +410,7 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
     seen: list[str] = []
 
     def fake_run_sequence(
-
         steps: typing.Any, ctx: typing.Any, *, on_error: typing.Any, on_step: typing.Any
-
     ) -> None:
         seen.append(ctx.run_id)
         on_step(0, 2, object(), _result(0), None)
