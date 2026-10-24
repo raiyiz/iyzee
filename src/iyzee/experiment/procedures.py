@@ -15,7 +15,7 @@ import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from typing import Any, ClassVar, Generic, Protocol, TypeVar, TypedDict, Unpack, cast
+from typing import Any, ClassVar, Generic, Protocol, TypeVar, TypedDict, Unpack
 
 from ..devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
 from .core import ExperimentContext, StepResult, run_sequence
@@ -261,7 +261,7 @@ def frequency_sweep_steps(
     laser_center_thz: float = DEFAULT_LASER_CENTER_THZ,
     wavemeter_channel: int = DEFAULT_CHANNEL,
     relax_time_s: float = SETTLE_TIME_S,
-    offsets_thz: Sequence[float] | None=None,
+    offsets_thz: Sequence[float] | None = None,
 ) -> list[FrequencyStep]:
     """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
@@ -333,7 +333,11 @@ def run_sweep(
 
 
 def run_bandwidth_sweep(
-    mx: KeysightMXA, rbw_values_hz: Sequence[float] | None=None, *, on_error: str = "raise", **config: Unpack[ConfigOptions]
+    mx: Analyzer,
+    rbw_values_hz: Sequence[float] | None = None,
+    *,
+    on_error: str = "raise",
+    **config: Unpack[ConfigOptions]
 ) -> list[StepResult]:
     """Measure squeezing/shot-noise traces using the caller-owned MXA."""
     return run_sweep(mx, build_bandwidth_sweep(rbw_values_hz, **config), on_error=on_error)
@@ -341,7 +345,7 @@ def run_bandwidth_sweep(
 
 def run_frequency_sweep(
     mx: KeysightMXA,
-    shutter: ShutterControl,
+    shutter: Shutter,
     *args: Any,
     wavemeter: Wavemeter | None = None,
     on_error: str = "raise",
