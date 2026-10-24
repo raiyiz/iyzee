@@ -127,7 +127,7 @@ def test_the_readme_library_snippet_runs(tmp_path: typing.Any, monkeypatch: pyte
         def __enter__(self) -> typing.Any:
             return self
 
-        def __exit__(self, *exc: typing.Any) -> bool:
+        def __exit__(self, *exc: typing.Any) -> typing.Literal[False]:
             return False
 
     monkeypatch.setattr(mxa_module, "KeysightMXA", FakeMXA)
