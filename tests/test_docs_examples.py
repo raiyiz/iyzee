@@ -19,7 +19,6 @@ from iyzee.scope_workflows import (
     save_scope_acquisition,
 )
 
-
 EXAMPLES = Path(__file__).resolve().parent.parent / "docs" / "examples"
 
 @pytest.fixture

@@ -7,8 +7,8 @@ ties them together (``terminal_view`` / ``screens.console``).
 
 from __future__ import annotations
 
-import atexit
 import asyncio
+import atexit
 import io
 import sys
 import time
@@ -28,7 +28,6 @@ from iyzee.tui.screens.console import IyzeeConsole
 from iyzee.tui.terminal_view import TerminalView
 from iyzee.tui.termkeys import key_to_bytes
 from iyzee.tui.vterm import VTermScreen
-
 
 # -- screen model ---------------------------------------------------------------------
 

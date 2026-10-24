@@ -32,7 +32,6 @@ from iyzee.tui.screens.sweep import (
     _positive_int,
 )
 
-
 # -- standalone validators ---------------------------------------------------------------
 
 def test_the_standalone_validators_accept_good_input_and_name_the_field_on_bad() -> None:
