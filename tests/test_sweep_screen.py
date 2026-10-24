@@ -397,6 +397,7 @@ async def test_capture_trace_plots_power_vs_frequency() -> None:
 
 def _saved_run_metadata(directory: Path) -> dict[str, Any]:
     import json
+
     (sidecar,) = directory.glob("*.json")
     return json.loads(sidecar.read_text())["run_metadata"]
 
@@ -479,8 +480,6 @@ def _log_text(screen: SweepScreen) -> str:
 
 
 @pytest.mark.parametrize("exc_type", [asyncio.CancelledError])
-
-
 @async_test
 async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exc_type: type[BaseException]
@@ -514,8 +513,6 @@ async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_
 
 
 @pytest.mark.parametrize("exc_type", [SystemExit])
-
-
 @async_test
 async def test_a_capture_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
     monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
