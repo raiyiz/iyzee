@@ -36,6 +36,7 @@ class CommandInput(Input):
     def action_history(self, step: int) -> None:
         self.bar.history_step(step)
 
+
 class CommandBar(Horizontal):
     def __init__(self, **kwargs: typing.Any) -> None:
         super().__init__(**kwargs)
