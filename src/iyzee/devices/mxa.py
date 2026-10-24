@@ -195,10 +195,10 @@ class KeysightMXA(BaseDevice):
     def set_trace_mode(self, trace_num: int | str, mode: str) -> None:
         self.write(f":TRACe{trace_num}:TYPE {mode}")
 
-    def set_trace_update(self, trace_num: typing.Any, state: bool = True) -> None:
+    def set_trace_update(self, trace_num: int | str, state: bool = True) -> None:
         self.write(f":TRACe{trace_num}:UPDATE {'ON' if state else 'OFF'}")
 
-    def set_trace_display(self, trace_num: typing.Any, state: bool = True) -> None:
+    def set_trace_display(self, trace_num: int | str, state: bool = True) -> None:
         self.write(f":TRACe{trace_num}:DISPLAY {'ON' if state else 'OFF'}")
 
     def clear_trace(self, trace_num: int) -> None:
