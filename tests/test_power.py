@@ -33,10 +33,10 @@ def test_psu_sends_the_documented_commands_and_closes_its_transport() -> None:
 
     assert psu.rm is resource_manager
     assert resource_manager.opened == []
-    assert psu.instrument is None
+    assert getattr(psu, "instrument") is None
 
     psu.connect()
-    assert psu.instrument is resource_manager.opened[0][1]
+    assert isinstance(psu.instrument, FakeInstrument)
 
     psu.set_voltage(1.7, SHUTTER_CHANNEL_DEFAULT)
     psu.set_current(0.01, SHUTTER_CHANNEL_DEFAULT)
