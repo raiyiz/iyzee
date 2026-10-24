@@ -1,6 +1,5 @@
 import math
 import typing
-
 from collections.abc import Iterable
 from dataclasses import dataclass
 

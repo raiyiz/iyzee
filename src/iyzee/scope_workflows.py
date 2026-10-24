@@ -49,7 +49,6 @@ import platform
 import re
 import threading
 import uuid
-
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
