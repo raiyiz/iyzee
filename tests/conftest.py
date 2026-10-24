@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 # The project uses a src layout. Make the `iyzee` package importable (as
 # `iyzee`, `iyzee.devices.mxa`, etc.) even when the package has not been pip-installed,
 # so the test suite can run from a bare checkout without hardware.

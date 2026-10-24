@@ -33,12 +33,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.markup import escape
-from textual_plotext import PlotextPlot
+
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Vertical
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
-from textual import work
-
+from textual_plotext import PlotextPlot
 from ...devices.scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from ...experiment import create_dirs
 from ...scope_workflows import (

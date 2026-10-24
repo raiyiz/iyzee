@@ -25,7 +25,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from rich.markup import escape
-from textual_plotext import PlotextPlot
+
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Vertical
 from textual.widgets import (
@@ -35,9 +36,8 @@ from textual.widgets import (
     RichLog,
     Select,
     Static,
+from textual_plotext import PlotextPlot
 )
-from textual import work
-
 from ...experiment import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,

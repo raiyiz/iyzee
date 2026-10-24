@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "export_rb_data.py"
 DATA = ROOT / "docs" / "data" / "rubidium.json"

@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 
 from iyzee.analysis import summarize_scope, summarize_sweep
-from iyzee.experiment.io import Recording
 from iyzee.experiment import StepResult, load_recording, save_step_results
+from iyzee.experiment.io import Recording
 from iyzee.waveform_math import Trace
 
 
