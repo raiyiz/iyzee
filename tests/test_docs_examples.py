@@ -128,6 +128,7 @@ def test_the_readme_library_snippet_runs(
     import iyzee.devices.mxa as mxa_module
     import iyzee.experiment as experiment
     import iyzee.experiment.io as io_module
+
     readme = (EXAMPLES.parent.parent / "README.md").read_text(encoding="utf-8")
     section = readme.split("### Use it as a library", 1)[1]
     block = re.search(r"~~~python\n(.*?)~~~", section, re.S)
