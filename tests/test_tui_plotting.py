@@ -23,6 +23,7 @@ class _PlotApp(App):
         yield PlotextPlot(id="plot")
         yield Label("placeholder")
 
+
 @async_test
 async def test_draw_series_plots_each_series_and_sets_labels() -> None:
     app = _PlotApp()
@@ -41,6 +42,7 @@ async def test_draw_series_plots_each_series_and_sets_labels() -> None:
         # structured way, so this checks the rendered canvas actually
         # changed rather than asserting on plotext internals.
         assert plot.plt.build() != ""
+
 
 def test_figure_series_extracts_lines_and_axis_labels() -> None:
     class _Line:
@@ -74,6 +76,7 @@ def test_figure_series_extracts_lines_and_axis_labels() -> None:
 
     assert lines == [([0, 1], [2, 3], "a")]
     assert labels == {"xlabel": "x", "ylabel": "y"}
+
 
 def test_prepare_series_keeps_short_series_and_caps_long_ones_without_losing_the_shape() -> None:
     x = np.arange(5, dtype=float)
