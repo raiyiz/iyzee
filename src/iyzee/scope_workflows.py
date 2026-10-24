@@ -51,7 +51,7 @@ import re
 import uuid
 from collections.abc import Mapping, Sequence
 from types import TracebackType
-from typing import Protocol
+from typing import Protocol, Self
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -74,9 +74,12 @@ log = logging.getLogger("iyzee.scope_workflows")
 class ScopeLock(Protocol):
     """Minimal context-manager contract implemented by the driver's RLock."""
 
-    def __enter__(self) -> object: ...
+    def __enter__(self) -> Self: ...
     def __exit__(
-        self, exc_type: object, exc_val: object, exc_tb: object
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None: ...
 
 
