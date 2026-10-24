@@ -24,6 +24,7 @@ def _graph() -> typing.Any:
     index, _ = module.build()
     return index
 
+
 INDEX = _graph()
 LAYER = {name: record["layer"] for name, record in INDEX["modules"].items()}
 ALLOWED = {
