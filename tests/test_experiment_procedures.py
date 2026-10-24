@@ -10,11 +10,13 @@ from iyzee.experiment.procedures import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
+    Analyzer,
     AnalyzerConfig,
     BandwidthStep,
     FrequencyStep,
     Sweep,
     SweepStep,
+    TraceAcquisition,
     acquire_pair,
     acquire_trace,
     bandwidth_sweep_config,
@@ -27,7 +29,6 @@ from iyzee.experiment.procedures import (
     run_frequency_sweep,
     run_sweep,
 )
-from iyzee.experiment.procedures import Analyzer, TraceAcquisition
 
 
 class FakeMXA:

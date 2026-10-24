@@ -5,9 +5,10 @@ from __future__ import annotations
 import typing
 from pathlib import Path
 
+import runpy
+
 import numpy as np
 import pytest
-import runpy
 
 from iyzee.devices.scope import Channel, Coupling, TriggerCoupling, TriggerMode, TriggerSlope
 from iyzee.experiment import StepResult, save_step_results

@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from rich.markup import escape
-
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Vertical
@@ -36,8 +35,9 @@ from textual.widgets import (
     RichLog,
     Select,
     Static,
-from textual_plotext import PlotextPlot
 )
+from textual_plotext import PlotextPlot
+
 from ...experiment import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
@@ -63,7 +63,6 @@ from ..plotting import draw_series, prepare_series
 from ..text import one_line
 from ..workers import LastRun
 from .page import FieldError, Page, _field, _positive_float, _positive_int
-
 
 if TYPE_CHECKING:
     from pathlib import Path

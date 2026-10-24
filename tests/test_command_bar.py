@@ -7,9 +7,9 @@ import pytest
 from textual.widgets import ContentSwitcher, DataTable, Input
 
 from helpers import FakeHandle, async_test, connect_app, notifications, wait_until
+from iyzee.tui import app as app_mod
 from iyzee.tui.command_bar import CommandBar, CommandInput
 from iyzee.tui.screens import results as results_mod
-from iyzee.tui import app as app_mod
 
 
 @pytest.fixture(autouse=True)

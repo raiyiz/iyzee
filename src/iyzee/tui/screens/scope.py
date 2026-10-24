@@ -33,12 +33,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.markup import escape
-
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Vertical
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 from textual_plotext import PlotextPlot
+
 from ...devices.scope import Channel, Coupling, LeCroy, TriggerCoupling, TriggerMode, TriggerSlope
 from ...experiment import create_dirs
 from ...scope_workflows import (
@@ -56,7 +56,6 @@ from ..commands import Command, CommandError, parse_si
 from ..plotting import describe_timebase, draw_series, format_si, time_series
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
-
 
 if TYPE_CHECKING:
     from ...devices.handles import InstrumentHandle

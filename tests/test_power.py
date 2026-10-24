@@ -1,8 +1,8 @@
 
 import pytest
 
-from iyzee.devices.power import PSU, ChannelState, PSUState, ShutterControl
 from iyzee import IP, SHUTTER_CHANNEL_DEFAULT
+from iyzee.devices.power import PSU, ChannelState, PSUState, ShutterControl
 
 
 class FakeInstrument:

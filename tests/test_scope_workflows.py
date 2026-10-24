@@ -9,7 +9,14 @@ from typing import Any, ClassVar, cast
 import numpy as np
 import pytest
 
-from iyzee.devices.scope import Channel, Coupling, DetailedWaveformData, TriggerCoupling, TriggerMode, TriggerSlope
+from iyzee.devices.scope import (
+    Channel,
+    Coupling,
+    DetailedWaveformData,
+    TriggerCoupling,
+    TriggerMode,
+    TriggerSlope,
+)
 from iyzee.scope_workflows import (
     ChannelSettings,
     TriggerSettings,
