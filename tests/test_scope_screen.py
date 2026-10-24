@@ -69,7 +69,7 @@ async def test_apply_writes_only_changes_and_shows_what_the_scope_reports() -> N
         screen.query_one("#apply-settings", Button).press()
         await wait_until(pilot, lambda: "Applied and verified" in _log(screen))
 
-        assert [c for c in scope.calls if c[0].startswith("set_")] == [
+        assert [c for c in scope.calls if isinstance(c[0], str) and c[0].startswith("set_")] == [
             ("set_volts_per_div", Channel.C1, 0.123)
         ]  # nothing else was written
         assert float(screen.query_one("#C1-vdiv", Input).value) == pytest.approx(0.1)
