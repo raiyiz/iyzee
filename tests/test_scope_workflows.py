@@ -315,6 +315,7 @@ def test_read_trigger_settings_reads_the_armed_source_and_failures_raise(
 
 # -- apply + read-back verification ---------------------------------------------------------
 
+
 class StatefulScope(FakeScope):
     """A scope that remembers what it was told, like a real one: values are
     quantized to ``vdiv_step`` and (optionally) some writes are ignored."""
@@ -353,7 +354,9 @@ class StatefulScope(FakeScope):
         super().set_trace_display(channel, value)
         self._update(channel, enabled=value)
 
+
 # -- acquisition consistency
+
 
 class TimebaseScope(FakeScope):
     INTERVALS: ClassVar[dict[Channel, float]] = {Channel.C1: 1e-6, Channel.C2: 5e-6}
@@ -413,7 +416,9 @@ def test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_on
 def _set_calls(scope: typing.Any) -> list[typing.Any]:
     return [c for c in scope.calls if c[0].startswith("set_")]
 
+
 # -- channel apply / read ---------------------------------------------------------------------
+
 
 def test_apply_channel_settings_writes_every_field_or_only_what_changed() -> None:
     scope = FakeScope()
@@ -506,7 +511,9 @@ def test_batches_hold_the_driver_lock_throughout(monkeypatch: pytest.MonkeyPatch
     assert held and all(held)
     assert not lock_owned()
 
+
 # -- acquisition failures ---------------------------------------------------------------------
+
 
 def test_acquisition_failures_raise_and_restore_the_trigger_mode() -> None:
     scope = FakeScope(fail_channels=frozenset({Channel.C1}))
