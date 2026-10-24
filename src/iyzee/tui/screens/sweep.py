@@ -78,6 +78,7 @@ LIVE_PLOT_INTERVAL_S = 0.1
 # How each instrument key a sweep ``requires`` is named in "connect the ..." messages.
 _INSTRUMENT_NAMES = {"mxa": "MXA", "shutter": "shutter", "wavemeter": "wavemeter"}
 
+
 class SweepAborted(Exception):
     """Raised from inside the progress callback to stop a running sweep.
 
@@ -86,6 +87,7 @@ class SweepAborted(Exception):
     "stop after the current step" abort possible without touching
     ``run_sequence`` itself.
     """
+
 
 class SweepScreen(Page):
     """Pick a sweep type, configure it, run it, and watch it live.
