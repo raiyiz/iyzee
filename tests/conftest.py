@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import typing
 
 import pytest
 
@@ -11,9 +12,8 @@ sys.path.insert(0, str(src_dir))
 
 from iyzee.tui import logging_support  # noqa: E402 - see sys.path setup above
 
-
 @pytest.fixture(autouse=True)
-def _isolated_log_root(tmp_path, monkeypatch):
+def _isolated_log_root(tmp_path: typing.Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Redirect logging_support.LOG_ROOT to this test's own tmp_path.
 
     Nearly every test in this suite constructs its own ``IyzeeApp()``, and
@@ -29,7 +29,6 @@ def _isolated_log_root(tmp_path, monkeypatch):
     """
     monkeypatch.setattr(logging_support, "LOG_ROOT", tmp_path / "logs")
 
-
 # -- real-hardware tests ------------------------------------------------------------------
 #
 # Everything under tests/hardware talks to real instruments. It is skipped unless
@@ -39,7 +38,6 @@ def _isolated_log_root(tmp_path, monkeypatch):
 # where it lives, not because its author remembered a marker.
 
 HARDWARE_DIR = Path(__file__).parent / "hardware"
-
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("hardware", "real-instrument tests")
@@ -58,11 +56,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "(open the shutter, run sweeps, move the laser). Requires --hardware.",
     )
 
-
 def pytest_configure(config: pytest.Config) -> None:
     if config.getoption("--hardware-actuate") and not config.getoption("--hardware"):
         raise pytest.UsageError("--hardware-actuate requires --hardware")
-
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     run_hardware = config.getoption("--hardware")
@@ -81,7 +77,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
                     reason="changes instrument state: also pass --hardware-actuate to run"
                 )
             )
-
 
 def pytest_report_header(config: pytest.Config) -> list[str] | None:
     """Say exactly which machines a hardware run will talk to, before it does."""
