@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import TracebackType
-from typing import Any
+from typing import Any, Literal, Self
 
 import pyvisa
 
@@ -51,7 +51,7 @@ class BaseDevice:
             self.instrument.close()
             self.instrument = None
 
-    def __enter__(self) -> BaseDevice:
+    def __enter__(self) -> Self:
         """Open the device at the explicit resource boundary."""
         self.connect()
         return self
@@ -61,7 +61,7 @@ class BaseDevice:
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
-    ) -> bool:
+    ) -> Literal[False]:
         """Close the VISA resource when leaving the context."""
         self.close()
         return False

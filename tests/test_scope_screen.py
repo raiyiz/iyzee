@@ -20,8 +20,10 @@ from iyzee.devices.scope import Channel, Coupling, TriggerSlope
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens.scope import ScopeScreen
 
+
 class ScreenScope(StatefulScope):
     """Stateful (remembers writes, can round/ignore them) and able to acquire."""
+
 
 async def _open(pilot: Pilot[Any], scope: object | None = None) -> ScopeScreen:
     app = pilot.app
@@ -32,8 +34,10 @@ async def _open(pilot: Pilot[Any], scope: object | None = None) -> ScopeScreen:
     await pilot.pause()
     return app.query_one(ScopeScreen)
 
+
 def _log(screen: ScopeScreen) -> str:
     return "\n".join(strip.text for strip in screen.query_one("#scope-log", RichLog).lines)
+
 
 async def _synced(pilot: Pilot[Any], screen: ScopeScreen) -> None:
     """Wait for the retrieve the page runs by itself when shown.
@@ -43,10 +47,13 @@ async def _synced(pilot: Pilot[Any], screen: ScopeScreen) -> None:
     """
     await wait_until(pilot, lambda: screen._synced and not screen._busy)
 
+
 def _set(screen: ScopeScreen, widget_id: str, value: str) -> None:
     screen.query_one(f"#{widget_id}", Input).value = value
 
+
 # -- apply: the form shows what the scope reports ------------------------------------------
+
 
 @async_test
 async def test_apply_writes_only_changes_and_shows_what_the_scope_reports() -> None:
@@ -85,6 +92,7 @@ async def test_apply_writes_only_changes_and_shows_what_the_scope_reports() -> N
         await wait_until(pilot, lambda: "No changes to apply." in _log(screen))
         assert scope.calls == []
 
+
 class TriggerScope(ScreenScope):
     """Remembers trigger writes and can refuse a level change."""
 
@@ -102,6 +110,7 @@ class TriggerScope(ScreenScope):
         super().set_trigger_slope(source, slope)
         self.trigger_state = replace(self.trigger_state, slope=slope)
 
+
 @async_test
 async def test_applying_trigger_changes_shows_what_the_scope_reports() -> None:
     scope = TriggerScope()
@@ -118,6 +127,7 @@ async def test_applying_trigger_changes_shows_what_the_scope_reports() -> None:
         assert verified is not None
         assert verified.level_volts == 0.25 and verified.slope is TriggerSlope.NEGATIVE
         assert not screen._busy and screen._synced
+
 
 @async_test
 async def test_a_refused_apply_is_reported_keeps_the_edit_and_requires_a_retrieve() -> None:
@@ -138,6 +148,7 @@ async def test_a_refused_apply_is_reported_keeps_the_edit_and_requires_a_retriev
         assert screen.query_one("#apply-settings", Button).disabled
         assert any("Applying settings failed" in n for n in notifications(app))
 
+
 @async_test
 async def test_acquire_refuses_while_the_form_has_changes_the_scope_does_not() -> None:
     scope = ScreenScope()
@@ -154,7 +165,9 @@ async def test_acquire_refuses_while_the_form_has_changes_the_scope_does_not() -
         assert any("press Apply" in n for n in notifications(app))
         assert "Acquiring" not in _log(screen)
 
+
 # -- acquire ---------------------------------------------------------------------------------
+
 
 @async_test
 async def test_acquire_saves_and_reports_that_a_running_acquisition_was_paused(
@@ -176,4 +189,3 @@ async def test_acquire_saves_and_reports_that_a_running_acquisition_was_paused(
         assert "paused for a consistent capture, then resumed" in _log(screen)
         assert list(tmp_path.rglob("*.npz")) and list(tmp_path.rglob("*.json"))
         assert not screen.query_one("#acquire-waveforms", Button).disabled
-
