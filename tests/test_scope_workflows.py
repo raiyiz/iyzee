@@ -4,6 +4,7 @@ import json
 import threading
 from dataclasses import replace
 from typing import Any, ClassVar
+import typing
 
 import numpy as np
 import pytest
@@ -19,7 +20,6 @@ from iyzee.scope_workflows import (
     read_trigger_settings,
     save_scope_acquisition,
 )
-
 
 class FakeScope:
     """Records every call ``scope_workflows`` makes, and can be told to
@@ -59,98 +59,98 @@ class FakeScope:
             level_volts=0.0,
         )
 
-    def query(self, command):
+    def query(self, command: str) -> str:
         return "LECROY,FAKE,SN0,0.0"
 
-    def set_volts_per_div(self, channel, value):
+    def set_volts_per_div(self, channel: typing.Any, value: typing.Any) -> None:
         self.calls.append(("set_volts_per_div", channel, value))
         if channel in self._fail_channels:
             raise RuntimeError(f"{channel} refused volts/div")
 
-    def set_offset(self, channel, value):
+    def set_offset(self, channel: typing.Any, value: typing.Any) -> None:
         self.calls.append(("set_offset", channel, value))
 
-    def set_coupling(self, channel, value):
+    def set_coupling(self, channel: typing.Any, value: typing.Any) -> None:
         self.calls.append(("set_coupling", channel, value))
 
-    def set_trace_display(self, channel, value):
+    def set_trace_display(self, channel: typing.Any, value: typing.Any) -> None:
         self.calls.append(("set_trace_display", channel, value))
 
-    def set_trigger_mode(self, mode):
+    def set_trigger_mode(self, mode: str) -> None:
         self.calls.append(("set_trigger_mode", mode))
 
-    def set_trigger_source(self, source):
+    def set_trigger_source(self, source: typing.Any) -> None:
         self.calls.append(("set_trigger_source", source))
 
-    def set_trigger_slope(self, source, slope):
+    def set_trigger_slope(self, source: typing.Any, slope: typing.Any) -> None:
         self.calls.append(("set_trigger_slope", source, slope))
 
-    def set_trigger_coupling(self, source, coupling):
+    def set_trigger_coupling(self, source: typing.Any, coupling: typing.Any) -> None:
         self.calls.append(("set_trigger_coupling", source, coupling))
 
-    def set_trigger_level(self, source, level):
+    def set_trigger_level(self, source: typing.Any, level: typing.Any) -> None:
         self.calls.append(("set_trigger_level", source, level))
 
     def _check_readable(self, channel: Channel) -> None:
         if channel in self._fail_reads:
             raise RuntimeError(f"{channel} did not respond to the query")
 
-    def get_volts_per_div(self, channel):
+    def get_volts_per_div(self, channel: typing.Any) -> typing.Any:
         self.calls.append(("get_volts_per_div", channel))
         self._check_readable(channel)
         return f"{channel}:VOLT_DIV {self.channel_state[channel].volts_per_div:.2E}V"
 
-    def get_offset(self, channel):
+    def get_offset(self, channel: typing.Any) -> typing.Any:
         self.calls.append(("get_offset", channel))
         self._check_readable(channel)
         return f"{channel}:OFFSET {self.channel_state[channel].offset:.2E}V"
 
-    def get_coupling(self, channel):
+    def get_coupling(self, channel: typing.Any) -> typing.Any:
         self.calls.append(("get_coupling", channel))
         self._check_readable(channel)
         return f"{channel}:COUPLING {self.channel_state[channel].coupling.value}"
 
-    def get_trace_display(self, channel):
+    def get_trace_display(self, channel: typing.Any) -> typing.Any:
         self.calls.append(("get_trace_display", channel))
         self._check_readable(channel)
         state = "ON" if self.channel_state[channel].enabled else "OFF"
         return f"{channel}:TRACE {state}"
 
-    def get_trigger_source(self):
+    def get_trigger_source(self) -> typing.Any:
         self.calls.append(("get_trigger_source",))
         return f"TRIG_SELECT EDGE,SR,{self.trigger_state.source},HT,OFF"
 
-    def get_trigger_mode(self):
+    def get_trigger_mode(self) -> typing.Any:
         self.calls.append(("get_trigger_mode",))
         return f"TRIG_MODE {self.trigger_state.mode.value}"
 
-    def get_trigger_slope(self, source):
+    def get_trigger_slope(self, source: typing.Any) -> typing.Any:
         self.calls.append(("get_trigger_slope", source))
         return f"{source}:TRIG_SLOPE {self.trigger_state.slope.value}"
 
-    def get_trigger_coupling(self, source):
+    def get_trigger_coupling(self, source: typing.Any) -> typing.Any:
         self.calls.append(("get_trigger_coupling", source))
         return f"{source}:TRIG_COUPLING {self.trigger_state.coupling.value}"
 
-    def set_time_per_div(self, seconds):
+    def set_time_per_div(self, seconds: typing.Any) -> None:
         self.calls.append(("set_time_per_div", seconds))
         self.trigger_state = replace(self.trigger_state, time_per_div=seconds)
 
-    def get_time_per_div(self):
+    def get_time_per_div(self) -> typing.Any:
         self.calls.append(("get_time_per_div",))
         return f"TDIV {self.trigger_state.time_per_div or 1e-6:.2E} S"
 
-    def get_trigger_level(self, source):
+    def get_trigger_level(self, source: typing.Any) -> typing.Any:
         self.calls.append(("get_trigger_level", source))
         return f"{source}:TRIG_LEVEL {self.trigger_state.level_volts:.2E}V"
 
-    def getHorProperties(self, channel):
+    def getHorProperties(self, channel: typing.Any) -> tuple[typing.Any, ...]:
         self.calls.append(("getHorProperties", channel))
         if self._fail_hor:
             raise RuntimeError("scope did not respond")
         return ("S", 0.0, 1e-6)
 
-    def getDataFloatsDetailed(self, channel, block="DAT1"):
+    def getDataFloatsDetailed(self, channel: typing.Any, block: str="DAT1") -> dict[typing.Any, typing.Any]:
         self.calls.append(("getDataFloatsDetailed", channel))
         if channel in self._fail_channels:
             raise RuntimeError(f"{channel} refused to send data")
@@ -163,16 +163,14 @@ class FakeScope:
             "vertical_offset": 0.5,
         }
 
-
-def _settings(channel: Channel, **overrides) -> ChannelSettings:
+def _settings(channel: Channel, **overrides: typing.Any) -> ChannelSettings:
     defaults: dict[str, Any] = dict(
         channel=channel, enabled=True, volts_per_div=0.5, offset=0.0, coupling=Coupling.DC_1M
     )
     defaults.update(overrides)
     return ChannelSettings(**defaults)
 
-
-def test_acquire_scope_recording_retains_calibration_and_statistics():
+def test_acquire_scope_recording_retains_calibration_and_statistics() -> None:
     scope = FakeScope()
     settings = (_settings(Channel.C1), _settings(Channel.C2))
     trigger = TriggerSettings(
@@ -207,8 +205,7 @@ def test_acquire_scope_recording_retains_calibration_and_statistics():
     assert waveform.stats["min"] == 1.0
     assert waveform.stats["peak_to_peak"] == 2.0
 
-
-def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path):
+def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path: typing.Any) -> None:
     scope = FakeScope()
     recording = acquire_scope_recording(
         scope, [Channel.C1], channel_settings=(_settings(Channel.C1),)
@@ -227,11 +224,9 @@ def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path
     assert manifest["configuration"]["applied_channel_settings"] is None
     assert len(manifest["data_sha256"]) == 64
 
-
 # -- apply_trigger_settings ----------------------------------------------------------------
 
-
-def test_apply_trigger_settings_writes_every_field_or_only_what_changed():
+def test_apply_trigger_settings_writes_every_field_or_only_what_changed() -> None:
     scope = FakeScope()
     settings = TriggerSettings(
         source=Channel.C2,
@@ -271,8 +266,7 @@ def test_apply_trigger_settings_writes_every_field_or_only_what_changed():
     apply_trigger_settings(scope, replace(baseline, time_per_div=5e-6), current_settings=baseline)
     assert read_trigger_settings(scope).time_per_div == 5e-6
 
-
-def test_read_trigger_settings_reads_the_armed_source_and_failures_raise():
+def test_read_trigger_settings_reads_the_armed_source_and_failures_raise() -> None:
     scope = FakeScope()
     scope.trigger_state = TriggerSettings(
         source=Channel.C2,
@@ -293,56 +287,51 @@ def test_read_trigger_settings_reads_the_armed_source_and_failures_raise():
     with pytest.raises(RuntimeError, match="nope"):
         read_trigger_settings(scope)
 
-
 # -- apply + read-back verification ---------------------------------------------------------
-
 
 class StatefulScope(FakeScope):
     """A scope that remembers what it was told, like a real one: values are
     quantized to ``vdiv_step`` and (optionally) some writes are ignored."""
 
-    def __init__(self, *, vdiv_step: float = 0.0, ignore_coupling=frozenset(), **kwargs):
+    def __init__(self, *, vdiv_step: float = 0.0, ignore_coupling: typing.Any=frozenset(), **kwargs: typing.Any) -> None:
         super().__init__(**kwargs)
         self.vdiv_step = vdiv_step
         self.ignore_coupling = ignore_coupling
 
-    def _update(self, channel, **changes):
+    def _update(self, channel: typing.Any, **changes: typing.Any) -> None:
         from dataclasses import replace
 
         self.channel_state[channel] = replace(self.channel_state[channel], **changes)
 
-    def set_volts_per_div(self, channel, value):
+    def set_volts_per_div(self, channel: typing.Any, value: typing.Any) -> None:
         super().set_volts_per_div(channel, value)
         if self.vdiv_step:
             value = round(value / self.vdiv_step) * self.vdiv_step
         self._update(channel, volts_per_div=value)
 
-    def set_offset(self, channel, value):
+    def set_offset(self, channel: typing.Any, value: typing.Any) -> None:
         super().set_offset(channel, value)
         self._update(channel, offset=value)
 
-    def set_coupling(self, channel, value):
+    def set_coupling(self, channel: typing.Any, value: typing.Any) -> None:
         super().set_coupling(channel, value)
         if channel not in self.ignore_coupling:
             self._update(channel, coupling=value)
 
-    def set_trace_display(self, channel, value):
+    def set_trace_display(self, channel: typing.Any, value: typing.Any) -> None:
         super().set_trace_display(channel, value)
         self._update(channel, enabled=value)
 
-
 # -- acquisition consistency
-
 
 class TimebaseScope(FakeScope):
     INTERVALS: ClassVar[dict[Channel, float]] = {Channel.C1: 1e-6, Channel.C2: 5e-6}
 
-    def getHorProperties(self, channel):
+    def getHorProperties(self, channel: typing.Any) -> tuple[typing.Any, ...]:
         self.calls.append(("getHorProperties", channel))
         return ("S", 0.0, self.INTERVALS[channel])
 
-
-def test_each_channel_gets_a_time_axis_from_its_own_timebase():
+def test_each_channel_gets_a_time_axis_from_its_own_timebase() -> None:
     scope = TimebaseScope()
 
     recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
@@ -351,12 +340,10 @@ def test_each_channel_gets_a_time_axis_from_its_own_timebase():
     assert c1.time_interval == 1e-6 and c2.time_interval == 5e-6
     np.testing.assert_allclose(c2.time, [0.0, 5e-6, 10e-6])
 
-
-def _mode_calls(scope):
+def _mode_calls(scope: typing.Any) -> list[typing.Any]:
     return [c for c in scope.calls if c[0] == "set_trigger_mode"]
 
-
-def test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_one_is_left_alone():
+def test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_one_is_left_alone() -> None:
     for mode in (TriggerMode.AUTO, TriggerMode.NORMAL):
         scope = FakeScope()
         scope.trigger_state = TriggerSettings(
@@ -388,15 +375,12 @@ def test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_on
     assert _mode_calls(scope) == [] and not any(c[0] == "get_trigger_mode" for c in scope.calls)
     assert recording.frozen is False
 
-
-def _set_calls(scope):
+def _set_calls(scope: typing.Any) -> list[typing.Any]:
     return [c for c in scope.calls if c[0].startswith("set_")]
-
 
 # -- channel apply / read ---------------------------------------------------------------------
 
-
-def test_apply_channel_settings_writes_every_field_or_only_what_changed():
+def test_apply_channel_settings_writes_every_field_or_only_what_changed() -> None:
     scope = FakeScope()
     apply_channel_settings(
         scope, [_settings(Channel.C1, volts_per_div=1.0, offset=0.2, enabled=False)]
@@ -424,8 +408,7 @@ def test_apply_channel_settings_writes_every_field_or_only_what_changed():
         )
     assert scope.calls == []
 
-
-def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_first_failure():
+def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_first_failure() -> None:
     scope = StatefulScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
     c1, c2 = apply_channel_settings(
         scope,
@@ -443,8 +426,7 @@ def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_
     assert all(c[1] == Channel.C1 for c in _set_calls(scope))
     assert not any(c[0].startswith("get_") for c in scope.calls)  # no read-back after a failure
 
-
-def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_first_failure():
+def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_first_failure() -> None:
     scope = FakeScope()
     scope.channel_state[Channel.C1] = _settings(
         Channel.C1, enabled=False, volts_per_div=1.0, offset=-0.25, coupling=Coupling.DC_50
@@ -465,8 +447,7 @@ def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_f
         read_channel_settings(scope, [Channel.C1, Channel.C2])
     assert {c[1] for c in scope.calls} == {Channel.C1}
 
-
-def test_batches_hold_the_driver_lock_throughout():
+def test_batches_hold_the_driver_lock_throughout() -> None:
     scope = StatefulScope()
     held: list[bool] = []
     original = scope.get_volts_per_div
@@ -481,11 +462,9 @@ def test_batches_hold_the_driver_lock_throughout():
     assert held and all(held)
     assert not scope.transaction_lock._is_owned()
 
-
 # -- acquisition failures ---------------------------------------------------------------------
 
-
-def test_acquisition_failures_raise_and_restore_the_trigger_mode():
+def test_acquisition_failures_raise_and_restore_the_trigger_mode() -> None:
     scope = FakeScope(fail_channels=frozenset({Channel.C1}))
     with pytest.raises(RuntimeError, match="C1 refused"):
         acquire_scope_recording(scope, [Channel.C1, Channel.C2])
@@ -496,7 +475,7 @@ def test_acquisition_failures_raise_and_restore_the_trigger_mode():
         acquire_scope_recording(FakeScope(fail_hor=True), [Channel.C1, Channel.C2])
 
     class Empty(FakeScope):
-        def getDataFloatsDetailed(self, channel, block="DAT1"):
+        def getDataFloatsDetailed(self, channel: typing.Any, block: str="DAT1") -> dict[typing.Any, typing.Any]:
             return {
                 "unit": "V",
                 "values": [],
