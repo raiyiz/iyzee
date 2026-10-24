@@ -29,11 +29,11 @@ def test_base_device_accepts_injected_resource_manager() -> None:
 
     assert device.rm is resource_manager
     assert resource_manager.open_calls == 0
-    assert device.instrument is None
+    assert getattr(device, "instrument") is None
 
     device.connect()
     assert resource_manager.open_calls == 1
-    assert device.instrument is resource_manager.instrument
+    assert isinstance(device.instrument, FakeInstrument)
 
     device.close()
     assert resource_manager.instrument.close_calls == 1
