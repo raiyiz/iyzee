@@ -31,8 +31,10 @@ def connected(*replies: typing.Any, timeout: int = 10_000) -> tuple[LeCroy, Fake
     scope.connect()
     return scope, resource
 
+
 def wf_block(data: bytes, header: bytes = b"C1:WF DAT1,", trailer: bytes = b"\n") -> bytes:
     return header + b"#9" + b"%09d" % len(data) + data + trailer
+
 
 def visa_timeout() -> VisaIOError:
     return VisaIOError(StatusCode.error_timeout)
@@ -64,12 +66,14 @@ def test_connect_applies_timeout_and_chunk_size_and_failures_are_clear() -> None
         refused.connect()
     assert not refused.connected
 
+
 def test_a_silent_scope_raises_lecroy_timeout_and_drops_the_connection() -> None:
     for read in (lambda s: s.query("C1:VOLT_DIV?"), lambda s: s._read_words("C1", "DAT1")):
         scope, resource = connected(visa_timeout())
         with pytest.raises(LeCroyTimeoutError):
             read(scope)
         assert scope.connected is False and resource.closed
+
 
 def test_idn_asks_for_the_identity_and_can_widen_the_timeout() -> None:
     scope, resource = connected("LECROY,WP804HD-MS,SN,11.6.0\n")
@@ -151,6 +155,7 @@ def test_setters_and_getters_use_the_documented_commands() -> None:
         scope, resource = connected("  reply text \n")
         assert call(scope) == "reply text"  # trimmed
         assert resource.written == [command]
+
 
 def test_bad_names_and_numbers_are_refused_before_anything_is_written() -> None:
     scope, resource = connected()
