@@ -15,10 +15,8 @@ import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from typing import Any, ClassVar, TypedDict, Unpack
+from typing import Any, ClassVar, Generic, Protocol, TypeVar, TypedDict, Unpack, cast
 
-from ..devices.mxa import KeysightMXA
-from ..devices.power import ShutterControl
 from ..devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
 from .core import ExperimentContext, StepResult, run_sequence
 
@@ -29,6 +27,37 @@ TRACE_SHOT = 2
 DEFAULT_SWEEP_DURATION_MS = 10
 #: Default spacing of a frequency scan: 10 MHz, in THz (the unit the laser is set in).
 FREQUENCY_STEP_THZ = 10e-6
+
+
+class TraceAcquisition(Protocol):
+    """The MXA operations required to acquire one trace."""
+
+    def set_trace_update(self, trace_num: int, state: bool = True) -> None: ...
+    def single_sweep_wait(self, timeout_sec: float = 30.0) -> bool: ...
+    def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> list[float]: ...
+
+
+class Analyzer(TraceAcquisition, Protocol):
+    """MXA operations needed to prepare and run a measurement sweep."""
+
+    def set_center_freq(self, freq_hz: float) -> None: ...
+    def set_span(self, span_hz: float) -> None: ...
+    def set_rbw(self, rbw_hz: float | None = None, auto: bool = False) -> None: ...
+    def set_vbw(self, vbw_hz: float | None = None, auto: bool = False) -> None: ...
+    def set_attenuation_auto(self, state: bool = True) -> None: ...
+    def set_trigger_source(self, source: str) -> None: ...
+    def set_sweep_duration(self, time: int) -> None: ...
+    def set_average_count(self, count: int) -> None: ...
+    def set_average_type(self, avg_type: str) -> None: ...
+    def set_trace_display(self, trace_num: int | str, state: bool = True) -> None: ...
+    def set_trace_mode(self, trace_num: int | str, mode: str) -> None: ...
+
+
+class Shutter(Protocol):
+    """The shutter operations a frequency step needs."""
+
+    def open(self) -> None: ...
+    def close(self) -> None: ...
 
 
 @dataclass(slots=True)
@@ -44,7 +73,9 @@ class AnalyzerConfig:
     trig_source: str = "IMM"
 
 
-def prepare_analyzer(mx: KeysightMXA, traces: Sequence[int], config: AnalyzerConfig | None = None) -> KeysightMXA:
+def prepare_analyzer(
+    mx: Analyzer, traces: Sequence[int], config: AnalyzerConfig | None = None
+) -> Analyzer:
     """Configure an already-owned MXA for a measurement procedure."""
     config = config or AnalyzerConfig()
 
@@ -65,7 +96,7 @@ def prepare_analyzer(mx: KeysightMXA, traces: Sequence[int], config: AnalyzerCon
     return mx
 
 
-def acquire_trace(mx: KeysightMXA, trace_num: int) -> list[float]:
+def acquire_trace(mx: TraceAcquisition, trace_num: int) -> list[float]:
     """Acquire one trace and return its data."""
     mx.set_trace_update(trace_num, True)
     try:
@@ -75,7 +106,7 @@ def acquire_trace(mx: KeysightMXA, trace_num: int) -> list[float]:
         mx.set_trace_update(trace_num, False)
 
 
-def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
+def acquire_pair(mx: TraceAcquisition, shutter: Shutter | None = None) -> dict[str, Any]:
     """Acquire the squeezing and shot-noise traces, in that order.
 
     A ``shutter`` is open only around the squeezing acquisition and is closed again (in a
@@ -196,11 +227,14 @@ SWEEP_KINDS: dict[str, type[SweepStep]] = {c.kind: c for c in (BandwidthStep, Fr
 
 
 @dataclass(frozen=True)
-class Sweep:
+StepT = TypeVar("StepT", bound=SweepStep)
+
+
+class Sweep(Generic[StepT]):
     """A sweep ready to run: its points and the analyzer setup they need."""
 
     kind: str
-    steps: Sequence[SweepStep]
+    steps: Sequence[StepT]
     config: AnalyzerConfig
 
     @property
@@ -266,7 +300,7 @@ def build_frequency_sweep(
     *,
     relax_time_s: float = SETTLE_TIME_S,
     **config: Unpack[ConfigOptions],
-) -> Sweep:
+) -> Sweep[FrequencyStep]:
     """Build a frequency sweep and the analyzer configuration it needs.
 
     The settle time is the laser's, not the analyzer's: every acquisition restarts the
