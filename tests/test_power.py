@@ -16,6 +16,7 @@ class FakeInstrument:
     def close(self) -> None:
         self.close_calls += 1
 
+
 class FakeResourceManager:
     def __init__(self) -> None:
         self.opened: list[tuple[str, FakeInstrument]] = []
@@ -24,6 +25,7 @@ class FakeResourceManager:
         instrument = FakeInstrument()
         self.opened.append((address, instrument))
         return instrument
+
 
 def test_psu_sends_the_documented_commands_and_closes_its_transport() -> None:
     resource_manager = FakeResourceManager()
@@ -62,6 +64,7 @@ def test_psu_sends_the_documented_commands_and_closes_its_transport() -> None:
         instrument = managed.instrument
     assert managed.instrument is None and instrument.close_calls == 1  # closed on exit
 
+
 def test_the_shutter_is_a_channel_of_a_psu_it_borrows() -> None:
     resource_manager = FakeResourceManager()
     psu = PSU(resource_manager=resource_manager)
@@ -93,6 +96,7 @@ def test_the_shutter_is_a_channel_of_a_psu_it_borrows() -> None:
     ]
     # The shutter never closes the supply it borrowed.
     assert instrument.close_calls == 0 and psu.instrument is instrument
+
 
 class FakeHMP:
     """A small model of an HMP4040 that keeps state, so reads are checked against writes.
@@ -146,6 +150,7 @@ class FakeHMP:
     def close(self) -> None:
         pass
 
+
 class FakeHMPResourceManager:
     def __init__(self, supply: FakeHMP) -> None:
         self.supply = supply
@@ -153,10 +158,12 @@ class FakeHMPResourceManager:
     def open_resource(self, address: str) -> FakeHMP:
         return self.supply
 
+
 def _connected_psu(supply: FakeHMP) -> PSU:
     psu = PSU(ip="192.0.2.1", resource_manager=FakeHMPResourceManager(supply))
     psu.connect()
     return psu
+
 
 def test_retrieve_state_reports_what_the_supply_says() -> None:
     supply = FakeHMP()
@@ -187,6 +194,7 @@ def test_retrieve_state_reports_what_the_supply_says() -> None:
     )
     assert state.is_live(3) and not state.is_live(1)
 
+
 def test_retrieve_state_only_asks_and_puts_the_selected_channel_back() -> None:
     supply = FakeHMP()
     psu = _connected_psu(supply)
@@ -205,6 +213,7 @@ def test_retrieve_state_only_asks_and_puts_the_selected_channel_back() -> None:
     with pytest.raises(ValueError, match="CURR"):
         psu.retrieve_state()
     assert supply.selected == 2
+
 
 def test_bad_channels_and_bad_replies_are_errors_never_guesses() -> None:
     supply = FakeHMP()
@@ -235,6 +244,7 @@ def test_bad_channels_and_bad_replies_are_errors_never_guesses() -> None:
             supply.overrides[command] = reply
             with pytest.raises(ValueError, match="expected 0 or 1"):
                 psu.retrieve_state()
+
 
 def test_the_shutter_reports_open_only_when_the_supply_says_it_is_powered() -> None:
     supply = FakeHMP()
