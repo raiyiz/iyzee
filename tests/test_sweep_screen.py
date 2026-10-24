@@ -11,9 +11,9 @@ from __future__ import annotations
 import asyncio
 import itertools
 import threading
+import typing
 from pathlib import Path
 from typing import Any
-import typing
 
 import numpy as np
 import pytest
@@ -21,9 +21,7 @@ from helpers import FakeHandle, async_test, make_result, notifications, plain, w
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, RichLog, Select, Static
 
-from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
-from iyzee.tui.screens import sweep as sweep_mod
 from iyzee.tui.screens.sweep import (
     MAX_POINTS,
     FieldError,
@@ -31,6 +29,9 @@ from iyzee.tui.screens.sweep import (
     _positive_float,
     _positive_int,
 )
+from iyzee.tui.screens import sweep as sweep_mod
+from iyzee.tui import app as app_mod
+
 
 # -- standalone validators ---------------------------------------------------------------
 
@@ -366,7 +367,6 @@ async def test_capture_trace_plots_power_vs_frequency() -> None:
 
 def _saved_run_metadata(directory: Path) -> dict[str, Any]:
     import json
-
     (sidecar,) = directory.glob("*.json")
     return json.loads(sidecar.read_text())["run_metadata"]
 

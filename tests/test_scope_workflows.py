@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import threading
+import typing
 from dataclasses import replace
 from typing import Any, ClassVar, cast
-import typing
 
 import numpy as np
 import pytest
@@ -20,6 +20,7 @@ from iyzee.scope_workflows import (
     read_trigger_settings,
     save_scope_acquisition,
 )
+
 
 class FakeScope:
     """Records every call ``scope_workflows`` makes, and can be told to
@@ -301,7 +302,6 @@ class StatefulScope(FakeScope):
 
     def _update(self, channel: typing.Any, **changes: typing.Any) -> None:
         from dataclasses import replace
-
         self.channel_state[channel] = replace(self.channel_state[channel], **changes)
 
     def set_volts_per_div(self, channel: typing.Any, value: typing.Any) -> None:
@@ -452,7 +452,8 @@ def test_batches_hold_the_driver_lock_throughout(monkeypatch: pytest.MonkeyPatch
     scope = StatefulScope()
     held: list[bool] = []
     original = scope.get_volts_per_div
-    lock_owned = lambda: cast(Any, scope.transaction_lock)._is_owned()
+    def lock_owned() -> bool:
+        return cast(Any, scope.transaction_lock)._is_owned()
     def read_vdiv(channel: Channel) -> str:
         held.append(lock_owned())
         return original(channel)

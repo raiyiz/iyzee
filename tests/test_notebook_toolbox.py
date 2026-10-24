@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import math
 import sys
+import typing
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-import typing
 
 import numpy as np
 import pytest
+
 
 pl = pytest.importorskip("polars")
 
@@ -41,6 +42,7 @@ from toolbox import (  # noqa: E402
 )
 
 from iyzee.experiment import StepResult, save_step_results  # noqa: E402
+
 
 def _save_sweep(
     root: Path,

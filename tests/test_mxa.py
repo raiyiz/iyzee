@@ -1,8 +1,8 @@
-from collections.abc import Iterator
 
 import pytest
 
 from iyzee.devices.mxa import KeysightMXA
+
 
 class FakeInstrument:
     def __init__(self) -> None:
@@ -56,12 +56,13 @@ def test_constructor_connects_with_the_configured_visa_settings() -> None:
 
     assert mxa.rm is resource_manager
     assert resource_manager.opened == []
-    assert getattr(mxa, "instrument") is None
+    instrument_before_connect = mxa.instrument
+    assert instrument_before_connect is None
 
     mxa.connect()
     assert len(resource_manager.opened) == 1
     instrument = resource_manager.opened[0][1]
-    assert isinstance(mxa.instrument, FakeInstrument)
+    assert mxa.instrument is instrument
     assert resource_manager.opened[0][0] == "TCPIP0::10.0.0.1::inst0::INSTR"
     assert instrument.timeout == 1234
     assert instrument.read_termination == "\n"

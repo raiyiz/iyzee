@@ -8,26 +8,27 @@ ties them together (``terminal_view`` / ``screens.console``).
 from __future__ import annotations
 
 import asyncio
-import atexit
 import io
 import sys
 import time
+import typing
 from collections.abc import Callable
 from typing import Any
-import typing
 
+import atexit
 import pytest
 from helpers import FakeApp, async_test
 from prompt_toolkit.input.vt100_parser import Vt100Parser
 from textual.widgets import ContentSwitcher
 
-from iyzee.tui import ipython_session
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.ipython_session import IPythonSession
 from iyzee.tui.screens.console import IyzeeConsole
 from iyzee.tui.terminal_view import TerminalView
 from iyzee.tui.termkeys import key_to_bytes
 from iyzee.tui.vterm import VTermScreen
+from iyzee.tui import ipython_session
+
 
 # -- screen model ---------------------------------------------------------------------
 

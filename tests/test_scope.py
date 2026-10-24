@@ -3,9 +3,8 @@
 The VISA resource is a fake (see ``helpers.FakeVisaResource``); nothing here opens a socket.
 """
 
-import typing
-
 import struct
+import typing
 
 import numpy as np
 import pytest
@@ -23,6 +22,7 @@ from iyzee.devices.scope import (
     TriggerMode,
     TriggerSlope,
 )
+
 
 def connected(*replies: typing.Any, timeout: int = 10_000) -> tuple[LeCroy, FakeVisaResource]:
     """A LeCroy wired to a fake VISA resource that will serve ``replies``."""

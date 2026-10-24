@@ -1,9 +1,9 @@
-import typing
 
 import pytest
 
-from iyzee import IP, SHUTTER_CHANNEL_DEFAULT
 from iyzee.devices.power import PSU, ChannelState, PSUState, ShutterControl
+from iyzee import IP, SHUTTER_CHANNEL_DEFAULT
+
 
 class FakeInstrument:
     def __init__(self) -> None:
@@ -33,10 +33,11 @@ def test_psu_sends_the_documented_commands_and_closes_its_transport() -> None:
 
     assert psu.rm is resource_manager
     assert resource_manager.opened == []
-    assert getattr(psu, "instrument") is None
+    instrument_before_connect = psu.instrument
+    assert instrument_before_connect is None
 
     psu.connect()
-    assert isinstance(psu.instrument, FakeInstrument)
+    assert psu.instrument is resource_manager.opened[0][1]
 
     psu.set_voltage(1.7, SHUTTER_CHANNEL_DEFAULT)
     psu.set_current(0.01, SHUTTER_CHANNEL_DEFAULT)
