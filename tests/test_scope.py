@@ -85,6 +85,7 @@ def test_idn_asks_for_the_identity_and_can_widen_the_timeout() -> None:
     assert resource.written == ["*IDN?"]
     assert resource.timeouts == [10_000, 15_000, 10_000]  # connect, widened, restored
 
+
 # -- waveform download -----------------------------------------------------------------------
 
 
@@ -122,6 +123,7 @@ def test_waveform_download_decodes_calibrates_and_rejects_malformed_blocks() -> 
         with pytest.raises(LeCroyProtocolError, match=match):
             scope._read_words("C1", "DAT1")
         assert scope.connected and not resource.closed  # the whole reply was read: stream aligned
+
 
 # -- channel / trigger control ---------------------------------------------------------------
 
