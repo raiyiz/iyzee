@@ -204,6 +204,7 @@ def test_every_sweep_kind_is_a_step_that_names_itself_and_declares_what_it_needs
         assert isinstance(sweep, Sweep) and sweep.requires == SWEEP_KINDS[sweep.kind].requires
         assert sweep.steps and all(isinstance(s, SWEEP_KINDS[sweep.kind]) for s in sweep.steps)
 
+
 # -- steps --------------------------------------------------------------------------------------
 
 
@@ -265,7 +266,9 @@ def test_a_frequency_step_names_what_the_context_lacks_and_touches_nothing_witho
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
     assert shutter.events == [] and mx.trace_calls == []
 
+
 # -- running a sweep ----------------------------------------------------------------------------
+
 
 def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkeypatch: pytest.MonkeyPatch) -> None:
     _quiet(monkeypatch)
