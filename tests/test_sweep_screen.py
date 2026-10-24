@@ -55,6 +55,7 @@ async def _open_sweep_screen(pilot: Pilot[Any]) -> SweepScreen:
     await pilot.pause()
     return pilot.app.query_one(SweepScreen)
 
+
 @async_test
 async def test_form_defaults_build_the_documented_runs_and_the_duration_applies_to_both() -> None:
     async with IyzeeApp().run_test() as pilot:
@@ -73,6 +74,7 @@ async def test_form_defaults_build_the_documented_runs_and_the_duration_applies_
         await pilot.pause()
         assert screen._build_bandwidth_run().config.sweep_duration_ms == 25
         assert screen._build_frequency_run().config.sweep_duration_ms == 25
+
 
 @async_test
 async def test_an_invalid_field_is_named_marked_and_focused() -> None:
@@ -141,6 +143,7 @@ async def test_starting_without_the_needed_instrument_notifies_and_launches_noth
             assert expected in notifications(app)[-1]
             assert screen.query_one(button).disabled is False
 
+
 @async_test
 async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
     app = IyzeeApp()
@@ -187,12 +190,14 @@ def _sweep_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_run_sequenc
     app.handles["mxa"] = FakeHandle()
     return app
 
+
 async def _press_run_and_wait(app: IyzeeApp) -> None:
     async with app.run_test() as pilot:
         await pilot.press("s")
         await pilot.pause()
         await pilot.click("#run-sweep")
         await wait_until(pilot, lambda: app.last_run is not None)
+
 
 def _points_on_disk(directory: Path) -> int:
     files = list(directory.glob("*.npz"))
@@ -202,8 +207,10 @@ def _points_on_disk(directory: Path) -> int:
     with np.load(files[0], allow_pickle=False) as archive:
         return len(archive["x_values"])
 
+
 def _result(index: int) -> Any:
     return make_result(f"pt{index}", float(index))
+
 
 def _locked_by_someone_else(lock: Any) -> bool:
     """Whether ``lock`` is held by another thread (an RLock is re-entrant for its owner)."""
@@ -215,10 +222,13 @@ def _locked_by_someone_else(lock: Any) -> bool:
         lock.release()
     return not got[0]
 
+
 @pytest.mark.parametrize(
     "kind,needed",
     [("bandwidth", {"mxa"}), ("frequency", {"mxa", "shutter", "wavemeter"})],
 )
+
+
 @async_test
 async def test_a_run_gets_the_connected_devices_and_holds_every_lock_it_needs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, needed: set[str]
@@ -247,6 +257,7 @@ async def test_a_run_gets_the_connected_devices_and_holds_every_lock_it_needs(
     assert ctx.shutter is (devices["shutter"] if "shutter" in needed else None)
     assert ctx.wavemeter is (devices["wavemeter"] if "wavemeter" in needed else None)
     assert seen["held"] == needed  # no more, no fewer
+
 
 @async_test
 async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
@@ -280,6 +291,7 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
         assert str(abort.label) == "Abort"
         assert app.last_run is not None and len(app.last_run.results) == 1
 
+
 @async_test
 async def test_points_are_on_disk_while_the_sweep_is_still_running(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -299,6 +311,7 @@ async def test_points_are_on_disk_while_the_sweep_is_still_running(
     assert app.last_run is not None and len(app.last_run.results) == 3
     assert app.last_run.path is not None and app.last_run.path.parent == tmp_path
     assert not app.sweep_running
+
 
 @async_test
 async def test_a_failing_save_is_reported_once_and_does_not_stop_the_run(
@@ -347,6 +360,7 @@ class _FakeMxaForCapture:
     def get_frequency_axis(self) -> list[float]:
         return self._freq
 
+
 @async_test
 async def test_capture_trace_plots_power_vs_frequency() -> None:
     app = IyzeeApp()
@@ -368,6 +382,7 @@ def _saved_run_metadata(directory: Path) -> dict[str, Any]:
     import json
     (sidecar,) = directory.glob("*.json")
     return json.loads(sidecar.read_text())["run_metadata"]
+
 
 @async_test
 async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
@@ -394,6 +409,7 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
     assert meta["config"]["res_bw_hz"] > 0  # AnalyzerConfig, as the sweep used it
     assert [(f["index"], f["error_type"]) for f in meta["failed_steps"]] == [(1, "TimeoutError")]
 
+
 @async_test
 async def test_an_aborted_sweep_is_marked_aborted_in_the_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -408,6 +424,7 @@ async def test_an_aborted_sweep_is_marked_aborted_in_the_file(
 
     assert _saved_run_metadata(tmp_path)["status"] == "aborted"
     assert _points_on_disk(tmp_path) == 1
+
 
 @async_test
 async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
@@ -434,7 +451,10 @@ def _log_text(screen: SweepScreen) -> str:
         str(seg) for line in screen.query_one("#sweep-log", RichLog).lines for seg in line
     )
 
+
 @pytest.mark.parametrize("exc_type", [asyncio.CancelledError])
+
+
 @async_test
 async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exc_type: type[BaseException]
@@ -464,7 +484,10 @@ async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_
         assert _points_on_disk(tmp_path) == 2
         assert '"failed"' in last_run.path.with_suffix(".json").read_text()
 
+
 @pytest.mark.parametrize("exc_type", [SystemExit])
+
+
 @async_test
 async def test_a_capture_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
     monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
@@ -483,6 +506,7 @@ async def test_a_capture_worker_dying_with_a_base_exception_does_not_take_the_ap
         assert app.is_running
         assert app.sweep_running is False
         assert "Capture failed" in _log_text(screen)
+
 
 @async_test
 async def test_even_frequency_sweeps_are_centered_symmetrically() -> None:
