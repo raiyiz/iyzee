@@ -219,7 +219,9 @@ def test_acquire_scope_recording_retains_calibration_and_statistics() -> None:
     assert waveform.stats["peak_to_peak"] == 2.0
 
 
-def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path: typing.Any) -> None:
+def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(
+    tmp_path: typing.Any,
+) -> None:
     scope = FakeScope()
     recording = acquire_scope_recording(
         scope, [Channel.C1], channel_settings=(_settings(Channel.C1),)
@@ -238,7 +240,9 @@ def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path
     assert manifest["configuration"]["applied_channel_settings"] is None
     assert len(manifest["data_sha256"]) == 64
 
+
 # -- apply_trigger_settings ----------------------------------------------------------------
+
 
 def test_apply_trigger_settings_writes_every_field_or_only_what_changed() -> None:
     scope = FakeScope()
@@ -281,7 +285,9 @@ def test_apply_trigger_settings_writes_every_field_or_only_what_changed() -> Non
     assert read_trigger_settings(scope).time_per_div == 5e-6
 
 
-def test_read_trigger_settings_reads_the_armed_source_and_failures_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_read_trigger_settings_reads_the_armed_source_and_failures_raise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     scope = FakeScope()
     scope.trigger_state = TriggerSettings(
         source=Channel.C2,
@@ -295,12 +301,17 @@ def test_read_trigger_settings_reads_the_armed_source_and_failures_raise(monkeyp
     assert ("get_trigger_slope", Channel.C2) in scope.calls  # off the armed source, not C1
 
     # One trigger, so nothing can partially succeed: a failure just raises.
-    monkeypatch.setattr(scope, "set_trigger_mode", lambda mode: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(
+        scope, "set_trigger_mode", lambda mode: (_ for _ in ()).throw(RuntimeError("nope"))
+    )
     with pytest.raises(RuntimeError, match="nope"):
         apply_trigger_settings(scope, scope.trigger_state)
-    monkeypatch.setattr(scope, "get_trigger_mode", lambda: (_ for _ in ()).throw(RuntimeError("nope")))
+    monkeypatch.setattr(
+        scope, "get_trigger_mode", lambda: (_ for _ in ()).throw(RuntimeError("nope"))
+    )
     with pytest.raises(RuntimeError, match="nope"):
         read_trigger_settings(scope)
+
 
 # -- apply + read-back verification ---------------------------------------------------------
 
@@ -308,7 +319,13 @@ class StatefulScope(FakeScope):
     """A scope that remembers what it was told, like a real one: values are
     quantized to ``vdiv_step`` and (optionally) some writes are ignored."""
 
-    def __init__(self, *, vdiv_step: float = 0.0, ignore_coupling: typing.Any=frozenset(), **kwargs: typing.Any) -> None:
+    def __init__(
+        self,
+        *,
+        vdiv_step: float = 0.0,
+        ignore_coupling: typing.Any = frozenset(),
+        **kwargs: typing.Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.vdiv_step = vdiv_step
         self.ignore_coupling = ignore_coupling
