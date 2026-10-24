@@ -102,6 +102,7 @@ async def _until(screen_text: typing.Any, needle: str, timeout: float = 10.0) ->
         await asyncio.sleep(0.03)
     return False
 
+
 @async_test
 async def test_session_runs_a_real_ipython_in_process() -> None:
     screen = VTermScreen(90, 24)
@@ -153,6 +154,7 @@ async def test_session_runs_a_real_ipython_in_process() -> None:
     assert not session._thread.is_alive()
     assert sys.stdout is real_stdout, "stdout is restored on close"
 
+
 def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     virtual_output: list[str] = []
     session = IPythonSession(FakeApp(), on_output=virtual_output.append)
@@ -168,9 +170,11 @@ def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(monkeypatch: pytes
     assert "\x1b[0 q" not in host_stdout.getvalue()
     assert "\x1b[0 q" in "".join(virtual_output)
 
+
 def _prompt_line(screen_text: typing.Any) -> str:
     lines = [line for line in screen_text().splitlines() if "In [" in line]
     return lines[-1].strip() if lines else ""
+
 
 @async_test
 async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_path: typing.Any) -> None:
@@ -220,6 +224,7 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
     await session_run(history, ["a = 1", "b = 2"], _noop)
     await session_run(history, [], recalls_after_restart)  # a fresh session, same file
 
+
 async def _noop(session: typing.Any, text: str) -> None:
     return None
 
@@ -229,8 +234,10 @@ def _keys(text: str) -> list[str]:
     names = {" ": "space", "+": "plus", "(": "left_parenthesis", ")": "right_parenthesis"}
     return [names.get(c, c) for c in text]
 
+
 def _console_text(app: IyzeeApp) -> str:
     return "\n".join(app.screen.query_one(TerminalView).text_lines())
+
 
 async def _wait(pilot: typing.Any, app: typing.Any, needle: str, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
@@ -239,6 +246,7 @@ async def _wait(pilot: typing.Any, app: typing.Any, needle: str, timeout: float 
         if needle in _console_text(app):
             return True
     return False
+
 
 @async_test
 async def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
@@ -270,6 +278,7 @@ async def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
         assert await _wait(pilot, app, "Out[3]: 5"), _console_text(app)
         await pilot.press("up")
         assert await _wait(pilot, app, "In [4]: x"), _console_text(app)
+
 
 @async_test
 async def test_console_interrupt_scrollback_and_shutdown() -> None:
@@ -323,6 +332,7 @@ def _session_whose_shell_thread_ends_at_once(monkeypatch: pytest.MonkeyPatch) ->
     session._prompt_depth = 0
     return session, injected
 
+
 @async_test
 async def test_the_shell_threads_id_is_forgotten_when_that_thread_ends(
     monkeypatch: pytest.MonkeyPatch,
@@ -334,6 +344,7 @@ async def test_the_shell_threads_id_is_forgotten_when_that_thread_ends(
         assert injected == []
     finally:
         session.close()
+
 
 @async_test
 async def test_interrupt_checks_the_thread_is_alive_even_if_an_id_were_left_behind(
