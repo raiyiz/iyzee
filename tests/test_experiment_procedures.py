@@ -101,7 +101,12 @@ class FakeShutterControl:
     def __enter__(self) -> Any:
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object | None) -> Literal[False]:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> Literal[False]:
         return False
 
     def open(self) -> None:
@@ -143,7 +148,9 @@ def _wavemeter(events: list[tuple[object, ...]], frequency: float = 377.1) -> An
         read_frequency=read_frequency,
     )
 
+
 # -- builders and defaults ----------------------------------------------------------------------
+
 
 def test_the_builders_and_their_defaults() -> None:
     steps = bandwidth_sweep_steps()
@@ -199,7 +206,10 @@ def test_every_sweep_kind_is_a_step_that_names_itself_and_declares_what_it_needs
 
 # -- steps --------------------------------------------------------------------------------------
 
-def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
     mx, shutter = FakeMXA(), FakeShutterControl()
     ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter)
@@ -213,7 +223,9 @@ def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(monkeypa
     assert shutter.events == []
 
 
-def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     events: list[tuple[object, ...]] = []
     monkeypatch.setattr(
         "iyzee.experiment.procedures.time.sleep", lambda s: events.append(("sleep", s))
