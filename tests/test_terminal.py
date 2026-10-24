@@ -12,6 +12,7 @@ import atexit
 import io
 import sys
 import time
+from collections.abc import Callable
 from typing import Any
 import typing
 
@@ -192,7 +193,7 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
         finally:
             session.close()
 
-    async def prompt_has(text: str, needle: str) -> bool:
+    async def prompt_has(text: Callable[[], str], needle: str) -> bool:
         # Poll the *prompt line*, not the whole screen: earlier cells that
         # contain the same text are still visible above it.
         deadline = time.monotonic() + 8
@@ -202,7 +203,7 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
             await asyncio.sleep(0.03)
         return False
 
-    async def recalls(session: typing.Any, text: str) -> None:
+    async def recalls(session: typing.Any, text: Callable[[], str]) -> None:
         session.send(b"\x1b[A")
         assert await prompt_has(text, "y = 22"), text()
         session.send(b"\x1b[A")
@@ -210,7 +211,7 @@ async def test_up_down_and_ctrl_r_recall_history_within_and_across_sessions(tmp_
         session.send(b"\x1b[B")  # Down goes forward again
         assert await prompt_has(text, "y = 22"), text()
 
-    async def recalls_after_restart(session: typing.Any, text: str) -> None:
+    async def recalls_after_restart(session: typing.Any, text: Callable[[], str]) -> None:
         session.send(b"\x1b[A")
         assert await prompt_has(text, "b = 2"), text()
 
