@@ -29,7 +29,9 @@ from iyzee.tui.terminal_view import TerminalView
 from iyzee.tui.termkeys import key_to_bytes
 from iyzee.tui.vterm import VTermScreen
 
+
 # -- screen model ---------------------------------------------------------------------
+
 
 def test_vterm_scrollback_colours_and_cursor() -> None:
     screen = VTermScreen(20, 3, scrollback=50)
