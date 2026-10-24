@@ -99,7 +99,9 @@ def test_device_returns_the_driver_and_a_missing_instrument_says_so() -> None:
     lab.connect("a")
     assert lab.device("a") == "the driver"
 
+
 # -- instruments that are a part of another (the shutter on the PSU) -------------------
+
 
 class PartHandle(FakeHandle):
     """A part of a parent instrument: shares its lock, records what it was built on."""
