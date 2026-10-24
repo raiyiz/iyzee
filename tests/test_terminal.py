@@ -29,7 +29,6 @@ from iyzee.tui.terminal_view import TerminalView
 from iyzee.tui.termkeys import key_to_bytes
 from iyzee.tui.vterm import VTermScreen
 
-
 # -- screen model ---------------------------------------------------------------------
 
 
