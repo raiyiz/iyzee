@@ -11,6 +11,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+import typing
 
 import numpy as np
 import pytest
@@ -40,7 +41,6 @@ from toolbox import (  # noqa: E402
 )
 
 from iyzee.experiment import StepResult, save_step_results  # noqa: E402
-
 
 def _save_sweep(
     root: Path,
@@ -87,8 +87,7 @@ def _save_sweep(
         path=path,
     )
 
-
-def test_array_frame_selects_a_row_and_rejects_ambiguous_shapes():
+def test_array_frame_selects_a_row_and_rejects_ambiguous_shapes() -> None:
     frame = array_frame(np.array([[1.0, 2.0], [3.0, 4.0]]), index=1)
     assert frame["sample"].to_list() == [0, 1]
     assert frame["value"].to_list() == [3.0, 4.0]
@@ -96,8 +95,7 @@ def test_array_frame_selects_a_row_and_rejects_ambiguous_shapes():
     with pytest.raises(ValueError, match="1-D or 2-D"):
         array_frame(np.zeros((2, 3, 4)))
 
-
-def test_catalog_uses_sidecars_and_marks_synthetic_data(tmp_path):
+def test_catalog_uses_sidecars_and_marks_synthetic_data(tmp_path: typing.Any) -> None:
     _save_sweep(tmp_path, "frequency-a", [377.1, 377.10001], [-2.0, -1.0], kind="frequency")
     _save_sweep(tmp_path, "rbw-baseline", [20e3, 40e3], [-2.0, -1.0])
 
@@ -111,8 +109,7 @@ def test_catalog_uses_sidecars_and_marks_synthetic_data(tmp_path):
     assert all(catalog["label"].str.contains("SYNTHETIC").to_list())
     assert set(catalog["name"]) == {"frequency-a", "rbw-baseline"}
 
-
-def test_frequency_offsets_share_one_reference_between_runs(tmp_path):
+def test_frequency_offsets_share_one_reference_between_runs(tmp_path: typing.Any) -> None:
     _save_sweep(
         tmp_path,
         "frequency-a",
@@ -138,8 +135,7 @@ def test_frequency_offsets_share_one_reference_between_runs(tmp_path):
     assert first["synthetic"].to_list() == [True, True]
     assert all(label.startswith("SYNTHETIC · ") for label in first["run"].to_list())
 
-
-def test_best_points_and_reference_differences_do_not_extrapolate(tmp_path):
+def test_best_points_and_reference_differences_do_not_extrapolate(tmp_path: typing.Any) -> None:
     _save_sweep(tmp_path, "rbw-a", [20e3, 40e3, 60e3], [-2.0, 1.0, -3.0])
     _save_sweep(tmp_path, "rbw-b", [20e3, 40e3, 60e3], [-1.0, 0.0, -2.0])
     catalog = scan_catalog(tmp_path)
@@ -155,8 +151,7 @@ def test_best_points_and_reference_differences_do_not_extrapolate(tmp_path):
     assert delta["synthetic"].to_list() == [True, True, True]
     assert "delta_db" in delta.columns
 
-
-def test_plot_builder_accepts_tidy_tables_and_exports_csv(tmp_path):
+def test_plot_builder_accepts_tidy_tables_and_exports_csv(tmp_path: typing.Any) -> None:
     _save_sweep(tmp_path, "rbw-a", [20e3, 40e3, 60e3], [-2.0, 1.0, -3.0])
     points = sweep_points(scan_catalog(tmp_path))
     figure = field_chart(
@@ -169,8 +164,7 @@ def test_plot_builder_accepts_tidy_tables_and_exports_csv(tmp_path):
     assert figure.axes[0].get_title(loc="left") == "A reusable plot"
     assert b"rel_noise_mean_db" in csv_bytes(points)
 
-
-def test_verification_reports_digest_mismatch(tmp_path):
+def test_verification_reports_digest_mismatch(tmp_path: typing.Any) -> None:
     _save_sweep(tmp_path, "rbw-a", [20e3], [-2.0])
     catalog = scan_catalog(tmp_path)
 
@@ -179,13 +173,12 @@ def test_verification_reports_digest_mismatch(tmp_path):
     path.write_bytes(path.read_bytes() + b"modified")
     assert verify(catalog)["integrity"].to_list() == ["MISMATCH"]
 
-
-def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch, tmp_path):
+def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch: pytest.MonkeyPatch, tmp_path: typing.Any) -> None:
     path = tmp_path / "scope.npz"
     np.savez(path, placeholder=np.arange(4))
     calls = 0
 
-    def decode(_recording):
+    def decode(_recording: typing.Any) -> tuple[typing.Any, ...]:
         nonlocal calls
         calls += 1
         time = np.linspace(-1e-3, 1e-3, 100)
@@ -229,8 +222,7 @@ def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch, tmp_
     assert first["synthetic"].to_list() == [True] * first.height
     assert second["synthetic"].to_list() == [True] * second.height
 
-
-def test_scope_decimation_preserves_extrema_within_the_point_budget():
+def test_scope_decimation_preserves_extrema_within_the_point_budget() -> None:
     time = np.arange(1000, dtype=float)
     values = np.zeros(1000)
     values[117] = 25.0
@@ -243,8 +235,7 @@ def test_scope_decimation_preserves_extrema_within_the_point_budget():
     assert reduced_values.max() == 25.0
     assert reduced_values.min() == -22.0
 
-
-def test_synthetic_scope_recordings_flow_through_analysis_helpers(tmp_path):
+def test_synthetic_scope_recordings_flow_through_analysis_helpers(tmp_path: typing.Any) -> None:
     paths = write_demo(
         tmp_path,
         now=datetime(2026, 10, 19, 12, tzinfo=UTC),
