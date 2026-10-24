@@ -1,10 +1,10 @@
 import time
+import typing
 
 import pyvisa
 
 from ..config import IP, address
 from .base import BaseDevice
-
 
 class KeysightMXA(BaseDevice):
     """
@@ -13,7 +13,7 @@ class KeysightMXA(BaseDevice):
     triggering synchronization, and binary data transfer.
     """
 
-    def __init__(self, ip: str | None = None, timeout_ms: int = 5_000, resource_manager=None):
+    def __init__(self, ip: str | None = None, timeout_ms: int = 5_000, resource_manager: typing.Any=None) -> None:
         super().__init__(
             ip=ip or address(IP.NOISE_ANALYZER),
             resource_manager=resource_manager,
@@ -26,7 +26,7 @@ class KeysightMXA(BaseDevice):
         """Backward-compatible alias for :meth:`close`."""
         self.close()
 
-    def write(self, cmd: str):
+    def write(self, cmd: str) -> None:
         if self.instrument is None:
             raise RuntimeError("Instrument not connected")
         self.instrument.write(cmd)
@@ -55,7 +55,7 @@ class KeysightMXA(BaseDevice):
     def idn(self) -> str:
         return self.query("*IDN?")
 
-    def reset(self):
+    def reset(self) -> None:
         """Factory default and clear status."""
         self.write("*RST")
         self.write("*CLS")
@@ -84,27 +84,27 @@ class KeysightMXA(BaseDevice):
             errs.append(msg)
         return errs
 
-    def set_display_update(self, state: bool):
+    def set_display_update(self, state: bool) -> None:
         """Disable display updates to improve remote measurement speed."""
         self.write(f"DISP:ENAB {'ON' if state else 'OFF'}")
 
     # ------------------------------------------------------------------
     # Frequency / Amplitude / Bandwidth
     # ------------------------------------------------------------------
-    def set_center_freq(self, freq_hz: float):
+    def set_center_freq(self, freq_hz: float) -> None:
         self.write(f"FREQ:CENT {freq_hz}")
 
-    def set_span(self, span_hz: float):
+    def set_span(self, span_hz: float) -> None:
         self.write(f"FREQ:SPAN {span_hz}")
 
-    def set_start_stop(self, start_hz: float, stop_hz: float):
+    def set_start_stop(self, start_hz: float, stop_hz: float) -> None:
         self.write(f"FREQ:STAR {start_hz}")
         self.write(f"FREQ:STOP {stop_hz}")
 
-    def set_ref_level(self, level_dbm: float):
+    def set_ref_level(self, level_dbm: float) -> None:
         self.write(f"DISP:WIND:TRAC:Y:RLEV {level_dbm} dBm")
 
-    def set_attenuation(self, att_db: float):
+    def set_attenuation(self, att_db: float) -> None:
         """
         Set mechanical attenuation manually.
         **Manual attenuation is strongly recommended** for triggered /
@@ -112,22 +112,22 @@ class KeysightMXA(BaseDevice):
         """
         self.write(f"POW:ATT {att_db}")
 
-    def set_attenuation_auto(self, state: bool = True):
+    def set_attenuation_auto(self, state: bool = True) -> None:
         self.write(f"POW:ATT:AUTO {'ON' if state else 'OFF'}")
 
-    def set_rbw(self, rbw_hz: float | None = None, auto: bool = False):
+    def set_rbw(self, rbw_hz: float | None = None, auto: bool = False) -> None:
         if auto or rbw_hz is None:
             self.write("BWID:AUTO ON")
         else:
             self.write(f"BWID {rbw_hz}")
 
-    def set_vbw(self, vbw_hz: float | None = None, auto: bool = False):
+    def set_vbw(self, vbw_hz: float | None = None, auto: bool = False) -> None:
         if auto or vbw_hz is None:
             self.write("BWID:VID:AUTO ON")
         else:
             self.write(f"BWID:VID {vbw_hz}")
 
-    def set_detector(self, detector: str):
+    def set_detector(self, detector: str) -> None:
         """
         Common detectors:
         - AVER : RMS/Average (best for noise-like signals)
@@ -141,23 +141,23 @@ class KeysightMXA(BaseDevice):
     # ------------------------------------------------------------------
     # Sweep / Acquisition Control
     # ------------------------------------------------------------------
-    def set_sweep_duration(self, time: int):
+    def set_sweep_duration(self, time: int) -> None:
         self.write(f"SWE:TIME {time}ms")
 
-    def set_sweep_points(self, points: int):
+    def set_sweep_points(self, points: int) -> None:
         self.write(f"SWE:POIN {points}")
 
     def get_sweep_points(self) -> int:
         return int(self.query("SWE:POIN?"))
 
-    def set_continuous_sweep(self, state: bool):
+    def set_continuous_sweep(self, state: bool) -> None:
         self.write(f"INIT:CONT {'ON' if state else 'OFF'}")
 
-    def initiate_sweep(self):
+    def initiate_sweep(self) -> None:
         """Start a sweep immediately (use with INIT:CONT OFF)."""
         self.write("INIT:IMM")
 
-    def abort_sweep(self):
+    def abort_sweep(self) -> None:
         self.write("ABOR")
 
     def single_sweep_wait(self, timeout_sec: float = 30.0) -> bool:
@@ -181,10 +181,10 @@ class KeysightMXA(BaseDevice):
         step = (stop - start) / (pts - 1)
         return [start + i * step for i in range(pts)]
 
-    def set_average_count(self, count: int):
+    def set_average_count(self, count: int) -> None:
         self.write(f"AVER:COUN {count}")
 
-    def set_average_type(self, avg_type: str):
+    def set_average_type(self, avg_type: str) -> None:
         """
         avg_type: RMS (power), LOG (log-power), SCAL (voltage).
         Use RMS for true noise power averaging.
@@ -192,16 +192,16 @@ class KeysightMXA(BaseDevice):
         self.write(f"AVER:TYPE {avg_type}")
 
     # -- Trace Control (suffix syntax) --------------------------------
-    def set_trace_mode(self, trace_num: int | str, mode: str):
+    def set_trace_mode(self, trace_num: int | str, mode: str) -> None:
         self.write(f":TRACe{trace_num}:TYPE {mode}")
 
-    def set_trace_update(self, trace_num, state: bool = True):
+    def set_trace_update(self, trace_num: typing.Any, state: bool = True) -> None:
         self.write(f":TRACe{trace_num}:UPDATE {'ON' if state else 'OFF'}")
 
-    def set_trace_display(self, trace_num, state: bool = True):
+    def set_trace_display(self, trace_num: typing.Any, state: bool = True) -> None:
         self.write(f":TRACe{trace_num}:DISPLAY {'ON' if state else 'OFF'}")
 
-    def clear_trace(self, trace_num: int):
+    def clear_trace(self, trace_num: int) -> None:
         self.write(f":TRACe{trace_num}:CLEar")
 
     def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> list[float]:
@@ -220,18 +220,18 @@ class KeysightMXA(BaseDevice):
     # ------------------------------------------------------------------
     # Marker Control
     # ------------------------------------------------------------------
-    def set_marker_state(self, marker: int, state: bool):
+    def set_marker_state(self, marker: int, state: bool) -> None:
         """marker: 1-12."""
         self.write(f"CALC:MARK{marker}:STAT {'ON' if state else 'OFF'}")
 
-    def set_marker_mode(self, marker: int, mode: str):
+    def set_marker_mode(self, marker: int, mode: str) -> None:
         """
         mode: POS, DELT, BAND, NOIS.
         **NOIS** returns noise density in dBm/Hz.
         """
         self.write(f"CALC:MARK{marker}:MODE {mode}")
 
-    def set_marker_x(self, marker: int, freq_hz: float):
+    def set_marker_x(self, marker: int, freq_hz: float) -> None:
         self.write(f"CALC:MARK{marker}:X {freq_hz}")
 
     def get_marker_x(self, marker: int) -> float:
@@ -240,7 +240,7 @@ class KeysightMXA(BaseDevice):
     def get_marker_y(self, marker: int) -> float:
         return float(self.query(f"CALC:MARK{marker}:Y?"))
 
-    def configure_noise_marker(self, marker: int = 1, freq_hz: float = 0.0):
+    def configure_noise_marker(self, marker: int = 1, freq_hz: float = 0.0) -> None:
         """Place a noise density marker (dBm/Hz)."""
         self.set_marker_state(marker, True)
         self.set_marker_mode(marker, "NOIS")
@@ -249,7 +249,7 @@ class KeysightMXA(BaseDevice):
 
     def configure_band_power_marker(
         self, marker: int, center_hz: float, left_hz: float, right_hz: float
-    ):
+    ) -> None:
         """Integrated power marker with left/right offsets."""
         self.set_marker_state(marker, True)
         self.set_marker_mode(marker, "BAND")
@@ -264,7 +264,7 @@ class KeysightMXA(BaseDevice):
     # ------------------------------------------------------------------
     # Triggering
     # ------------------------------------------------------------------
-    def set_trigger_source(self, source: str):
+    def set_trigger_source(self, source: str) -> None:
         """
         source: IMM (FreeRun), VID (Video), EXT (External),
                 RFB (RFBurst), FRAM (Frame).
@@ -273,13 +273,13 @@ class KeysightMXA(BaseDevice):
         """
         self.write(f"TRIG:SOUR {source}")
 
-    def set_trigger_level_video(self, level_dbm: float):
+    def set_trigger_level_video(self, level_dbm: float) -> None:
         self.write(f"TRIG:LEV:VID {level_dbm}")
 
-    def set_trigger_level_external(self, level_v: float):
+    def set_trigger_level_external(self, level_v: float) -> None:
         self.write(f"TRIG:LEV:EXT {level_v}")
 
-    def set_trigger_slope(self, slope: str):
+    def set_trigger_slope(self, slope: str) -> None:
         """slope: POS or NEG."""
         self.write(f"TRIG:SLOP {slope}")
 
