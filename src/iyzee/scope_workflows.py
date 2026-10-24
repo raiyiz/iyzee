@@ -50,18 +50,18 @@ import platform
 import re
 import uuid
 from collections.abc import Mapping, Sequence
-from contextlib import AbstractContextManager
+from types import TracebackType
+from typing import Literal, Protocol
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Protocol
-
 import numpy as np
 
 from .devices.scope import (
     Channel,
     Coupling,
     DetailedWaveformData,
+    LeCroy,
     TriggerCoupling,
     TriggerMode,
     TriggerSlope,
@@ -72,10 +72,23 @@ from .experiment.io import save_numeric_recording
 log = logging.getLogger("iyzee.scope_workflows")
 
 
+class ScopeLock(Protocol):
+    """Minimal context-manager contract implemented by the driver's RLock."""
+
+    def __enter__(self) -> object: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> Literal[False]: ...
+
+
 class ScopeDriver(Protocol):
     """Structural scope interface shared by the LeCroy driver and test doubles."""
 
-    transaction_lock: AbstractContextManager[object]
+    @property
+    def transaction_lock(self) -> ScopeLock: ...
 
     def query(self, command: str) -> str: ...
     def get_volts_per_div(self, channel: Channel) -> str: ...
