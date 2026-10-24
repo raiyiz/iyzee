@@ -298,7 +298,7 @@ def build_bandwidth_sweep(
 def build_frequency_sweep(
     laser_center_thz: float = DEFAULT_LASER_CENTER_THZ,
     wavemeter_channel: int = DEFAULT_CHANNEL,
-    offsets_thz: Sequence[float] | None=None,
+    offsets_thz: Sequence[float] | None = None,
     *,
     relax_time_s: float = SETTLE_TIME_S,
     **config: Unpack[ConfigOptions],
@@ -344,7 +344,7 @@ def run_bandwidth_sweep(
 
 
 def run_frequency_sweep(
-    mx: KeysightMXA,
+    mx: Analyzer,
     shutter: Shutter,
     *args: Any,
     wavemeter: Wavemeter | None = None,
