@@ -39,7 +39,9 @@ def wf_block(data: bytes, header: bytes = b"C1:WF DAT1,", trailer: bytes = b"\n"
 def visa_timeout() -> VisaIOError:
     return VisaIOError(StatusCode.error_timeout)
 
+
 # -- connection ------------------------------------------------------------------------------
+
 
 def test_connect_applies_timeout_and_chunk_size_and_failures_are_clear() -> None:
     manager = FakeResourceManager()
@@ -85,6 +87,7 @@ def test_idn_asks_for_the_identity_and_can_widen_the_timeout() -> None:
 
 # -- waveform download -----------------------------------------------------------------------
 
+
 def test_waveform_download_decodes_calibrates_and_rejects_malformed_blocks() -> None:
     # 0x0A bytes inside the data must not end the read early.
     scope, resource = connected(wf_block(struct.pack("<3h", -32768, 10, 32767)))
@@ -121,6 +124,7 @@ def test_waveform_download_decodes_calibrates_and_rejects_malformed_blocks() -> 
         assert scope.connected and not resource.closed  # the whole reply was read: stream aligned
 
 # -- channel / trigger control ---------------------------------------------------------------
+
 
 def test_setters_and_getters_use_the_documented_commands() -> None:
     for call, expected in (
