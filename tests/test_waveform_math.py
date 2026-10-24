@@ -31,7 +31,15 @@ from iyzee.waveform_math import (
 )
 
 
-def _trace(label: str, time: typing.Any, values: typing.Any, *, time_unit: str="S", value_unit: str="V", **meta: typing.Any) -> Trace:
+def _trace(
+    label: str,
+    time: typing.Any,
+    values: typing.Any,
+    *,
+    time_unit: str = "S",
+    value_unit: str = "V",
+    **meta: typing.Any,
+) -> Trace:
     return Trace(
         label=label,
         time=np.asarray(time, dtype=np.float64),
@@ -41,7 +49,10 @@ def _trace(label: str, time: typing.Any, values: typing.Any, *, time_unit: str="
         meta=meta,
     )
 
-def _recording(waveforms: list[dict], applied: list[dict] | None = None, **extra: typing.Any) -> Recording:
+
+def _recording(
+    waveforms: list[dict], applied: list[dict] | None = None, **extra: typing.Any
+) -> Recording:
     """A hand-built Recording matching save_scope_acquisition's schema."""
     arrays: dict[str, np.ndarray] = {}
     manifest_waveforms = []
@@ -118,6 +129,7 @@ def test_subtract_traces_is_exact_resamples_and_never_mutates_or_mixes_units() -
         with pytest.raises(ValueError, match="different units"):
             operation(volts, amps)
 
+
 def test_background_correction_by_region_or_reference_and_its_input_checks() -> None:
     trace = _trace("C1", [0.0, 1.0, 2.0, 3.0], [10.0, 12.0, 100.0, 100.0])
 
@@ -138,6 +150,7 @@ def test_background_correction_by_region_or_reference_and_its_input_checks() -> 
         subtract_background(flat)
     with pytest.raises(ValueError, match="exactly one"):
         subtract_background(flat, region=(0.0, 1.0), reference=dark)
+
 
 def test_scale_trace_is_affine_defaults_to_identity_and_refuses_bad_scales() -> None:
     trace = _trace("C1", [0.0, 1.0, 2.0], [1.0, 2.0, 3.0])
@@ -169,6 +182,7 @@ def _figure(traces: typing.Any, **kwargs: typing.Any) -> typing.Iterator[typing.
     finally:
         plt.close(fig)
 
+
 def test_waveform_figures_label_lines_and_axes_without_guessing_units() -> None:
     traces = [
         _trace("C1", [0.0, 1.0], [1.0, 2.0], volts_per_div=0.5, coupling="D1M"),
@@ -191,6 +205,7 @@ def test_waveform_figures_label_lines_and_axes_without_guessing_units() -> None:
     with _figure([]) as fig:  # nothing to draw does not crash
         assert len(fig.axes[0].lines) == 0
 
+
 def test_save_waveform_figure_writes_a_real_png_and_closes_the_figure(tmp_path: typing.Any) -> None:
     traces = [_trace("C1", [0.0, 1.0, 2.0], [1.0, 2.0, 1.0])]
     open_before = len(plt.get_fignums())
@@ -201,6 +216,7 @@ def test_save_waveform_figure_writes_a_real_png_and_closes_the_figure(tmp_path: 
     assert out == tmp_path / "plot.png"
     assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"  # a real matplotlib-rendered image
     assert len(plt.get_fignums()) == open_before  # no leaked figures after repeated saves
+
 
 def test_end_to_end_acquire_save_load_and_subtract(tmp_path: typing.Any) -> None:
     scope = FakeScope()
