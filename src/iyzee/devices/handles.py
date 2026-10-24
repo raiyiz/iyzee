@@ -114,7 +114,8 @@ class _LockedHandle:
 class _VisaDevice(Protocol):
     """Shared lifecycle surface of the raw VISA drivers."""
 
-    ip: IP | str | None
+    @property
+    def ip(self) -> IP | str | None: ...
 
     def connect(self) -> None: ...
     def close(self) -> None: ...
