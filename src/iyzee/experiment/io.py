@@ -33,7 +33,6 @@ from matplotlib.figure import Figure
 from ..config import data_root
 from .core import StepResult
 
-
 # Where all measurement runs are written and (in the TUI) read back from —
 # <project root>/data, i.e. a sibling of src/, not inside the installed
 # package. That makes it a fixed, predictable place regardless of the

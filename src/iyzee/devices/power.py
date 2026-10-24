@@ -3,9 +3,8 @@ import typing
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from ..config import address, IP
-from .base import BaseDevice, SHUTTER_CHANNEL_DEFAULT
-
+from ..config import IP, address
+from .base import SHUTTER_CHANNEL_DEFAULT, BaseDevice
 
 #: The HMP4040 has four channels.
 CHANNELS = (1, 2, 3, 4)

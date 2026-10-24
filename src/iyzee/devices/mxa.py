@@ -3,7 +3,7 @@ import typing
 
 import pyvisa
 
-from ..config import address, IP
+from ..config import IP, address
 from .base import BaseDevice
 
 

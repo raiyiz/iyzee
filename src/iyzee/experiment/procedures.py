@@ -18,8 +18,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, ClassVar, Protocol, TypedDict, Unpack
 
 from ..devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
-from .core import ExperimentContext, run_sequence, StepResult
-
+from .core import ExperimentContext, StepResult, run_sequence
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2

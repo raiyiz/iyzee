@@ -24,12 +24,11 @@ import time
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
-from ..config import address, IP
+from ..config import IP, address
 from .base import SHUTTER_CHANNEL_DEFAULT
 from .power import ShutterControl
 from .scope import LeCroy, LeCroyTimeoutError
 from .wavemeter import Wavemeter
-
 
 log = logging.getLogger("iyzee.instruments")
 
