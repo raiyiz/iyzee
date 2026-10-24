@@ -30,6 +30,7 @@ def make_registry(calls: list[tuple[str, list[str]]]) -> CommandRegistry:
         ]
     )
 
+
 def test_parse_si_understands_suffixes_and_rejects_garbage() -> None:
     for text, value in (
         ("2u", 2e-6),
@@ -43,6 +44,7 @@ def test_parse_si_understands_suffixes_and_rejects_garbage() -> None:
         assert parse_si(text) == pytest.approx(value)
     with pytest.raises(CommandError, match="not a number"):
         parse_si("fast")
+
 
 def test_exact_name_alias_and_unique_prefix_resolve_and_pass_arguments() -> None:
     calls: list = []
@@ -59,12 +61,14 @@ def test_exact_name_alias_and_unique_prefix_resolve_and_pass_arguments() -> None
         ("quit", []),
     ]
 
+
 def test_an_exact_alias_beats_prefix_matching_and_blank_lines_do_nothing() -> None:
     calls: list = []
     registry = make_registry(calls)
     registry.execute("s")  # would be ambiguous as a prefix of sweep/... only if aliases didn't win
     assert calls == [("sweep", [])]
     assert registry.execute("  :  ") is None
+
 
 def test_ambiguous_and_unknown_commands_are_user_errors() -> None:
     registry = make_registry([])
@@ -73,6 +77,7 @@ def test_ambiguous_and_unknown_commands_are_user_errors() -> None:
     with pytest.raises(CommandError, match="unknown command :zap"):
         registry.execute("zap")
 
+
 def test_quoted_arguments_stay_together_and_bad_quoting_is_an_error() -> None:
     calls: list = []
     make_registry(calls).execute('connect "a b" c')
@@ -80,10 +85,12 @@ def test_quoted_arguments_stay_together_and_bad_quoting_is_an_error() -> None:
     with pytest.raises(CommandError, match="cannot parse"):
         make_registry([]).execute('connect "oops')
 
+
 def test_a_later_registration_shadows_an_earlier_one() -> None:
     registry = make_registry([])
     registry.add(Command("sweep", lambda args: "page-specific", "shadow"))
     assert registry.execute("sweep") == "page-specific"
+
 
 def test_tab_completion_of_command_words_and_arguments() -> None:
     registry = make_registry([])
@@ -98,6 +105,7 @@ def test_tab_completion_of_command_words_and_arguments() -> None:
         "wavemeter",
     ]  # already-given ones are skipped
     assert registry.complete("zzz") == ("zzz", [])
+
 
 def test_help_lists_every_command_and_details_one() -> None:
     registry = make_registry([])
