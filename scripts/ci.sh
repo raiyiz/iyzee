@@ -39,11 +39,7 @@ notebooks() {
 
 typecheck() {
     sync
-    uv run --locked mypy src tests
-    # Enforce complete signatures on the scope APIs without imposing a repository-wide
-    # annotation migration on unrelated legacy modules and tests.
-    uv run --locked mypy --disallow-untyped-defs --follow-imports=silent \
-        src/iyzee/devices/base.py src/iyzee/devices/scope.py src/iyzee/scope_workflows.py
+    uv run --locked mypy --disallow-untyped-defs src tests
 }
 
 all() {
@@ -51,9 +47,7 @@ all() {
     uv run --locked pytest
     uv run --locked ruff check .
     uv run --locked ruff format --check .
-    uv run --locked mypy src tests
-    uv run --locked mypy --disallow-untyped-defs --follow-imports=silent \
-        src/iyzee/devices/base.py src/iyzee/devices/scope.py src/iyzee/scope_workflows.py
+    uv run --locked mypy --disallow-untyped-defs src tests
     uv run --locked scripts/check_doc_links.py
     notebooks
     docs
