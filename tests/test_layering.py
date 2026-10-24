@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+
 def _graph() -> typing.Any:
     spec = importlib.util.spec_from_file_location("docs_index", ROOT / "scripts" / "docs_index.py")
     assert spec is not None and spec.loader is not None
@@ -34,6 +35,7 @@ ALLOWED = {
     "entry": {"config", "devices", "experiment", "session", "tui"},
 }
 
+
 def test_every_internal_import_points_down_the_layers() -> None:
     violations = []
     for module, deps in INDEX["imports"].items():
@@ -43,6 +45,7 @@ def test_every_internal_import_points_down_the_layers() -> None:
             if theirs != mine and theirs not in ALLOWED[mine]:
                 violations.append(f"{module} ({mine}) imports {dep} ({theirs})")
     assert not violations, "\n".join(violations)
+
 
 def test_only_the_tui_imports_textual() -> None:
     offenders = []
