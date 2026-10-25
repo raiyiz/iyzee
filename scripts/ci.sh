@@ -1,5 +1,5 @@
 #!/bin/sh
-# One entry point for CI and local checks: scripts/ci.sh {test|test-ui-core|test-ui-controls|test-ui-results|test-core-a|test-core-b|hardware|lint|typecheck|doc-links|notebooks|docs-index|docs|all|update}
+# One entry point for CI and local checks: scripts/ci.sh {test|test-ui-core|test-ui-power-scope|test-ui-sweep|test-ui-results|test-core-a|test-core-b|hardware|lint|typecheck|doc-links|notebooks|docs-index|docs|all|update}
 set -eu
 
 cd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/.."
@@ -94,8 +94,11 @@ case "${1:-}" in
         test_group tests/test_app.py tests/test_command_bar.py tests/test_connect_screen.py \
             tests/test_console.py tests/test_log_screen.py tests/test_rb_screen.py
         ;;
-    test-ui-controls)
-        test_group tests/test_power_screen.py tests/test_scope_screen.py tests/test_sweep_screen.py
+    test-ui-power-scope)
+        test_group tests/test_power_screen.py tests/test_scope_screen.py
+        ;;
+    test-ui-sweep)
+        test_group tests/test_sweep_screen.py
         ;;
     test-ui-results)
         test_group tests/test_layout.py tests/test_results_screen.py tests/test_tui_plotting.py
@@ -124,5 +127,5 @@ case "${1:-}" in
     docs)      docs ;;
     all)       all ;;
     update)    update ;;
-    *)         echo "usage: $0 {test|test-ui-core|test-ui-controls|test-ui-results|test-core-a|test-core-b|hardware|lint|typecheck|doc-links|notebooks|docs-index|docs|all|update}" >&2; exit 2 ;;
+    *)         echo "usage: $0 {test|test-ui-core|test-ui-power-scope|test-ui-sweep|test-ui-results|test-core-a|test-core-b|hardware|lint|typecheck|doc-links|notebooks|docs-index|docs|all|update}" >&2; exit 2 ;;
 esac

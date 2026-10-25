@@ -50,47 +50,50 @@ async def test_command_bar_focus_history_and_completion(app):
 async def test_command_operations_validation_navigation_and_quit(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # Keyboard submission/history are covered above; exercise the same dispatcher
+    # directly here so this test measures command behavior, not per-key UI overhead.
     handle = FakeHandle()
     app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
-        await run(pilot, "connect fake")
+        app.run_command("connect fake")
         await wait_until(pilot, lambda: "fake" in app.lab.handles)
         assert handle.connected
 
-        await run(pilot, "status")
+        app.run_command("status")
         await wait_until(pilot, lambda: any("fake: connected" in m for m in notifications(app)))
 
-        await run(pilot, "disconnect fake")
+        app.run_command("disconnect fake")
         await wait_until(pilot, lambda: "fake" not in app.lab.handles)
         assert handle.disconnected
 
-        await run(pilot, "frobnicate")
+        app.run_command("frobnicate")
         await wait_until(
             pilot, lambda: any("unknown command :frobnicate" in m for m in notifications(app))
         )
         assert app.is_running
 
         # Results-only commands must be rejected elsewhere, then validated on Results.
-        await run(pilot, "width 40")
+        app.run_command("width 40")
         await wait_until(
             pilot, lambda: any("unknown command :width" in m for m in notifications(app))
         )
-        await run(pilot, "scope")
-        await run(pilot, "acquire")
+        switcher = app.query_one(ContentSwitcher)
+        app.run_command("scope")
+        await wait_until(pilot, lambda: switcher.current == "scope")
+        app.run_command("acquire")
         await wait_until(
             pilot, lambda: any("cannot acquire waveforms" in m for m in notifications(app))
         )
 
-        await run(pilot, "results")
-        switcher = app.query_one(ContentSwitcher)
+        app.run_command("results")
         await wait_until(pilot, lambda: switcher.current == "results")
-        await run(pilot, "width 42")  # snaps to the nearest step
+        app.run_command("width 42")  # snaps to the nearest step
         run_list = app.query_one("#results-list")
         await wait_until(pilot, lambda: run_list.has_class("w-40"))
-        await run(pilot, "width soon")
+        app.run_command("width soon")
         await wait_until(pilot, lambda: any("usage: :width" in m for m in notifications(app)))
 
-        await run(pilot, "sw")  # unique prefix
+        app.run_command("sw")  # unique prefix
         await wait_until(pilot, lambda: switcher.current == "sweep")
-        await run(pilot, "q")
+        app.run_command("q")
         await wait_until(pilot, lambda: not app.is_running)

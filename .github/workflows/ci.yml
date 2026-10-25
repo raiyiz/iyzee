@@ -25,7 +25,8 @@ jobs:
         # independent, balanced shards to reduce pull-request feedback time.
         check:
           - test-ui-core
-          - test-ui-controls
+          - test-ui-power-scope
+          - test-ui-sweep
           - test-ui-results
           - test-core-a
           - test-core-b
