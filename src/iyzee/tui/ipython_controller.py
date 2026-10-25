@@ -42,10 +42,10 @@ class _ThreadStream:
         return self._default.write(text)
 
     def flush(self) -> None:
-        if threading.get_ident() == self._session._worker_id:
-            self._session._flush_output()
-        else:
+        if threading.get_ident() != self._session._worker_id:
             self._default.flush()
+        # Worker writes are already scheduled onto the UI loop by write().
+        # Draining here would call Textual widgets directly from the worker.
 
     def isatty(self) -> bool:
         if threading.get_ident() == self._session._worker_id:
@@ -189,6 +189,8 @@ class IPythonSession:
                     self._idle.set()
                     self._notify_busy(False)
         finally:
+            self._idle.set()
+            self._notify_busy(False)
             self._worker_id = None
             self._restore_globals()
 
