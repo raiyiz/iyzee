@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from helpers import FakeApp
 
-from iyzee.tui.ipython_controller import IPythonSession
+from iyzee.tui.ipython_controller import Completion, IPythonSession
 
 
 def _session() -> tuple[IPythonSession, list[str]]:
@@ -48,8 +48,8 @@ def test_exception_is_reported_and_next_cell_still_runs() -> None:
 def test_completion_and_live_lab_namespace() -> None:
     session, _output = _session()
     try:
-        matches = session.complete("lab.", cursor_pos=4)
-        assert ".mx" in matches and ".results" in matches
+        texts = [c.text for c in session.complete("lab.", cursor_pos=4)]
+        assert ".mx" in texts and ".results" in texts
         assert session.submit("lab.connected")
         _finish(session)
     finally:
@@ -62,5 +62,15 @@ def test_input_is_explicitly_unsupported_and_worker_closes() -> None:
         assert session.submit("input('value? ')")
         _finish(session)
         assert "input() is not available" in "".join(output)
+    finally:
+        assert session.close()
+
+
+def test_completion_reports_the_range_it_replaces() -> None:
+    session, _output = _session()
+    try:
+        # The text replaces source[start:end]; it is not a suffix to append.
+        assert session.complete("pri") == [Completion(0, 3, "print")]
+        assert session.complete("lab.m") == [Completion(3, 5, ".mx")]
     finally:
         assert session.close()

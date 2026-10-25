@@ -11,7 +11,7 @@ import sys
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, NamedTuple, TextIO
 
 from IPython.core.completer import provisionalcompleter
 from IPython.core.interactiveshell import InteractiveShell
@@ -26,6 +26,14 @@ def _raise_in_thread(thread_id: int) -> None:
     )
     if result > 1:
         ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), None)
+
+
+class Completion(NamedTuple):
+    """One completion: ``text`` replaces ``source[start:end]`` (it is not a suffix)."""
+
+    start: int
+    end: int
+    text: str
 
 
 class _ThreadStream:
@@ -128,13 +136,13 @@ class IPythonSession:
             self._jobs.put(source)
         return True
 
-    def complete(self, source: str, cursor_pos: int | None = None) -> list[str]:
-        """Return IPython's insertion suffixes for the text at the cursor."""
+    def complete(self, source: str, cursor_pos: int | None = None) -> list[Completion]:
+        """Return IPython's completions for the text at the cursor."""
         if self.executing or self._closed:
             return []
         with provisionalcompleter():
             return [
-                item.text
+                Completion(item.start, item.end, item.text)
                 for item in self.shell.Completer.completions(
                     source, len(source) if cursor_pos is None else cursor_pos
                 )

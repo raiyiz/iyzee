@@ -48,3 +48,19 @@ async def test_console_cells_share_state_and_keep_live_lab_results() -> None:
 
     session = console.session
     assert session._thread is not None and not session._thread.is_alive()
+
+
+@async_test
+async def test_completion_replaces_the_word_under_the_cursor() -> None:
+    app = IyzeeApp()
+    async with app.run_test(size=(110, 32)) as pilot:
+        await pilot.press("i")
+        await pilot.pause()
+        editor = app.query_one(IyzeeConsole).query_one(TextArea)
+        for typed, expected in (("pri", "print"), ("lab.m", "lab.mx"), ("x = lab.m", "x = lab.mx")):
+            editor.text = typed
+            editor.cursor_location = (0, len(typed))
+            await pilot.press("ctrl+space")
+            await pilot.pause()
+            assert editor.text == expected
+            assert editor.cursor_location == (0, len(expected))

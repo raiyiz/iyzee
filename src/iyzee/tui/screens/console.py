@@ -23,6 +23,16 @@ if TYPE_CHECKING:
     from ..app import IyzeeApp
 
 
+def _location_to_offset(text: str, location: tuple[int, int]) -> int:
+    row, column = location
+    return sum(len(line) + 1 for line in text.split("\n")[:row]) + column
+
+
+def _offset_to_location(text: str, offset: int) -> tuple[int, int]:
+    row = text.count("\n", 0, offset)
+    return row, offset - (text.rfind("\n", 0, offset) + 1)
+
+
 class ConsoleScreen(Vertical):
     """The console page and its persistent interactive Python session."""
 
@@ -155,16 +165,16 @@ class IyzeeConsole(Vertical):
     def action_complete(self) -> None:
         editor = self.query_one(TextArea)
         source = editor.text
-        row, column = editor.cursor_location
-        cursor_pos = sum(len(line) + 1 for line in source.splitlines()[:row]) + column
+        cursor_pos = _location_to_offset(source, editor.cursor_location)
         matches = self.session.complete(source, cursor_pos)
         if not matches:
             return
         if len(matches) == 1:
-            editor.text = source[:cursor_pos] + matches[0] + source[cursor_pos:]
-            editor.cursor_location = (row, column + len(matches[0]))
+            match = matches[0]
+            editor.text = source[: match.start] + match.text + source[match.end :]
+            editor.cursor_location = _offset_to_location(editor.text, match.start + len(match.text))
         else:
-            self._write("  ".join(matches) + "\n")
+            self._write("  ".join(m.text.removeprefix(".") for m in matches) + "\n")
 
     def action_history_previous(self) -> None:
         if self.session.executing or not self._history:
