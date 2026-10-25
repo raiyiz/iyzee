@@ -270,7 +270,7 @@ can persist across switches.
 )
 
 The registry is #code("PAGE_SPECS"); the nav rail, the content switcher and the `:` commands all derive from it, so adding a
-page cannot leave them out of step. F1–F4 reach only Connect/Sweep/Results/Console because the console's embedded terminal lets
+The registry is #code("PAGE_SPECS"); the nav rail, the content switcher and the `:` commands all derive from it, so adding a page cannot leave them out of step. F1–F4 are global shortcuts for Connect/Sweep/Results/Console; Scope, Power, Rb and Log are reached through their letter bindings or the nav rail.
 exactly those four through; Scope, Power, Rb and Log are letter-only.
 
 The shared #code("Page") base owns mechanics that are not domain-specific: scrolling without stealing initial focus, labeled fields, the finite/positive
