@@ -179,7 +179,7 @@ class IyzeeConsole(Vertical):
 
     def on_vim_text_area_save_requested(self, _message: VimTextArea.SaveRequested) -> None:
         self._write(
-            "The console buffer is not a file; executed cells are stored in IPython history.\\n"
+            "The console buffer is not a file; executed cells are stored in IPython history.\n"
         )
 
     def on_vim_text_area_quit_requested(self, _message: VimTextArea.QuitRequested) -> None:
