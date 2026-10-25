@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 
 from helpers import async_test
-from textual.widgets import TextArea
+from textual_vim_textarea import Mode, VimTextArea
 
 from iyzee.experiment import StepResult
 from iyzee.tui.app import IyzeeApp
@@ -13,10 +13,13 @@ from iyzee.tui.screens.console import IyzeeConsole
 from iyzee.tui.workers import LastRun
 
 
-async def _run_cell(pilot, console: IyzeeConsole, source: str) -> None:
-    editor = console.query_one(TextArea)
+async def _run_cell(
+    pilot, console: IyzeeConsole, source: str, key: str = "ctrl+enter"
+) -> None:
+    editor = console.query_one(VimTextArea)
     editor.text = source
-    await pilot.press("ctrl+enter")
+    editor.cursor_location = editor.document.end
+    await pilot.press(key)
     deadline = time.monotonic() + 8
     while console.session.executing and time.monotonic() < deadline:
         await pilot.pause(0.03)
@@ -33,7 +36,7 @@ async def test_console_cells_share_state_and_keep_live_lab_results() -> None:
         console = app.query_one(IyzeeConsole)
         shell = console.session.shell
 
-        await _run_cell(pilot, console, "answer = 40")
+        await _run_cell(pilot, console, "answer = 40", key="shift+enter")
         assert shell.user_ns["answer"] == 40
 
         await _run_cell(pilot, console, "answer + 2")
@@ -56,7 +59,7 @@ async def test_completion_replaces_the_word_under_the_cursor() -> None:
     async with app.run_test(size=(110, 32)) as pilot:
         await pilot.press("i")
         await pilot.pause()
-        editor = app.query_one(IyzeeConsole).query_one(TextArea)
+        editor = app.query_one(IyzeeConsole).query_one(VimTextArea)
         for typed, expected in (("pri", "print"), ("lab.m", "lab.mx"), ("x = lab.m", "x = lab.mx")):
             editor.text = typed
             editor.cursor_location = (0, len(typed))
@@ -64,3 +67,34 @@ async def test_completion_replaces_the_word_under_the_cursor() -> None:
             await pilot.pause()
             assert editor.text == expected
             assert editor.cursor_location == (0, len(expected))
+
+
+
+@async_test
+async def test_tab_completes_in_insert_mode_and_indents_without_matches() -> None:
+    async with IyzeeApp().run_test(size=(110, 32)) as pilot:
+        await pilot.press("i")
+        await pilot.pause()
+        editor = pilot.app.query_one(VimTextArea)
+        assert editor.mode is Mode.INSERT
+
+        await pilot.press("p", "r", "i", "tab")
+        assert editor.text == "print"
+
+        editor.text = "#"
+        editor.cursor_location = (0, 1)
+        await pilot.press("tab")
+        assert editor.text == "#    "
+
+
+@async_test
+async def test_vim_delete_and_undo_work_in_console_editor() -> None:
+    async with IyzeeApp().run_test(size=(110, 32)) as pilot:
+        await pilot.press("i")
+        editor = pilot.app.query_one(VimTextArea)
+        editor.text = "one two"
+        editor.cursor_location = (0, 0)
+        await pilot.press("escape", "d", "w")
+        assert editor.text == "two"
+        await pilot.press("u")
+        assert editor.text == "one two"
