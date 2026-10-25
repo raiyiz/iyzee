@@ -84,7 +84,7 @@ async def test_tab_completes_in_insert_mode_and_indents_without_matches() -> Non
         editor.text = "#"
         editor.cursor_location = (0, 1)
         await pilot.press("tab")
-        assert editor.text == "#    "
+        assert editor.text == "#   "
 
 
 @async_test

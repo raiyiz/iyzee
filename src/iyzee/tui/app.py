@@ -564,7 +564,7 @@ class IyzeeApp(App):
 
     QUIT_CONFIRM_S = 4.0
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         """Route Textual's generic quit action through the hardware-safe preflight."""
         self.action_request_shutdown()
 

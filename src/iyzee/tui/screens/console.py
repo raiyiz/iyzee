@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from matplotlib.figure import Figure
 from rich.text import Text
-from textual.app import ComposeResult
 from textual import events
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.css.query import NoMatches

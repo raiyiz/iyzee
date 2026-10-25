@@ -175,12 +175,9 @@ class IPythonSession:
         # Interactive debuggers require terminal stdin. Keep automatic post-mortem
         # debugging disabled and replace both line magics with a fast failure.
         self.shell.call_pdb = False
-        self.shell.register_magic_function(
-            self._reject_interactive_debugger, magic_kind="line", magic_name="debug"
-        )
-        self.shell.register_magic_function(
-            self._reject_interactive_debugger, magic_kind="line", magic_name="pdb"
-        )
+        line_magics = self.shell.magics_manager.magics["line"]
+        line_magics["debug"] = self._reject_interactive_debugger
+        line_magics["pdb"] = self._reject_interactive_debugger
         InteractiveShell._instance = self.shell  # type: ignore[assignment]
 
     @property
@@ -201,6 +198,8 @@ class IPythonSession:
         sys.stdout = _ThreadStream(stdout, self)  # type: ignore[assignment]
         sys.stderr = _ThreadStream(stderr, self)  # type: ignore[assignment]
         builtins.input = self._input  # type: ignore[assignment]
+        # Normal UI shutdown waits for this worker to stop before exiting; daemon=True
+        # is only a last-resort fallback for abnormal interpreter termination.
         self._thread = threading.Thread(target=self._run, name="iyzee-ipython", daemon=True)
         self._thread.start()
 
