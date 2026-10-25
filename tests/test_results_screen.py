@@ -357,12 +357,9 @@ async def test_export_writes_a_real_png_and_runs_off_the_ui_thread(
 async def test_list_width_keys_resize_clamp_persist_and_a_bad_saved_width_falls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    bad = tmp_path / "bad.json"
-    bad.write_text('{"results_list_width": 7}')  # unusable: back to the default
-    async with _open_results_screen(monkeypatch, tmp_path, bad) as (screen, _pilot):
-        assert screen.query_one("#results-list").has_class(f"w-{results_mod.DEFAULT_LIST_WIDTH}")
-
     prefs_file = tmp_path / "config" / "tui.json"
+    prefs_file.parent.mkdir(parents=True)
+    prefs_file.write_text('{"results_list_width": 7}')  # unusable: back to the default
     async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, pilot):
         run_list = screen.query_one("#results-list")
         assert run_list.has_class(f"w-{results_mod.DEFAULT_LIST_WIDTH}")
