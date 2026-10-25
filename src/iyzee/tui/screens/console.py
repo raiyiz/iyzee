@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from matplotlib.figure import Figure
 from rich.text import Text
@@ -46,7 +47,7 @@ class ConsoleScreen(Vertical):
 class IyzeeConsole(Vertical):
     """A persistent IPython namespace presented as a code editor and output log."""
 
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding]] = [
         Binding("ctrl+enter", "submit_cell", "Run cell", priority=True),
         Binding("ctrl+space", "complete", "Complete", show=False, priority=True),
         Binding("ctrl+p", "history_previous", "Previous cell", show=False, priority=True),
@@ -132,10 +133,8 @@ class IyzeeConsole(Vertical):
         state = "running · Ctrl+C interrupts" if self._busy else (
             "Ctrl+Enter run · Ctrl+Space complete · Ctrl+P/N history"
         )
-        try:
+        with contextlib.suppress(NoMatches):
             self.query_one("#console-status", Static).update(f"{self._lab_text}  ·  {state}")
-        except NoMatches:
-            pass
 
     def action_submit_cell(self) -> None:
         editor = self.query_one(TextArea)
@@ -206,8 +205,6 @@ class IyzeeConsole(Vertical):
         self.app.call_from_thread(self._draw_figure, lines, labels)
 
     def _draw_figure(self, lines: list[tuple[list, list, str]], labels: dict[str, str]) -> None:
-        from textual_plotext import PlotextPlot
-
         plot = self.query_one("#console-plot", PlotextPlot)
         plot.display = True
         draw_series(plot, lines, xlabel=labels["xlabel"] or None, ylabel=labels["ylabel"] or None)

@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 
 from helpers import async_test
-
 from textual.widgets import TextArea
 
 from iyzee.experiment import StepResult

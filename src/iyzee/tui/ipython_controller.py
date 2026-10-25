@@ -11,7 +11,7 @@ import sys
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import Any, TextIO
 
 from IPython.core.completer import provisionalcompleter
 from IPython.core.interactiveshell import InteractiveShell
@@ -187,7 +187,7 @@ class IPythonSession:
                     break
                 try:
                     self.shell.run_cell(source, store_history=True, silent=False)
-                except (Exception, KeyboardInterrupt, SystemExit) as exc:
+                except (KeyboardInterrupt, SystemExit) as exc:
                     self._write_output(f"{type(exc).__name__}: {exc}\n")
                 finally:
                     self._idle.set()
