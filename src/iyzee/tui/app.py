@@ -584,12 +584,17 @@ class IyzeeApp(App):
         """Cancel an ordinary quit if a cell survives the bounded interrupt wait."""
         try:
             session = self.console_session
+            if session is not None:
+                # Close the race between observing an idle worker and the session close:
+                # no new cell should be queued while this shutdown decision is in flight.
+                session.pause_submissions()
             if session is not None and session.executing:
                 session.interrupt()
                 stopped = await asyncio.to_thread(
                     session.wait_until_idle, self.CELL_SHUTDOWN_TIMEOUT_S
                 )
                 if not stopped:
+                    session.resume_submissions()
                     message = (
                         f"Console cell did not stop within {self.CELL_SHUTDOWN_TIMEOUT_S:g}s. "
                         "Shutdown cancelled; instruments remain connected and may retain their "
@@ -605,6 +610,9 @@ class IyzeeApp(App):
             # asking the lab to close their devices.
             self.shutdown_requested.set()
             if not await asyncio.to_thread(self._close_console_and_instruments):
+                self.shutdown_requested.clear()
+                if session is not None:
+                    session.resume_submissions()
                 self.notify(
                     "Shutdown cancelled because the IPython worker did not stop. "
                     "No instruments were disconnected; wait and retry.",

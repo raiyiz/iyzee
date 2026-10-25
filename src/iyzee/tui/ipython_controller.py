@@ -165,6 +165,7 @@ class IPythonSession:
         self._in_cell = False
         self._started = False
         self._closed = False
+        self._accepting_submissions = True
         self._previous_shell = InteractiveShell._instance
         self._previous_input = builtins.input
         self._previous_streams: tuple[Any, Any, Any] | None = None
@@ -188,6 +189,17 @@ class IPythonSession:
         """Wait at most the given number of seconds for the current cell to finish."""
         return self._idle.wait(timeout)
 
+    def pause_submissions(self) -> None:
+        """Atomically reject new cells while shutdown is being decided."""
+        with self._state_lock:
+            self._accepting_submissions = False
+
+    def resume_submissions(self) -> None:
+        """Reopen the editor after a cancelled shutdown, unless the session is closed."""
+        with self._state_lock:
+            if not self._closed:
+                self._accepting_submissions = True
+
     def start(self) -> None:
         if self._started or self._closed:
             return
@@ -204,13 +216,13 @@ class IPythonSession:
         self._thread.start()
 
     def submit(self, source: str) -> bool:
-        """Queue one cell; returns False while another cell is running."""
-        if not source.strip() or self._closed or not self._started:
+        """Queue one cell; returns False while busy, closed or shutting down."""
+        if not source.strip() or not self._started:
             return False
         if self._thread is None or not self._thread.is_alive():
             return False
         with self._state_lock:
-            if self._closed or not self._idle.is_set():
+            if self._closed or not self._accepting_submissions or not self._idle.is_set():
                 return False
             self._idle.clear()
             self._notify_busy(True)
@@ -219,15 +231,16 @@ class IPythonSession:
 
     def complete(self, source: str, cursor_pos: int | None = None) -> list[Completion]:
         """Return IPython's completions for the text at the cursor."""
-        if self.executing or self._closed:
-            return []
-        with provisionalcompleter():
-            return [
-                Completion(item.start, item.end, item.text)
-                for item in self.shell.Completer.completions(
-                    source, len(source) if cursor_pos is None else cursor_pos
-                )
-            ]
+        with self._state_lock:
+            if self._closed or not self._accepting_submissions or not self._idle.is_set():
+                return []
+            with provisionalcompleter():
+                return [
+                    Completion(item.start, item.end, item.text)
+                    for item in self.shell.Completer.completions(
+                        source, len(source) if cursor_pos is None else cursor_pos
+                    )
+                ]
 
     def history(self) -> list[str]:
         """Return recent raw cells from IPython's configured history database."""
@@ -251,9 +264,12 @@ class IPythonSession:
 
     def close(self, timeout: float = 3.0) -> bool:
         """Stop the worker. False means user code did not stop within the timeout."""
-        if self._closed:
+        with self._state_lock:
+            was_closed = self._closed
+            self._closed = True
+            self._accepting_submissions = False
+        if was_closed:
             return self._thread is None or not self._thread.is_alive()
-        self._closed = True
         self.interrupt()
         if self._started:
             self._jobs.put(None)

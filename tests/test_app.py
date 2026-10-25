@@ -298,8 +298,12 @@ async def test_shutdown_stays_open_when_a_console_cell_ignores_interrupt() -> No
         assert handle.disconnect_calls == 0
         assert session.executing
 
-        # Once the blocked call returns, the operator can quit normally.
+        # Once the blocked call returns, the rejected shutdown must reopen the session.
         await wait_until(pilot, lambda: not session.executing, timeout=3.0)
+        assert session.submit("shutdown_retry = 42")
+        await wait_until(pilot, lambda: not session.executing, timeout=3.0)
+        assert session.shell.user_ns["shutdown_retry"] == 42
+
         await pilot.press("ctrl+q")
         await wait_until(pilot, lambda: not app.is_running)
 
