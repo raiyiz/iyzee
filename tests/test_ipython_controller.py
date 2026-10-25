@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from helpers import FakeApp
 
 from iyzee.tui.ipython_controller import IPythonSession

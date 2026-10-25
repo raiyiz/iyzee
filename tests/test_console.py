@@ -6,11 +6,12 @@ import time
 
 from helpers import async_test
 
+from textual.widgets import TextArea
+
 from iyzee.experiment import StepResult
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens.console import IyzeeConsole
 from iyzee.tui.workers import LastRun
-from textual.widgets import TextArea
 
 
 async def _run_cell(pilot, console: IyzeeConsole, source: str) -> None:

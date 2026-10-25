@@ -187,7 +187,7 @@ class IPythonSession:
                     break
                 try:
                     self.shell.run_cell(source, store_history=True, silent=False)
-                except BaseException as exc:
+                except (Exception, KeyboardInterrupt, SystemExit) as exc:
                     self._write_output(f"{type(exc).__name__}: {exc}\n")
                 finally:
                     self._idle.set()
@@ -199,7 +199,8 @@ class IPythonSession:
     def _input(self, prompt: str = "") -> str:
         if threading.get_ident() == self._worker_id:
             raise RuntimeError(
-                "input() is not available in the cell console; define a variable in the editor instead"
+                "input() is not available in the cell console; "
+                "define a variable in the editor instead"
             )
         return self._previous_input(prompt)
 
