@@ -33,9 +33,10 @@ class _Result:
 
 class IyzeeIPython:
     """Minimal test harness: a plain InteractiveShell built from the same
-    ``shell_config``/``lab_namespace`` the console's real (terminal) shell
-    uses, with a ``run``-and-capture ``execute``. The terminal shell itself
-    is covered in test_ipython_session.py."""
+    ``shell_config``/``lab_namespace`` the execution controller uses,
+    with a ``run``-and-capture ``execute``. The real Textual console and
+    worker behavior are covered in test_console.py and
+    test_ipython_controller.py."""
 
     def __init__(self, app, namespace=None, history_file=None) -> None:
         self.shell = InteractiveShell(

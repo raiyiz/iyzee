@@ -863,25 +863,20 @@ completion live in `tui/commands.py`, while each page declares the commands it
 supports. This keeps the command grammar free from Textual and makes command
 semantics easy to test.
 
-The design also matters for the embedded console: while the terminal owns the
-keyboard, most keys must continue to mean what IPython expects rather than what
-the surrounding TUI expects.
-
-= The embedded IPython console
-
-The console is not a second application. It is IPython running inside the same
-process and looking at the same live instruments.
-
-The input path is:
+The console is a native Textual cell editor backed by an in-process IPython
+`InteractiveShell`. Textual owns editing, key events, output scrolling and
+plotting; a small controller executes cells serially on a worker thread. This
+removes the virtual-terminal compatibility layer while preserving access to
+the live `lab` namespace.
 
 #figure(
   stack(
     spacing: 4pt,
-    node("keyboard event", "Textual receives the physical key"),
+    node("TextArea", "multiline Python editor"),
     arrow(dir: "↓"),
-    node("termkeys", "key event to terminal bytes"),
+    node("IPythonSession", "serialized cell execution"),
     arrow(dir: "↓"),
-    node("IPython / prompt_toolkit", "real Python terminal UI"),
+    node("InteractiveShell", "run_cell() on the worker thread"),
     arrow(dir: "↓"),
     node("LabProxy", "fresh session lookup"),
     arrow(dir: "↓"),
@@ -889,10 +884,10 @@ The input path is:
     arrow(dir: "↓"),
     node("live instrument", "same handle used by TUI workers"),
   ),
-  caption: [The console is an in-process terminal frontend to the same live resource graph.],
+  caption: [Cell execution remains in-process and uses the same live resource graph.],
 )
 
-The output path is the reverse integration problem:
+Execution output follows the other direction of the integration boundary:
 
 #block(
   fill: blue-pale,
@@ -901,24 +896,16 @@ The output path is the reverse integration problem:
   radius: 3pt,
   width: 100%,
 )[
-```text
-IPython output
-     ↓
-virtual terminal
-     ↓
-pyte
-     ↓
-Vterm
-     ↓
-TerminalView
-     ↓
-Textual rendering```
+  IPython stdout / stderr / tracebacks
+  → worker-aware stream routing and IPython display hook
+  → Textual RichLog and Matplotlib plot panel
 ]
 
-This arrangement is valuable because it allows IPython and prompt-toolkit to
-retain their own editing, completion, history, inspection, magics, and
-interrupt behavior. `iyzee` only supplies the virtual terminal boundary needed
-to place that existing terminal UI inside Textual.
+IPython retains Python execution, history, completion, inspection, magics and
+tracebacks. Textual provides the editor and output UI instead of reproducing
+prompt_toolkit's terminal behavior. Cells execute one at a time away from the
+UI event loop, keeping slow hardware calls from freezing navigation and
+status updates.
 
 == Why in-process matters
 

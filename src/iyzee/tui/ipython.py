@@ -1,6 +1,6 @@
 """What the console's IPython shell is made of: the ``lab`` namespace,
 its locking, and its configuration. (Running the shell lives in
-``ipython_session.py``.)
+``ipython_controller.py``.)
 
 Guide: :guide:`arch-labproxy`
 """
@@ -150,7 +150,7 @@ class LabProxy:
 
     def __dir__(self) -> list[str]:
         # Always lists the full set regardless of what's connected right
-        # now, so `lab.<Tab>` in the console shows what's *possible*
+        # now, so completion on `lab.` in the console shows what's *possible*
         # (mx/psu/shutter/scope), not just what happens to be connected at
         # this exact moment.
         return sorted({*self._INSTRUMENT_KEYS, "results", "last_run", "handles", "connected"})
@@ -199,14 +199,14 @@ def shell_config(history_file: str | Path | None = None) -> Config:
     config.InteractiveShell.banner1 = ""
     config.InteractiveShell.banner2 = ""
     # Jedi does static analysis and can't see through LabProxy's dynamic
-    # __getattr__ — with it on, `lab.<Tab>` silently returns no completions
+    # __getattr__ — with it on, completion on `lab.` silently returns no members
     # at all (checked directly: Jedi returns nothing for `lab.` and
     # IPython's complete() does not fall back to its own simpler dir()-based
     # completer when that happens). Regular attribute/module/keyword
     # completion elsewhere is unaffected.
     config.Completer.use_jedi = False
     # Let IPython's completer look through the proxies: without this,
-    # nested completion such as `lab.mx.<Tab>` finds nothing, because the
+    # nested completion on `lab.mx.` finds nothing, because the
     # completer will not call getattr on objects it does not trust.
     config.Completer.policy_overrides = {"allowed_getattr": {LabProxy, LockedProxy}}
     return config

@@ -349,7 +349,7 @@ Key handling relies on Textual's own focus and binding priority, with no app-spe
   [`Ctrl+Q`], [quit at once],
   [`q`], [quit on a second press within #fact("tui.quit_confirm_s") s, so a stray key cannot close an app holding live instruments],
   [`j` / `k`, `Escape`], [move focus; leave a text field],
-  [`Ctrl+\\`], [Textual's command palette (not `Ctrl+P`, which IPython uses for history)],
+  [`Ctrl+\\`], [Textual's command palette],
 )
 
 Commands (#code("CommandRegistry")) are parsed without Textual: an exact name or alias wins, otherwise a unique prefix does (`:conn`); a page's commands shadow the global ones. Values accept SI suffixes (`:tdiv 2u`; #code("parse_si")).
@@ -366,7 +366,7 @@ The layout reflows at #fact("tui.breakpoints.1.0") and #fact("tui.breakpoints.2.
 
 = The console in practice <sec-console>
 
-The Console page runs IPython's own terminal UI (prompt_toolkit's prompt with vi or emacs editing, completion, history search, `%magics`, `?` help and `%debug`) inside the application process, so `lab.mx` is the live instrument rather than a copy. prompt_toolkit is a terminal application, so it is given virtual terminals (#code("IPythonSession")): keystrokes are encoded by `termkeys.py` into a pipe input, and its output is interpreted by a `pyte`-based screen (`vterm.py`) painted by `terminal_view.py`. The shell runs in its own thread, so a slow cell cannot freeze the UI; Ctrl+C interrupts the running cell. While the terminal has focus only `F1`–`F4`, `Ctrl+Q` and `Ctrl+\\` reach the app; Ctrl+Z is never forwarded because IPython binds it to "suspend". During shutdown, IPython's normal cleanup still runs, but its terminal-reset output is routed through the virtual-terminal sink rather than leaking escape sequences into the host terminal.
+The Console page presents a persistent in-process IPython shell through a Textual multiline editor and output log. `Ctrl+Enter` runs the cell, `Ctrl+Space` requests completion, `Ctrl+P` / `Ctrl+N` browse executed cells, and `Ctrl+C` interrupts a running cell on a best-effort basis. Execution runs on a worker thread so slow hardware calls do not freeze the UI. The same `lab` proxy exposes live instruments and the latest sweep results. Interactive `input()` and terminal-based debugger prompts are not supported by the cell editor. Matplotlib figures created in the console are shown in the plot panel.
 
 #callout(
   "Two different things are called lab",
@@ -418,7 +418,7 @@ Calibrated values come from the scope's own `VERTICAL_GAIN`/`VERTICAL_OFFSET` (`
 - Rohde & Schwarz, *HMP Series Power Supply User Manual*: `INST:NSEL`, `INST OUTn`, `OUTP:SEL`, `OUTP:GEN`.
 - Teledyne LeCroy, *Remote Control Manual* for your model family: `WF?`, `INSPECT?`, `CFMT`, `CORD`, `<channel>:VOLT_DIV`/`OFFSET`/`COUPLING`/`TRACE`, `TRIG_SELECT`/`TRIG_LEVEL`/`TRIG_SLOPE`/`TRIG_COUPLING`/`TRIG_MODE`, `TIME_DIV`.
 - PyVISA documentation, resource strings and `query_binary_values()`: #link("https://pyvisa.readthedocs.io/en/1.10.0/api/resources.html")[PyVISA resources]
-- Textual workers and focus: #link("https://textual.textualize.io/guide/workers/")[Workers guide]; prompt_toolkit and pyte host the console: #link("https://python-prompt-toolkit.readthedocs.io/")[prompt_toolkit], #link("https://pyte.readthedocs.io/")[pyte]
+- Textual workers and focus: #link("https://textual.textualize.io/guide/workers/")[Workers guide]; the console uses Textual #link("https://textual.textualize.io/widgets/text_area/")[TextArea] and #link("https://textual.textualize.io/widgets/rich_log/")[RichLog], backed by IPython.
 
 = Maintenance rule
 

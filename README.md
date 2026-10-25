@@ -128,7 +128,7 @@ The console uses a multiline code editor: <code>Ctrl+Enter</code> runs a cell, <
 
 ## The IPython console
 
-Press <code>i</code> to work with the same connected instruments from a real IPython shell.
+Press <code>i</code> to work with the same connected instruments in an in-process IPython session.
 
 ~~~python
 lab.mx.set_center_freq(1.5e6)
@@ -146,7 +146,7 @@ lab.wavemeter.read_frequency(4)
 Use ordinary IPython discovery:
 
 ~~~python
-lab.scope.
+# Type lab.scope. in the editor and press Ctrl+Space to complete its members.
 lab.mx.set_rbw?
 help(lab.wavemeter)
 ~~~
