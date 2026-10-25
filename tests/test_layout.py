@@ -57,8 +57,9 @@ async def _show(pilot: Any, page_id: str) -> None:
 
 
 async def _resize(pilot: Any, size: tuple[int, int]) -> None:
-    # Pilot.resize_terminal already waits for Textual to process the Resize message.
+    # resize_terminal dispatches Resize; one more turn lets layout recompute dimensions.
     await pilot.resize_terminal(*size)
+    await pilot.pause(0)
 
 
 @async_test
