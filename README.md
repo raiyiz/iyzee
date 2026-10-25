@@ -120,7 +120,7 @@ Outside text-entry widgets:
 - <code>j</code> / <code>k</code> move focus.
 - <code>Escape</code> leaves a text field.
 - <code>Ctrl+\\</code> opens Textual's command palette.
-- <code>Ctrl+Q</code> quits immediately; <code>q</code> quits after a second press.
+- <code>Ctrl+Q</code> requests shutdown; if a console cell is still active after the 12 s preflight, the quit is cancelled and the app stays open. <code>q</code> still requires a second press.
 
 The console editor is Vim-modal and starts in NORMAL mode. Press <code>i</code> to insert code and <code>Escape</code> to return to NORMAL; <code>v</code>/<code>V</code> select characterwise/linewise visual regions. It supports common Vim motions and operators, text objects, counts, the single unnamed register, undo and redo. This is not full Vim: named registers, macros, marks, <code>:s///</code> substitution, folds and splits are not implemented. In INSERT mode, <code>Tab</code> requests IPython completion and, with no candidates, inserts spaces to the next four-column tab stop. <code>Shift+Enter</code> runs the cell; <code>Ctrl+Enter</code> is an alternate, <code>Ctrl+Space</code> explicitly requests completion, and <code>Ctrl+P</code>/<code>Ctrl+N</code> recalls executed cells. <code>Ctrl+C</code> is a best-effort interrupt.
 
@@ -151,7 +151,7 @@ lab.mx.set_rbw?
 help(lab.wavemeter)
 ~~~
 
-Press <code>Ctrl+Space</code> to request IPython completion; when several matches exist they are listed in the output panel.
+In INSERT mode, <code>Tab</code> completes the token at the cursor; when no candidates are available, it falls back to spaces-based indentation at the next four-column tab stop. <code>Ctrl+Space</code> explicitly requests completion, and multiple matches are listed in the output panel.
 
 <code>lab</code> reflects the application's current connection state rather than caching stale instrument references. Calls to the same physical instrument are serialized so console activity cannot overlap with a screen worker using that instrument.
 

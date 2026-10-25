@@ -864,15 +864,18 @@ supports. This keeps the command grammar free from Textual and makes command
 semantics easy to test.
 
 The console is a native Textual cell editor backed by an in-process IPython
-`InteractiveShell`. Textual owns editing, key events, output scrolling and
-plotting; a small controller executes cells serially on a worker thread. This
-removes the virtual-terminal compatibility layer while preserving access to
-the live `lab` namespace.
+`InteractiveShell`. `VimTextArea` provides modal editing; in INSERT mode,
+Tab requests IPython completion and falls back to spaces-based indentation
+when no candidates exist. Shift+Enter runs the cell, with Ctrl+Enter as an
+alternate. Textual owns editing, key events, output scrolling and plotting;
+a small controller executes cells serially on a worker thread. This removes
+the virtual-terminal compatibility layer while preserving access to the live
+`lab` namespace.
 
 #figure(
   stack(
     spacing: 4pt,
-    node("TextArea", "multiline Python editor"),
+    node("VimTextArea", "modal multiline Python editor"),
     arrow(dir: "↓"),
     node("IPythonSession", "serialized cell execution"),
     arrow(dir: "↓"),
@@ -1111,9 +1114,14 @@ Shutdown is a resource-management problem too. Connected instruments may have
 blocking disconnect operations, and a worker may currently hold an instrument
 lock.
 
-The application's shutdown path first closes the embedded console, then closes
-instruments outside the Textual UI thread. `Lab.close_all()` takes each
-instrument's lock before disconnecting it and handles instruments independently.
+A normal shutdown request first pauses cell submissions and completion, sends a
+best-effort interrupt, and waits up to 12 seconds for the active cell to stop.
+If the cell is still active, shutdown is cancelled, the console becomes usable
+again and instruments remain connected; the operator is warned that outputs may
+remain in their last commanded state. Only after the cell is idle does the app
+close the console worker and close instruments outside the Textual UI thread.
+`Lab.close_all()` takes each instrument's lock before disconnecting it and
+handles instruments independently.
 
 The essential behavior is:
 
@@ -1122,13 +1130,15 @@ The essential behavior is:
     spacing: 4pt,
     node("shutdown request", "user or application"),
     arrow(dir: "↓"),
-    node("close / interrupt console", "release console work"),
+    node("pause cells + interrupt", "wait up to 12 s for active cell"),
     arrow(dir: "↓"),
-    node("Lab.close_all", "collect connected handles"),
+    node("cell stops?", "otherwise cancel quit; leave instruments connected"),
+    arrow(dir: "↓"),
+    node("Lab.close_all", "only after cell is idle"),
     arrow(dir: "↓"),
     node("per-device cleanup", "respect resource locks"),
     arrow(dir: "↓"),
-    node("deadline", "one wedged device cannot stall exit"),
+    node("bounded close", "report disconnected links and failures"),
   ),
   caption: [Shutdown is bounded resource cleanup, not an assumption that every physical link will respond promptly.],
 )

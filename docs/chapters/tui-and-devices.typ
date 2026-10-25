@@ -269,9 +269,7 @@ can persist across switches.
   [`l`], [#code("LogScreen")], [live application log, level filter, rotated history],
 )
 
-The registry is #code("PAGE_SPECS"); the nav rail, the content switcher and the `:` commands all derive from it, so adding a
 The registry is #code("PAGE_SPECS"); the nav rail, the content switcher and the `:` commands all derive from it, so adding a page cannot leave them out of step. F1–F4 are global shortcuts for Connect/Sweep/Results/Console; Scope, Power, Rb and Log are reached through their letter bindings or the nav rail.
-exactly those four through; Scope, Power, Rb and Log are letter-only.
 
 The shared #code("Page") base owns mechanics that are not domain-specific: scrolling without stealing initial focus, labeled fields, the finite/positive
 validators, validation marking, the safe worker-to-UI callback #code("Page._ui"), and the no-op
@@ -346,9 +344,9 @@ Key handling relies on Textual's own focus and binding priority, with no app-spe
   [`c s o r t i l`], [switch page (the page you are on is not offered)],
   [`F1`–`F4`], [Connect / Sweep / Results / Console, even from inside the console],
   [`:`], [vim-style command line; `:help` lists what the current page offers],
-  [`Ctrl+Q`], [quit at once],
+  [`Ctrl+Q`], [request safe shutdown; cancel the quit if an active cell does not stop within 12 s],
   [`q`], [quit on a second press within #fact("tui.quit_confirm_s") s, so a stray key cannot close an app holding live instruments],
-  [`j` / `k`, `Escape`], [move focus; leave a text field],
+  [`j` / `k`, `Escape`], [move focus; Escape leaves ordinary form fields, while VimTextArea uses it to return to NORMAL],
   [`Ctrl+\\`], [Textual's command palette],
 )
 
@@ -370,7 +368,7 @@ The Console page presents a persistent in-process IPython shell through the pack
 
 In INSERT mode, `Tab` requests IPython completion, applying a single candidate over IPython's exact source range or listing multiple matches. If there are no candidates, Tab inserts spaces to the next four-column tab stop. `Shift+Enter` runs the current cell; `Ctrl+Enter` is an alternate, `Ctrl+Space` explicitly requests completion, and `Ctrl+P` / `Ctrl+N` browse executed cells. Completion works against the dynamic `lab` proxy as well as ordinary Python names. The session executes cells sequentially on a worker thread, preserving Python state without freezing the UI. The same `lab` proxy exposes live instruments and the latest sweep results. Matplotlib figures created in the console are shown in the plot panel.
 
-`input()`, direct reads from `sys.stdin`, and interactive `%debug` / `%pdb` prompts fail immediately because there is no console stdin stream. `Ctrl+C` is best-effort; Python cannot reliably interrupt native code or a driver call blocked in I/O. Current driver timeout defaults are MXA VISA 5 s, PSU VISA 10 s, LeCroy VISA 10 s (with supported per-query overrides), and wavemeter HTTP 1 s for reads / 3 s for setpoint writes. The MXA `wait_opc()` / `single_sweep_wait()` operation can use a 30 s per-call timeout.
+`input()`, text or binary reads from `sys.stdin`, worker binary stdout/stderr access, and interactive `%debug` / `%pdb` prompts fail immediately because there is no console terminal stream. `Ctrl+C` is best-effort; Python cannot reliably interrupt native code or a driver call blocked in I/O. Current driver timeout defaults are MXA VISA 5 s, PSU VISA 10 s, LeCroy VISA 10 s (with supported per-query overrides), and wavemeter HTTP 1 s for reads / 3 s for setpoint writes. The MXA `wait_opc()` / `single_sweep_wait()` operation can use a 30 s per-call timeout.
 
 A normal quit requests a cell interrupt and waits up to 12 s. If the worker remains active, the quit is cancelled and the application stays open with instruments connected; this avoids disconnecting hardware underneath a cell, but does not mean the hardware is safe to leave at its present output state. Wait for the call or its I/O timeout to finish before retrying. There is no safe force-quit path; external process termination can leave the PSU output or shutter at its last commanded state.
 
