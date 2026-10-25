@@ -34,7 +34,7 @@ async def _open(pilot: Pilot[Any], scope: object | None = None) -> ScopeScreen:
     if scope is not None:
         app.handles["scope"] = FakeHandle(scope=scope)
     await pilot.press("o")
-    await pilot.pause()
+    await pilot.pause(0)
     return app.query_one(ScopeScreen)
 
 

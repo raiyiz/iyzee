@@ -121,7 +121,7 @@ async def _open(
         if shutter:
             app.handles["shutter"] = FakeHandle(device=_shutter(psu))
     await pilot.press("p")
-    await pilot.pause()
+    await pilot.pause(0)
     screen = app.query_one(PowerScreen)
     if psu is not None:
         await wait_until(pilot, lambda: screen._synced and not screen._busy)

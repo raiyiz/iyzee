@@ -54,7 +54,7 @@ def test_the_standalone_validators_accept_good_input_and_name_the_field_on_bad()
 
 async def _open_sweep_screen(pilot: Pilot[Any]) -> SweepScreen:
     await pilot.press("s")
-    await pilot.pause()
+    await pilot.pause(0)
     return pilot.app.query_one(SweepScreen)
 
 
