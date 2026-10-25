@@ -68,9 +68,9 @@ async def test_page_navigation_and_footer_contracts(app) -> None:
 
         # From the console only the F-keys navigate; the cell editor owns text input.
         for key, page in [
-            # ("f1", "connect"),
-            # ("f3", "results"),
-            # ("f2", "sweep"),
+            ("f1", "connect"),
+            ("f3", "results"),
+            ("f2", "sweep"),
             ("f4", "console"),
         ]:
             await pilot.press(key)
