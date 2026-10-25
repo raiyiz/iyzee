@@ -30,41 +30,41 @@ The implementation's complexity mostly comes from hosting a terminal application
 
 ### 1. Establish the execution core
 
-- [ ] Reuse `shell_config()` and `lab_namespace()` to construct a plain `InteractiveShell`.
-- [ ] Add a small, serialized execution controller that retains namespace state between cells.
-- [ ] Capture normal output, errors, expression results, IPython tracebacks and rich display output.
-- [ ] Verify live `lab` access remains protected by the existing instrument locks.
-- [ ] Keep UI rendering and hardware calls off the Textual event loop.
+- [x] Reuse `shell_config()` and `lab_namespace()` to construct a plain `InteractiveShell`.
+- [x] Add a small, serialized execution controller that retains namespace state between cells.
+- [x] Capture normal output, errors and expression results through IPython's display/output hooks.
+- [x] Keep the live `lab` proxy and existing instrument-lock boundary; retain its focused regression tests.
+- [x] Execute cells on a dedicated worker rather than the Textual event loop.
 
 ### 2. Replace terminal presentation
 
-- [ ] Replace the emulated terminal with a Textual multiline editor and scrollable output.
-- [ ] Support submit, multiline code, history navigation and IPython completion.
-- [ ] Preserve visible busy/idle and interrupt affordances.
-- [ ] Keep the Matplotlib line-plot panel and useful `lab` status.
-- [ ] Decide and implement a clear `input()` experience or document its limitation.
-- [ ] Delete `terminal_view.py`, `vterm.py`, and `termkeys.py` when there are no production references.
+- [x] Replace the emulated terminal with a Textual multiline editor and scrollable output.
+- [x] Support submit, multiline code, history navigation and IPython completion.
+- [x] Preserve visible busy/idle and interrupt affordances.
+- [x] Keep the Matplotlib line-plot panel and useful `lab` status.
+- [x] Document `input()` and interactive terminal debugger prompts as unsupported by the cell editor.
+- [x] Delete the terminal widget, virtual screen and terminal key encoder.
 
 ### 3. Simplify lifecycle and output routing
 
-- [ ] Replace the terminal-specific `IPythonSession` with a smaller execution controller.
+- [x] Replace terminal-specific shell handling with a smaller non-terminal controller.
 - [ ] Minimize process-wide stream and builtin modifications; always restore any temporary routing.
-- [ ] Make Ctrl+C best-effort without targeting unrelated/dead threads.
-- [ ] Ensure closing the app does not leave a cell silently running against instruments.
+- [x] Make Ctrl+C best-effort and verify the worker thread is alive before interrupting it.
+- [x] Refuse to disconnect instruments if the cell worker does not stop during shutdown.
 - [ ] Preserve isolated in-memory history for tests and per-user persistent history for real runs.
 
 ### 4. Consolidate tests
 
-- [ ] Keep focused tests for persistent namespace, execution, output/errors, completion/history and live `lab` behavior.
-- [ ] Keep a small number of end-to-end tests for the Textual console workflow and shutdown.
-- [ ] Remove tests that solely verify discarded terminal rendering/key-encoding implementation details.
-- [ ] Avoid duplicate tests for the same invariant at helper and UI levels unless they guard distinct boundaries.
+- [x] Keep focused controller and live-`lab` behavioral tests.
+- [x] Keep one end-to-end cell execution/live-results/shutdown test.
+- [x] Remove the terminal emulator and low-level key-protocol test suite.
+- [x] Drop the redundant console-screen integration test in favor of the combined console test.
 
 ### 5. Verify and document
 
 - [ ] Run focused console and lab tests locally, then the full test suite.
 - [ ] Run Ruff and mypy.
-- [ ] Check documentation and examples for references to the old terminal-specific interaction model.
+- [x] Update the README to describe cell submission, completion, history, interruption and the explicit input limitation.
 - [ ] Review the final diff for unnecessary abstractions, dead code and test duplication.
 
 ## Acceptance criteria

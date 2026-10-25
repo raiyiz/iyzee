@@ -122,7 +122,7 @@ Outside text-entry widgets:
 - <code>Ctrl+\\</code> opens Textual's command palette.
 - <code>Ctrl+Q</code> quits immediately; <code>q</code> quits after a second press.
 
-The embedded console deliberately keeps normal terminal editing keys for IPython.
+The console uses a multiline code editor: <code>Ctrl+Enter</code> runs a cell, <code>Ctrl+Space</code> completes, <code>Ctrl+P</code>/<code>Ctrl+N</code> recalls executed cells, and <code>Ctrl+C</code> interrupts a running cell. <code>input()</code> is not supported in this editor.
 
 ---
 
@@ -146,14 +146,16 @@ lab.wavemeter.read_frequency(4)
 Use ordinary IPython discovery:
 
 ~~~python
-lab.scope.<TAB>
+lab.scope.
 lab.mx.set_rbw?
 help(lab.wavemeter)
 ~~~
 
+Press <code>Ctrl+Space</code> to request IPython completion; when several matches exist they are listed in the output panel.
+
 <code>lab</code> reflects the application's current connection state rather than caching stale instrument references. Calls to the same physical instrument are serialized so console activity cannot overlap with a screen worker using that instrument.
 
-The console is an in-process IPython terminal, not a second control API. Completion, history, magics, inspection, top-level <code>await</code>, and <code>%debug</code> are provided by IPython itself.
+The console is an in-process IPython shell in a Textual code editor, not a second control API. Python state, magics, inspection, top-level <code>await</code>, command history, and completion remain backed by IPython. Interactive <code>input()</code> and terminal-based debugger prompts are not supported by this editor.
 
 ---
 
