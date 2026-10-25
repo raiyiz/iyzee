@@ -52,7 +52,8 @@ The defined related test-file set is 966 lines now, compared with 1,077 before. 
 
 These are accepted consequences of moving from a terminal-based IPython frontend to a Textual cell editor, not regressions to recreate by emulating a terminal:
 
-- IPython's terminal vi/emacs editing integrations and their prompt-specific keymaps. The replacement editor provides its own Vim NORMAL/INSERT/VISUAL/COMMAND modes and motions instead.
+- IPython's terminal vi/emacs editing integrations and their prompt-specific keymaps. The replacement editor provides its own Vim NORMAL/INSERT/VISUAL/VISUAL-LINE/COMMAND modes, common motions/operators, text objects, counts, undo/redo and a single unnamed register.
+- Advanced Vim features not implemented by the current `VimTextArea` dependency: named/multiple registers, macros, marks, `:s///` regex substitution, folds and splits. Do not imply full Vim compatibility.
 - Ctrl+R's prompt-toolkit incremental history search and terminal autosuggestions. History remains navigable in the editor with previous/next cell shortcuts; do not add a custom search/autosuggestion subsystem in this refactor.
 - Interactive `input()` and other reads from `sys.stdin`.
 - Interactive terminal debugger prompts, including `%debug` and `%pdb` flows that stop for input. These must fail fast with a clear explanation rather than leave the worker blocked.
@@ -76,8 +77,8 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 ### 2. Native Vim cell editor
 
 - [x] Mount `textual-vim-textarea`'s `VimTextArea` and show mode/status in the console.
-- [x] Use the dependency's NORMAL, INSERT, VISUAL, VISUAL-LINE and COMMAND modes, common motions/operators/counts, undo/redo and registers for yank/delete/paste where supported.
-- [x] Bind Tab to IPython completion in INSERT mode; if no completion is available, fall through to four-space indentation. Multiple matches are listed; a single match replaces the IPython-provided source range.
+- [x] Use the dependency's NORMAL, INSERT, VISUAL, VISUAL-LINE and COMMAND modes, common motions/operators/text objects/counts, undo/redo and its single unnamed register for yank/delete/paste.
+- [x] Bind Tab to IPython completion in INSERT mode; if no completion is available, fall through to space indentation at the next four-column tab stop. Multiple matches are listed; a single match replaces the IPython-provided source range.
 - [x] Bind Shift+Enter as the primary submit shortcut and Ctrl+Enter as an alternate. Ctrl+Space remains an explicit completion shortcut.
 - [x] Keep multiline editing, line numbers, history recall, busy status, best-effort interrupt and plot output.
 - [x] Add Textual pilot coverage for Tab, indentation fallback, completion replacement, Vim delete/undo and Shift+Enter submission. CI is the authority for whether these new tests pass.
@@ -131,5 +132,5 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 - Added worker-aware stdin guarding after `sys.stdin.readline()`, `read()` or iteration could block forever and steal terminal keystrokes. Such reads now fail immediately, and the original streams are restored.
 - Added the pre-exit shutdown path: pause new cells, request an interrupt and wait up to 12 s; if the cell remains active, cancel the quit, reopen submissions, keep the UI available and leave instruments connected. This also closes the race between the idle check and worker shutdown. The worker is daemonized only as a fallback for abnormal interpreter termination.
 - Added explicit `%debug` / `%pdb` rejection, so terminal-only debugger prompts cannot hold the cell worker at stdin.
-- Reused the already-declared `textual-vim-textarea` dependency: Vim modes, Tab completion with indentation fallback, Shift+Enter submit and Ctrl+Enter alternate, plus mode/status feedback and focused tests.
+- Reused the already-declared `textual-vim-textarea` dependency: Vim modes, Tab completion with space indentation fallback, Shift+Enter submit and Ctrl+Enter alternate, plus mode/status feedback and focused tests. Its documented limit is one unnamed register, with no macros, marks, regex substitution, folds or splits.
 - Removed stale terminal-emulator comments and obsolete lint exceptions. Ruff later identified formatting-only issues in newly edited files; these were corrected in dedicated style commits. Current-head CI is running; the local environment still cannot clone the repository, so no local pytest/Ruff/mypy run is claimed.

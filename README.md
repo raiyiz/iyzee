@@ -122,7 +122,7 @@ Outside text-entry widgets:
 - <code>Ctrl+\\</code> opens Textual's command palette.
 - <code>Ctrl+Q</code> quits immediately; <code>q</code> quits after a second press.
 
-The console editor is Vim-modal and starts in NORMAL mode. Press <code>i</code> to insert code and <code>Escape</code> to return to NORMAL; <code>v</code>/<code>V</code> select characterwise/linewise visual regions. It supports common Vim motions and operators, counts, registers, undo and redo. In INSERT mode, <code>Tab</code> requests IPython completion and indents by four spaces when there are no candidates. <code>Shift+Enter</code> runs the cell; <code>Ctrl+Enter</code> is an alternate, <code>Ctrl+Space</code> explicitly requests completion, and <code>Ctrl+P</code>/<code>Ctrl+N</code> recalls executed cells. <code>Ctrl+C</code> is a best-effort interrupt.
+The console editor is Vim-modal and starts in NORMAL mode. Press <code>i</code> to insert code and <code>Escape</code> to return to NORMAL; <code>v</code>/<code>V</code> select characterwise/linewise visual regions. It supports common Vim motions and operators, text objects, counts, the single unnamed register, undo and redo. This is not full Vim: named registers, macros, marks, <code>:s///</code> substitution, folds and splits are not implemented. In INSERT mode, <code>Tab</code> requests IPython completion and, with no candidates, inserts spaces to the next four-column tab stop. <code>Shift+Enter</code> runs the cell; <code>Ctrl+Enter</code> is an alternate, <code>Ctrl+Space</code> explicitly requests completion, and <code>Ctrl+P</code>/<code>Ctrl+N</code> recalls executed cells. <code>Ctrl+C</code> is a best-effort interrupt.
 
 ---
 
