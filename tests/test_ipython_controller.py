@@ -181,7 +181,6 @@ def test_interactive_debugger_magics_fail_fast_and_worker_stays_usable(source: s
         assert session.close()
 
 
-
 def test_binary_stdout_access_fails_fast_and_worker_stays_usable() -> None:
     session, output = _session()
     try:

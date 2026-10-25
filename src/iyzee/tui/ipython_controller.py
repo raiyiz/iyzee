@@ -140,9 +140,7 @@ class _ThreadStdin:
         return self._default.fileno()
 
     def __getattr__(self, name: str) -> Any:
-        if self._on_worker() and (
-            name in {"buffer", "raw", "detach"} or name.startswith("read")
-        ):
+        if self._on_worker() and (name in {"buffer", "raw", "detach"} or name.startswith("read")):
             raise RuntimeError(_NO_INPUT)
         return getattr(self._default, name)
 
