@@ -77,6 +77,7 @@ async def test_connect_errors_and_probe_failure_leave_no_handle(
                 pilot,
                 lambda: Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == message,
             )
+            await _row_is(pilot, table, "error")
             await wait_until(pilot, lambda: not screen._busy)
             # Rendering must keep bracketed driver text literal, not interpret it as markup.
             app.export_screenshot()
@@ -97,6 +98,7 @@ async def test_connect_errors_and_probe_failure_leave_no_handle(
             pilot,
             lambda: Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == "no answer",
         )
+        await _row_is(pilot, table, "error")
         await wait_until(pilot, lambda: not screen._busy)
         assert (failed_probe.connect_calls, failed_probe.disconnect_calls) == (1, 1)
         assert "fake" not in app.handles
