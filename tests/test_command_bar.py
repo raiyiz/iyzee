@@ -65,15 +65,21 @@ async def test_command_operations_validation_navigation_and_quit(
         assert handle.disconnected
 
         await run(pilot, "frobnicate")
-        await wait_until(pilot, lambda: any("unknown command :frobnicate" in m for m in notifications(app)))
+        await wait_until(
+            pilot, lambda: any("unknown command :frobnicate" in m for m in notifications(app))
+        )
         assert app.is_running
 
         # Results-only commands must be rejected elsewhere, then validated on Results.
         await run(pilot, "width 40")
-        await wait_until(pilot, lambda: any("unknown command :width" in m for m in notifications(app)))
+        await wait_until(
+            pilot, lambda: any("unknown command :width" in m for m in notifications(app))
+        )
         await run(pilot, "scope")
         await run(pilot, "acquire")
-        await wait_until(pilot, lambda: any("cannot acquire waveforms" in m for m in notifications(app)))
+        await wait_until(
+            pilot, lambda: any("cannot acquire waveforms" in m for m in notifications(app))
+        )
 
         await run(pilot, "results")
         switcher = app.query_one(ContentSwitcher)
