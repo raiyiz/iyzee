@@ -9,7 +9,7 @@ import ctypes
 import queue
 import sys
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple, TextIO
 
@@ -29,6 +29,7 @@ def _raise_in_thread(thread_id: int) -> None:
 
 
 _NO_INPUT = "input() is not available in the cell console; define a variable in the editor instead"
+_NO_BINARY_STREAM = "binary stream access is not supported in the cell console"
 
 
 def _clear_pending_interrupt(thread_id: int) -> None:
@@ -57,6 +58,13 @@ class _ThreadStream:
             return len(text)
         return self._default.write(text)
 
+    def writelines(self, lines: Iterable[str]) -> None:
+        if threading.get_ident() == self._session._worker_id:
+            for line in lines:
+                self.write(line)
+        else:
+            self._default.writelines(lines)
+
     def flush(self) -> None:
         if threading.get_ident() != self._session._worker_id:
             self._default.flush()
@@ -74,6 +82,12 @@ class _ThreadStream:
         return self._default.fileno()
 
     def __getattr__(self, name: str) -> Any:
+        if threading.get_ident() == self._session._worker_id and name in {
+            "buffer",
+            "raw",
+            "detach",
+        }:
+            raise RuntimeError(_NO_BINARY_STREAM)
         return getattr(self._default, name)
 
 
@@ -126,6 +140,10 @@ class _ThreadStdin:
         return self._default.fileno()
 
     def __getattr__(self, name: str) -> Any:
+        if self._on_worker() and (
+            name in {"buffer", "raw", "detach"} or name.startswith("read")
+        ):
+            raise RuntimeError(_NO_INPUT)
         return getattr(self._default, name)
 
 

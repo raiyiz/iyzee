@@ -141,6 +141,8 @@ def test_stray_interrupts_never_kill_the_worker() -> None:
         "import sys; sys.stdin.readlines()",
         "import sys\nfor line in sys.stdin: pass",
         "import sys; sys.stdin.fileno()",
+        "import sys; sys.stdin.buffer.readline()",
+        "import sys; sys.stdin.detach()",
     ],
 )
 def test_reading_stdin_fails_fast_instead_of_blocking(source: str) -> None:
@@ -172,6 +174,20 @@ def test_interactive_debugger_magics_fail_fast_and_worker_stays_usable(source: s
         assert session.submit(source)
         _finish(session)
         assert "interactive debugger prompts" in "".join(output)
+        assert session.submit("6 * 7")
+        _finish(session)
+        assert "42" in "".join(output)
+    finally:
+        assert session.close()
+
+
+
+def test_binary_stdout_access_fails_fast_and_worker_stays_usable() -> None:
+    session, output = _session()
+    try:
+        assert session.submit("import sys; sys.stdout.buffer.write(b'raw')")
+        _finish(session)
+        assert "binary stream access is not supported" in "".join(output)
         assert session.submit("6 * 7")
         _finish(session)
         assert "42" in "".join(output)
