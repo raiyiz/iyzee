@@ -163,3 +163,18 @@ def test_close_restores_process_wide_streams_and_input() -> None:
     assert (sys.stdin, sys.stdout, sys.stderr, builtins.input) != before
     assert session.close()
     assert (sys.stdin, sys.stdout, sys.stderr, builtins.input) == before
+
+
+
+@pytest.mark.parametrize("source", ["%debug", "%pdb on"])
+def test_interactive_debugger_magics_fail_fast_and_worker_stays_usable(source: str) -> None:
+    session, output = _session()
+    try:
+        assert session.submit(source)
+        _finish(session)
+        assert "interactive debugger prompts" in "".join(output)
+        assert session.submit("6 * 7")
+        _finish(session)
+        assert "42" in "".join(output)
+    finally:
+        assert session.close()

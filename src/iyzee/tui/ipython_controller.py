@@ -172,6 +172,15 @@ class IPythonSession:
         self.shell = InteractiveShell(
             config=shell_config(history_file), user_ns=lab_namespace(app, namespace)
         )
+        # Interactive debuggers require terminal stdin. Keep automatic post-mortem
+        # debugging disabled and replace both line magics with a fast failure.
+        self.shell.call_pdb = False
+        self.shell.register_magic_function(
+            self._reject_interactive_debugger, magic_kind="line", magic_name="debug"
+        )
+        self.shell.register_magic_function(
+            self._reject_interactive_debugger, magic_kind="line", magic_name="pdb"
+        )
         InteractiveShell._instance = self.shell  # type: ignore[assignment]
 
     @property
@@ -291,6 +300,12 @@ class IPythonSession:
                 return
             except KeyboardInterrupt:
                 continue
+
+    @staticmethod
+    def _reject_interactive_debugger(_line: str = "") -> None:
+        raise RuntimeError(
+            "interactive debugger prompts (%debug/%pdb) are not supported in the cell console"
+        )
 
     def _input(self, prompt: str = "") -> str:
         if threading.get_ident() == self._worker_id:
