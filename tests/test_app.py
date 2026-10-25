@@ -277,31 +277,39 @@ async def test_shutdown_stays_open_when_a_console_cell_ignores_interrupt() -> No
     app = IyzeeApp()
     app.CELL_SHUTDOWN_TIMEOUT_S = 0.05
     handle = FakeHandle()
-    async with app.run_test(size=(110, 32)) as pilot:
-        await pilot.press("i")
-        await pilot.pause()
-        app.handles["mxa"] = handle
-        session = app.console_session
-        assert session is not None
-        assert session.submit("import threading; threading.Event().wait(0.35)")
-        await wait_until(pilot, lambda: session.executing)
+    release_cell = threading.Event()
+    try:
+        async with app.run_test(size=(110, 32)) as pilot:
+            await pilot.press("i")
+            await pilot.pause()
+            app.handles["mxa"] = handle
+            session = app.console_session
+            assert session is not None
+            # Hold the cell until the test releases it; a fixed short sleep races
+            # the UI's shutdown notification on slower CI workers.
+            session.shell.user_ns["release_cell"] = release_cell
+            assert session.submit("release_cell.wait()")
+            await wait_until(pilot, lambda: session.executing)
 
-        await pilot.press("ctrl+q")
-        await wait_until(
-            pilot,
-            lambda: any("Shutdown cancelled" in message for message in notifications(app)),
-        )
-        assert app.is_running
-        assert handle.disconnect_calls == 0
-        assert session.executing
+            await pilot.press("ctrl+q")
+            await wait_until(
+                pilot,
+                lambda: any("Shutdown cancelled" in message for message in notifications(app)),
+            )
+            assert app.is_running
+            assert handle.disconnect_calls == 0
+            assert session.executing
 
-        # Once the blocked call returns, the rejected shutdown must reopen the session.
-        await wait_until(pilot, lambda: not session.executing, timeout=3.0)
-        assert session.submit("shutdown_retry = 42")
-        await wait_until(pilot, lambda: not session.executing, timeout=3.0)
-        assert session.shell.user_ns["shutdown_retry"] == 42
+            # Releasing the blocked call must let the rejected shutdown reopen the session.
+            release_cell.set()
+            await wait_until(pilot, lambda: not session.executing, timeout=3.0)
+            assert session.submit("shutdown_retry = 42")
+            await wait_until(pilot, lambda: not session.executing, timeout=3.0)
+            assert session.shell.user_ns["shutdown_retry"] == 42
 
-        await pilot.press("ctrl+q")
-        await wait_until(pilot, lambda: not app.is_running)
+            await pilot.press("ctrl+q")
+            await wait_until(pilot, lambda: not app.is_running)
 
-    assert handle.disconnect_calls == 1
+        assert handle.disconnect_calls == 1
+    finally:
+        release_cell.set()
