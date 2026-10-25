@@ -419,19 +419,22 @@ class IyzeeApp(App):
         able to hang the quit.
         """
         self.shutdown_requested.set()
+        clean_exit = False
         try:
-            await asyncio.to_thread(self._close_console_and_instruments)
+            clean_exit = await asyncio.to_thread(self._close_console_and_instruments)
         finally:
-            if self.session_marker is not None:
+            if clean_exit and self.session_marker is not None:
                 self.session_marker.stop()  # reached: this session ended cleanly
 
-    def _close_console_and_instruments(self) -> None:
+    def _close_console_and_instruments(self) -> bool:
         # The console first: a cell still running holds instrument locks, and
         # closing the session interrupts it so close_instruments can get them.
         if self.console_session is not None and not self.console_session.close():
             log.error("IPython cell is still running; leaving instruments connected for safety")
-            return
+            self.session_note("shutdown incomplete: IPython cell still running")
+            return False
         self.close_instruments()
+        return True
 
     def close_instruments(self, timeout: float = 5.0) -> None:
         """Disconnect every connected instrument within ``timeout`` (see ``Lab.close_all``)."""

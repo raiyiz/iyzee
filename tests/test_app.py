@@ -161,6 +161,20 @@ async def test_exiting_the_app_disconnects_every_connected_instrument() -> None:
     assert app.handles == {}
 
 
+def test_shutdown_does_not_disconnect_while_a_console_cell_is_still_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    app = IyzeeApp()
+    app.console_session = SimpleNamespace(close=lambda: False)  # type: ignore[assignment]
+    monkeypatch.setattr(
+        app, "close_instruments", lambda: pytest.fail("must not disconnect under running code")
+    )
+
+    assert not app._close_console_and_instruments()
+
+
 def test_a_failing_disconnect_does_not_stop_the_others_from_closing() -> None:
     app = IyzeeApp()
     broken, fine = FakeHandle(disconnect_error="link already gone"), FakeHandle()
