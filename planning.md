@@ -23,13 +23,13 @@ The first native-cell baseline (before the Vim editor, stdin guard, interrupt-bo
 | Current source module | Lines |
 | --- | ---: |
 | `tui/ipython.py` | 227 |
-| `tui/ipython_controller.py` | 367 |
+| `tui/ipython_controller.py` | 383 |
 | `tui/screens/console.py` | 280 |
-| **Total** | **874** |
+| **Total** | **890** |
 
-That is 633 fewer source lines than the original six-module implementation (42.0% reduction).
+That is 617 fewer source lines than the original six-module implementation (40.9% reduction).
 
-The defined related test-file set is 963 lines now, compared with 1,077 before. It consists of `test_ipython.py`, `test_console.py`, `test_ipython_controller.py`, `test_app.py` and `test_layout.py`; the app/layout files also cover broader behavior. The set shrank by 114 lines. These are source-only and test-only counts, not PR-wide +/- totals.
+The defined related test-file set is 966 lines now, compared with 1,077 before. It consists of `test_ipython.py`, `test_console.py`, `test_ipython_controller.py`, `test_app.py` and `test_layout.py`; the app/layout files also cover broader behavior. The set shrank by 111 lines. These are source-only and test-only counts, not PR-wide +/- totals.
 
 ## Design decisions
 
@@ -43,7 +43,7 @@ The defined related test-file set is 963 lines now, compared with 1,077 before. 
 - Completion replacements use IPython's returned source range, not blind insertion at the cursor. Completion must work for partial words and the dynamic `lab` proxy.
 - Disable ANSI color sequences in IPython output; the output pane renders text, not a terminal.
 - Ctrl+C is best-effort; it cannot reliably abort native code or a VISA/driver call blocked in I/O. Current finite timeout defaults are MXA VISA 5 s, PSU VISA 10 s, LeCroy VISA 10 s, and wavemeter HTTP 1 s for reads / 3 s for setpoint writes. MXA `wait_opc()` / `single_sweep_wait()` allow a per-call 30 s timeout. Driver constructors and the LeCroy per-query timeout provide the documented override points; changing Python thread interruption must never be treated as a replacement for I/O timeouts.
-- The execution worker remains a daemon thread as a last-resort fallback for abnormal interpreter termination, but ordinary user-requested quit is preflighted. The app requests interruption and waits up to 12 s. If the cell is still active, shutdown is cancelled, the app stays open, and the operator is told that hardware may retain its current output state. There is no “safe force quit” path. Once the call finishes (or its driver timeout fires), the operator can retry. Never disconnect a device concurrently with cell code that might still use it.
+- The execution worker remains a daemon thread as a last-resort fallback for abnormal interpreter termination, but ordinary user-requested quit is preflighted. The app atomically pauses submissions/completion, requests interruption and waits up to 12 s. If the cell is still active, shutdown is cancelled, submissions reopen and the app stays open; the operator is told that hardware may retain its current output state. There is no “safe force quit” path. Once the call finishes (or its driver timeout fires), the operator can retry. Never disconnect a device concurrently with cell code that might still use it.
 - External process termination cannot guarantee hardware safety: the PSU output/shutter may remain at the last commanded state. Normal shutdown closes instruments only after worker code has stopped; the Power page is not a substitute for safely resolving a cell that still owns a device lock.
 - Prefer fixes at the actual behavior boundary over warning filters, swallowed causes, generic exception handling or more indirection.
 - Test user-visible behavior with a small, focused suite. Delete tests that only verify the removed ANSI terminal, screen drawing internals or keystroke byte protocol.
@@ -70,7 +70,7 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 - [x] Make completion ranges explicit and guard Ctrl+C so asynchronous interrupts are delivered only inside cell execution.
 - [x] Guard `input()` and `sys.stdin` reads against blocking the worker.
 - [x] Reject interactive `%debug` and `%pdb` entry with a clear error rather than opening a terminal prompt.
-- [x] Route ordinary quit paths through a pre-exit interrupt/wait check; a 12 s timeout cancels the quit and leaves the app open.
+- [x] Route ordinary quit paths through a pre-exit interrupt/wait check; pause cell submission/completion while the decision is in flight, reopen them on timeout, and keep the app open if the 12 s limit expires.
 - [x] Document the finite driver timeout defaults and the longer MXA per-call acquisition timeout.
 
 ### 2. Native Vim cell editor
@@ -129,7 +129,7 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 - Disabled IPython ANSI colors because tracebacks and `?` inspection output were being shown as raw escape codes in the plain-text log.
 - Made Ctrl+C safe at cell boundaries after asynchronous exceptions could hit queue/bookkeeping code, kill the worker and leave the UI permanently busy. The controller now targets only a live worker inside `run_cell` and refuses submissions after worker death.
 - Added worker-aware stdin guarding after `sys.stdin.readline()`, `read()` or iteration could block forever and steal terminal keystrokes. Such reads now fail immediately, and the original streams are restored.
-- Added the pre-exit shutdown path: request an interrupt and wait up to 12 s; if the cell remains active, cancel the quit, keep the UI available and leave instruments connected. The worker is daemonized only as a fallback for abnormal interpreter termination.
+- Added the pre-exit shutdown path: pause new cells, request an interrupt and wait up to 12 s; if the cell remains active, cancel the quit, reopen submissions, keep the UI available and leave instruments connected. This also closes the race between the idle check and worker shutdown. The worker is daemonized only as a fallback for abnormal interpreter termination.
 - Added explicit `%debug` / `%pdb` rejection, so terminal-only debugger prompts cannot hold the cell worker at stdin.
 - Reused the already-declared `textual-vim-textarea` dependency: Vim modes, Tab completion with indentation fallback, Shift+Enter submit and Ctrl+Enter alternate, plus mode/status feedback and focused tests.
-- Removed stale terminal-emulator comments and obsolete lint exceptions; the remaining formatting cleanup is tracked by CI.
+- Removed stale terminal-emulator comments and obsolete lint exceptions. Ruff later identified formatting-only issues in newly edited files; these were corrected in dedicated style commits. Current-head CI is running; the local environment still cannot clone the repository, so no local pytest/Ruff/mypy run is claimed.
