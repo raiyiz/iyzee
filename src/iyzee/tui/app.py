@@ -157,10 +157,9 @@ class IyzeeApp(App):
     # navigation to mouse and keyboard users.
     #
     # "escape" and "j"/"k" specifically: Textual's own Input widget
-    # doesn't bind Escape to anything, so it already bubbles here
-    # untouched — this doesn't intercept a key that widget wanted. (The
-    # console's TextArea ignores Escape in its default tab mode, so Escape
-    # also leaves the editor through this binding.)
+    # doesn't bind Escape to anything, so it bubbles here and blurs the
+    # field. VimTextArea consumes Escape to leave INSERT/VISUAL mode and
+    # return to NORMAL, so it isn't blurred out of its own editing modes.
     # "j"/"k" bind to the same focus_next/focus_previous actions Tab/
     # Shift+Tab already use; an editable widget consumes plain "j"/"k"
     # keystrokes itself (typing the character) before they ever reach
