@@ -74,3 +74,19 @@ def test_completion_reports_the_range_it_replaces() -> None:
         assert session.complete("lab.m") == [Completion(3, 5, ".mx")]
     finally:
         assert session.close()
+
+
+def test_output_contains_no_ansi_escape_codes() -> None:
+    session, output = _session()
+    try:
+        # Tracebacks and `?` help are coloured by default; the console log
+        # prints text verbatim, so any escape would show up as garbage.
+        assert session.submit("1 / 0")
+        _finish(session)
+        assert session.submit("len?")
+        _finish(session)
+        rendered = "".join(output)
+        assert "ZeroDivisionError" in rendered and "Docstring" in rendered
+        assert "\x1b" not in rendered
+    finally:
+        assert session.close()

@@ -187,6 +187,9 @@ def shell_config(history_file: str | Path | None = None) -> Config:
     config = Config()
     config.InteractiveShell.automagic = True
     config.InteractiveShell.autoawait = True
+    # The console log prints text verbatim (no terminal to interpret escape
+    # codes), so tracebacks and `?` help must not be coloured.
+    config.InteractiveShell.colors = "nocolor"
     config.InteractiveShell.autoindent = True
     config.InteractiveShell.display_page = True
     if history_file is None:
