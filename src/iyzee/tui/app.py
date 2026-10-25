@@ -158,26 +158,20 @@ class IyzeeApp(App):
     # "escape" and "j"/"k" specifically: Textual's own Input widget
     # doesn't bind Escape to anything, so it already bubbles here
     # untouched — this doesn't intercept a key that widget wanted. (The
-    # console's terminal view does want Escape — it is IPython's vi-mode
-    # key — and claims it itself, so it never reaches this binding.)
+    # console's TextArea ignores Escape in its default tab mode, so Escape
+    # also leaves the editor through this binding.)
     # "j"/"k" bind to the same focus_next/focus_previous actions Tab/
     # Shift+Tab already use; an editable widget consumes plain "j"/"k"
     # keystrokes itself (typing the character) before they ever reach
     # this binding, so it only fires when nothing is claiming them —
     # i.e. exactly the "outside editable widgets" case.
     # "o" for the Scope page joins the letter shortcuts (c/s/t/i) rather
-    # than an F-key: F1-F4 are specifically special-cased elsewhere —
-    # terminal_view._APP_KEYS lets exactly those four bypass the console's
-    # embedded terminal and reach the app, and both the in-app help text
-    # and the console's on-screen banner "F1-F4 switch pages". Reusing
-    # one of those four for Scope would silently break whichever page it
-    # displaced when a console cell has focus; adding a fifth would not
-    # reach the app at all from inside the terminal (F5+ are CSI-tilde
-    # sequences, a different wire format _APP_KEYS/termkeys.py don't
-    # handle — see termkeys.py's own comment on this split). So Scope is
-    # reachable everywhere via "o", the nav rail, and the command palette,
-    # just without a dedicated function key. "l" for the Log page (added
-    # later) follows the same reasoning.
+    # than an F-key: F1-F4 are priority bindings that work even while a text
+    # field has focus, and they intentionally cover only Connect, Sweep,
+    # Results and Console. Scope, Power, Rb and Log are reached by letter
+    # outside text fields, or from anywhere through the nav rail and the
+    # command palette. "l" for the Log page (added later) follows the same
+    # reasoning.
     BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("c", "show_page('connect')", "Connect"),
         Binding("s", "show_page('sweep')", "Sweep"),

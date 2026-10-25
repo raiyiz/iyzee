@@ -58,8 +58,6 @@ select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF", "S", "BLE", "T20"
 "docs/examples/*.py" = ["S101", "T201"]
 "scripts/*.py" = ["T201"]
 "src/iyzee/devices/wavemeter.py" = ["T201"]
-"src/iyzee/tui/ipython_session.py" = ["T201"]
-"src/iyzee/tui/screens/console.py" = ["T201"]
 
 [tool.mypy]
 python_version = "3.14"
