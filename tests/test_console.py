@@ -52,12 +52,15 @@ async def test_console_cells_share_state_and_keep_live_lab_results() -> None:
 
 
 @async_test
-async def test_completion_replaces_the_word_under_the_cursor() -> None:
-    app = IyzeeApp()
-    async with app.run_test(size=(110, 32)) as pilot:
+async def test_editor_completion_indentation_and_vim_editing() -> None:
+    async with IyzeeApp().run_test(size=(110, 32)) as pilot:
         await pilot.press("i")
         await pilot.pause()
-        editor = app.query_one(IyzeeConsole).query_one(VimTextArea)
+        editor = pilot.app.query_one(IyzeeConsole).query_one(VimTextArea)
+        await pilot.press("i")
+        await pilot.pause()
+        assert editor.mode is Mode.INSERT
+
         for typed, expected in (("pri", "print"), ("lab.m", "lab.mx"), ("x = lab.m", "x = lab.mx")):
             editor.text = typed
             editor.cursor_location = (0, len(typed))
@@ -65,17 +68,6 @@ async def test_completion_replaces_the_word_under_the_cursor() -> None:
             await pilot.pause()
             assert editor.text == expected
             assert editor.cursor_location == (0, len(expected))
-
-
-@async_test
-async def test_tab_completes_in_insert_mode_and_indents_without_matches() -> None:
-    async with IyzeeApp().run_test(size=(110, 32)) as pilot:
-        await pilot.press("i")
-        await pilot.pause()
-        editor = pilot.app.query_one(VimTextArea)
-        await pilot.press("i")
-        await pilot.pause()
-        assert editor.mode is Mode.INSERT
 
         await pilot.press("p", "r", "i", "tab")
         assert editor.text == "print"
@@ -85,13 +77,12 @@ async def test_tab_completes_in_insert_mode_and_indents_without_matches() -> Non
         await pilot.press("tab")
         assert editor.text == "lab.mx"
 
-        # With a token but no IPython matches, Tab falls through to indentation.
+        # A token with no IPython matches, comments, and blank lines all retain indentation.
         editor.text = "zzzzzzzz"
         editor.cursor_location = (0, len(editor.text))
         await pilot.press("tab")
         assert editor.text == "zzzzzzzz    "
 
-        # A comment is not an IPython completion target, so Tab also indents.
         editor.text = "#"
         editor.cursor_location = (0, 1)
         await pilot.press("tab")
@@ -102,12 +93,6 @@ async def test_tab_completes_in_insert_mode_and_indents_without_matches() -> Non
         await pilot.press("tab")
         assert editor.text == "    "
 
-
-@async_test
-async def test_vim_delete_and_undo_work_in_console_editor() -> None:
-    async with IyzeeApp().run_test(size=(110, 32)) as pilot:
-        await pilot.press("i")
-        editor = pilot.app.query_one(VimTextArea)
         editor.text = "one two"
         editor.cursor_location = (0, 0)
         await pilot.press("escape", "d", "w")
