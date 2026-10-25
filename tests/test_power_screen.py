@@ -129,11 +129,13 @@ async def _open(
 
 
 @async_test
-async def test_every_control_changes_the_supply_and_the_page_shows_what_it_reports() -> None:
+async def test_controls_and_invalid_setpoints_are_safe() -> None:
     psu = FakePSU()
     psu.selected[1] = True
     async with IyzeeApp().run_test() as pilot:
         screen = await _open(pilot, psu)
+        app = pilot.app
+        assert isinstance(app, IyzeeApp)
 
         # Connecting reads the supply into the page and the form without changing anything.
         assert "Global output: off" in _text(screen, "power-summary")
@@ -161,28 +163,36 @@ async def test_every_control_changes_the_supply_and_the_page_shows_what_it_repor
         await press("power-global", lambda: not psu.general)
         assert psu.selected == {1: True, 2: True, 3: False, 4: False}
 
+        # Reopen after the simulated supply changed out-of-band, then verify validation
+        # and a refused hardware command in the same app session.
+        psu.selected[1] = False
+        psu.fail_on = "enable_output"
+        reads = psu.reads
+        await pilot.press("s")
+        await pilot.pause()
+        await pilot.press("p")
+        await wait_until(pilot, lambda: psu.reads > reads and not screen._busy)
 
-@async_test
-async def test_bad_setpoints_send_nothing_and_a_refused_change_is_reported() -> None:
-    psu = FakePSU(fail_on="enable_output")
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, psu)
-
-        for voltage, current in (("abc", "1"), ("40", "1"), ("5", "11"), ("-1", "1"), ("nan", "1")):
+        writes_before = psu.writes()
+        for voltage, current in (
+            ("abc", "1"),
+            ("40", "1"),
+            ("5", "11"),
+            ("-1", "1"),
+            ("nan", "1"),
+        ):
             _set(screen, "power-v1", voltage)
             _set(screen, "power-i1", current)
             await pilot.pause()  # let the edit settle: editing clears an invalid marker
             _button(screen, "power-apply1").press()
             await pilot.pause()
-            assert psu.writes() == [], (voltage, current)
+            assert psu.writes() == writes_before, (voltage, current)
 
         _button(screen, "power-toggle1").press()  # the supply refuses this one
         await wait_until(pilot, lambda: "Could not enable CH1" in _log(screen))
         assert "refused [by test]" in _log(screen)
         assert any("Could not enable CH1" in n for n in notifications(app))
-        assert str(_button(screen, "power-toggle1").label) == "Enable CH1"  # nothing changed
+        assert str(_button(screen, "power-toggle1").label) == "Enable CH1"
         assert not screen._busy and not _button(screen, "power-toggle1").disabled
 
 
