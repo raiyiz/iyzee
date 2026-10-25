@@ -28,7 +28,9 @@ def test_cells_share_state_and_route_output() -> None:
     try:
         assert session.submit("answer = 40")
         _finish(session)
-        assert session.submit("import sys; print('hello'); sys.stdout.writelines(['via ', 'writelines\\n']); answer + 2")
+        assert session.submit(
+            "import sys; print('hello'); sys.stdout.writelines(['via ', 'writelines\\n']); answer + 2"
+        )
         _finish(session)
         rendered = "".join(output)
         assert "hello" in rendered
