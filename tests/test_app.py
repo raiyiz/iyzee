@@ -127,9 +127,10 @@ async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(
 
 
 @async_test
-async def test_q_requires_a_second_immediate_press(app) -> None:
+async def test_q_requires_a_second_immediate_press_and_closes_instruments(app) -> None:
+    one, two = FakeHandle(), FakeHandle()
     async with app.run_test() as pilot:
-        await pilot.pause()
+        app.handles["one"], app.handles["two"] = one, two
 
         await pilot.press("q")
         await pilot.pause()
@@ -141,21 +142,11 @@ async def test_q_requires_a_second_immediate_press(app) -> None:
         await pilot.press("q")
         assert app.is_running
 
-        # A genuinely immediate second press quits.
+        # A genuinely immediate second press quits and performs normal cleanup.
         await pilot.press("q")
         await wait_until(pilot, lambda: not app.is_running)
 
     assert not app.is_running
-
-
-@async_test
-async def test_exiting_the_app_disconnects_every_connected_instrument(app) -> None:
-    one, two = FakeHandle(), FakeHandle()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        app.handles["one"], app.handles["two"] = one, two
-        await pilot.press("ctrl+q")
-        await wait_until(pilot, lambda: not app.is_running)
     assert (one.disconnect_calls, two.disconnect_calls) == (1, 1)
     assert app.handles == {}
 
