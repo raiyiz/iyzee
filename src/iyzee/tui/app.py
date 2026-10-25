@@ -122,6 +122,7 @@ class IyzeeApp(App):
 
     # Seconds between idle-link checks (see ``_check_links``).
     LINK_CHECK_INTERVAL = 2.0
+    CELL_SHUTDOWN_TIMEOUT_S = 12.0
     CSS_PATH = "app.tcss"
 
     # Width breakpoints. Textual adds exactly one of these class names to
@@ -190,7 +191,7 @@ class IyzeeApp(App):
         # also quits, but only on a second press: one stray keystroke
         # shouldn't shut down an app that is holding live instruments. Hidden
         # from the footer, which is already crowded; the first press says so.
-        Binding("ctrl+q", "quit", "Quit", priority=True),
+        Binding("ctrl+q", "request_shutdown", "Quit", priority=True),
         Binding("q", "request_quit", "Quit", show=False),
         # Vim-style command line (``:help`` lists the commands available on this page).
         Binding("colon", "command_mode", "Command", show=False),
@@ -229,6 +230,7 @@ class IyzeeApp(App):
         # Like the console history, persistent only for real runs (see ``run()``).
         self.prefs = Prefs(Path(prefs_file) if prefs_file else None)
         self._quit_armed_until = 0.0  # monotonic deadline for the second "q"
+        self._shutdown_in_progress = False
         # Installed first, before anything else in this constructor can
         # fail: this is the sink for every log.exception/log.warning/
         # log.info call anywhere in the app (see logging_support's module
@@ -307,8 +309,8 @@ class IyzeeApp(App):
         Without a handler the process just stops: no log line, and the shutter and the
         instruments are left exactly as they were.
         """
-        log.critical("received %s: shutting down cleanly", name)
-        self.exit()
+        log.critical("received %s: requesting safe shutdown", name)
+        self.action_request_shutdown()
 
     def session_note(self, activity: str) -> None:
         """Tell the session marker what is going on, for the report after a crash."""
@@ -515,7 +517,7 @@ class IyzeeApp(App):
             return self.command_registry().help_text(args[0] if args else None)
 
         def quit_(args: list[str]) -> None:
-            self.exit()
+            self.action_request_shutdown()
 
         commands = [
             Command(
@@ -562,11 +564,64 @@ class IyzeeApp(App):
 
     QUIT_CONFIRM_S = 4.0
 
+    def action_quit(self) -> None:
+        """Route Textual's generic quit action through the hardware-safe preflight."""
+        self.action_request_shutdown()
+
+    def action_request_shutdown(self) -> None:
+        """Check that console code has stopped before tearing down hardware."""
+        if self._shutdown_in_progress:
+            return
+        self._shutdown_in_progress = True
+        self.run_worker(
+            self._safe_shutdown(),
+            name="safe-shutdown",
+            group="shutdown",
+            exclusive=True,
+        )
+
+    async def _safe_shutdown(self) -> None:
+        """Cancel an ordinary quit if a cell survives the bounded interrupt wait."""
+        try:
+            session = self.console_session
+            if session is not None and session.executing:
+                session.interrupt()
+                stopped = await asyncio.to_thread(
+                    session.wait_until_idle, self.CELL_SHUTDOWN_TIMEOUT_S
+                )
+                if not stopped:
+                    message = (
+                        f"Console cell did not stop within {self.CELL_SHUTDOWN_TIMEOUT_S:g}s. "
+                        "Shutdown cancelled; instruments remain connected and may retain their "
+                        "current output state. Wait for the cell or its driver I/O timeout, then "
+                        "try quitting again. Ctrl+C cannot interrupt a blocked native driver call."
+                    )
+                    log.error(message)
+                    self.session_note("shutdown cancelled: IPython cell still running")
+                    self.notify(message, severity="error", timeout=20, markup=False)
+                    return
+
+            # Signal sweep/trace workers to stop at their next safe step boundary before
+            # asking the lab to close their devices.
+            self.shutdown_requested.set()
+            if not await asyncio.to_thread(self._close_console_and_instruments):
+                self.notify(
+                    "Shutdown cancelled because the IPython worker did not stop. "
+                    "No instruments were disconnected; wait and retry.",
+                    severity="error",
+                    timeout=15,
+                    markup=False,
+                )
+                return
+            self.exit()
+        finally:
+            self._shutdown_in_progress = False
+
     def action_request_quit(self) -> None:
-        """``q``: the first press asks, a second one within a few seconds quits."""
+        """When q is pressed twice within the window, request a safe shutdown."""
         now = time.monotonic()
         if now <= self._quit_armed_until:
-            self.exit()
+            self.action_request_shutdown()
             return
         self._quit_armed_until = now + self.QUIT_CONFIRM_S
         connected = len(self.handles)

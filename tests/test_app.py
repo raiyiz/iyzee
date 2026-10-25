@@ -47,7 +47,7 @@ async def test_page_navigation_and_footer_contracts() -> None:
 
         assert "c" not in offered() and {"s", "t", "i"} <= offered()
         binding = pilot.app.screen.active_bindings["ctrl+q"].binding
-        assert binding.action == "quit" and binding.show is True
+        assert binding.action == "request_shutdown" and binding.show is True
 
         await pilot.press("s")
         assert switcher.current == "sweep"
@@ -273,3 +273,35 @@ async def test_handles_that_cannot_tell_are_never_dropped() -> None:
 
         assert "x" in app.handles
         app.handles.clear()  # nothing to disconnect on the way out
+
+
+
+@async_test
+async def test_shutdown_stays_open_when_a_console_cell_ignores_interrupt() -> None:
+    app = IyzeeApp()
+    app.CELL_SHUTDOWN_TIMEOUT_S = 0.05
+    handle = FakeHandle()
+    async with app.run_test(size=(110, 32)) as pilot:
+        await pilot.press("i")
+        await pilot.pause()
+        app.handles["mxa"] = handle
+        session = app.console_session
+        assert session is not None
+        assert session.submit("import threading; threading.Event().wait(0.35)")
+        await wait_until(pilot, lambda: session.executing)
+
+        await pilot.press("ctrl+q")
+        await wait_until(
+            pilot,
+            lambda: any("Shutdown cancelled" in message for message in notifications(app)),
+        )
+        assert app.is_running
+        assert handle.disconnect_calls == 0
+        assert session.executing
+
+        # Once the blocked call returns, the operator can quit normally.
+        await wait_until(pilot, lambda: not session.executing, timeout=3.0)
+        await pilot.press("ctrl+q")
+        await wait_until(pilot, lambda: not app.is_running)
+
+    assert handle.disconnect_calls == 1

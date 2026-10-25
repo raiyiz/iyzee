@@ -187,6 +187,10 @@ class IPythonSession:
     def executing(self) -> bool:
         return not self._idle.is_set()
 
+    def wait_until_idle(self, timeout: float) -> bool:
+        """Wait at most the given number of seconds for the current cell to finish."""
+        return self._idle.wait(timeout)
+
     def start(self) -> None:
         if self._started or self._closed:
             return
