@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from iyzee.tui.app import IyzeeApp
+
 # The project uses a src layout. Make the `iyzee` package importable (as
 # `iyzee`, `iyzee.devices.mxa`, etc.) even when the package has not been pip-installed,
 # so the test suite can run from a bare checkout without hardware.
@@ -10,6 +12,11 @@ src_dir = Path(__file__).parents[1] / "src"
 sys.path.insert(0, str(src_dir))
 
 from iyzee.tui import logging_support  # noqa: E402 - see sys.path setup above
+
+
+@pytest.fixture
+def app():
+    return IyzeeApp()
 
 
 @pytest.fixture(autouse=True)
