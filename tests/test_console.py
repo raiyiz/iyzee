@@ -80,10 +80,17 @@ async def test_tab_completes_in_insert_mode_and_indents_without_matches() -> Non
         await pilot.press("p", "r", "i", "tab")
         assert editor.text == "print"
 
+        # A comment is not an IPython completion target, so Tab keeps its
+        # editor indentation behavior instead of listing unrelated names.
         editor.text = "#"
         editor.cursor_location = (0, 1)
         await pilot.press("tab")
         assert editor.text == "#   "
+
+        editor.text = ""
+        editor.cursor_location = (0, 0)
+        await pilot.press("tab")
+        assert editor.text == "    "
 
 
 @async_test

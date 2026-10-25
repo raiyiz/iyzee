@@ -48,7 +48,7 @@ class ConsoleCodeArea(VimTextArea):
                 return
         if self.mode is Mode.INSERT and event.key == "tab":
             console = self._console()
-            if console is not None and console.complete_at_cursor():
+            if console is not None and console.complete_at_cursor(tab=True):
                 event.stop()
                 event.prevent_default()
                 return
@@ -217,10 +217,23 @@ class IyzeeConsole(Vertical):
     def action_complete(self) -> None:
         self.complete_at_cursor()
 
-    def complete_at_cursor(self) -> bool:
+    @staticmethod
+    def _has_completion_target(source: str, cursor_pos: int) -> bool:
+        """Only ask IPython for Tab completion when there is a token to complete."""
+        line = source[:cursor_pos].rsplit("\n", 1)[-1]
+        if line.lstrip().startswith("#"):
+            return False
+        stripped = line.rstrip()
+        if len(stripped) < len(line) and stripped.endswith(("import", "from")):
+            return True
+        return bool(line) and (line[-1].isalnum() or line[-1] in "_.%")
+
+    def complete_at_cursor(self, *, tab: bool = False) -> bool:
         editor = self.query_one(VimTextArea)
         source = editor.text
         cursor_pos = _location_to_offset(source, editor.cursor_location)
+        if tab and not self._has_completion_target(source, cursor_pos):
+            return False
         matches = self.session.complete(source, cursor_pos)
         if not matches:
             return False
