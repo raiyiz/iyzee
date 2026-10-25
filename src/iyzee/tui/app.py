@@ -28,7 +28,7 @@ from .commands import Command, CommandError, CommandRegistry
 from .diagnostics import SessionMarker, describe
 from .diagnostics import install as install_crash_diagnostics
 from .ipython import default_history_file
-from .ipython_session import IPythonSession
+from .ipython_controller import IPythonSession
 from .logging_support import LogEntry
 from .logging_support import install as install_logging
 from .prefs import Prefs, default_prefs_file
@@ -432,8 +432,9 @@ class IyzeeApp(App):
     def _close_console_and_instruments(self) -> None:
         # The console first: a cell still running holds instrument locks, and
         # closing the session interrupts it so close_instruments can get them.
-        if self.console_session is not None:
-            self.console_session.close()
+        if self.console_session is not None and not self.console_session.close():
+            log.error("IPython cell is still running; leaving instruments connected for safety")
+            return
         self.close_instruments()
 
     def close_instruments(self, timeout: float = 5.0) -> None:

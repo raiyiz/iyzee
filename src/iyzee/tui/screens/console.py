@@ -1,56 +1,30 @@
-"""The Console page: a real IPython terminal, inside the app.
-
-What runs here is IPython's own terminal UI — its prompt, editing (vi or
-emacs mode), completion menu, history search, auto-suggestions, ``%magics``,
-``?`` help, ``%debug`` — in the same process as the app, so ``lab.mx`` is the
-live instrument. See ``ipython_session.py`` for how a terminal application is
-hosted without a terminal, and ``vterm.py`` / ``terminal_view.py`` for how its
-screen is drawn.
-
-This module is the page around it: the plot panel that matplotlib figures are
-drawn into, the ``lab: ...`` status line, and the glue.
-"""
+"""Textual's cell-based console backed by an in-process IPython shell."""
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any, cast
 
-from IPython.core.displaypub import DisplayPublisher
+from matplotlib.figure import Figure
+from rich.text import Text
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical
 from textual.css.query import NoMatches
-from textual.widgets import Static
-from textual_plotext import PlotextPlot
+from textual.widgets import RichLog, Static, TextArea
 
 from ..ipython import AppState
-from ..ipython_session import IPythonSession
+from ..ipython_controller import IPythonSession
 from ..plotting import draw_series, figure_series
-from ..terminal_view import TerminalView
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from ..app import IyzeeApp
 
 
 class ConsoleScreen(Vertical):
-    """A live Python/IPython console bound to the app's current instruments."""
+    """The console page and its persistent interactive Python session."""
 
     def compose(self) -> ComposeResult:
-        yield Static(
-            "Embedded IPython • same process • lab.mx / lab.psu / lab.shutter / lab.scope",
-            classes="panel-title",
-        )
-        # Constructed once — this only runs on this page's first mount, not
-        # every time it's switched back to, so the shell (and its
-        # variables, history, lab) genuinely persists for the app's
-        # lifetime. lab itself needs no refreshing either way (see
-        # LabProxy's docstring) — it reads app state live on every access.
-        #
-        # self.app is App[Any] in Textual's stubs; it's always an
-        # IyzeeApp at runtime (see ConnectScreen.iyzee_app for why), and
-        # that satisfies ipython.AppState structurally.
+        yield Static("IPython · live lab access · Ctrl+Enter runs a cell", classes="panel-title")
         app = cast("IyzeeApp", self.app)
         yield IyzeeConsole(
             app,
@@ -59,242 +33,182 @@ class ConsoleScreen(Vertical):
         )
 
     def on_mount(self) -> None:
-        self.console = self.query_one(IyzeeConsole)
-        cast("IyzeeApp", self.app).console_session = self.console.session
+        console = self.query_one(IyzeeConsole)
+        cast("IyzeeApp", self.app).console_session = console.session
 
     def on_show(self) -> None:
-        # Screen.AUTO_FOCUS (what used to put focus on the input every time
-        # this screen became active) is Screen-only and doesn't exist for a
-        # plain widget, so it's done by hand here instead. Also refresh the
-        # status line's "lab: ..." text — nothing about the shell itself
-        # needs refreshing.
-        self.query_one(TerminalView).focus()
-        self.console.refresh_status()
+        console = self.query_one(IyzeeConsole)
+        console.query_one(TextArea).focus()
+        console.refresh_status()
 
 
 class IyzeeConsole(Vertical):
-    """IPython's terminal UI, a plot panel, and a status line."""
+    """A persistent IPython namespace presented as a code editor and output log."""
+
+    BINDINGS = [
+        Binding("ctrl+enter", "submit_cell", "Run cell", priority=True),
+        Binding("ctrl+space", "complete", "Complete", show=False, priority=True),
+        Binding("ctrl+p", "history_previous", "Previous cell", show=False, priority=True),
+        Binding("ctrl+n", "history_next", "Next cell", show=False, priority=True),
+        Binding("ctrl+c", "interrupt", "Interrupt", priority=True),
+    ]
 
     DEFAULT_CSS = """
-    /* Scrolls (instead of clipping) once the page is too short for the
-       terminal plus the plot panel: with a plot showing, its fixed 12 rows
-       would otherwise squeeze the terminal to nothing. min-height keeps the
-       terminal usable rather than letting it shrink away. */
-    IyzeeConsole { height: 1fr; min-height: 16; overflow-y: auto; }
-    IyzeeConsole #console-terminal {
-        height: 1fr;
-        min-height: 8;
-        margin: 0 1 0 1;
+    IyzeeConsole { height: 1fr; min-height: 12; }
+    IyzeeConsole #console-output {
+        height: 1fr; min-height: 6; margin: 0 1; border: round $primary-darken-1;
     }
-    IyzeeConsole #console-plot {
-        height: 12;
-        margin: 0 1 0 1;
-        border: round $primary-darken-1;
-        display: none;
+    IyzeeConsole #console-editor {
+        height: 8; min-height: 4; margin: 0 1; border: round $primary-darken-1;
     }
-    IyzeeConsole #console-status {
-        height: 2;
-        padding: 0 2;
-        color: $text-muted;
-    }
+    IyzeeConsole #console-status { height: 2; padding: 0 2; color: $text-muted; }
     """
 
     def __init__(
         self,
         app_state: AppState,
         *,
-        history_file: str | Path | None = None,
+        history_file: str | None = None,
         editing_mode: str = "vi",
     ) -> None:
         super().__init__()
+        # Textual handles editing; editing_mode is retained at the app boundary
+        # until preference migration is considered separately.
+        self._editing_mode = editing_mode
         self._lab_text = ""
         self._busy = False
-        self._view: TerminalView | None = None
-        # Built here (the UI thread, inside compose) because constructing the
-        # session needs the running event loop to hand its output back to.
+        self._history: list[str] = []
+        self._history_index = 0
+        self._history_draft = ""
+        self._output: RichLog | None = None
         self.session = IPythonSession(
             app_state,
             history_file=history_file,
-            editing_mode=editing_mode,
             on_output=self._on_output,
             on_busy=self._on_busy,
         )
 
     def compose(self) -> ComposeResult:
-        yield TerminalView(id="console-terminal")
-        yield PlotextPlot(id="console-plot")
+        yield RichLog(id="console-output", wrap=True, markup=False, highlight=False)
+        yield TextArea(id="console-editor", show_line_numbers=True)
         yield Static("", id="console-status")
 
     def on_mount(self) -> None:
-        self._view = self.query_one(TerminalView)
-        self._view.attach(self.session)
-        shell = self.session.shell
-        shell.display_pub = _ConsoleDisplayPublisher()
-        # IPython's terminal shell restricts the display formatter to
-        # text/plain (a real terminal can't show the rest). This console can
-        # at least turn HTML into text and note images, so let those through.
-        formatter = shell.display_formatter
-        if formatter is None:
-            raise RuntimeError("IPython display formatter was not initialized")
-        formatter.active_types = list(formatter.format_types)
-        self._install_figure_plotting()
+        self._output = self.query_one(RichLog)
+        self._history = self.session.history()
+        self._history_index = len(self._history)
+
+        formatter = self.session.shell.display_formatter
+        if formatter is not None:
+            formatter.formatters["text/plain"].for_type(Figure, self._render_figure)
+
+        self._write("iyzee IPython console · Ctrl+Enter runs · Ctrl+Space completes")
+        self._write("input() is not supported here; define values in the editor instead.\n")
         self.refresh_status()
-        # Started only now, with the view in place to receive its output.
-        # Deliberately not focusing the terminal here: on_mount fires for every
-        # page at app startup (ContentSwitcher mounts all of its children
-        # immediately), so this page's on_mount runs even while some other
-        # page is the one actually visible. Focusing here would steal focus
-        # from whichever page the user is really looking at.
-        # ConsoleScreen.on_show() does this instead.
         self.session.start()
 
     def on_unmount(self) -> None:
-        self.session.close()
+        if not self.session.close():
+            self.app.log.warning(
+                "IPython cell did not stop during shutdown; leaving instruments connected"
+            )
 
-    # -- session callbacks (UI thread) ----------------------------------------------------
+    def _write(self, text: str) -> None:
+        if self._output is not None:
+            self._output.write(Text(text), scroll_end=True)
 
     def _on_output(self, text: str) -> None:
-        if self._view is not None:
-            self._view.feed(text)
+        if self.is_mounted:
+            self._write(text)
 
     def _on_busy(self, busy: bool) -> None:
         self._busy = busy
         if self.is_mounted:
-            self._render_status()
-
-    # -- status line -------------------------------------------------------------------------
+            self.refresh_status()
 
     def refresh_status(self) -> None:
-        """Update the "lab: ..." status line. Purely cosmetic — the console's
-        `lab` variable itself always reflects current state without needing
-        this or any other refresh; see LabProxy."""
         lab = self.session.shell.user_ns.get("lab")
         connected = ", ".join(lab.connected) if lab is not None else ""
         self._lab_text = f"lab: {connected or 'nothing connected yet'}"
-        self._render_status()
-
-    def _render_status(self) -> None:
-        # is_mounted (checked by the one caller, _on_busy) is true as soon
-        # as this widget itself is attached to the DOM — not once its own
-        # compose()-yielded children have finished mounting, which happens
-        # as a separate, slightly later step. IPythonSession's background
-        # thread can report "busy" fast enough to land in that gap (most
-        # reliably right after session.start(), the very last line of
-        # on_mount — see its docstring for why it's last), so
-        # "#console-status" isn't always there yet despite the is_mounted
-        # check passing. Once it exists it stays for the widget's whole
-        # life, so this only ever needs to no-op, never retry.
-        try:
-            status = self.query_one("#console-status", Static)
-        except NoMatches:
-            return
-        state = "running… Ctrl+C interrupts" if self._busy else "Ctrl+C clears the line"
-        status.update(
-            f"{self._lab_text}   ·   {state}   ·   Shift+PageUp/Down or wheel: scrollback"
+        state = "running · Ctrl+C interrupts" if self._busy else (
+            "Ctrl+Enter run · Ctrl+Space complete · Ctrl+P/N history"
         )
+        try:
+            self.query_one("#console-status", Static).update(f"{self._lab_text}  ·  {state}")
+        except NoMatches:
+            pass
 
-    # -- matplotlib figures ---------------------------------------------------------------------
+    def action_submit_cell(self) -> None:
+        editor = self.query_one(TextArea)
+        source = editor.text
+        if not source.strip() or self.session.executing:
+            return
+        self._write(f"In [cell]:\n{source}\n")
+        if not self.session.submit(source):
+            self._write("A cell is already running.\n")
+            return
+        self._history.append(source)
+        self._history_index = len(self._history)
+        self._history_draft = ""
+        editor.text = ""
 
-    def _install_figure_plotting(self) -> None:
-        """Render matplotlib Figures into the plot panel instead of the
-        unhelpful default ``<Figure size ... with N Axes>`` text repr.
+    def action_complete(self) -> None:
+        editor = self.query_one(TextArea)
+        source = editor.text
+        row, column = editor.cursor_location
+        before_cursor = "\n".join(source.splitlines()[:row])
+        cursor_pos = len(before_cursor) + (1 if row else 0) + column
+        matches = self.session.complete(source, cursor_pos)
+        if not matches:
+            return
+        if len(matches) == 1:
+            editor.text = source[:cursor_pos] + matches[0] + source[cursor_pos:]
+            editor.cursor_location = (row, column + len(matches[0]))
+        else:
+            self._write("  ".join(matches) + "\n")
 
-        Registered as a ``text/plain`` formatter (not routed through
-        ``_ConsoleDisplayPublisher``) because that's the layer that still
-        has the actual ``Figure`` object — by the time data reaches a
-        ``DisplayPublisher.publish()`` call, matplotlib has already
-        flattened it to a mimetype bundle (if it even produced one; a
-        bare ``Figure`` without ``%matplotlib inline``-equivalent wiring
-        doesn't). Covers this codebase's actual shape — simple line plots,
-        the same kind ``experiment.io.build_figure()`` produces — by
-        walking ``fig.axes[0].lines``; anything fancier (subplots beyond
-        the first axes, imshow, 3D) still falls back to the plain repr.
-        """
-        from matplotlib.figure import Figure
+    def action_history_previous(self) -> None:
+        if self.session.executing or not self._history:
+            return
+        editor = self.query_one(TextArea)
+        if self._history_index == len(self._history):
+            self._history_draft = editor.text
+        if self._history_index > 0:
+            self._history_index -= 1
+            self._show_history_entry(editor)
 
-        display_formatter = self.session.shell.display_formatter
-        if display_formatter is None:
-            raise RuntimeError("IPython display formatter was not initialized")
-        display_formatter.formatters["text/plain"].for_type(Figure, self._render_figure)
+    def action_history_next(self) -> None:
+        if self.session.executing or self._history_index >= len(self._history):
+            return
+        self._history_index += 1
+        editor = self.query_one(TextArea)
+        if self._history_index == len(self._history):
+            editor.text = self._history_draft
+        else:
+            self._show_history_entry(editor)
 
-    def _render_figure(self, fig: Any, p: Any, cycle: bool) -> None:
-        # PlainTextFormatter uses IPython.lib.pretty's pretty-printer
-        # protocol for registered type printers: func(obj, printer, cycle)
-        # writing via `p.text(...)`, not a plain `func(obj) -> str`. Easy
-        # to miss since every other formatter (HTML, PNG, ...) just wants
-        # a return value.
+    def _show_history_entry(self, editor: TextArea) -> None:
+        editor.text = self._history[self._history_index]
+        editor.cursor_location = editor.document.end
+
+    def action_interrupt(self) -> None:
+        if self.session.executing:
+            self.session.interrupt()
+
+    def _render_figure(self, fig: Figure, printer: Any, cycle: bool) -> None:
         if cycle:
-            p.text("Figure(...)")
+            printer.text("Figure(...)")
             return
         lines, labels = figure_series(fig)
         if not lines:
-            p.text(f"<Figure size {fig.get_size_inches()} with {len(fig.axes)} Axes>")
+            printer.text(f"<Figure size {fig.get_size_inches()} with {len(fig.axes)} Axes>")
             return
-        # Runs on the shell's thread, not the UI thread.
+        printer.text(f"[plotted {len(lines)} line(s) below]")
         self.app.call_from_thread(self._draw_figure, lines, labels)
-        p.text(f"[plotted {len(lines)} line(s) in the plot panel below the terminal]")
 
     def _draw_figure(self, lines: list[tuple[list, list, str]], labels: dict[str, str]) -> None:
-        # Same defensive shape as _render_status, for the same reason —
-        # see its comment. The actual risk here is lower (this can only
-        # fire once code has *run* in the shell, which requires
-        # session.start() — the last line of on_mount — to have already
-        # returned; #console-plot should reliably exist by then), but the
-        # guard costs nothing and keeps every threaded callback in this
-        # class consistent rather than "safe until someone changes the
-        # ordering upstream and doesn't notice this one relied on it."
-        try:
-            plot = self.query_one("#console-plot", PlotextPlot)
-        except NoMatches:
-            return
+        from textual_plotext import PlotextPlot
+
+        plot = self.query_one("#console-plot", PlotextPlot)
         plot.display = True
-        draw_series(
-            plot,
-            lines,
-            xlabel=labels["xlabel"] or None,
-            ylabel=labels["ylabel"] or None,
-        )
-
-
-class _ConsoleDisplayPublisher(DisplayPublisher):
-    """Route IPython's rich ``display()`` output into the terminal.
-
-    The base :class:`DisplayPublisher` only ever does anything with the
-    ``text/plain`` entry of a display bundle — every other mimetype
-    (``text/html`` from a pandas ``DataFrame``, ``image/png`` from a
-    matplotlib figure, ...) is silently dropped, so ``display(df)`` degraded
-    to a bare ``<DataFrame at 0x...>`` repr with no indication anything was
-    lost.
-
-    This renders ``text/html`` as plain text (tags stripped — a real HTML
-    renderer is out of scope here) and gives image mimetypes a one-line
-    placeholder instead of vanishing, so "a plot was produced" is at least
-    visible.
-
-    ``publish`` runs on the shell's thread, whose ``sys.stdout`` is the
-    virtual terminal, so this is just ``print``.
-    """
-
-    def publish(
-        self,
-        data: Any,
-        metadata: Any = None,
-        source: Any = None,
-        *,
-        transient: Any = None,
-        update: bool = False,
-        **kwargs: Any,
-    ) -> None:
-        if "text/html" in data:
-            text = re.sub(r"<[^>]+>", "", data["text/html"]).strip()
-            print(text or "(empty)")
-            return
-        for mime in data:
-            if mime.startswith("image/"):
-                size = len(data[mime])
-                print(
-                    f"[{mime}, {size} bytes — inline image display not supported in this console]"
-                )
-                return
-        if "text/plain" in data:
-            print(data["text/plain"])
+        draw_series(plot, lines, xlabel=labels["xlabel"] or None, ylabel=labels["ylabel"] or None)
