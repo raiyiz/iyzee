@@ -47,8 +47,23 @@ async def test_command_bar_focus_history_and_completion(app):
 
 
 @async_test
-async def test_command_navigation_validation_and_quit(app):
+async def test_command_operations_validation_navigation_and_quit(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    handle = FakeHandle()
+    app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
+        await run(pilot, "connect fake")
+        assert "fake" in app.lab.handles
+        assert handle.connected
+
+        await run(pilot, "status")
+        assert any("fake: connected" in m for m in notifications(app))
+
+        await run(pilot, "disconnect fake")
+        assert handle.disconnected
+        assert "fake" not in app.lab.handles
+
         await run(pilot, "frobnicate")
         assert any("unknown command :frobnicate" in m for m in notifications(app))
         assert app.is_running
@@ -72,20 +87,3 @@ async def test_command_navigation_validation_and_quit(app):
         assert app.query_one(ContentSwitcher).current == "sweep"
         await run(pilot, "q")
         assert not app.is_running
-
-
-@async_test
-async def test_connect_and_disconnect_commands_drive_the_lab(monkeypatch: pytest.MonkeyPatch):
-    handle = FakeHandle()
-    app = connect_app(monkeypatch, handle)
-    async with app.run_test() as pilot:
-        await run(pilot, "connect fake")
-        assert "fake" in app.lab.handles
-        assert handle.connected
-
-        await run(pilot, "status")
-        assert any("fake: connected" in m for m in notifications(app))
-
-        await run(pilot, "disconnect fake")
-        assert handle.disconnected
-        assert "fake" not in app.lab.handles
