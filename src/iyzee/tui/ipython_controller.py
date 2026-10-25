@@ -28,6 +28,9 @@ def _raise_in_thread(thread_id: int) -> None:
         ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), None)
 
 
+_NO_INPUT = "input() is not available in the cell console; define a variable in the editor instead"
+
+
 def _clear_pending_interrupt(thread_id: int) -> None:
     """Drop an interrupt that was delivered but not yet raised in ``thread_id``."""
     ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), None)
@@ -74,6 +77,58 @@ class _ThreadStream:
         return getattr(self._default, name)
 
 
+class _ThreadStdin:
+    """Make stdin unreadable from the execution worker; other threads see the real one.
+
+    A worker blocked in a real read can never be interrupted and would steal
+    keystrokes from Textual, so reads fail fast instead.
+    """
+
+    def __init__(self, default: TextIO, session: IPythonSession) -> None:
+        self._default = default
+        self._session = session
+
+    def _on_worker(self) -> bool:
+        return threading.get_ident() == self._session._worker_id
+
+    def read(self, size: int = -1) -> str:
+        if self._on_worker():
+            raise RuntimeError(_NO_INPUT)
+        return self._default.read(size)
+
+    def readline(self, size: int = -1) -> str:
+        if self._on_worker():
+            raise RuntimeError(_NO_INPUT)
+        return self._default.readline(size)
+
+    def readlines(self, hint: int = -1) -> list[str]:
+        if self._on_worker():
+            raise RuntimeError(_NO_INPUT)
+        return self._default.readlines(hint)
+
+    def __iter__(self) -> _ThreadStdin:
+        if self._on_worker():
+            raise RuntimeError(_NO_INPUT)
+        return self
+
+    def __next__(self) -> str:
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
+
+    def isatty(self) -> bool:
+        return False if self._on_worker() else bool(self._default.isatty())
+
+    def fileno(self) -> int:
+        if self._on_worker():
+            raise RuntimeError(_NO_INPUT)
+        return self._default.fileno()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._default, name)
+
+
 class IPythonSession:
     """Persistent IPython shell whose output is delivered as ordinary text."""
 
@@ -112,7 +167,7 @@ class IPythonSession:
         self._closed = False
         self._previous_shell = InteractiveShell._instance
         self._previous_input = builtins.input
-        self._previous_streams: tuple[Any, Any] | None = None
+        self._previous_streams: tuple[Any, Any, Any] | None = None
 
         self.shell = InteractiveShell(
             config=shell_config(history_file), user_ns=lab_namespace(app, namespace)
@@ -127,8 +182,9 @@ class IPythonSession:
         if self._started or self._closed:
             return
         self._started = True
-        stdout, stderr = sys.stdout, sys.stderr
-        self._previous_streams = (stdout, stderr)
+        stdin, stdout, stderr = sys.stdin, sys.stdout, sys.stderr
+        self._previous_streams = (stdin, stdout, stderr)
+        sys.stdin = _ThreadStdin(stdin, self)  # type: ignore[assignment]
         sys.stdout = _ThreadStream(stdout, self)  # type: ignore[assignment]
         sys.stderr = _ThreadStream(stderr, self)  # type: ignore[assignment]
         builtins.input = self._input  # type: ignore[assignment]
@@ -238,10 +294,7 @@ class IPythonSession:
 
     def _input(self, prompt: str = "") -> str:
         if threading.get_ident() == self._worker_id:
-            raise RuntimeError(
-                "input() is not available in the cell console; "
-                "define a variable in the editor instead"
-            )
+            raise RuntimeError(_NO_INPUT)
         return self._previous_input(prompt)
 
     def _write_output(self, text: str) -> None:
@@ -282,10 +335,12 @@ class IPythonSession:
     def _restore_globals(self) -> None:
         previous = self._previous_streams
         if previous is not None:
+            if isinstance(sys.stdin, _ThreadStdin) and sys.stdin._session is self:
+                sys.stdin = previous[0]
             if isinstance(sys.stdout, _ThreadStream) and sys.stdout._session is self:
-                sys.stdout = previous[0]
+                sys.stdout = previous[1]
             if isinstance(sys.stderr, _ThreadStream) and sys.stderr._session is self:
-                sys.stderr = previous[1]
+                sys.stderr = previous[2]
             if builtins.input == self._input:
                 builtins.input = self._previous_input
             self._previous_streams = None

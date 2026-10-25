@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import builtins
+import sys
 import time
 
+import pytest
 from helpers import FakeApp
 
 from iyzee.tui.ipython_controller import Completion, IPythonSession
@@ -128,3 +131,35 @@ def test_stray_interrupts_never_kill_the_worker() -> None:
         assert "42" in "".join(output)
     finally:
         assert session.close()
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import sys; sys.stdin.readline()",
+        "import sys; sys.stdin.read()",
+        "import sys; sys.stdin.readlines()",
+        "import sys\nfor line in sys.stdin: pass",
+        "import sys; sys.stdin.fileno()",
+    ],
+)
+def test_reading_stdin_fails_fast_instead_of_blocking(source: str) -> None:
+    session, output = _session()
+    try:
+        # Reading the real stdin would block the worker for good (interrupts
+        # cannot free a blocked read) and would steal Textual's keystrokes.
+        assert session.submit(source)
+        _finish(session)
+        assert "not available in the cell console" in "".join(output)
+        assert session.submit("6 * 7")
+        _finish(session)
+    finally:
+        assert session.close()
+
+
+def test_close_restores_process_wide_streams_and_input() -> None:
+    before = (sys.stdin, sys.stdout, sys.stderr, builtins.input)
+    session, _output = _session()
+    assert (sys.stdin, sys.stdout, sys.stderr, builtins.input) != before
+    assert session.close()
+    assert (sys.stdin, sys.stdout, sys.stderr, builtins.input) == before
