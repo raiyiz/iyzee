@@ -13,8 +13,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, TextIO, cast
 
-from IPython.core.interactiveshell import InteractiveShell
 from IPython.core.completer import provisionalcompleter
+from IPython.core.interactiveshell import InteractiveShell
 
 from .ipython import AppState, lab_namespace, shell_config
 

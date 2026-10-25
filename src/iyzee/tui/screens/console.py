@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from matplotlib.figure import Figure
@@ -11,6 +12,7 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.widgets import RichLog, Static, TextArea
+from textual_plotext import PlotextPlot
 
 from ..ipython import AppState
 from ..ipython_controller import IPythonSession
@@ -29,7 +31,6 @@ class ConsoleScreen(Vertical):
         yield IyzeeConsole(
             app,
             history_file=app.console_history_file,
-            editing_mode=app.console_editing_mode,
         )
 
     def on_mount(self) -> None:
@@ -58,6 +59,7 @@ class IyzeeConsole(Vertical):
     IyzeeConsole #console-output {
         height: 1fr; min-height: 6; margin: 0 1; border: round $primary-darken-1;
     }
+    IyzeeConsole #console-plot { height: 12; margin: 0 1; display: none; border: round $primary-darken-1; }
     IyzeeConsole #console-editor {
         height: 8; min-height: 4; margin: 0 1; border: round $primary-darken-1;
     }
@@ -68,13 +70,9 @@ class IyzeeConsole(Vertical):
         self,
         app_state: AppState,
         *,
-        history_file: str | None = None,
-        editing_mode: str = "vi",
+        history_file: str | Path | None = None,
     ) -> None:
         super().__init__()
-        # Textual handles editing; editing_mode is retained at the app boundary
-        # until preference migration is considered separately.
-        self._editing_mode = editing_mode
         self._lab_text = ""
         self._busy = False
         self._history: list[str] = []
@@ -91,6 +89,7 @@ class IyzeeConsole(Vertical):
     def compose(self) -> ComposeResult:
         yield RichLog(id="console-output", wrap=True, markup=False, highlight=False)
         yield TextArea(id="console-editor", show_line_numbers=True)
+        yield PlotextPlot(id="console-plot")
         yield Static("", id="console-status")
 
     def on_mount(self) -> None:
