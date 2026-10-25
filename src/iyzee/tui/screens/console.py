@@ -129,7 +129,6 @@ class IyzeeConsole(Vertical):
             id="console-editor",
             show_line_numbers=True,
             tab_behavior="indent",
-            indent_type="spaces",
             indent_width=4,
         )
         yield PlotextPlot(id="console-plot")
