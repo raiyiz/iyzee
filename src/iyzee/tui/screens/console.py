@@ -145,7 +145,9 @@ class IyzeeConsole(Vertical):
             formatter.formatters["text/plain"].for_type(Figure, self._render_figure)
 
         self._write("iyzee IPython · Vim: i insert, Esc normal, v visual, : commands")
-        self._write("Tab completes in INSERT mode; with no matches it indents. Shift+Enter / Ctrl+Enter runs.\n")
+        self._write(
+            "Tab completes in INSERT mode; with no matches it indents. Shift+Enter / Ctrl+Enter runs.\n"
+        )
         self._write("input(), stdin reads and interactive debugger prompts are not supported.\n")
         self.refresh_status()
         self.session.start()
@@ -178,7 +180,9 @@ class IyzeeConsole(Vertical):
         self.refresh_status()
 
     def on_vim_text_area_save_requested(self, _message: VimTextArea.SaveRequested) -> None:
-        self._write("The console buffer is not a file; executed cells are stored in IPython history.\\n")
+        self._write(
+            "The console buffer is not a file; executed cells are stored in IPython history.\\n"
+        )
 
     def on_vim_text_area_quit_requested(self, _message: VimTextArea.QuitRequested) -> None:
         cast("IyzeeApp", self.app).action_request_shutdown()
@@ -190,7 +194,9 @@ class IyzeeConsole(Vertical):
         lab = self.session.shell.user_ns.get("lab")
         connected = ", ".join(lab.connected) if lab is not None else ""
         self._lab_text = f"lab: {connected or 'nothing connected yet'}"
-        state = "running · Ctrl+C is best-effort" if self._busy else "Tab complete · Shift+Enter run"
+        state = (
+            "running · Ctrl+C is best-effort" if self._busy else "Tab complete · Shift+Enter run"
+        )
         with contextlib.suppress(NoMatches):
             self.query_one("#console-status", Static).update(
                 f"{self._lab_text} · {self._editor_status} · {state}"

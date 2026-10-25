@@ -13,9 +13,7 @@ from iyzee.tui.screens.console import IyzeeConsole
 from iyzee.tui.workers import LastRun
 
 
-async def _run_cell(
-    pilot, console: IyzeeConsole, source: str, key: str = "ctrl+enter"
-) -> None:
+async def _run_cell(pilot, console: IyzeeConsole, source: str, key: str = "ctrl+enter") -> None:
     editor = console.query_one(VimTextArea)
     editor.text = source
     editor.cursor_location = editor.document.end
