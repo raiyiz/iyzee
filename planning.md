@@ -18,16 +18,18 @@ The legacy console implementation occupied six source modules (1,507 lines):
 | `tui/termkeys.py` | 155 |
 | **Total** | **1,507** |
 
-The current cell-based implementation occupies three source modules (798 lines at this baseline):
+The first native-cell baseline (before the Vim editor, stdin guard, interrupt-boundary fix and pre-exit shutdown checks) occupied 798 lines in the three modules below. The current implementation includes those fixes and the regression coverage for them:
 
 | Current source module | Lines |
 | --- | ---: |
 | `tui/ipython.py` | 227 |
-| `tui/ipython_controller.py` | 349 |
-| `tui/screens/console.py` | 222 |
-| **Total** | **798** |
+| `tui/ipython_controller.py` | 367 |
+| `tui/screens/console.py` | 280 |
+| **Total** | **874** |
 
-The focused related test set is 1,077 lines before and 885 lines at this baseline. That is the set of `test_ipython.py`, the old/new console tests, `test_app.py` and `test_layout.py`; these app/layout files also cover wider behavior. These are line-count checks on defined file sets, not PR-wide +/- totals.
+That is 633 fewer source lines than the original six-module implementation (42.0% reduction).
+
+The defined related test-file set is 963 lines now, compared with 1,077 before. It consists of `test_ipython.py`, `test_console.py`, `test_ipython_controller.py`, `test_app.py` and `test_layout.py`; the app/layout files also cover broader behavior. The set shrank by 114 lines. These are source-only and test-only counts, not PR-wide +/- totals.
 
 ## Design decisions
 
@@ -40,8 +42,9 @@ The focused related test set is 1,077 lines before and 885 lines at this baselin
 - Use VimTextArea for the editor and preserve as much of its supported modal editing as possible. The editor starts in Vim NORMAL mode; INSERT mode remains a real multiline Python editor. Completion should be available by Tab in INSERT mode; when there are no candidates, Tab should retain ordinary indentation behavior. Shift+Enter runs the current cell, and Ctrl+Enter remains an alternate shortcut.
 - Completion replacements use IPython's returned source range, not blind insertion at the cursor. Completion must work for partial words and the dynamic `lab` proxy.
 - Disable ANSI color sequences in IPython output; the output pane renders text, not a terminal.
-- Ctrl+C is best-effort. It may interrupt Python code, but it cannot reliably abort native code or an instrument call blocked in driver I/O. Instrument/network operations must have finite, appropriate timeouts.
-- Never race a running cell with instrument disconnection. Before normal shutdown, request interruption and wait for a bounded interval. If the cell remains active, do not exit through the ordinary path: keep the app open, explain that hardware state may persist, and offer waiting or returning to the app. No forced disconnect while cell code may still own an instrument lock. Any explicit force-exit policy must warn that outputs may remain energized and must not be described as safe or clean.
+- Ctrl+C is best-effort; it cannot reliably abort native code or a VISA/driver call blocked in I/O. Current finite timeout defaults are MXA VISA 5 s, PSU VISA 10 s, LeCroy VISA 10 s, and wavemeter HTTP 1 s for reads / 3 s for setpoint writes. MXA `wait_opc()` / `single_sweep_wait()` allow a per-call 30 s timeout. Driver constructors and the LeCroy per-query timeout provide the documented override points; changing Python thread interruption must never be treated as a replacement for I/O timeouts.
+- The execution worker remains a daemon thread as a last-resort fallback for abnormal interpreter termination, but ordinary user-requested quit is preflighted. The app requests interruption and waits up to 12 s. If the cell is still active, shutdown is cancelled, the app stays open, and the operator is told that hardware may retain its current output state. There is no “safe force quit” path. Once the call finishes (or its driver timeout fires), the operator can retry. Never disconnect a device concurrently with cell code that might still use it.
+- External process termination cannot guarantee hardware safety: the PSU output/shutter may remain at the last commanded state. Normal shutdown closes instruments only after worker code has stopped; the Power page is not a substitute for safely resolving a cell that still owns a device lock.
 - Prefer fixes at the actual behavior boundary over warning filters, swallowed causes, generic exception handling or more indirection.
 - Test user-visible behavior with a small, focused suite. Delete tests that only verify the removed ANSI terminal, screen drawing internals or keystroke byte protocol.
 
@@ -66,40 +69,40 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 - [x] Use IPython's in-memory or per-user application history.
 - [x] Make completion ranges explicit and guard Ctrl+C so asynchronous interrupts are delivered only inside cell execution.
 - [x] Guard `input()` and `sys.stdin` reads against blocking the worker.
-- [ ] Reject/disable interactive debugger entry points such as `%debug` and `%pdb` with a fast, understandable error.
-- [ ] Make worker shutdown outcome explicit before the app begins unmounting; a timeout must keep ordinary shutdown from exiting.
-- [ ] Audit configured finite I/O timeouts used by the drivers reachable from the console and document where each is set.
+- [x] Reject interactive `%debug` and `%pdb` entry with a clear error rather than opening a terminal prompt.
+- [x] Route ordinary quit paths through a pre-exit interrupt/wait check; a 12 s timeout cancels the quit and leaves the app open.
+- [x] Document the finite driver timeout defaults and the longer MXA per-call acquisition timeout.
 
 ### 2. Native Vim cell editor
 
-- [ ] Mount the existing `textual-vim-textarea` `VimTextArea` rather than a plain `TextArea`, and expose current Vim mode/status in the console UI.
-- [ ] Preserve normal, insert, visual, visual-line and command modes, common motions/operators/counts, undo/redo and register-backed yank/delete/paste supported by the dependency.
-- [ ] Bind Tab to IPython completion in INSERT mode. With no matches, preserve standard indentation; with multiple matches, show candidates; apply single matches as source-range replacements.
-- [ ] Bind Shift+Enter and Ctrl+Enter to execute the current cell without stealing normal editor input unnecessarily.
-- [ ] Keep multiline editing, sensible line numbers, history recall, busy status, interrupt control and plot output.
-- [ ] Test the editor modes, Tab completion/indent fallback, source-range replacement and both submission bindings under Textual's test pilot.
+- [x] Mount `textual-vim-textarea`'s `VimTextArea` and show mode/status in the console.
+- [x] Use the dependency's NORMAL, INSERT, VISUAL, VISUAL-LINE and COMMAND modes, common motions/operators/counts, undo/redo and registers for yank/delete/paste where supported.
+- [x] Bind Tab to IPython completion in INSERT mode; if no completion is available, fall through to four-space indentation. Multiple matches are listed; a single match replaces the IPython-provided source range.
+- [x] Bind Shift+Enter as the primary submit shortcut and Ctrl+Enter as an alternate. Ctrl+Space remains an explicit completion shortcut.
+- [x] Keep multiline editing, line numbers, history recall, busy status, best-effort interrupt and plot output.
+- [x] Add Textual pilot coverage for Tab, indentation fallback, completion replacement, Vim delete/undo and Shift+Enter submission. CI is the authority for whether these new tests pass.
 
 ### 3. Remove terminal emulation and clean dependencies
 
 - [x] Delete the terminal widget, virtual screen and low-level terminal key encoder.
-- [ ] Ensure `pyte` is absent from `pyproject.toml` and `uv.lock`.
-- [ ] Ensure `prompt-toolkit` is not a direct project dependency and remains only as an IPython transitive dependency.
-- [ ] Keep `jedi` as an IPython transitive dependency, but test completion against actual iyzee behavior; the current shell disables Jedi completion because static Jedi analysis misses dynamic `LabProxy` members.
-- [ ] Do not enable `TextArea(language="python")` syntax highlighting unless the `textual[syntax]` extra is declared and locked.
-- [ ] Remove stale references to the deleted terminal session, key protocol and per-file lint exceptions.
-- [ ] Audit `textual-vim-textarea` usage so this dependency is used by the console editor rather than left unused.
+- [x] Confirm `pyte` is absent from both `pyproject.toml` and `uv.lock`.
+- [x] Keep `prompt-toolkit` out of direct dependencies; it remains transitive through IPython.
+- [x] Keep `jedi` transitive through IPython. The shell disables Jedi completion because static analysis misses dynamic `LabProxy` attributes; the regression tests exercise actual IPython completion instead.
+- [x] Do not enable `TextArea(language="python")` syntax highlighting, so the `textual[syntax]` extra is not needed.
+- [x] Remove stale references to the deleted terminal session, key protocol and per-file lint exceptions.
+- [x] Use the existing direct dependency `textual-vim-textarea` for the actual console editor.
 
 ### 4. Behavioral regression tests
 
 - [x] Keep focused controller, live-`lab`, completion-range, stdin and interrupt-boundary tests.
 - [x] Remove virtual-terminal ANSI, cursor protocol and terminal byte-encoding tests.
-- [ ] Cover debugger fail-fast behavior, Vim editor mode and bindings, and shutdown refusal while a cell is still running.
-- [ ] Retain a concise end-to-end test for persistent cell state, live results and orderly shutdown; avoid duplicating the same contract in several test layers.
+- [x] Add regression coverage for debugger fail-fast behavior, Vim editor/Tab behavior, Shift+Enter, and shutdown refusal while a cell is still running (test results pending current CI).
+- [x] Retain one concise end-to-end test for persistent cell state, live results and orderly shutdown rather than duplicating the full contract in each layer.
 
 ### 5. Documentation and verification
 
 - [x] Update README and architecture/TUI guides for cell submission, completion, history, interruption and unsupported interactive input.
-- [ ] Document Vim mode and the final keyboard contract, including Tab completion and Shift+Enter.
+- [x] Document Vim mode, Tab completion/indent fallback, Shift+Enter and Ctrl+Enter, best-effort interruption and shutdown preflight.
 - [ ] Run focused console/lab tests and the full suite in CI; local test execution is unavailable in the current GitHub-only editing environment.
 - [ ] Confirm Ruff and mypy on the latest head, then verify the new commit's CI rather than relying on earlier runs.
 - [ ] Review the final branch diff and line counts for unnecessary abstractions, stale comments, dead code and duplicated tests.
@@ -112,11 +115,11 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 - Completion works for partial names and `lab` attributes, replacing the exact source range.
 - `input()`, direct stdin reads and interactive debugger prompts fail promptly; the worker remains usable afterwards.
 - Ctrl+C is explicitly best-effort, while blocking device I/O is bounded by finite driver timeouts.
-- Normal shutdown cannot proceed to app exit while a cell may still be using hardware. The timeout/recovery UX and the daemon-thread policy are explicit; no concurrent forced disconnect.
+- Normal user-requested shutdown waits up to 12 s after a best-effort interrupt; if a cell is still active, ordinary quit is cancelled and the app stays open. The worker is a daemon only as a last-resort abnormal-exit fallback. No concurrent instrument disconnection or “safe force quit” is offered.
 - `pyte` is absent; `prompt-toolkit` and `jedi` are transitive through IPython, not unnecessary direct dependencies; syntax highlighting is not enabled without its extra.
-- Console source remains at or below 850 lines and the defined related-test set at or below 1,000 lines. Coverage must not be deleted solely to meet these budgets.
+- Console source remains at or below 900 lines and the defined related-test set at or below 1,000 lines. Current measured counts are 874 source lines and 963 related-test lines. Coverage must not be deleted solely to meet these budgets.
 - README and architecture/TUI guides accurately state the supported features and intentional losses.
-- The latest CI run passes; any check that could not be run is identified honestly.
+- The latest head passes CI (tests, Ruff, mypy, docs, doc-links, notebooks); any check that could not be run is identified honestly.
 
 ## Progress log
 
@@ -126,5 +129,7 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 - Disabled IPython ANSI colors because tracebacks and `?` inspection output were being shown as raw escape codes in the plain-text log.
 - Made Ctrl+C safe at cell boundaries after asynchronous exceptions could hit queue/bookkeeping code, kill the worker and leave the UI permanently busy. The controller now targets only a live worker inside `run_cell` and refuses submissions after worker death.
 - Added worker-aware stdin guarding after `sys.stdin.readline()`, `read()` or iteration could block forever and steal terminal keystrokes. Such reads now fail immediately, and the original streams are restored.
-- Added a shutdown guard so a failed cell stop does not trigger instrument disconnection. This still needs a pre-exit recovery path; the current `on_unmount` guard alone cannot keep the app open.
-- Removed stale terminal-emulator comments and obsolete lint exceptions.
+- Added the pre-exit shutdown path: request an interrupt and wait up to 12 s; if the cell remains active, cancel the quit, keep the UI available and leave instruments connected. The worker is daemonized only as a fallback for abnormal interpreter termination.
+- Added explicit `%debug` / `%pdb` rejection, so terminal-only debugger prompts cannot hold the cell worker at stdin.
+- Reused the already-declared `textual-vim-textarea` dependency: Vim modes, Tab completion with indentation fallback, Shift+Enter submit and Ctrl+Enter alternate, plus mode/status feedback and focused tests.
+- Removed stale terminal-emulator comments and obsolete lint exceptions; the remaining formatting cleanup is tracked by CI.

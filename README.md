@@ -122,7 +122,7 @@ Outside text-entry widgets:
 - <code>Ctrl+\\</code> opens Textual's command palette.
 - <code>Ctrl+Q</code> quits immediately; <code>q</code> quits after a second press.
 
-The console uses a multiline code editor: <code>Ctrl+Enter</code> runs a cell, <code>Ctrl+Space</code> completes, <code>Ctrl+P</code>/<code>Ctrl+N</code> recalls executed cells, and <code>Ctrl+C</code> interrupts a running cell. <code>input()</code> is not supported in this editor.
+The console editor is Vim-modal and starts in NORMAL mode. Press <code>i</code> to insert code and <code>Escape</code> to return to NORMAL; <code>v</code>/<code>V</code> select characterwise/linewise visual regions. It supports common Vim motions and operators, counts, registers, undo and redo. In INSERT mode, <code>Tab</code> requests IPython completion and indents by four spaces when there are no candidates. <code>Shift+Enter</code> runs the cell; <code>Ctrl+Enter</code> is an alternate, <code>Ctrl+Space</code> explicitly requests completion, and <code>Ctrl+P</code>/<code>Ctrl+N</code> recalls executed cells. <code>Ctrl+C</code> is a best-effort interrupt.
 
 ---
 
@@ -155,7 +155,9 @@ Press <code>Ctrl+Space</code> to request IPython completion; when several matche
 
 <code>lab</code> reflects the application's current connection state rather than caching stale instrument references. Calls to the same physical instrument are serialized so console activity cannot overlap with a screen worker using that instrument.
 
-The console is an in-process IPython shell in a Textual code editor, not a second control API. Python state, magics, inspection, top-level <code>await</code>, command history, and completion remain backed by IPython. Interactive <code>input()</code> and terminal-based debugger prompts are not supported by this editor.
+The console is an in-process IPython shell, not a second control API. Python state, magics, inspection and top-level <code>await</code> remain backed by IPython. <code>input()</code>, direct reads from <code>sys.stdin</code>, and interactive <code>%debug</code>/<code>%pdb</code> prompts fail fast because the cell editor has no terminal input stream.
+
+Ctrl+C cannot reliably interrupt a Python call blocked in native code or instrument I/O. Driver calls use finite timeouts: the MXA VISA default is 5 s (its <code>*OPC?</code> wait can use a 30 s per-call timeout), the PSU and LeCroy scope VISA defaults are 10 s, and wavemeter HTTP reads/setpoint writes use 1 s/3 s. The driver constructors and per-call timeout parameters are the points to change those limits. On normal quit, iyzee requests an interrupt and waits up to 12 s for the cell. If it is still active, the quit is cancelled and the app stays open rather than disconnecting an instrument the cell may still be using. If the process is killed externally, hardware outputs may remain in their last commanded state; this is not a safe-shutdown guarantee.
 
 ---
 

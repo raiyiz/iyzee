@@ -366,7 +366,13 @@ The layout reflows at #fact("tui.breakpoints.1.0") and #fact("tui.breakpoints.2.
 
 = The console in practice <sec-console>
 
-The Console page presents a persistent in-process IPython shell through a Textual multiline editor and output log. `Ctrl+Enter` runs the cell, `Ctrl+Space` requests completion, `Ctrl+P` / `Ctrl+N` browse executed cells, and `Ctrl+C` interrupts a running cell on a best-effort basis. Execution runs on a worker thread so slow hardware calls do not freeze the UI. The same `lab` proxy exposes live instruments and the latest sweep results. Interactive `input()` and terminal-based debugger prompts are not supported by the cell editor. Matplotlib figures created in the console are shown in the plot panel.
+The Console page presents a persistent in-process IPython shell through the package's VimTextArea editor and a Textual output log. It starts in Vim NORMAL mode; press `i` to type in INSERT mode, `Escape` to return to NORMAL, and `v` / `V` for characterwise / linewise visual selection. Common motions and operators, counts, registers, undo and redo are provided by the existing VimTextArea dependency.
+
+In INSERT mode, `Tab` requests IPython completion, applying a single candidate over IPython's exact source range or listing multiple matches. If there are no candidates, Tab falls back to four-space indentation. `Shift+Enter` runs the current cell; `Ctrl+Enter` is an alternate, `Ctrl+Space` explicitly requests completion, and `Ctrl+P` / `Ctrl+N` browse executed cells. Completion works against the dynamic `lab` proxy as well as ordinary Python names. The session executes cells sequentially on a worker thread, preserving Python state without freezing the UI. The same `lab` proxy exposes live instruments and the latest sweep results. Matplotlib figures created in the console are shown in the plot panel.
+
+`input()`, direct reads from `sys.stdin`, and interactive `%debug` / `%pdb` prompts fail immediately because there is no console stdin stream. `Ctrl+C` is best-effort; Python cannot reliably interrupt native code or a driver call blocked in I/O. Current driver timeout defaults are MXA VISA 5 s, PSU VISA 10 s, LeCroy VISA 10 s (with supported per-query overrides), and wavemeter HTTP 1 s for reads / 3 s for setpoint writes. The MXA `wait_opc()` / `single_sweep_wait()` operation can use a 30 s per-call timeout.
+
+A normal quit requests a cell interrupt and waits up to 12 s. If the worker remains active, the quit is cancelled and the application stays open with instruments connected; this avoids disconnecting hardware underneath a cell, but does not mean the hardware is safe to leave at its present output state. Wait for the call or its I/O timeout to finish before retrying. There is no safe force-quit path; external process termination can leave the PSU output or shutter at its last commanded state.
 
 #callout(
   "Two different things are called lab",
