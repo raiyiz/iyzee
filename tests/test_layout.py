@@ -57,9 +57,9 @@ async def _show(pilot: Any, page_id: str) -> None:
 
 
 async def _resize(pilot: Any, size: tuple[int, int]) -> None:
-    # resize_terminal dispatches Resize; one more turn lets layout recompute dimensions.
+    # Let Textual finish its layout pass before measuring scrollability.
     await pilot.resize_terminal(*size)
-    await pilot.pause(0)
+    await pilot.pause()
 
 
 @async_test
