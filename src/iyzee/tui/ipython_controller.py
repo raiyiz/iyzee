@@ -113,9 +113,7 @@ class IPythonSession:
         sys.stdout = _ThreadStream(stdout, self)  # type: ignore[assignment]
         sys.stderr = _ThreadStream(stderr, self)  # type: ignore[assignment]
         builtins.input = self._input  # type: ignore[assignment]
-        self._thread = threading.Thread(
-            target=self._run, name="iyzee-ipython", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="iyzee-ipython", daemon=True)
         self._thread.start()
 
     def submit(self, source: str) -> bool:
@@ -156,12 +154,7 @@ class IPythonSession:
         """Interrupt the active cell if it has a live worker thread."""
         thread_id = self._worker_id
         thread = self._thread
-        if (
-            not self.executing
-            or thread_id is None
-            or thread is None
-            or not thread.is_alive()
-        ):
+        if not self.executing or thread_id is None or thread is None or not thread.is_alive():
             return False
         _raise_in_thread(thread_id)
         return True

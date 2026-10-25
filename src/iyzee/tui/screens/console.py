@@ -47,7 +47,9 @@ class ConsoleScreen(Vertical):
 class IyzeeConsole(Vertical):
     """A persistent IPython namespace presented as a code editor and output log."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[
+        list[Binding | tuple[str, str] | tuple[str, str, str]]
+    ] = [
         Binding("ctrl+enter", "submit_cell", "Run cell", priority=True),
         Binding("ctrl+space", "complete", "Complete", show=False, priority=True),
         Binding("ctrl+p", "history_previous", "Previous cell", show=False, priority=True),
@@ -130,8 +132,10 @@ class IyzeeConsole(Vertical):
         lab = self.session.shell.user_ns.get("lab")
         connected = ", ".join(lab.connected) if lab is not None else ""
         self._lab_text = f"lab: {connected or 'nothing connected yet'}"
-        state = "running · Ctrl+C interrupts" if self._busy else (
-            "Ctrl+Enter run · Ctrl+Space complete · Ctrl+P/N history"
+        state = (
+            "running · Ctrl+C interrupts"
+            if self._busy
+            else "Ctrl+Enter run · Ctrl+Space complete · Ctrl+P/N history"
         )
         with contextlib.suppress(NoMatches):
             self.query_one("#console-status", Static).update(f"{self._lab_text}  ·  {state}")
