@@ -62,9 +62,9 @@ The implementation's complexity mostly comes from hosting a terminal application
 
 ### 5. Verify and document
 
-- [ ] Run focused console and lab tests locally, then the full test suite (this environment cannot clone the repository; use CI to validate the pushed commits).
-- [ ] Run Ruff and mypy.
-- [x] Update the README to describe cell submission, completion, history, interruption and the explicit input limitation.
+- [ ] Run focused console and lab tests locally, then the full test suite (this environment cannot clone the repository; use CI to validate the pushed commits). The first full CI run found two stale `#console-terminal` selectors; both now target `#console-editor`.
+- [ ] Confirm Ruff and mypy on the latest head (both passed on an earlier implementation commit).
+- [x] Update the README and architecture/TUI guides to describe cell submission, completion, history, interruption and the explicit input limitation.
 - [ ] Review the final diff for unnecessary abstractions, dead code and test duplication.
 
 ## Acceptance criteria
