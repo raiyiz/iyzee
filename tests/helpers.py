@@ -144,7 +144,7 @@ async def enter_on_first_row(
 ) -> tuple[ConnectScreen, DataTable]:
     """Open the Connect page, put the cursor on the first row, press Enter."""
     await pilot.press("c")
-    await pilot.pause()
+    await pilot.pause(0)
     screen = app.query_one(ConnectScreen)
     table = screen.query_one(DataTable)
     table.cursor_coordinate = table.cursor_coordinate._replace(row=0)

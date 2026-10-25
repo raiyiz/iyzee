@@ -22,7 +22,7 @@ async def _run_cell(pilot, console: IyzeeConsole, source: str, key: str = "ctrl+
     while console.session.executing and time.monotonic() < deadline:
         await pilot.pause(0.03)
     assert not console.session.executing, f"cell did not finish: {source!r}"
-    await pilot.pause()  # drain the scheduled output callback instead of guessing a delay
+    await pilot.pause(0)  # yield once so scheduled output callbacks can reach the UI
 
 
 @async_test

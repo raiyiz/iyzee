@@ -53,7 +53,7 @@ async def _scroll_to(pilot: Any, widget: Any) -> Region:
 async def _show(pilot: Any, page_id: str) -> None:
     """Switch page without keystrokes: the console page keeps the keyboard for itself."""
     await pilot.app.run_action(f"show_page('{page_id}')")
-    await pilot.pause()
+    await pilot.pause(0)
 
 
 async def _resize(pilot: Any, size: tuple[int, int]) -> None:
