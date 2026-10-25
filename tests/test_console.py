@@ -44,7 +44,7 @@ async def test_console_cells_share_state_and_keep_live_lab_results() -> None:
         result = StepResult(label="pt0", x_value=1.0, x_unit="Hz", traces={}, meta={})
         app.last_run = LastRun(kind="bandwidth", results=[result], path=None)
         assert lab.results == [result]
-        assert lab.last_run.kind == "bandwidth"
+        assert lab.last_run is not None and lab.last_run.kind == "bandwidth"
 
     session = console.session
     assert session._thread is not None and not session._thread.is_alive()

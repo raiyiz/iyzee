@@ -98,7 +98,7 @@ class IPythonSession:
         self.shell = InteractiveShell(
             config=shell_config(history_file), user_ns=lab_namespace(app, namespace)
         )
-        InteractiveShell._instance = self.shell
+        InteractiveShell._instance = self.shell  # type: ignore[assignment]
 
     @property
     def executing(self) -> bool:
@@ -146,7 +146,10 @@ class IPythonSession:
         """Return recent raw cells from IPython's configured history database."""
         if self.executing or self._closed:
             return []
-        rows = self.shell.history_manager.get_tail(n=1000, raw=True, include_latest=True)
+        manager = self.shell.history_manager
+        if manager is None:
+            return []
+        rows = manager.get_tail(n=1000, raw=True, include_latest=True)
         return [source for _session, _line, source in rows if source.strip()]
 
     def interrupt(self) -> bool:

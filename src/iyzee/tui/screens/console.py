@@ -154,8 +154,7 @@ class IyzeeConsole(Vertical):
         editor = self.query_one(TextArea)
         source = editor.text
         row, column = editor.cursor_location
-        before_cursor = "\n".join(source.splitlines()[:row])
-        cursor_pos = len(before_cursor) + (1 if row else 0) + column
+        cursor_pos = sum(len(line) + 1 for line in source.splitlines()[:row]) + column
         matches = self.session.complete(source, cursor_pos)
         if not matches:
             return
