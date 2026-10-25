@@ -23,7 +23,7 @@ The implementation's complexity mostly comes from hosting a terminal application
 - Serialize Python cell execution off the UI thread. Route cell output into Textual without sending ANSI sequences through a terminal emulator.
 - Keep interruption best-effort and prevent a stale thread identifier from targeting unrelated workers.
 - Make shutdown and worker state explicit; never close shared lab resources while a cell may still be using them.
-- Support interactive `input()` if it can be integrated cleanly with the UI. Otherwise document it as a deliberate limitation rather than emulate a full terminal to preserve it.
+- Explicitly document interactive `input()` and terminal-based debugger prompts as unsupported by the first cell-based editor.
 - Consolidate tests around public behavior. Remove tests whose only purpose is ANSI colors, cursor drawing, terminal byte protocol and terminal-widget internals once that implementation is gone.
 
 ## Work units
@@ -48,10 +48,10 @@ The implementation's complexity mostly comes from hosting a terminal application
 ### 3. Simplify lifecycle and output routing
 
 - [x] Replace terminal-specific shell handling with a smaller non-terminal controller.
-- [ ] Minimize process-wide stream and builtin modifications; always restore any temporary routing.
+- [x] Limit global hooks to worker-aware stdout/stderr and `input()` routing, restoring them when execution stops.
 - [x] Make Ctrl+C best-effort and verify the worker thread is alive before interrupting it.
 - [x] Refuse to disconnect instruments if the cell worker does not stop during shutdown.
-- [ ] Preserve isolated in-memory history for tests and per-user persistent history for real runs.
+- [x] Preserve isolated in-memory history for tests and per-user persistent history for real runs.
 
 ### 4. Consolidate tests
 
@@ -62,7 +62,7 @@ The implementation's complexity mostly comes from hosting a terminal application
 
 ### 5. Verify and document
 
-- [ ] Run focused console and lab tests locally, then the full test suite.
+- [ ] Run focused console and lab tests locally, then the full test suite (this environment cannot clone the repository; use CI to validate the pushed commits).
 - [ ] Run Ruff and mypy.
 - [x] Update the README to describe cell submission, completion, history, interruption and the explicit input limitation.
 - [ ] Review the final diff for unnecessary abstractions, dead code and test duplication.

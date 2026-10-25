@@ -169,7 +169,7 @@ class IyzeeApp(App):
     # than an F-key: F1-F4 are specifically special-cased elsewhere —
     # terminal_view._APP_KEYS lets exactly those four bypass the console's
     # embedded terminal and reach the app, and both the in-app help text
-    # and ipython_session's banner document "F1-F4 switch pages". Reusing
+    # and the console's on-screen banner "F1-F4 switch pages". Reusing
     # one of those four for Scope would silently break whichever page it
     # displaced when a console cell has focus; adding a fifth would not
     # reach the app at all from inside the terminal (F5+ are CSI-tilde
