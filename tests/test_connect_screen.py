@@ -60,42 +60,45 @@ async def test_connecting_a_row_updates_table_handles_hint_and_detail(
         assert "disconnect Fake" in plain(hint)
 
 
-@pytest.mark.parametrize(
-    "message",
-    [
-        "bench unreachable",
-        "could not open [/dev/ttyUSB0]",  # brackets must render as literal text
-    ],
-)
 @async_test
-async def test_connect_error_is_shown_verbatim_and_leaves_no_handle(
-    monkeypatch: pytest.MonkeyPatch, message: str
+async def test_connect_errors_and_probe_failure_leave_no_handle(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app = connect_app(monkeypatch, FakeHandle(connect_error=message))
-    async with app.run_test() as pilot:
-        _, table = await enter_on_first_row(app, pilot)
-        await _row_is(pilot, table, "error")
-        app.export_screenshot()  # force a real render of the table
-        # DataTable parses str cells as markup; what it would display is
-        # exactly the original message, brackets and all.
-        assert Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == message
-        assert f"Fake: {message}" in notifications(app), "the toast carries the raw text"
-        # A failed connect must not leave a handle behind: the instrument still
-        # reads as "not connected" to the rest of the app (Sweep guards, lab).
-        assert "fake" not in app.handles
-        assert app.is_running
+    messages = ["bench unreachable", "could not open [/dev/ttyUSB0]"]
+    failed_connects = [FakeHandle(connect_error=message) for message in messages]
+    failed_probe = FakeHandle(probe_error="no answer")
+    app = connect_app(monkeypatch, *failed_connects, failed_probe)
 
-
-@async_test
-async def test_a_failed_probe_closes_the_half_open_link(monkeypatch: pytest.MonkeyPatch) -> None:
-    """connect() succeeded but probe() failed: nothing will ever hold a
-    reference to that handle, so the connect path has to close it."""
-    handle = FakeHandle(probe_error="no answer")
-    app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
-        _, table = await enter_on_first_row(app, pilot)
-        await _row_is(pilot, table, "error")
-        assert (handle.connect_calls, handle.disconnect_calls) == (1, 1)
+        screen, table = await enter_on_first_row(app, pilot)
+
+        for message in messages:
+            await wait_until(
+                pilot,
+                lambda: Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == message,
+            )
+            await wait_until(pilot, lambda: not screen._busy)
+            # Rendering must keep bracketed driver text literal, not interpret it as markup.
+            app.export_screenshot()
+            assert Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == message
+            assert f"Fake: {message}" in notifications(app), "the toast carries the raw text"
+            assert "fake" not in app.handles
+            assert app.is_running
+
+            # Retry the same row with the next fake handle queued by connect_app.
+            if message != messages[-1]:
+                await pilot.press("enter")
+
+        assert failed_connects[0].connect_calls == 1
+        assert failed_connects[1].connect_calls == 1
+
+        await pilot.press("enter")
+        await wait_until(
+            pilot,
+            lambda: Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == "no answer",
+        )
+        await wait_until(pilot, lambda: not screen._busy)
+        assert (failed_probe.connect_calls, failed_probe.disconnect_calls) == (1, 1)
         assert "fake" not in app.handles
         assert table.get_cell("fake", DETAIL_COL) == "no answer"
 
