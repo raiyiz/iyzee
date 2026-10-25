@@ -104,64 +104,46 @@ async def test_connect_errors_and_probe_failure_leave_no_handle(
 
 
 @async_test
-async def test_enter_on_a_connecting_row_does_not_open_the_device_twice(
+async def test_connect_row_guards_retries_and_safe_disconnect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first, second = FakeHandle(connect_delay=0.4), FakeHandle(connect_delay=0.4)
     app = connect_app(monkeypatch, first, second)
     async with app.run_test() as pilot:
-        _, table = await enter_on_first_row(app, pilot)
+        screen, table = await enter_on_first_row(app, pilot)
         await _row_is(pilot, table, "connecting...")
-        await pilot.press("enter")  # impatient second press
+        await pilot.press("enter")  # impatient second press must not start the second handle
         await _row_is(pilot, table, "connected")
+        await wait_until(pilot, lambda: not screen._busy)
         assert first.connect_calls == 1
-        assert second.connect_calls == 0, "second Enter must be ignored while busy"
+        assert second.connect_calls == 0
         assert app.handles["fake"] is first
 
-
-@async_test
-async def test_disconnect_requires_a_fresh_second_enter(monkeypatch: pytest.MonkeyPatch) -> None:
-    handle = FakeHandle()
-    app = connect_app(monkeypatch, handle)
-    async with app.run_test() as pilot:
-        screen, table = await enter_on_first_row(app, pilot)
-        await _row_is(pilot, table, "connected")
-        await wait_until(pilot, lambda: not screen._busy)  # the row is usable again
-
-        await pilot.press("enter")  # first Enter arms it...
+        await pilot.press("enter")  # first Enter arms disconnect confirmation
         await wait_until(pilot, lambda: screen._armed is not None)
-        assert "fake" in app.handles and handle.disconnect_calls == 0
+        assert "fake" in app.handles and first.disconnect_calls == 0
         assert "Press Enter again to disconnect Fake." in notifications(app)
 
-        # An expired confirmation must not be enough to disconnect.
+        # An expired confirmation must only re-arm; a fresh second Enter disconnects.
         assert screen._armed is not None
-        screen._armed = (
-            screen._armed[0],
-            time.monotonic() - 1,
-        )  # force the confirmation window to expire
+        screen._armed = (screen._armed[0], time.monotonic() - 1)
         await pilot.press("enter")
-        assert "fake" in app.handles and handle.disconnect_calls == 0
-
-        # A genuinely fresh second Enter does disconnect.
+        assert "fake" in app.handles and first.disconnect_calls == 0
         await pilot.press("enter")
         await _row_is(pilot, table, "disconnected")
-        assert handle.disconnect_calls == 1 and "fake" not in app.handles
+        assert first.disconnect_calls == 1 and "fake" not in app.handles
 
-
-@async_test
-async def test_disconnect_is_refused_while_a_sweep_is_running(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    handle = FakeHandle()
-    app = connect_app(monkeypatch, handle)
-    async with app.run_test() as pilot:
-        _, table = await enter_on_first_row(app, pilot)
+        # The next attempt uses the second handle; a running sweep blocks disconnect.
+        await pilot.press("enter")
         await _row_is(pilot, table, "connected")
+        await wait_until(pilot, lambda: not screen._busy)
+        assert app.handles["fake"] is second and second.connect_calls == 1
         app.sweep_running = True
-
         await pilot.press("enter", "enter")
-        assert handle.disconnect_calls == 0 and "fake" in app.handles
+        assert second.disconnect_calls == 0 and app.handles["fake"] is second
         assert any("sweep is running" in m for m in notifications(app))
+
+    assert second.disconnect_calls == 1
 
 
 @async_test
