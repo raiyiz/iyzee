@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from helpers import FakeHandle, async_test, connect_app, notifications
+from helpers import FakeHandle, async_test, connect_app, notifications, wait_until
 from textual.widgets import ContentSwitcher, Input
 
 from iyzee.tui.command_bar import CommandBar, CommandInput
@@ -19,7 +19,7 @@ async def run(pilot, line: str) -> None:
     await pilot.press(":")
     await pilot.press(*line)
     await pilot.press("enter")
-    await pilot.pause()
+    await pilot.pause(0)
 
 
 @async_test
@@ -54,36 +54,37 @@ async def test_command_operations_validation_navigation_and_quit(
     app = connect_app(monkeypatch, handle)
     async with app.run_test() as pilot:
         await run(pilot, "connect fake")
-        assert "fake" in app.lab.handles
+        await wait_until(pilot, lambda: "fake" in app.lab.handles)
         assert handle.connected
 
         await run(pilot, "status")
-        assert any("fake: connected" in m for m in notifications(app))
+        await wait_until(pilot, lambda: any("fake: connected" in m for m in notifications(app)))
 
         await run(pilot, "disconnect fake")
+        await wait_until(pilot, lambda: "fake" not in app.lab.handles)
         assert handle.disconnected
-        assert "fake" not in app.lab.handles
 
         await run(pilot, "frobnicate")
-        assert any("unknown command :frobnicate" in m for m in notifications(app))
+        await wait_until(pilot, lambda: any("unknown command :frobnicate" in m for m in notifications(app)))
         assert app.is_running
 
         # Results-only commands must be rejected elsewhere, then validated on Results.
         await run(pilot, "width 40")
-        assert any("unknown command :width" in m for m in notifications(app))
+        await wait_until(pilot, lambda: any("unknown command :width" in m for m in notifications(app)))
         await run(pilot, "scope")
         await run(pilot, "acquire")
-        assert any("cannot acquire waveforms" in m for m in notifications(app))
+        await wait_until(pilot, lambda: any("cannot acquire waveforms" in m for m in notifications(app)))
 
         await run(pilot, "results")
-        assert app.query_one(ContentSwitcher).current == "results"
+        switcher = app.query_one(ContentSwitcher)
+        await wait_until(pilot, lambda: switcher.current == "results")
         await run(pilot, "width 42")  # snaps to the nearest step
         run_list = app.query_one("#results-list")
-        assert run_list.has_class("w-40")
+        await wait_until(pilot, lambda: run_list.has_class("w-40"))
         await run(pilot, "width soon")
-        assert any("usage: :width" in m for m in notifications(app))
+        await wait_until(pilot, lambda: any("usage: :width" in m for m in notifications(app)))
 
         await run(pilot, "sw")  # unique prefix
-        assert app.query_one(ContentSwitcher).current == "sweep"
+        await wait_until(pilot, lambda: switcher.current == "sweep")
         await run(pilot, "q")
-        assert not app.is_running
+        await wait_until(pilot, lambda: not app.is_running)
