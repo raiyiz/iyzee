@@ -29,7 +29,7 @@ The first native-cell baseline (before the Vim editor, stdin guard, interrupt-bo
 
 That is 590 fewer source lines than the original six-module implementation (39.2% reduction).
 
-The defined related test-file set is 1,002 lines now, compared with 1,077 before. It consists of `test_ipython.py`, `test_console.py`, `test_ipython_controller.py`, `test_app.py` and `test_layout.py`; the app/layout files also cover broader behavior. The set shrank by 75 lines (7.0%). These are source-only and test-only counts, not PR-wide +/- totals.
+The defined related test-file set is 988 lines now, compared with 1,077 before. It consists of `test_ipython.py`, `test_console.py`, `test_ipython_controller.py`, `test_app.py` and `test_layout.py`; the app/layout files also cover broader behavior. The set shrank by 89 lines (8.3%). These are source-only and test-only counts, not PR-wide +/- totals.
 
 ## Design decisions
 
@@ -97,16 +97,16 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 
 - [x] Keep focused controller, live-`lab`, completion-range, stdin and interrupt-boundary tests.
 - [x] Remove virtual-terminal ANSI, cursor protocol and terminal byte-encoding tests.
-- [x] Add regression coverage for debugger fail-fast behavior, Vim editor/Tab behavior, Shift+Enter, and shutdown refusal while a cell is still running (test results pending current CI).
+- [x] Add regression coverage for debugger fail-fast behavior, Vim editor/Tab behavior, Shift+Enter, and shutdown refusal while a cell is still running.
 - [x] Retain one concise end-to-end test for persistent cell state, live results and orderly shutdown rather than duplicating the full contract in each layer.
 
 ### 5. Documentation and verification
 
 - [x] Update README and architecture/TUI guides for cell submission, completion, history, interruption and unsupported interactive input.
 - [x] Document Vim mode, Tab completion/indent fallback, Shift+Enter and Ctrl+Enter, best-effort interruption and shutdown preflight.
-- [ ] Run focused console/lab tests and the full suite in CI; local test execution is unavailable in the current GitHub-only editing environment.
-- [ ] Confirm Ruff and mypy on the latest head, then verify the new commit's CI rather than relying on earlier runs.
-- [ ] Review the final branch diff and line counts for unnecessary abstractions, stale comments, dead code and duplicated tests.
+- [x] Run all test shards and the notebook test group in CI; local test execution is unavailable in the current GitHub-only editing environment.
+- [x] Confirm Ruff, mypy, docs, doc-links and notebooks on the latest implementation/test-sharding commit; the corresponding test shards all pass as well.
+- [x] Review the final branch file list, line-count budgets, and new test/shard changes for stale names, duplicated execution and reduced assertions.
 
 ## Acceptance criteria
 
@@ -118,9 +118,9 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 - Ctrl+C is explicitly best-effort, while blocking device I/O is bounded by finite driver timeouts.
 - Normal user-requested shutdown waits up to 12 s after a best-effort interrupt; if a cell is still active, ordinary quit is cancelled and the app stays open. The worker is a daemon only as a last-resort abnormal-exit fallback. No concurrent instrument disconnection or “safe force quit” is offered.
 - `pyte` is absent; `prompt-toolkit` and `jedi` are transitive through IPython, not unnecessary direct dependencies; syntax highlighting is not enabled without its extra.
-- Console source remains at or below 930 lines and the defined related-test set at or below 1,010 lines. Current measured counts are 917 source lines and 1,002 related-test lines. Coverage must not be deleted solely to meet these budgets.
+- Console source remains at or below 930 lines and the defined related-test set at or below 1,010 lines. Current measured counts are 917 source lines and 988 related-test lines. Coverage must not be deleted solely to meet these budgets.
 - README and architecture/TUI guides accurately state the supported features and intentional losses.
-- The latest head passes CI (tests, Ruff, mypy, docs, doc-links, notebooks); any check that could not be run is identified honestly.
+- The implementation and test-sharding changes pass CI (tests, Ruff, mypy, docs, doc-links, notebooks); any check that could not be run is identified honestly. The local test suite cannot be run in this GitHub-only editing environment.
 
 ## Progress log
 
@@ -134,4 +134,8 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 - Added explicit `%debug` / `%pdb` rejection, so terminal-only debugger prompts cannot hold the cell worker at stdin.
 - Reused the already-declared `textual-vim-textarea` dependency: Vim modes, Tab completion with space indentation fallback, Shift+Enter submit and Ctrl+Enter alternate, plus mode/status feedback and focused tests. Its documented limit is one unnamed register, with no macros, marks, regex substitution, folds or splits.
 - Fixed the save-notice newline so Vim `:w` feedback renders as separate text instead of a literal `\\n`.
-- Removed stale terminal-emulator comments and obsolete lint exceptions. Added a guard for binary stream bypasses and coverage for worker output via `writelines()`. The latest implementation head's full CI result and the latest documentation-only follow-up must be checked before treating the PR as ready. The local environment cannot clone the repository, so no local pytest/Ruff/mypy run is claimed.
+- Removed stale terminal-emulator comments and obsolete lint exceptions. Added a guard for binary stream bypasses and coverage for worker output via `writelines()`.
+- Reduced test feedback latency without dropping command assertions: the keyboard path remains covered by the command-bar focus/history/completion test, while command-behavior coverage invokes the same `IyzeeApp.run_command()` dispatcher directly instead of typing every character through Textual.
+- Split the previous 31-test Power/Scope/Sweep CI job into Power+Scope and Sweep shards. `scripts/ci.sh test` still runs the complete suite; only the CI matrix is sharded. The all-target avoids re-running notebook tests before the separate notebook validation.
+- The earlier monolithic pytest job took 151.76 s (242 passed, 25 skipped). CI run `40228509406` passed all 11 jobs after sharding and finished in 87 s; its UI/core, Power+Scope, Sweep, and Results test shards took 32.03 s, 15.05 s, 30.84 s, and 30.00 s respectively. The other test shards also passed (Core A: 67 passed, 23 skipped in 15.20 s; Core B: 91 passed in 2.92 s). Ruff, mypy, docs, doc-links and notebook checks passed.
+- The five-file related-test set currently measures 988 lines; source remains 917 lines. The implementation and sharding changes in `805b64a` passed CI run `40228509406`; the follow-up planning/PR-description edits are documentation-only. The local environment cannot clone the repository, so no local pytest/Ruff/mypy run is claimed.
