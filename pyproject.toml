@@ -8,20 +8,13 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "ipython>=9.0",
-    "matplotlib>=3.11.1",
     "numpy>=2.5.2",
     "platformdirs>=4.0",
-    "prompt-toolkit>=3.0.41",
-    "pyte>=0.8.2",
     "pyvisa>=1.16.2",
     "pyvisa-py>=0.8.1",
     "requests>=2.34.2",
-    "tabulate>=0.10.0",
     "textual>=8.2.8",
     "textual-plotext>=1.0.1",
-    "textual-vim-textarea==1.2.0",
-    "traitlets>=5.14",
 ]
 
 [project.scripts]
@@ -50,18 +43,8 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF", "S", "BLE", "T20"]
 
-# Assert statements are appropriate in tests and examples; production invariants are
-# explicit checks. These files intentionally use print for example/CLI/console output.
-
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101"]
-# Notebooks show their results with print() and as bare expressions.
-"notebooks/*.py" = ["B018", "T201"]
-"docs/examples/*.py" = ["S101", "T201"]
-"scripts/*.py" = ["T201"]
-"src/iyzee/devices/wavemeter.py" = ["T201"]
-"src/iyzee/tui/ipython_session.py" = ["T201"]
-"src/iyzee/tui/screens/console.py" = ["T201"]
 
 [tool.mypy]
 python_version = "3.14"
@@ -69,14 +52,9 @@ ignore_missing_imports = true
 
 [dependency-groups]
 dev = [
-    "ipdb>=0.13.13",
     "mypy>=1.18.2",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "ruff>=0.13.0",
     "textual-dev>=1.7.0",
-]
-notebooks = [
-    "marimo>=0.25.1",
-    "polars>=2.0.0",
 ]

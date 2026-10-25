@@ -1,6 +1,6 @@
 """The lab session: which instruments exist, which are connected, and their locks.
 
-``Lab`` is the core object the TUI, the console and plain scripts share. It owns
+``Lab`` is the core object the TUI and plain scripts share. It owns
 the connected handles (see :mod:`iyzee.devices.handles`), so connecting,
 disconnecting, noticing a dead link and closing everything on exit are
 implemented once, without Textual::
@@ -18,8 +18,6 @@ supply. Such a spec names its ``parent``; its handle is built from the parent's 
 shares its link and lock), connecting it connects the parent first if needed, disconnecting
 the parent disconnects it first, and on exit it is closed before the parent, so the
 shutter is never left open by the supply going away.
-
-Guide: :guide:`arch-lab`
 """
 
 from __future__ import annotations
@@ -223,7 +221,7 @@ class Lab:
         """Disconnect every instrument within ``timeout``, parts before their parents.
 
         Instruments at the same level close in parallel. Each disconnect takes that
-        instrument's lock first, so it waits for an in-flight sweep step or console call
+        instrument's lock first, so it waits for an in-flight sweep step
         instead of tearing the link down under it. An instrument still busy at the
         deadline is skipped (and logged) rather than blocking the exit; the OS reclaims
         its sockets when the process ends anyway. Parts go first because closing the

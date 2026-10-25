@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from helpers import async_test, wait_until
+from helpers import async_test
 from textual.geometry import Region
 from textual.widgets import ContentSwitcher, Select
 
@@ -50,7 +50,7 @@ async def _scroll_to(pilot: Any, widget: Any) -> Region:
 
 
 async def _show(pilot: Any, page_id: str) -> None:
-    """Switch page without keystrokes: the console page keeps the keyboard for itself."""
+    """Switch page without keystrokes."""
     await pilot.app.run_action(f"show_page('{page_id}')")
     await pilot.pause()
 
@@ -83,12 +83,6 @@ async def test_every_control_stays_reachable_at_the_extreme_sizes() -> None:
                         f"{selector} at {size}"
                     )
 
-        await _resize(pilot, (80, 16))  # and the console terminal on a short terminal
-        await _show(pilot, "console")
-        terminal = app.query_one("#console-terminal")
-        await wait_until(pilot, lambda: app.focused is terminal)
-        assert (await _scroll_to(pilot, terminal)).overlaps(terminal.region)
-
 
 @async_test
 async def test_pages_scroll_instead_of_clipping_and_the_layout_reflows_with_the_width() -> None:
@@ -96,7 +90,7 @@ async def test_pages_scroll_instead_of_clipping_and_the_layout_reflows_with_the_
     async with app.run_test() as pilot:
         for width in (60, 140):
             await _resize(pilot, (width, 30))
-            for page_id in ("connect", "sweep", "results", "console"):
+            for page_id in ("connect", "sweep", "scope", "power", "results"):
                 await _show(pilot, page_id)
                 page = app.query_one(f"#{page_id}")
                 assert page.styles.overflow_x != "hidden" and page.styles.overflow_y != "hidden"

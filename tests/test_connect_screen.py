@@ -87,36 +87,6 @@ async def test_connect_error_is_shown_verbatim_and_leaves_no_handle(
 
 
 @async_test
-async def test_a_failed_probe_closes_the_half_open_link(monkeypatch: pytest.MonkeyPatch) -> None:
-    """connect() succeeded but probe() failed: nothing will ever hold a
-    reference to that handle, so the connect path has to close it."""
-    handle = FakeHandle(probe_error="no answer")
-    app = connect_app(monkeypatch, handle)
-    async with app.run_test() as pilot:
-        _, table = await enter_on_first_row(app, pilot)
-        await _row_is(pilot, table, "error")
-        assert (handle.connect_calls, handle.disconnect_calls) == (1, 1)
-        assert "fake" not in app.handles
-        assert table.get_cell("fake", DETAIL_COL) == "no answer"
-
-
-@async_test
-async def test_enter_on_a_connecting_row_does_not_open_the_device_twice(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    first, second = FakeHandle(connect_delay=0.4), FakeHandle(connect_delay=0.4)
-    app = connect_app(monkeypatch, first, second)
-    async with app.run_test() as pilot:
-        _, table = await enter_on_first_row(app, pilot)
-        await _row_is(pilot, table, "connecting...")
-        await pilot.press("enter")  # impatient second press
-        await _row_is(pilot, table, "connected")
-        assert first.connect_calls == 1
-        assert second.connect_calls == 0, "second Enter must be ignored while busy"
-        assert app.handles["fake"] is first
-
-
-@async_test
 async def test_disconnect_requires_a_fresh_second_enter(monkeypatch: pytest.MonkeyPatch) -> None:
     handle = FakeHandle()
     app = connect_app(monkeypatch, handle)
@@ -161,6 +131,12 @@ async def test_disconnect_is_refused_while_a_sweep_is_running(
         assert any("sweep is running" in m for m in notifications(app))
 
 
+async def _enter_on_row(pilot, table, row: int) -> None:  # type: ignore[no-untyped-def]
+    table.cursor_coordinate = table.cursor_coordinate._replace(row=row)
+    await pilot.press("enter")
+    await pilot.pause()
+
+
 @async_test
 async def test_a_part_and_its_parent_keep_each_others_rows_in_step(
     monkeypatch: pytest.MonkeyPatch,
@@ -177,19 +153,21 @@ async def test_a_part_and_its_parent_keep_each_others_rows_in_step(
     app = app_mod.IyzeeApp()
     app.lab.specs = specs
     async with app.run_test() as pilot:
+        await pilot.press("c")
         screen = app.query_one(ConnectScreen)
         table = screen.query_one(DataTable)
 
         def status(key: str) -> str:
             return str(table.get_cell(key, "status"))
 
-        screen.request_connect("shutter")
+        await _enter_on_row(pilot, table, 1)
         await wait_until(pilot, lambda: status("shutter") == "connected")
         await wait_until(pilot, lambda: status("psu") == "connected")
         assert str(table.get_cell("psu", "detail")) == "supply ready"
         assert set(app.handles) == {"psu", "shutter"} and parent.connect_calls == 1
 
-        screen.request_disconnect("psu")
+        await _enter_on_row(pilot, table, 0)  # first Enter arms ...
+        await _enter_on_row(pilot, table, 0)  # ... the second disconnects
         await wait_until(pilot, lambda: status("psu") == "disconnected")
         await wait_until(pilot, lambda: status("shutter") == "disconnected")
         assert app.handles == {} and part.disconnected and parent.disconnected

@@ -2,8 +2,7 @@
 on top of the :class:`~iyzee.devices.scope.LeCroy` driver.
 
 Plain functions and dataclasses, no Textual import — the same operations
-``ScopeScreen``'s buttons trigger are usable identically from a script or
-the IPython console::
+``ScopeScreen``'s buttons trigger are usable identically from a script::
 
     from iyzee.devices.scope import Channel, Coupling, LeCroy
     from iyzee.scope_workflows import ChannelSettings, apply_channel_settings
@@ -25,7 +24,7 @@ against your instrument before relying on it for anything safety-critical.
 
 Every batch holds the driver's re-entrant ``transaction_lock`` (for a
 ``ScopeHandle`` that is also the handle's own lock), so these functions are safe
-to call from a screen worker, the IPython console, or a script at the same time.
+to call from a screen worker, or a script at the same time.
 
 Two behaviours worth knowing before relying on a recording:
 
@@ -39,8 +38,6 @@ Two behaviours worth knowing before relying on a recording:
 
 The first failure raises. A timeout or I/O error also drops the driver's
 connection (see ``LeCroyTimeoutError``), so there is nothing left to continue on.
-
-Guide: :guide:`arch-scope-case`
 """
 
 from __future__ import annotations

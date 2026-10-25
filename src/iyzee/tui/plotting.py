@@ -1,17 +1,12 @@
 """Draw a set of labeled (x, y) series into a ``PlotextPlot`` widget.
 
 The single source of truth for the "clear, plot each series, set
-title/labels, refresh" boilerplate that used to be written out
-independently in ``SweepScreen._plot_result``, ``ResultsScreen``,
-and ``IyzeeConsole._draw_figure`` — those three differ in where their
-series data comes from (a live sweep, a saved ``.npz``, a matplotlib
-``Figure``'s line data), not in how it ends up on screen.
+title/labels, refresh" boilerplate shared by ``SweepScreen`` and ``ResultsScreen``.
 
 Pairs with ``experiment.io.difference_series``, which is the equivalent
 consolidation for the squeezing-minus-shot-noise *computation* — that one
-lives in ``experiment/`` since it's plotting-backend-agnostic (matplotlib
-and this module both build on it); this one is plotext/Textual-specific
-and belongs with the rest of the TUI instead.
+lives in ``experiment/`` since it is plotting-backend-agnostic; this one is
+plotext/Textual-specific and belongs with the rest of the TUI.
 """
 
 from __future__ import annotations
@@ -19,7 +14,6 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from itertools import pairwise
-from typing import Any
 
 import numpy as np
 from textual_plotext import PlotextPlot
@@ -100,8 +94,8 @@ def draw_series(
 
     ``clear=False`` appends to whatever's already drawn instead of
     replacing it — what a live sweep wants (one more line per completed
-    point, not a full redraw), as opposed to Results/Console, which are
-    always redrawing from scratch for a newly selected run/figure.
+    point, not a full redraw), as opposed to Results, which always
+    redraws from scratch for a newly selected run.
     """
     if clear:
         plot.plt.clear_data()
@@ -114,22 +108,6 @@ def draw_series(
     if ylabel:
         plot.plt.ylabel(ylabel)
     plot.refresh()
-
-
-def figure_series(
-    fig: Any,
-) -> tuple[list[tuple[list[float], list[float], str | None]], dict[str, str]]:
-    """Extract line data and axis labels from a matplotlib figure."""
-    lines = [
-        (list(line.get_xdata()), list(line.get_ydata()), line.get_label())
-        for ax in fig.axes
-        for line in ax.lines
-    ]
-    labels = {
-        "xlabel": fig.axes[0].get_xlabel() if fig.axes else "",
-        "ylabel": fig.axes[0].get_ylabel() if fig.axes else "",
-    }
-    return lines, labels
 
 
 _SI_PREFIXES = (

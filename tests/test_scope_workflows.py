@@ -312,15 +312,15 @@ def test_read_trigger_settings_reads_the_armed_source_and_failures_raise():
 # -- link loss: stop instead of reading a late reply as the next channel's answer ---------
 
 
-# -- locking: one lock, no deadlock through the console proxy ------------------------------
+# -- locking: one re-entrant lock, no deadlock when the caller already holds it -----------
 
 
-def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock():
-    """The console's ``lab.scope`` is a LockedProxy over the handle's lock;
-    the workflows take the same (re-entrant) lock again and must not hang."""
+def test_workflow_while_holding_the_handle_lock_does_not_deadlock():
+    """A caller (say a one-run script) holding the handle's lock around a workflow batch:
+    the workflow takes the same re-entrant lock again and must not hang."""
     from helpers import FakeResourceManager, FakeVisaResource
 
-    from iyzee.devices.handles import LockedProxy, ScopeHandle
+    from iyzee.devices.handles import ScopeHandle
     from iyzee.devices.scope import LeCroy
 
     handle = ScopeHandle()
@@ -330,17 +330,19 @@ def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock()
     handle._scope = LeCroy("10.0.0.1", resource_manager=resources)
     handle.connect()
     assert handle.lock is handle.device.transaction_lock  # one lock, owned by the driver
-    proxy = LockedProxy(handle.device, handle.lock)
     outcome: list[object] = []
 
     def run() -> None:
-        outcome.append(apply_channel_settings(proxy, [_settings(Channel.C1, volts_per_div=1.0)]))
+        with handle.lock:
+            outcome.append(
+                apply_channel_settings(handle.device, [_settings(Channel.C1, volts_per_div=1.0)])
+            )
 
     worker = threading.Thread(target=run, daemon=True)
     worker.start()
     worker.join(timeout=3.0)
 
-    assert not worker.is_alive(), "deadlocked: handle lock re-entered through the proxy"
+    assert not worker.is_alive(), "deadlocked: handle lock re-entered"
     assert outcome == [[_settings(Channel.C1, volts_per_div=1.0)]]
     assert "C1:VOLT_DIV 1.0" in resources.resource.written
 

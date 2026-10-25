@@ -8,10 +8,8 @@ path to catch any schema drift between the writer and this module's reader.
 
 from __future__ import annotations
 
-import contextlib
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from test_scope_workflows import FakeScope
@@ -21,8 +19,6 @@ from iyzee.experiment.io import Recording, load_recording
 from iyzee.scope_workflows import acquire_scope_recording, save_scope_acquisition
 from iyzee.waveform_math import (
     Trace,
-    build_waveform_figure,
-    save_waveform_figure,
     scale_trace,
     subtract_background,
     subtract_traces,
@@ -162,54 +158,6 @@ def test_scale_trace_is_affine_defaults_to_identity_and_refuses_bad_scales():
     ):
         with pytest.raises(ValueError, match=message):
             scale_trace(trace, **kwargs)
-
-
-# -- figures -----------------------------------------------------------------------------------
-
-
-@contextlib.contextmanager
-def _figure(traces, **kwargs):
-    """A built waveform figure, always closed afterwards."""
-    fig = build_waveform_figure(traces, **kwargs)
-    try:
-        yield fig
-    finally:
-        plt.close(fig)
-
-
-def test_waveform_figures_label_lines_and_axes_without_guessing_units():
-    traces = [
-        _trace("C1", [0.0, 1.0], [1.0, 2.0], volts_per_div=0.5, coupling="D1M"),
-        _trace("C2", [0.0, 1.0], [3.0, 4.0]),
-    ]
-    with _figure(traces, title="My Run") as fig:
-        (ax,) = fig.axes
-        labels = [line.get_label() for line in ax.lines]
-        assert len(labels) == 2 and ax.get_legend() is not None and labels[1] == "C2"
-        assert "0.5 V/div" in labels[0] and "D1M" in labels[0]  # provenance in the legend
-        assert (ax.get_xlabel(), ax.get_ylabel(), ax.get_title()) == (
-            "Time (S)",
-            "Signal (V)",
-            "My Run",
-        )
-
-    mixed = [_trace("C0", [0.0], [1.0], value_unit="V"), _trace("C1", [0.0], [1.0], value_unit="A")]
-    with _figure(mixed) as fig:
-        assert fig.axes[0].get_ylabel() == "Signal (mixed units)"
-    with _figure([]) as fig:  # nothing to draw does not crash
-        assert len(fig.axes[0].lines) == 0
-
-
-def test_save_waveform_figure_writes_a_real_png_and_closes_the_figure(tmp_path):
-    traces = [_trace("C1", [0.0, 1.0, 2.0], [1.0, 2.0, 1.0])]
-    open_before = len(plt.get_fignums())
-
-    out = save_waveform_figure(traces, tmp_path / "plot.png", title="Test")
-    save_waveform_figure(traces, tmp_path / "plot2.png")
-
-    assert out == tmp_path / "plot.png"
-    assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"  # a real matplotlib-rendered image
-    assert len(plt.get_fignums()) == open_before  # no leaked figures after repeated saves
 
 
 def test_end_to_end_acquire_save_load_and_subtract(tmp_path):

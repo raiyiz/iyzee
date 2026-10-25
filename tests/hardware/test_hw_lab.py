@@ -6,22 +6,21 @@ import threading
 
 import pytest
 
-from iyzee.devices.handles import InstrumentHandle, LockedProxy
+from iyzee.devices.handles import InstrumentHandle
 from iyzee.devices.mxa import KeysightMXA
 from iyzee.lab import Lab
 
 pytestmark = pytest.mark.mxa
 
 
-def test_concurrent_callers_through_the_proxy_never_see_each_others_replies(
+def test_concurrent_callers_holding_the_handle_lock_never_see_each_others_replies(
     mx: KeysightMXA, mxa_handle: InstrumentHandle
 ) -> None:
-    """The point of ``LockedProxy``: threads sharing one analyzer get their own answers.
+    """The point of the handle lock: threads sharing one analyzer get their own answers.
 
     ``*IDN?`` is a fixed string, so a reply that went to the wrong caller (or a reply
     left over from an overlapped exchange) shows up as a different or empty string.
     """
-    proxy = LockedProxy(mx, mxa_handle.lock)
     expected = mx.idn()
     replies: list[str] = []
     errors: list[BaseException] = []
@@ -29,7 +28,8 @@ def test_concurrent_callers_through_the_proxy_never_see_each_others_replies(
     def worker() -> None:
         try:
             for _ in range(25):
-                replies.append(proxy.idn())
+                with mxa_handle.lock:
+                    replies.append(mx.idn())
         except BaseException as exc:  # noqa: BLE001 - reported below
             errors.append(exc)
 

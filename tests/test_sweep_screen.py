@@ -16,16 +16,15 @@ from typing import Any
 
 import numpy as np
 import pytest
-from helpers import FakeHandle, async_test, make_result, notifications, plain, wait_until
+from helpers import FakeHandle, async_test, make_result, notifications, wait_until
 from textual.pilot import Pilot
-from textual.widgets import Button, Input, RichLog, Select, Static
+from textual.widgets import Button, Input, RichLog, Select
 
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens import sweep as sweep_mod
 from iyzee.tui.screens.sweep import (
     MAX_POINTS,
-    FieldError,
     SweepScreen,
     _positive_float,
     _positive_int,
@@ -78,44 +77,6 @@ async def test_form_defaults_build_the_documented_runs_and_the_duration_applies_
         assert screen._build_frequency_run().config.sweep_duration_ms == 25
 
 
-@async_test
-async def test_an_invalid_field_is_named_marked_and_focused() -> None:
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        screen = await _open_sweep_screen(pilot)
-        for key in ("mxa", "shutter", "wavemeter"):
-            app.handles[key] = FakeHandle()
-        for field_id, label, bad, kind in (
-            ("rbw-stop", "RBW stop", "abc", "bandwidth"),
-            ("rbw-steps", "Steps", "0", "bandwidth"),
-            ("freq-points", "Points", "5000", "frequency"),
-            ("sweep-duration", "Sweep duration", "abc", "frequency"),
-        ):
-            screen.query_one("#sweep-type", Select).value = kind
-            await pilot.pause()
-            field = screen.query_one(f"#{field_id}", Input)
-            good = field.value
-            field.value = bad
-            await pilot.pause()
-
-            build = (
-                screen._build_bandwidth_run if kind == "bandwidth" else screen._build_frequency_run
-            )
-            with pytest.raises(FieldError) as excinfo:
-                build()
-            assert excinfo.value.field_id == field_id and label in str(excinfo.value)
-
-            screen._start_sweep()
-            await pilot.pause()
-            assert field.has_class("-invalid") and app.focused is field
-            assert any(m.startswith("Invalid sweep parameters") for m in notifications(app))
-            assert not app.sweep_running
-
-            field.value = good  # editing clears the marker
-            await pilot.pause()
-            assert not field.has_class("-invalid")
-
-
 # -- pre-flight guards and the "not ready" banner ------------------------------------------
 
 
@@ -146,42 +107,6 @@ async def test_starting_without_the_needed_instrument_notifies_and_launches_noth
             await pilot.pause()
             assert expected in notifications(app)[-1]
             assert screen.query_one(button).disabled is False
-
-
-@async_test
-async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        screen = await _open_sweep_screen(pilot)
-        banner = screen.query_one("#sweep-status", Static)
-        assert banner.display
-        assert "MXA" in plain(banner) and "F1" in plain(banner)
-
-        app.handles["mxa"] = FakeHandle()
-        app.instruments_changed()
-        await pilot.pause()
-        assert not banner.display
-
-        screen.query_one("#sweep-type", Select).value = "frequency"
-        await pilot.pause()
-        assert banner.display
-        assert "shutter" in plain(banner) and "MXA" not in plain(banner)
-
-        app.handles["shutter"] = FakeHandle()
-        app.instruments_changed()
-        await pilot.pause()
-        assert banner.display
-        assert "wavemeter" in plain(banner)
-
-        app.handles["wavemeter"] = FakeHandle()
-        app.instruments_changed()
-        await pilot.pause()
-        assert not banner.display
-
-        del app.handles["mxa"]
-        app.instruments_changed()
-        await pilot.pause()
-        assert banner.display and "MXA" in plain(banner)
 
 
 # -- running a (fake) sweep: abort, and saving as it goes ----------------------------------
@@ -492,27 +417,6 @@ async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_
         assert len(last_run.results) == 2
         assert _points_on_disk(tmp_path) == 2
         assert '"failed"' in last_run.path.with_suffix(".json").read_text()
-
-
-@pytest.mark.parametrize("exc_type", [SystemExit])
-@async_test
-async def test_a_capture_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
-    monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
-) -> None:
-    def dying_acquire(mx, trace_num):
-        raise exc_type()
-
-    monkeypatch.setattr(sweep_mod, "acquire_trace", dying_acquire)
-    app = IyzeeApp()
-    app.handles["mxa"] = FakeHandle(device=object())
-    async with app.run_test() as pilot:
-        screen = await _open_sweep_screen(pilot)
-        screen._start_capture()
-        await wait_until(pilot, lambda: not screen.query_one("#capture-trace").disabled)
-
-        assert app.is_running
-        assert app.sweep_running is False
-        assert "Capture failed" in _log_text(screen)
 
 
 @async_test

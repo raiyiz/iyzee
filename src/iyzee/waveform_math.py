@@ -11,7 +11,7 @@ data a renderer can draw: ``experiment.io.difference_series``/
 
 Every function below is pure — a :class:`Trace` in, a new ``Trace`` out, no
 ``Channel`` enum, socket, or Textual import — so the same call works
-identically from a script, the IPython console, or the Results screen. Loading
+identically from a script or the Results screen. Loading
 a saved run happens one layer down, in ``experiment.io.load_recording``; this
 module only interprets the loaded arrays/metadata once they're a
 :class:`~iyzee.experiment.io.Recording`.
@@ -20,17 +20,12 @@ module only interprets the loaded arrays/metadata once they're a
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 if TYPE_CHECKING:
-    from matplotlib.figure import Figure
-
     from .experiment.io import Recording
 
 
@@ -237,76 +232,3 @@ def scale_trace(
         value_unit=trace.value_unit,
         meta={"source": source},
     )
-
-
-def _legend_label(trace: Trace) -> str:
-    """One legend entry carrying a trace's provenance, e.g.
-    ``"C1 (0.5 V/div, D1M)"`` or ``"C1 - C2 (bg-corrected)"``."""
-    meta = trace.meta
-    detail = []
-    if "volts_per_div" in meta:
-        detail.append(f"{meta['volts_per_div']:g} V/div")
-    if "coupling" in meta:
-        detail.append(str(meta["coupling"]))
-    source = meta.get("source")
-    if source and source != trace.label:
-        detail.append(str(source))
-    return f"{trace.label} ({', '.join(detail)})" if detail else trace.label
-
-
-def build_waveform_figure(traces: Sequence[Trace], *, title: str | None = None) -> Figure:
-    """Build (but do not display or save) a matplotlib figure for ``traces``.
-
-    A real ``Figure``/``Axes`` pair — labeled axes, a legend built from each
-    trace's provenance, a light grid — mirroring ``experiment.io.
-    build_figure`` for sweep results. This is the one place that decides how
-    a set of waveforms becomes a figure; :func:`save_waveform_figure` saves
-    it as an image, and the Results screen's inline preview extracts its line
-    data with ``tui.plotting.figure_series`` — the same path the console
-    already uses for any matplotlib figure a script builds — so the
-    interactive preview and the static export are never two different
-    renderings of the same data.
-
-    Axis labels come from the first trace when every trace shares the same
-    unit; mixed units (comparing a raw channel against one rescaled into
-    different units, say) get a "(mixed units)" label rather than a guess,
-    since there's no single correct number for shared tick marks in that
-    case — the per-line legend still carries each trace's own unit via
-    ``meta``.
-    """
-    fig, ax = plt.subplots()
-    for trace in traces:
-        ax.plot(trace.time, trace.values, label=_legend_label(trace))
-    if traces:
-        time_units = {t.time_unit for t in traces}
-        value_units = {t.value_unit for t in traces}
-        time_label = traces[0].time_unit if len(time_units) == 1 else "mixed units"
-        value_label = traces[0].value_unit if len(value_units) == 1 else "mixed units"
-        ax.set_xlabel(f"Time ({time_label})")
-        ax.set_ylabel(f"Signal ({value_label})")
-        ax.legend(loc="best", fontsize="small")
-        ax.grid(True, alpha=0.3)
-    if title:
-        ax.set_title(title)
-    fig.tight_layout()
-    return fig
-
-
-def save_waveform_figure(traces: Sequence[Trace], path: Path, *, title: str | None = None) -> Path:
-    """Build a waveform figure, save it as an image, and release it.
-
-    Uses ``fig.savefig`` rather than ``plt.show()`` — compare
-    ``experiment.io.multiplot``, the interactive equivalent for sweep
-    results — because this is meant to be called from the Results screen (or
-    any non-interactive caller): a blocking GUI window has no display to
-    attach to in that context and would just hang. The figure is closed
-    immediately afterwards, since pyplot keeps every figure it creates alive
-    until explicitly closed and a long session exporting one waveform plot
-    after another would otherwise leak them.
-    """
-    fig = build_waveform_figure(traces, title=title)
-    try:
-        fig.savefig(path)
-    finally:
-        plt.close(fig)
-    return path

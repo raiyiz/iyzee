@@ -1,7 +1,7 @@
 """Read what a saved recording says, without a UI: sweep and scope summaries.
 
 ``experiment.io.load_recording`` returns the raw arrays and the JSON manifest;
-this module turns them into typed answers a script, the IPython console and the
+this module turns them into typed answers a script and the
 Results screen can all share. It imports no Textual and no driver, so the screen
 decides how a summary is *worded and drawn* while this module decides what it
 *means*.
@@ -19,8 +19,6 @@ Vocabulary used here (and by the Results screen):
   point by a **statistic** (``"mean"`` or ``"minimum"`` over the trace).
   "Delta" is deliberately not used for this: in the physics chapter Δ is the
   detuning from an atomic line.
-
-Guide: :guide:`data-sweep`
 """
 
 from __future__ import annotations

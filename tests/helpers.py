@@ -14,7 +14,6 @@ import os
 import threading
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -27,7 +26,6 @@ from iyzee.lab import InstrumentSpec
 from iyzee.tui import app as app_mod
 from iyzee.tui.screens import connect as connect_mod
 from iyzee.tui.screens.connect import ConnectScreen
-from iyzee.tui.workers import LastRun
 
 
 def async_test[**P](fn: Callable[P, Awaitable[None]]) -> Callable[P, None]:
@@ -116,14 +114,6 @@ class FakeHandle:
         return self._probe
 
 
-@dataclass
-class FakeApp:
-    """Minimal stand-in for ``IyzeeApp`` satisfying ``ipython.AppState``."""
-
-    handles: dict[str, Any] = field(default_factory=dict)
-    last_run: LastRun | None = None
-
-
 def connect_app(
     monkeypatch: pytest.MonkeyPatch,
     *handles: FakeHandle,
@@ -150,13 +140,6 @@ async def enter_on_first_row(
     table.cursor_coordinate = table.cursor_coordinate._replace(row=0)
     await pilot.press("enter")
     return screen, table
-
-
-def history_manager(shell: Any) -> Any:
-    """``shell.history_manager`` (typed Optional by IPython) with the None case ruled out."""
-    manager = shell.history_manager
-    assert manager is not None
-    return manager
 
 
 def plain(widget: Static) -> str:

@@ -86,9 +86,7 @@ class LogScreen(Page):
         gotten to this page — it mounts last, see ``IyzeeApp.PAGES``). The
         narrower case this guards is this widget existing but its own
         ``compose()``-yielded children not having finished mounting yet —
-        the same gap ``console.py``'s ``_render_status`` hit for real; see
-        its comment for why "attached" and "children exist" aren't the
-        same moment.
+        a real gap: "attached" and "children exist" aren't the same moment.
         """
         try:
             source = self.query_one("#log-source", Select)

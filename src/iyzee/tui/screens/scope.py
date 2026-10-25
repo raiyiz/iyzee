@@ -9,8 +9,7 @@ on the scope now", "acquire every enabled channel") live in
 same widgets), the buttons, the plot, and reporting the result. See
 ``scope_workflows``'s module docstring for why: the same operations this
 screen's buttons trigger are meant to be identically usable from a script
-or the IPython console, which they cannot be if the logic lives on a
-Textual widget.
+which they cannot be if the logic lives on a Textual widget.
 
 Three buttons, three background operations. *Retrieve* reads the scope into
 the form (it also runs once by itself when the scope is connected). *Apply*
@@ -20,7 +19,6 @@ scope rounded or ignored shows up as what it really is. *Acquire* records the
 enabled channels. Apply and Acquire need a successful Retrieve first, so
 defaults in the form are never pushed to an instrument that hasn't been read.
 
-Guide: :guide:`sec-scope-recording`
 """
 
 from __future__ import annotations
@@ -51,7 +49,6 @@ from ...scope_workflows import (
     read_trigger_settings,
     save_scope_acquisition,
 )
-from ..commands import Command, CommandError, parse_si
 from ..plotting import describe_timebase, draw_series, format_si, time_series
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float, _positive_float
@@ -266,40 +263,6 @@ class ScopeScreen(Page):
                 "Connect the scope first — press F1 for the Connect page.", severity="error"
             )
         return handle
-
-    def commands(self) -> list[Command]:
-        def tdiv(args: list[str]) -> str:
-            if len(args) != 1:
-                raise CommandError("usage: :tdiv <seconds/div>, e.g. :tdiv 2u")
-            seconds = parse_si(args[0])
-            if seconds <= 0:
-                raise CommandError("time/div must be positive")
-            self.query_one("#trig-tdiv", Input).value = repr(seconds)
-            return self.press_button("apply-settings", f"set time/div to {format_si(seconds, 's')}")
-
-        return [
-            Command(
-                "retrieve",
-                lambda _: self.press_button("retrieve-settings", "retrieve settings"),
-                "Read the scope's current settings into the form",
-            ),
-            Command(
-                "apply",
-                lambda _: self.press_button("apply-settings", "apply changes"),
-                "Send changed channel/trigger settings to the scope",
-            ),
-            Command(
-                "acquire",
-                lambda _: self.press_button("acquire-waveforms", "acquire waveforms"),
-                "Acquire waveforms from the enabled channels",
-            ),
-            Command(
-                "tdiv",
-                tdiv,
-                "Set time/div and apply it (2u, 500n, 1.5m, 1e-6)",
-                usage="<seconds/div>",
-            ),
-        ]
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "retrieve-settings":

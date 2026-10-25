@@ -13,7 +13,6 @@ from iyzee.experiment.io import (
     create_dirs,
     difference_series,
     difference_series_many,
-    multiplot,
     save_step_results,
 )
 
@@ -96,7 +95,7 @@ def test_save_step_results_names_files_safely_uniquely_or_exactly_as_asked(tmp_p
         assert len(archive["x_values"]) == 2
 
 
-# -- multiplot / difference_series -------------------------------------------------------
+# -- difference_series -------------------------------------------------------
 
 
 def test_difference_statistics_and_series_handle_unusable_traces():
@@ -120,40 +119,3 @@ def test_difference_statistics_and_series_handle_unusable_traces():
         [[1.0, 1.0], [1.0, 1.0], [2.0, 2.0]],
         ["first", "missing", "third"],
     ) == [([0, 1], [2.0, 3.0], "first"), ([0, 1], [3.0, 4.0], "third")]
-
-
-def test_multiplot_plots_each_result(monkeypatch):
-    plotted = []
-
-    class FakeAx:
-        def plot(self, x_values, values):
-            plotted.append((list(x_values), list(values)))
-
-        def legend(self, *a, **k):
-            pass
-
-        def set_xlabel(self, *a, **k):
-            pass
-
-        def set_ylabel(self, *a, **k):
-            pass
-
-    class FakeFig:
-        def tight_layout(self):
-            pass
-
-    monkeypatch.setattr("iyzee.experiment.io.plt.subplots", lambda: (FakeFig(), FakeAx()))
-    monkeypatch.setattr("iyzee.experiment.io.plt.show", lambda: None)
-
-    multiplot(
-        [
-            StepResult(
-                label="x=1",
-                x_value=1.0,
-                x_unit="Hz",
-                traces={"squeezing": [3.0, 4.0], "shot_noise": [1.0, 1.0]},
-            )
-        ]
-    )
-
-    assert plotted == [([0, 1], [2.0, 3.0])]

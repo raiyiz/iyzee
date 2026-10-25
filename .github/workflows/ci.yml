@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [test, lint, typecheck, doc-links, notebooks]
+        check: [test, lint, typecheck]
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -34,38 +34,3 @@ jobs:
 
       - name: Run ${{ matrix.check }}
         run: scripts/ci.sh ${{ matrix.check }}
-
-  docs:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with:
-          version: "0.13.1"
-          python-version: "3.14"
-
-      - name: Build documentation index
-        run: scripts/ci.sh docs-index
-
-      - name: Set up Typst
-        uses: typst-community/setup-typst@fee4b65b091cc546f02ce3be15fad8760f38a108 # v5
-        with:
-          typst-version: "0.15.1"
-          cache-dependency-path: docs/main.typ
-
-      - name: Compile documentation
-        env:
-          DOCS_INDEX_PREBUILT: "1"  # built in the step above; don't sync and index twice
-        run: scripts/ci.sh docs
-
-      - name: Upload compiled documentation
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: iyzee-documentation
-          path: build/docs/*.pdf
-          if-no-files-found: error
-          retention-days: 30

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import os
-import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,7 +10,7 @@ from typing import cast
 
 import numpy as np
 import pytest
-from helpers import async_test, notifications, plain, save_run, wait_until
+from helpers import async_test, plain, save_run, wait_until
 from test_scope_workflows import FakeScope
 from textual.pilot import Pilot
 from textual.widgets import Button, DataTable, Input, ListView, Select, Static
@@ -20,7 +18,6 @@ from textual.widgets import Button, DataTable, Input, ListView, Select, Static
 from iyzee.devices.scope import Channel, LeCroy
 from iyzee.scope_workflows import acquire_scope_recording, save_scope_acquisition
 from iyzee.tui import app as app_mod
-from iyzee.tui import plotting as plotting_mod
 from iyzee.tui.screens import results as results_mod
 from iyzee.tui.screens.results import ResultsScreen
 from iyzee.waveform_math import scale_trace, subtract_background, subtract_traces
@@ -37,10 +34,10 @@ def _save_scope_run(
 
 @asynccontextmanager
 async def _open_results_screen(
-    monkeypatch: pytest.MonkeyPatch, data_root: Path, prefs_file: Path | None = None
+    monkeypatch: pytest.MonkeyPatch, data_root: Path
 ) -> AsyncIterator[tuple[ResultsScreen, Pilot]]:
     monkeypatch.setattr(results_mod, "_DATA_ROOT", data_root)
-    app = app_mod.IyzeeApp(prefs_file=prefs_file)
+    app = app_mod.IyzeeApp()
     async with app.run_test() as pilot:
         await pilot.press("t")
         screen = app.query_one(ResultsScreen)
@@ -261,118 +258,3 @@ async def test_scope_operations_apply_and_chain_through_derived_traces(
         chained = scale_trace(screen._derived[subtracted.label], y_scale=1000.0)
         expect_one_new(chained.label)
         np.testing.assert_allclose(screen._derived[chained.label].values, chained.values)
-
-
-@async_test
-async def test_the_operation_form_shows_only_relevant_fields_and_bad_input_makes_no_trace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path)
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, lambda: set(screen._measured) == {"C1", "C2"})
-        screen.query_one("#results-op", Select).value = "background-region"
-        await pilot.pause()
-        assert screen.query_one("#results-field-chan-a").display
-        assert screen.query_one("#results-field-region-lo").display
-        assert screen.query_one("#results-field-region-hi").display
-        assert not screen.query_one("#results-field-chan-b").display
-        assert not screen.query_one("#results-field-yscale").display
-
-        for invalid in ("not-a-number", "nan", "inf"):
-            await _apply_op(screen, pilot, "scale", a="C1", yscale=invalid)
-            assert screen._derived == {}
-            assert screen.query_one("#results-yscale").has_class("-invalid")
-            assert any(
-                "Y scale" in message for message in notifications(cast(app_mod.IyzeeApp, pilot.app))
-            )
-
-
-@async_test
-async def test_slow_scope_preview_cannot_overwrite_a_newer_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path)
-    entered = threading.Event()
-    release = threading.Event()
-    real_prepare = plotting_mod.prepare_series
-    call_count = 0
-
-    def gated_prepare(x, y, label, *args, **kwargs):  # type: ignore[no-untyped-def]
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            entered.set()
-            release.wait(timeout=5)
-        return real_prepare(x, y, label, *args, **kwargs)
-
-    monkeypatch.setattr(plotting_mod, "prepare_series", gated_prepare)
-    drawn: list[list[str | None]] = []
-    real_draw = results_mod.draw_series
-
-    def spy(plot, series, **kwargs):  # type: ignore[no-untyped-def]
-        drawn.append([label for _x, _y, label in series])
-        return real_draw(plot, series, **kwargs)
-
-    monkeypatch.setattr(results_mod, "draw_series", spy)
-
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, entered.is_set)
-        generation = screen._render_generation
-        screen._checkboxes["C2"].value = False
-        await wait_until(pilot, lambda: screen._render_generation != generation)
-        release.set()
-        await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1"])
-        await pilot.pause(0.2)
-        assert drawn == [["C1"]]
-
-
-@async_test
-async def test_export_writes_a_real_png_and_runs_off_the_ui_thread(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    npz_path = _save_scope_run(tmp_path)
-    entered = threading.Event()
-    release = threading.Event()
-    real_save = results_mod.save_waveform_figure
-
-    def gated_save(traces, path, *, title=None):  # type: ignore[no-untyped-def]
-        assert threading.current_thread() is not threading.main_thread()
-        entered.set()
-        release.wait(timeout=5)
-        return real_save(traces, path, title=title)
-
-    monkeypatch.setattr(results_mod, "save_waveform_figure", gated_save)
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        screen.query_one("#results-export", Button).press()
-        await wait_until(pilot, entered.is_set)
-        assert screen.query_one("#results-export").disabled
-        release.set()
-        await wait_until(pilot, lambda: not screen.query_one("#results-export").disabled)
-        out = npz_path.with_name(f"{npz_path.stem}-plot.png")
-        assert out.exists()
-        assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
-
-
-@async_test
-async def test_list_width_keys_resize_clamp_persist_and_a_bad_saved_width_falls_back(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    bad = tmp_path / "bad.json"
-    bad.write_text('{"results_list_width": 7}')  # unusable: back to the default
-    async with _open_results_screen(monkeypatch, tmp_path, bad) as (screen, _pilot):
-        assert screen.query_one("#results-list").has_class(f"w-{results_mod.DEFAULT_LIST_WIDTH}")
-
-    prefs_file = tmp_path / "config" / "tui.json"
-    async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, pilot):
-        run_list = screen.query_one("#results-list")
-        assert run_list.has_class(f"w-{results_mod.DEFAULT_LIST_WIDTH}")
-
-        await pilot.press("]")
-        assert run_list.has_class("w-40") and not run_list.has_class("w-35")
-        for _ in range(20):  # far past the end: clamped, not an error
-            await pilot.press("[")
-        assert run_list.has_class("w-20")
-
-    assert json.loads(prefs_file.read_text())["results_list_width"] == 20
-    async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, _pilot):
-        assert screen.query_one("#results-list").has_class("w-20")  # remembered

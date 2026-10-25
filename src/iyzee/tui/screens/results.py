@@ -2,11 +2,11 @@
 
 One recording browser handles both result types. Sweep recordings keep their
 point-by-point inspection; scope acquisitions expose channel selection,
-waveform operations, and PNG export.
+and waveform operations.
 
 File loading and waveform preview preparation stay off the UI thread. The
 math used for scope operations remains in iyzee.waveform_math so the same
-operations are available from scripts and the IPython console without any
+operations are available from scripts without any
 Textual dependency.
 """
 
@@ -16,12 +16,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar
 
 import numpy as np
 from textual import work
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
 from textual.widgets import (
@@ -50,13 +48,11 @@ from ...analysis import (
 from ...experiment.io import DATA_ROOT, STEM_PATTERN, Recording, load_recording
 from ...waveform_math import (
     Trace,
-    save_waveform_figure,
     scale_trace,
     subtract_background,
     subtract_traces,
     traces_from_scope_recording,
 )
-from ..commands import Command, CommandError
 from ..plotting import describe_timebase, draw_series, format_si, prepare_series, time_series
 from .page import FieldError, Page, _field, _finite_float
 
@@ -187,11 +183,6 @@ def _format_db(value: float | None) -> str:
     return "—" if value is None else f"{value:.3f} dB"
 
 
-# Width of the run list as a percent of the page; the detail pane takes the rest.
-LIST_WIDTHS = (20, 25, 30, 35, 40, 45, 50, 55, 60)
-DEFAULT_LIST_WIDTH = 35
-
-
 def run_label(path: Path, mtime: float) -> str:
     """List label for one saved run: its name (if any) and save time."""
     when = datetime.fromtimestamp(mtime).astimezone()
@@ -286,24 +277,13 @@ class ResultsScreen(Page):
                 DataTable(cursor_type="row", zebra_stripes=True, id="results-points"),
                 Static("", id="results-point-summary"),
                 PlotextPlot(id="results-point-plot"),
-                Horizontal(
-                    Button("Export plot (PNG)", id="results-export", variant="success"),
-                    id="results-export-row",
-                ),
                 RichLog(id="results-log", highlight=False, markup=True),
                 id="results-detail",
             ),
             id="results-body",
         )
 
-    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
-        Binding("left_square_bracket", "list_narrower", "List narrower"),
-        Binding("right_square_bracket", "list_wider", "List wider"),
-    ]
-
     def on_mount(self) -> None:
-        self._list_width = self.iyzee_app.prefs.get("results_list_width", DEFAULT_LIST_WIDTH)
-        self._set_list_width(self._list_width)
         self._paths: list[Path] = []
         self._path: Path | None = None
         self._suppress_events = False
@@ -372,27 +352,6 @@ class ResultsScreen(Page):
         if index is not None and 0 <= index < len(self._paths):
             self._select(self._paths[index])
 
-    def _set_list_width(self, percent: int) -> None:
-        if percent not in LIST_WIDTHS:
-            percent = DEFAULT_LIST_WIDTH
-        self._list_width = percent
-        run_list = self.query_one("#results-list")
-        for width in LIST_WIDTHS:
-            run_list.set_class(width == percent, f"w-{width}")
-
-    def _resize_list(self, step: int) -> None:
-        index = LIST_WIDTHS.index(self._list_width) + step
-        percent = LIST_WIDTHS[max(0, min(index, len(LIST_WIDTHS) - 1))]
-        if percent != self._list_width:
-            self._set_list_width(percent)
-            self.iyzee_app.prefs.set("results_list_width", percent)
-
-    def action_list_narrower(self) -> None:
-        self._resize_list(-1)
-
-    def action_list_wider(self) -> None:
-        self._resize_list(+1)
-
     def _set_sweep_visible(self, visible: bool) -> None:
         for widget_id in (
             "#results-statistic",
@@ -407,7 +366,6 @@ class ResultsScreen(Page):
         for widget_id in (
             "#results-channels",
             "#results-op-panel",
-            "#results-export-row",
             "#results-log",
         ):
             self.query_one(widget_id).display = visible
@@ -731,35 +689,11 @@ class ResultsScreen(Page):
             ylabel=ylabel,
         )
 
-    def commands(self) -> list[Command]:
-        def width(args: list[str]) -> str:
-            if len(args) != 1 or not args[0].isdigit():
-                raise CommandError(f"usage: :width {LIST_WIDTHS[0]}-{LIST_WIDTHS[-1]} (percent)")
-            percent = min(LIST_WIDTHS, key=lambda w: abs(w - int(args[0])))
-            self._set_list_width(percent)
-            self.iyzee_app.prefs.set("results_list_width", percent)
-            return f"list width {percent}%"
-
-        def latest(args: list[str]) -> str:
-            run_list = self.query_one("#results-list", ListView)
-            if not len(run_list):
-                raise CommandError("no recordings found")
-            run_list.index = 0
-            return "newest recording selected"
-
-        return [
-            Command("refresh", lambda _: self.refresh_runs(), "Re-scan the data directory"),
-            Command("latest", latest, "Select the newest recording"),
-            Command("width", width, "Set the run list width (percent)", usage="<20-60>"),
-        ]
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "results-apply-op":
             self._apply_operation()
         elif event.button.id == "results-clear-op":
             self._clear_derived()
-        elif event.button.id == "results-export":
-            self._export()
 
     def _operand(self, field_id: str, label: str) -> Trace:
         name = self._selected(field_id, label)
@@ -817,37 +751,3 @@ class ResultsScreen(Page):
         self._refresh_operand_choices()
         self._redraw_scope()
         self.query_one("#results-log", RichLog).write("Cleared derived traces.")
-
-    def _export(self) -> None:
-        if self._path is None:
-            self.notify("Select a scope acquisition first.", severity="error")
-            return
-        if self._recording is None or self._recording.metadata.get("kind") != "scope-acquisition":
-            self.notify("Select a scope acquisition first.", severity="error")
-            return
-        traces = self._selected_traces()
-        if not traces:
-            self.notify("Select at least one channel/trace to export.", severity="error")
-            return
-        out_path = self._path.with_name(f"{self._path.stem}-plot.png")
-        self.query_one("#results-export", Button).disabled = True
-        self._save_export(traces, out_path, self._path.name)
-
-    @work(thread=True, exclusive=True, group="results-export", exit_on_error=False)
-    def _save_export(self, traces: list[Trace], out_path: Path, title: str) -> None:
-        error: Exception | None = None
-        try:
-            save_waveform_figure(traces, out_path, title=title)
-        except Exception as exc:  # noqa: BLE001 - reported, not raised, from a UI action
-            error = exc
-        self._ui(self._finish_export, out_path, error)
-
-    def _finish_export(self, out_path: Path, error: Exception | None) -> None:
-        self.query_one("#results-export", Button).disabled = False
-        log_widget = self.query_one("#results-log", RichLog)
-        if error is not None:
-            log_widget.write(f"[red]Export failed: {escape(str(error))}[/red]")
-            self.notify(f"Export failed: {error}", severity="error", markup=False)
-            return
-        log_widget.write(f"Saved plot: {escape(str(out_path))}")
-        self.notify(f"Saved {out_path.name}")

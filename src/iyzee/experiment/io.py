@@ -9,8 +9,6 @@ may also retain raw ``raw_*`` waveform codes. Keeping the arrays numeric means
 readers never need ``allow_pickle=True`` — loading a recording cannot invoke
 NumPy's pickle-based object-array deserialization. Older object-array archives
 written by a pre-split version of this module are intentionally unsupported.
-
-Guide: :guide:`data-where`
 """
 
 from __future__ import annotations
@@ -26,7 +24,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from ..config import data_root
@@ -379,40 +376,3 @@ def difference_values_many(
         difference_statistic(squeezing, shot_noise, statistic)
         for squeezing, shot_noise in zip(squeezing_rows, shot_noise_rows, strict=True)
     ]
-
-
-def build_figure(results: list[StepResult]):
-    """Build (but do not display) the squeezing-minus-shot-noise figure.
-
-    Split out of :func:`multiplot` so non-interactive callers — saving to
-    disk, or a TUI that renders traces itself with something like
-    ``textual-plotext`` — can get the figure without ``matplotlib`` trying
-    to pop up a blocking GUI window.
-    """
-    fig, ax = plt.subplots()
-    series = difference_series_many(
-        [result.traces.get("squeezing") for result in results],
-        [result.traces.get("shot_noise") for result in results],
-        [result.label for result in results],
-    )
-
-    for x_values, difference, _label in series:
-        ax.plot(x_values, difference)
-    labels = [label for _, _, label in series]
-
-    if labels:
-        ax.legend(labels, ncol=4, loc="upper center", bbox_to_anchor=(0.5, 1.1))
-    ax.set_xlabel("Trace point")
-    ax.set_ylabel("Squeezing - shot noise")
-    fig.tight_layout()
-    return fig
-
-
-def multiplot(results: list[StepResult]) -> None:
-    """Build and display the squeezing-minus-shot-noise figure.
-
-    Kept for scripts and notebooks that want the one-call figure.
-    Non-interactive callers should use :func:`build_figure` instead.
-    """
-    build_figure(results)
-    plt.show()

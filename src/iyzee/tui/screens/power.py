@@ -13,7 +13,7 @@ rounded, clamped or refused is displayed as it really is.
 
 There is deliberately **no background polling**. The supply is under our control and only
 changes when we command it, so the page reads it exactly when something may have changed:
-on connect, after each of its own actions, when the page is opened (the console may have
+on connect, after each of its own actions, when the page is opened (something else may have
 changed things), when a sweep finishes (it moved the shutter), and on Refresh. A full read
 is about 22 round-trips to the supply and can take seconds; doing that on a timer kept the
 page permanently "working" with its controls disabled.
@@ -38,7 +38,6 @@ from textual.widgets import Button, Input, Label, RichLog, Static
 
 from ...devices.handles import InstrumentHandle
 from ...devices.power import CHANNELS, CURRENT_MAX, PSU, VOLTAGE_MAX, PSUState, ShutterControl
-from ..commands import Command
 from ..text import one_line
 from .page import FieldError, Page, _field, _finite_float
 
@@ -92,7 +91,7 @@ class PowerScreen(Page):
         self._refresh_ui()
 
     def on_show(self) -> None:
-        """Opening the page re-reads the supply: the console may have changed it meanwhile."""
+        """Opening the page re-reads the supply: something else may have changed it meanwhile."""
         self.refresh_readiness()
         self._read_supply()
 
@@ -271,7 +270,7 @@ class PowerScreen(Page):
         error: Exception | None = None
         took = 0.0
         try:
-            with handle.lock:  # waits for a sweep or the console if either has the link
+            with handle.lock:  # waits for a sweep if it has the link
                 started = time.monotonic()
                 try:
                     if action is not None:
@@ -406,17 +405,6 @@ class PowerScreen(Page):
             f"set CH{number} to {voltage:g} V / {current:g} A",
             fill_channels=(number,),
         )
-
-    # -- commands --------------------------------------------------------------------------
-
-    def commands(self) -> list[Command]:
-        return [
-            Command(
-                "refresh",
-                lambda _: self.press_button("power-refresh", "read the supply"),
-                "Read the supply's state into the page",
-            ),
-        ]
 
 
 __all__ = ["PowerScreen"]

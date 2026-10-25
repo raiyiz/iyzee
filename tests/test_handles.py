@@ -1,4 +1,4 @@
-"""Tests for the instrument adapter layer: LockedProxy and each
+"""Tests for the instrument adapter layer: each
 InstrumentHandle implementation.
 
 None of these touch real hardware. Each handle wraps a driver
@@ -12,14 +12,12 @@ deterministic regardless of what's plugged in on the bench.
 from __future__ import annotations
 
 import threading
-import time
 from typing import Any, cast
 
 import pytest
 
 from iyzee.devices import handles as instruments_mod
 from iyzee.devices.handles import (
-    LockedProxy,
     ScopeHandle,
     ShutterHandle,
     WavemeterHandle,
@@ -28,52 +26,6 @@ from iyzee.devices.handles import (
 from iyzee.devices.scope import LeCroyTimeoutError
 from iyzee.devices.wavemeter import DEFAULT_CHANNEL
 from iyzee.lab import INSTRUMENTS
-
-# -- LockedProxy --------------------------------------------------------
-
-
-class _Recorder:
-    """A fake device whose calls take just long enough to observe overlap."""
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def slow_write(self, tag: str) -> str:
-        self.calls.append(f"start:{tag}")
-        time.sleep(0.05)
-        self.calls.append(f"end:{tag}")
-        return tag
-
-    @property
-    def not_callable(self) -> int:
-        return 42
-
-
-def test_locked_proxy_serializes_calls_across_threads() -> None:
-    """Two threads calling through the same proxy must never interleave —
-    this is the exact guarantee SweepScreen and the console rely on when
-    they hold the same handle's lock (see LockedProxy's docstring)."""
-    lock = threading.Lock()
-    recorder = _Recorder()
-    proxy = LockedProxy(recorder, lock)
-
-    def call(tag: str) -> None:
-        proxy.slow_write(tag)
-
-    t1 = threading.Thread(target=call, args=("a",))
-    t2 = threading.Thread(target=call, args=("b",))
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-
-    # If the calls had overlapped, we'd see start:a, start:b, end:a, end:b
-    # (or similar interleaving) instead of one call finishing before the
-    # next starts.
-    assert recorder.calls in (
-        ["start:a", "end:a", "start:b", "end:b"],
-        ["start:b", "end:b", "start:a", "end:a"],
-    )
 
 
 class _FakeVisaDevice:

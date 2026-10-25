@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
-import os
-import signal
 import threading
 import time
-from collections.abc import Callable
-from pathlib import Path
 from typing import ClassVar, cast
 
 from textual import events
@@ -22,22 +17,12 @@ from textual.widgets import ContentSwitcher, Footer, Header, Static
 
 from ..devices.handles import InstrumentHandle
 from ..lab import INSTRUMENTS, Lab
-from . import logging_support
-from .command_bar import CommandBar
-from .commands import Command, CommandError, CommandRegistry
-from .diagnostics import SessionMarker, describe
-from .diagnostics import install as install_crash_diagnostics
-from .ipython import default_history_file
-from .ipython_session import IPythonSession
 from .logging_support import LogEntry
 from .logging_support import install as install_logging
-from .prefs import Prefs, default_prefs_file
 from .screens.connect import ConnectScreen
-from .screens.console import ConsoleScreen
 from .screens.log import LogScreen
 from .screens.page import Page
 from .screens.power import PowerScreen
-from .screens.rb import RbScreen
 from .screens.results import ResultsScreen
 from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
@@ -51,9 +36,7 @@ PAGE_SPECS = (
     ("sweep", "Sweep", SweepScreen),
     ("scope", "Scope", ScopeScreen),
     ("power", "Power", PowerScreen),
-    ("rb", "Rb", RbScreen),
     ("results", "Results", ResultsScreen),
-    ("console", "Console", ConsoleScreen),
     ("log", "Log", LogScreen),
 )
 
@@ -116,7 +99,7 @@ class NavRail(Static):
 
 
 class IyzeeApp(App):
-    """Connect to lab instruments, browse results, and use IPython."""
+    """Connect to lab instruments, run sweeps, and browse results."""
 
     TITLE = "iyzee"
     SUB_TITLE = "lab instrument control"
@@ -140,58 +123,19 @@ class IyzeeApp(App):
         (116, "-wide"),
     ]
 
-    # Textual's command palette defaults to Ctrl+P with a *priority*
-    # binding — priority bindings are checked before a focused widget ever
-    # gets a look at the key, regardless of the DOM/focus chain — which
-    # silently ate every Ctrl+P the console's own "previous history entry"
-    # binding was supposed to get (Ctrl+N happens not to collide with
-    # anything else Textual claims by default, so only this half of the
-    # history pair needed moving). The console's binding is the one
-    # documented and depended on elsewhere in this app, so the palette
-    # moves instead of it.
-    COMMAND_PALETTE_BINDING = "ctrl+backslash"
-
-    # Keep navigation in Textual itself rather than interpreting keys in
-    # ``on_key``. This means editable widgets retain their normal key
-    # handling, while Footer and the command palette expose the same
-    # navigation to mouse and keyboard users.
-    #
-    # "escape" and "j"/"k" specifically: Textual's own Input widget
-    # doesn't bind Escape to anything, so it already bubbles here
-    # untouched — this doesn't intercept a key that widget wanted. (The
-    # console's terminal view does want Escape — it is IPython's vi-mode
-    # key — and claims it itself, so it never reaches this binding.)
-    # "j"/"k" bind to the same focus_next/focus_previous actions Tab/
-    # Shift+Tab already use; an editable widget consumes plain "j"/"k"
-    # keystrokes itself (typing the character) before they ever reach
-    # this binding, so it only fires when nothing is claiming them —
-    # i.e. exactly the "outside editable widgets" case.
-    # "o" for the Scope page joins the letter shortcuts (c/s/t/i) rather
-    # than an F-key: F1-F4 are specifically special-cased elsewhere —
-    # terminal_view._APP_KEYS lets exactly those four bypass the console's
-    # embedded terminal and reach the app, and both the in-app help text
-    # and ipython_session's banner document "F1-F4 switch pages". Reusing
-    # one of those four for Scope would silently break whichever page it
-    # displaced when a console cell has focus; adding a fifth would not
-    # reach the app at all from inside the terminal (F5+ are CSI-tilde
-    # sequences, a different wire format _APP_KEYS/termkeys.py don't
-    # handle — see termkeys.py's own comment on this split). So Scope is
-    # reachable everywhere via "o", the nav rail, and the command palette,
-    # just without a dedicated function key. "l" for the Log page (added
-    # later) follows the same reasoning.
+    # Navigation lives in Textual bindings (not ``on_key``) so editable widgets keep their own
+    # key handling and the Footer shows the same keys. Plain "j"/"k" only fire when no widget
+    # is consuming the character.
     BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("c", "show_page('connect')", "Connect"),
         Binding("s", "show_page('sweep')", "Sweep"),
         Binding("o", "show_page('scope')", "Scope"),
         Binding("p", "show_page('power')", "Power"),
-        Binding("r", "show_page('rb')", "Rb"),
         Binding("t", "show_page('results')", "Results"),
-        Binding("i", "show_page('console')", "Console"),
         Binding("l", "show_page('log')", "Log"),
         Binding("f1", "show_page('connect')", "Connect", priority=True),
         Binding("f2", "show_page('sweep')", "Sweep", priority=True),
         Binding("f3", "show_page('results')", "Results", priority=True),
-        Binding("f4", "show_page('console')", "Console", priority=True),
         # Ctrl+Q quits at once (Textual already binds it, but hidden; this
         # re-declares it so the footer tells people how to leave). A bare "q"
         # also quits, but only on a second press: one stray keystroke
@@ -199,8 +143,6 @@ class IyzeeApp(App):
         # from the footer, which is already crowded; the first press says so.
         Binding("ctrl+q", "quit", "Quit", priority=True),
         Binding("q", "request_quit", "Quit", show=False),
-        # Vim-style command line (``:help`` lists the commands available on this page).
-        Binding("colon", "command_mode", "Command", show=False),
         Binding("escape", "blur_focused", "Leave field", show=False),
         Binding("j", "focus_next", "Focus next", show=False),
         Binding("k", "focus_previous", "Focus previous", show=False),
@@ -219,111 +161,29 @@ class IyzeeApp(App):
     }
     DEFAULT_PAGE = "connect"
 
-    def __init__(
-        self,
-        *,
-        console_history_file: str | Path | None = None,
-        console_editing_mode: str = "vi",
-        prefs_file: str | Path | None = None,
-        session_dir: str | Path | None = None,
-        handle_signals: bool = False,
-    ) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        # Like the history and prefs files, only real runs opt in (see ``run()``): a marker per
-        # running session so the next start can say the last one did not end cleanly, and
-        # handlers that turn SIGTERM/SIGHUP into a logged, clean shutdown.
-        self.session_marker = SessionMarker(Path(session_dir)) if session_dir else None
-        self._handle_signals = handle_signals
-        # Like the console history, persistent only for real runs (see ``run()``).
-        self.prefs = Prefs(Path(prefs_file) if prefs_file else None)
         self._quit_armed_until = 0.0  # monotonic deadline for the second "q"
-        # Installed first, before anything else in this constructor can
-        # fail: this is the sink for every log.exception/log.warning/
-        # log.info call anywhere in the app (see logging_support's module
-        # docstring for why nothing showed any of this before). Kept as
-        # self.log_handler, not a module global, so LogScreen reads the
-        # live buffer straight off the running app rather than needing its
-        # own reference to a handler that (in tests) gets replaced every
-        # time a new IyzeeApp() is constructed — see install()'s docstring.
+        # Sink for every log call in the app; LogScreen reads the live buffer off it.
         self.log_handler = install_logging(self._on_log_entry)
         # The session's instruments live in the core ``Lab`` (no Textual in it);
         # ``handles`` is its connected-handles dict, shared rather than copied.
         self.lab = Lab()
         self.handles: dict[str, InstrumentHandle] = self.lab.handles
-        # No per-app lock table anymore — each InstrumentHandle owns its
-        # own threading.Lock (see devices.handles.InstrumentHandle.lock) so
-        # that a page's background worker (Connect, Sweep), the IPython
-        # console (via LockedProxy — see ipython.namespace_from_handles),
-        # and a handle used entirely outside this app all get the same
-        # correct synchronization for free, rather than it only existing
-        # because IyzeeApp happens to be running.
-        # The most recently completed sweep, if any — set by
-        # SweepScreen._finish, read by ConsoleScreen to expose `results` in
-        # the console namespace. See workers.LastRun.
+        # The most recently completed sweep, if any (set by SweepScreen._finish).
         self.last_run: LastRun | None = None
-        # Set once the app starts shutting down. Long-running workers poll
-        # it (SweepScreen checks it after every step) so a sweep stops at
-        # the next step boundary and releases its instrument lock, which
-        # is what lets close_instruments() disconnect cleanly.
+        # Set once the app starts shutting down. Long-running workers poll it (a sweep
+        # checks it after every step) so they stop and release their instrument lock.
         self.shutdown_requested = threading.Event()
-        # True while a sweep or a trace capture is running. ConnectScreen
-        # refuses to disconnect instruments meanwhile (the run holds the
-        # instrument locks, so a disconnect could only stall behind it).
+        # True while a sweep or a trace capture is running. ConnectScreen refuses to
+        # disconnect instruments meanwhile (the run holds the instrument locks).
         self._sweep_running = False
-        # Passed straight through to IPythonSession (see ConsoleScreen.compose)
-        # as its `history_file`. Defaults to `None` — `:memory:`, private,
-        # nothing persisted — quite deliberately: every test in this
-        # codebase constructs `IyzeeApp()` with no arguments, and picking
-        # any default here other than "no persistence" would silently
-        # reintroduce the shared-file test-suite hang `default_history_file`
-        # documents. Real persistence is opt-in, from the real entry point
-        # only (see `run()` below).
-        self.console_history_file = console_history_file
-        # IPython's own editing mode for the console: "vi" or "emacs".
-        self.console_editing_mode = console_editing_mode
-        # Set by ConsoleScreen; closed on exit (see on_unmount).
-        self.console_session: IPythonSession | None = None
-        # Instruments whose link died while connected: key -> why. A lost link
-        # is removed from ``handles`` (so "in handles" keeps meaning "usable"
-        # for the nav rail, readiness banners and the console alike) and
-        # remembered here so the Connect page can say what happened.
+        # Instruments whose link died while connected: key -> why. A lost link is removed
+        # from ``handles`` and remembered here so the Connect page can say what happened.
         self.lost_links: dict[str, str] = {}
 
     def on_mount(self) -> None:
         self.set_interval(self.LINK_CHECK_INTERVAL, self._check_links)
-        if self.session_marker is not None:
-            for info in self.session_marker.start():
-                what = describe(info)
-                log.warning("the previous session did not end cleanly: %s", what)
-                self.notify(
-                    f"The previous iyzee session did not end cleanly ({what}). "
-                    "See the Log page, and faulthandler.log in the logs folder.",
-                    severity="warning",
-                    timeout=30,
-                    markup=False,
-                )
-        if self._handle_signals:
-            loop = asyncio.get_running_loop()
-            for name in ("SIGTERM", "SIGHUP"):
-                number = getattr(signal, name, None)
-                if number is not None:
-                    # Not the main thread, or not a platform that supports it: just skip it.
-                    with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
-                        loop.add_signal_handler(number, self._on_signal, name)
-
-    def _on_signal(self, name: str) -> None:
-        """SIGTERM / SIGHUP (a closed terminal, ``kill``): say so, then shut down cleanly.
-
-        Without a handler the process just stops: no log line, and the shutter and the
-        instruments are left exactly as they were.
-        """
-        log.critical("received %s: shutting down cleanly", name)
-        self.exit()
-
-    def session_note(self, activity: str) -> None:
-        """Tell the session marker what is going on, for the report after a crash."""
-        if self.session_marker is not None:
-            self.session_marker.note(activity)
 
     def _check_links(self) -> None:
         """Notice links that died while nobody was talking to them (no instrument I/O)."""
@@ -353,11 +213,10 @@ class IyzeeApp(App):
                 for page_id, page_cls in self.PAGES.items():
                     yield page_cls(id=page_id)
         yield Footer(compact=True)
-        yield CommandBar(id="command-bar")  # docked over the footer while open
 
     def action_show_page(self, page_id: str) -> None:
         self.query_one(ContentSwitcher).current = page_id
-        page = cast("Page | ConsoleScreen", self.query_one(f"#{page_id}"))
+        page = cast("Page", self.query_one(f"#{page_id}"))
         page.on_show()
         nav = self.query_one(NavRail)
         nav.set_active(page_id)
@@ -370,8 +229,7 @@ class IyzeeApp(App):
 
         Returning False hides the footer entry (and the key does nothing,
         which is right: there's nowhere to go). It frees a slot on every
-        page, which is what keeps the console's footer — the most crowded
-        one — from clipping at 80 columns.
+        page, which keeps the footer from clipping at 80 columns.
         """
         if action == "show_page" and parameters:
             switcher = self.query(ContentSwitcher)
@@ -413,158 +271,16 @@ class IyzeeApp(App):
         for screen in self.query(LogScreen):
             screen.append_entry(entry)
 
-    async def on_unmount(self) -> None:
+    def on_unmount(self) -> None:
         """Runs on every way out (Ctrl+Q, ``exit()``, test teardown).
 
-        Without this, quitting simply dropped the process with every
-        connected instrument still open — VISA sessions, the PSU channel
-        driving the shutter, the scope socket. Off the UI thread, because
-        a disconnect is blocking I/O and a wedged instrument must not be
-        able to hang the quit.
+        Without this, quitting dropped the process with every instrument still open: VISA
+        sessions, the PSU channel driving the shutter, the scope socket. ``Lab.close_all``
+        takes each instrument's lock, so it waits for an in-flight step and gives up after
+        its timeout rather than letting a wedged instrument hang the quit.
         """
         self.shutdown_requested.set()
-        try:
-            await asyncio.to_thread(self._close_console_and_instruments)
-        finally:
-            if self.session_marker is not None:
-                self.session_marker.stop()  # reached: this session ended cleanly
-
-    def _close_console_and_instruments(self) -> None:
-        # The console first: a cell still running holds instrument locks, and
-        # closing the session interrupts it so close_instruments can get them.
-        if self.console_session is not None:
-            self.console_session.close()
-        self.close_instruments()
-
-    def close_instruments(self, timeout: float = 5.0) -> None:
-        """Disconnect every connected instrument within ``timeout`` (see ``Lab.close_all``)."""
-        self.lab.close_all(timeout)
-
-    # -- ":" command mode ---------------------------------------------------
-
-    def action_command_mode(self) -> None:
-        self.query_one(CommandBar).open()
-
-    def _current_page(self) -> Page | None:
-        current = self.query_one(ContentSwitcher).current
-        return self.query_one(f"#{current}", Page) if current else None
-
-    def command_registry(self) -> CommandRegistry:
-        """Global commands plus those of the page being shown (which may shadow them)."""
-        registry = CommandRegistry(self._global_commands())
-        page = self._current_page()
-        if page is not None:
-            registry.add(*page.commands())
-        return registry
-
-    def run_command(self, line: str) -> None:
-        try:
-            message = self.command_registry().execute(line)
-        except CommandError as exc:
-            self.notify(str(exc), severity="error", timeout=5, markup=False)
-            return
-        except Exception as exc:  # a bad command must never take the app down
-            log.exception("command failed: %s", line)
-            self.notify(f"command failed: {exc}", severity="error", timeout=6, markup=False)
-            return
-        if message:
-            self.notify(message, timeout=5, markup=False)
-
-    def _global_commands(self) -> list[Command]:
-        instrument_keys = [spec.key for spec in INSTRUMENTS]
-        keys_and_all = [*instrument_keys, "all"]
-
-        def complete_keys(prefix: str) -> list[str]:
-            return [k for k in keys_and_all if k.startswith(prefix)]
-
-        def targets(args: list[str]) -> list[str]:
-            chosen = instrument_keys if "all" in args else args
-            unknown = [a for a in chosen if a not in instrument_keys]
-            if unknown:
-                raise CommandError(
-                    f"unknown instrument {unknown[0]!r}; known: {', '.join(instrument_keys)}"
-                )
-            return chosen
-
-        def goto(page_id: str) -> Callable[[list[str]], str | None]:
-            def run(args: list[str]) -> str | None:
-                if args:
-                    raise CommandError(f":{page_id} takes no arguments")
-                self.action_show_page(page_id)
-                return None
-
-            return run
-
-        def connect(args: list[str]) -> str | None:
-            if not args:
-                self.action_show_page("connect")
-                return None
-            screen = self.query_one(ConnectScreen)
-            return "; ".join(screen.request_connect(key) for key in targets(args))
-
-        def disconnect(args: list[str]) -> str | None:
-            if not args:
-                raise CommandError("usage: :disconnect <instrument>... | all")
-            screen = self.query_one(ConnectScreen)
-            return "; ".join(screen.request_disconnect(key) for key in targets(args))
-
-        def status(args: list[str]) -> str:
-            lines = []
-            for spec in INSTRUMENTS:
-                state = (
-                    "connected" if spec.key in self.handles else self.lost_links.get(spec.key, "-")
-                )
-                lines.append(f"{spec.key}: {state}")
-            return "\n".join(lines)
-
-        def help_(args: list[str]) -> str:
-            return self.command_registry().help_text(args[0] if args else None)
-
-        def quit_(args: list[str]) -> None:
-            self.exit()
-
-        commands = [
-            Command(
-                "connect",
-                connect,
-                "Connect page, or connect the named instruments",
-                usage="[<instrument>... | all]",
-                complete=complete_keys,
-                aliases=("c",),
-            ),
-            Command(
-                "disconnect",
-                disconnect,
-                "Disconnect instruments",
-                usage="<instrument>... | all",
-                complete=complete_keys,
-            ),
-            Command("status", status, "Which instruments are connected"),
-            Command(
-                "help",
-                help_,
-                "List the commands available on this page",
-                usage="[command]",
-                complete=lambda prefix: [
-                    n for n in self.command_registry().names if n.startswith(prefix)
-                ],
-                aliases=("h",),
-            ),
-            Command("quit", quit_, "Quit now (q asks for confirmation instead)", aliases=("q",)),
-        ]
-        for page_id, label, key in (
-            ("sweep", "Sweep", "s"),
-            ("scope", "Scope", "o"),
-            ("power", "Power", "p"),
-            ("rb", "Rb", "r"),
-            ("results", "Results", "t"),
-            ("console", "Console", "i"),
-            ("log", "Log", "l"),
-        ):
-            commands.append(
-                Command(page_id, goto(page_id), f"Go to the {label} page", aliases=(key,))
-            )
-        return commands
+        self.lab.close_all(5.0)
 
     QUIT_CONFIRM_S = 4.0
 
@@ -588,30 +304,17 @@ class IyzeeApp(App):
         """Leave the currently focused field, if any.
 
         This is what makes "escape" a real "back to navigation" motion for
-        plain Input fields (RBW, IP addresses, ...), matching the escape
-        the console's vim mode already has — those widgets have no notion
-        of their own to leave, so without this, focusing one meant "j"/"k"
-        typed into it forever instead of moving focus.
+        plain Input fields (RBW, IP addresses, ...): those widgets have no notion of their
+        own to leave, so without this, focusing one meant "j"/"k" typed into it forever
+        instead of moving focus.
         """
         if self.focused is not None:
             self.focused.blur()
 
 
 def run() -> None:
-    """Console-script entry point (``iyz``).
-
-    The only place that opts into persistent console history — see
-    `IyzeeApp.__init__` and `default_history_file`'s docstrings for why
-    that's deliberately not the default.
-    """
-    install_crash_diagnostics(logging_support.LOG_ROOT)
-    IyzeeApp(
-        console_history_file=default_history_file(),
-        console_editing_mode=os.environ.get("IYZEE_EDITING_MODE", "vi"),
-        prefs_file=default_prefs_file(),
-        session_dir=logging_support.LOG_ROOT,
-        handle_signals=True,
-    ).run()
+    """Console-script entry point (``iyz``)."""
+    IyzeeApp().run()
 
 
 if __name__ == "__main__":

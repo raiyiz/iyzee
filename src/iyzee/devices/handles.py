@@ -8,20 +8,15 @@ same operations: ``connect()``, ``disconnect()``, ``probe()`` (a cheap call that
 confirms the link is alive and returns a short status string), ``alive``,
 ``device`` and a ``lock`` that serializes every call to that instrument.
 
-Nothing here knows about the TUI: scripts, the console and the TUI all go
-through the same handles (see :class:`iyzee.lab.Lab`). :class:`LockedProxy`
-hands a device out with every method call taking that lock.
-
-Guide: :guide:`arch-handles`
+Nothing here knows about the TUI: scripts and the TUI all go
+through the same handles (see :class:`iyzee.lab.Lab`).
 """
 
 from __future__ import annotations
 
-import functools
 import logging
 import threading
 import time
-from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
 from ..config import IP, address
@@ -77,16 +72,11 @@ class InstrumentHandle(Protocol):
     @property
     def lock(self) -> threading.Lock | threading.RLock:
         """Serializes every call to this instrument's hardware, from
-        whichever caller — a screen's background worker, the IPython
-        console (via :class:`LockedProxy`), or a plain script holding this
-        same handle directly.
+        whichever caller — a screen's background worker or a plain script
+        holding this same handle directly.
 
-        Owned by the handle, not by :class:`~iyzee.lab.Lab`
-        (which used to keep a separate ``dict[str, threading.Lock]``
-        alongside ``handles``): a handle built and connected outside any
-        running app — the whole point of a script/console-first design —
-        still comes with correct synchronization for free, rather than
-        safety being something only the TUI happens to provide.
+        Owned by the handle, not by :class:`~iyzee.lab.Lab`: a handle built and
+        connected outside any running app still comes with correct synchronization.
         """
         ...
 
@@ -99,8 +89,8 @@ class _LockedHandle:
     """
 
     def __init__(self) -> None:
-        # Re-entrant: a caller holding the handle lock (a workflow batch) may go
-        # through a LockedProxy that takes the same lock again without deadlocking.
+        # Re-entrant: a caller holding the handle lock (a workflow batch) may call
+        # something that takes the same lock again without deadlocking.
         self._lock = threading.RLock()
 
     @property
@@ -192,8 +182,7 @@ class WavemeterHandle(_LockedHandle):
     """Adapter for the wavemeter's stateless HTTP API.
 
     There is no persistent connection to open. The handle provides the shared
-    instrument lock, performs one real readout when probing, and hands the
-    console a stateless :class:`~iyzee.devices.wavemeter.Wavemeter` client.
+    instrument lock, performs one real readout when probing, and hands out a stateless :class:`~iyzee.devices.wavemeter.Wavemeter` client.
     """
 
     def __init__(self) -> None:
@@ -258,7 +247,7 @@ class ScopeHandle(_LockedHandle):
     def lock(self) -> threading.RLock:
         """The driver's own transaction lock.
 
-        One lock guards the scope: the handle, the console's ``LockedProxy``,
+        One lock guards the scope: the handle,
         workflow batches and the driver's compound transfers all share it, so
         there is no second lock to order against or to deadlock on.
         """
@@ -268,54 +257,3 @@ class ScopeHandle(_LockedHandle):
     def device(self) -> LeCroy:
         """The underlying live LeCroy driver."""
         return self._scope
-
-
-class LockedProxy:
-    """Serializes calls to a live device shared between a screen worker
-    and the IPython console.
-
-    The console is handed the same live ``mx``/``shutter``/``scope``
-    objects a screen's background worker calls directly (see
-    ``ipython.namespace_from_handles``). Without this, a console cell
-    calling e.g. ``mx.single_sweep_wait()`` could run at the same moment
-    ``SweepScreen`` is mid-sweep on that same MXA — two threads issuing
-    commands to one VISA resource concurrently, which PyVISA does not
-    guarantee is safe.
-
-    Wraps a device so attribute access passes straight through, but
-    calling any method acquires ``lock`` for the call's duration — the
-    same lock a screen holds around its own hardware
-    calls to this instrument (the owning handle's own ``.lock``; see
-    :class:`InstrumentHandle`).
-
-    Deliberately does *not* forward dunder methods such as ``__enter__``
-    or ``__getitem__``: connection lifecycle belongs to the Connect
-    screen, and console code reaching for ``with mx:`` would close the
-    device out from under the app's own bookkeeping (the Connect screen's
-    table would still say "connected" while the underlying VISA resource
-    was actually closed).
-    """
-
-    def __init__(self, target: Any, lock: AbstractContextManager[Any]) -> None:
-        object.__setattr__(self, "_target", target)
-        object.__setattr__(self, "_lock", lock)
-
-    def __getattr__(self, name: str) -> Any:
-        target = object.__getattribute__(self, "_target")
-        value = getattr(target, name)
-        if not callable(value):
-            return value
-        lock = object.__getattribute__(self, "_lock")
-
-        @functools.wraps(value)  # keep name/signature/docstring: `lab.mx.method?` must still help
-        def _locked_call(*args: Any, **kwargs: Any) -> Any:
-            with lock:
-                return value(*args, **kwargs)
-
-        return _locked_call
-
-    def __dir__(self) -> list[str]:
-        return dir(object.__getattribute__(self, "_target"))
-
-    def __repr__(self) -> str:
-        return repr(object.__getattribute__(self, "_target"))

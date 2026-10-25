@@ -26,29 +26,3 @@ lint:
 
 typecheck:
   script: [scripts/ci.sh typecheck]
-
-doc-links:
-  script: [scripts/ci.sh doc-links]
-
-notebooks:
-  script: [scripts/ci.sh notebooks]
-
-docs-index:
-  script: [scripts/ci.sh docs-index]
-  artifacts:
-    paths: [docs/code-index.json]
-    expire_in: 1 day
-
-docs:
-  needs: [docs-index]
-  cache: []  # the Typst image has no uv; nothing to cache
-  variables:
-    DOCS_INDEX_PREBUILT: "1"
-  image:
-    name: ghcr.io/typst/typst:0.15.1
-    entrypoint: [""]
-  script: [scripts/ci.sh docs]
-  artifacts:
-    name: iyzee-documentation
-    paths: [build/docs/*.pdf]
-    expire_in: 30 days

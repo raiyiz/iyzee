@@ -9,7 +9,6 @@ it composes the same lower-level pieces they're built from
 a new caller with different needs (here, live progress) is a few lines
 against the existing building blocks, not a change to ``experiment/``.
 
-Guide: :guide:`sec-pages`
 """
 
 from __future__ import annotations
@@ -57,7 +56,6 @@ from ...experiment import (
     run_sequence,
     save_step_results,
 )
-from ..commands import Command
 from ..plotting import draw_series, prepare_series
 from ..text import one_line
 from ..workers import LastRun
@@ -197,23 +195,6 @@ class SweepScreen(Page):
             )
         status.display = bool(missing)
 
-    def commands(self) -> list[Command]:
-        return [
-            Command(
-                "run", lambda _: self.press_button("run-sweep", "start the sweep"), "Run the sweep"
-            ),
-            Command(
-                "abort",
-                lambda _: self.press_button("abort-sweep", "abort the sweep"),
-                "Abort the running sweep",
-            ),
-            Command(
-                "capture",
-                lambda _: self.press_button("capture-trace", "capture a trace"),
-                "Capture a single trace",
-            ),
-        ]
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run-sweep":
             self._start_sweep()
@@ -284,7 +265,6 @@ class SweepScreen(Page):
         self.query_one("#abort-sweep", Button).disabled = False
         self.query_one("#capture-trace", Button).disabled = True
         self.iyzee_app.sweep_running = True
-        self.iyzee_app.session_note(f"{kind} sweep running ({len(sweep.steps)} points)")
         self._run(sweep, devices)
 
     def _build_bandwidth_run(self) -> Sweep:
@@ -340,12 +320,9 @@ class SweepScreen(Page):
         mx = devices["mxa"]
         # Hold the lock of every instrument the sweep requires for
         # the whole run, not just individual calls — a sweep is one logical
-        # operation, and interleaving a console cell's commands partway
-        # through it would be just as broken as interleaving two sweeps.
-        # This is the same lock devices.handles.LockedProxy acquires per call
-        # for console code, and ConnectScreen acquires around connect/
-        # disconnect — each handle's own .lock (see InstrumentHandle.lock),
-        # not a table IyzeeApp used to keep separately.
+        # operation, and interleaving another caller's commands partway through it would
+        # be just as broken as interleaving two sweeps. ConnectScreen takes the same
+        # lock around connect/disconnect: each handle's own .lock (InstrumentHandle.lock).
         locks = [self.iyzee_app.handles[key].lock for key in sweep.requires]
 
         with contextlib.ExitStack() as stack:
@@ -566,7 +543,6 @@ class SweepScreen(Page):
         died: BaseException | None = None,
     ) -> None:
         self.iyzee_app.sweep_running = False
-        self.iyzee_app.session_note("idle")
         self.query_one("#run-sweep", Button).disabled = False
         self.query_one("#abort-sweep", Button).disabled = True
         self.query_one("#abort-sweep", Button).label = "Abort"
@@ -605,7 +581,7 @@ class SweepScreen(Page):
         if path is None:
             log.write(
                 f"[red]Sweep {status}: {len(self._collected)} point(s) recorded but "
-                "could not be saved — they are available as `results` in the console.[/red]"
+                "could not be saved. Check the data directory and permissions.[/red]"
             )
             return
         log.write(f"Sweep {status}: {len(self._collected)} point(s) saved to {escape(str(path))}")
