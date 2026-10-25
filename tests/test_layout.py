@@ -44,8 +44,9 @@ def _visible_area(app: IyzeeApp) -> Region:
 
 async def _scroll_to(pilot: Any, widget: Any) -> Region:
     widget.scroll_visible(animate=False)
-    await pilot.pause()
-    await pilot.pause()  # the scroll applies after a refresh; the region updates after the next
+    # Preserve both UI turns (scroll, then updated region) without waiting for idle timers.
+    await pilot.pause(0)
+    await pilot.pause(0)
     return _visible_area(pilot.app)
 
 
