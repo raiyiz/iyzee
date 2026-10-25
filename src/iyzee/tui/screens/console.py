@@ -47,9 +47,7 @@ class ConsoleScreen(Vertical):
 class IyzeeConsole(Vertical):
     """A persistent IPython namespace presented as a code editor and output log."""
 
-    BINDINGS: ClassVar[
-        list[Binding | tuple[str, str] | tuple[str, str, str]]
-    ] = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("ctrl+enter", "submit_cell", "Run cell", priority=True),
         Binding("ctrl+space", "complete", "Complete", show=False, priority=True),
         Binding("ctrl+p", "history_previous", "Previous cell", show=False, priority=True),
