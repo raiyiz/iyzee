@@ -28,6 +28,11 @@ def _raise_in_thread(thread_id: int) -> None:
         ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), None)
 
 
+def _clear_pending_interrupt(thread_id: int) -> None:
+    """Drop an interrupt that was delivered but not yet raised in ``thread_id``."""
+    ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), None)
+
+
 class Completion(NamedTuple):
     """One completion: ``text`` replaces ``source[start:end]`` (it is not a suffix)."""
 
@@ -97,6 +102,12 @@ class IPythonSession:
         self._state_lock = threading.Lock()
         self._worker_id: int | None = None
         self._thread: threading.Thread | None = None
+        # True only while the worker is inside run_cell. Interrupts are
+        # delivered under this lock, so they can never land in the worker's
+        # own bookkeeping (queue wait, busy notifications), where a stray
+        # KeyboardInterrupt would kill the thread and leave the console busy.
+        self._interrupt_lock = threading.Lock()
+        self._in_cell = False
         self._started = False
         self._closed = False
         self._previous_shell = InteractiveShell._instance
@@ -127,6 +138,8 @@ class IPythonSession:
     def submit(self, source: str) -> bool:
         """Queue one cell; returns False while another cell is running."""
         if not source.strip() or self._closed or not self._started:
+            return False
+        if self._thread is None or not self._thread.is_alive():
             return False
         with self._state_lock:
             if self._closed or not self._idle.is_set():
@@ -159,12 +172,13 @@ class IPythonSession:
         return [source for _session, _line, source in rows if source.strip()]
 
     def interrupt(self) -> bool:
-        """Interrupt the active cell if it has a live worker thread."""
-        thread_id = self._worker_id
-        thread = self._thread
-        if not self.executing or thread_id is None or thread is None or not thread.is_alive():
-            return False
-        _raise_in_thread(thread_id)
+        """Interrupt the cell being run; False if no cell is running right now."""
+        with self._interrupt_lock:
+            thread_id = self._worker_id
+            thread = self._thread
+            if not self._in_cell or thread_id is None or thread is None or not thread.is_alive():
+                return False
+            _raise_in_thread(thread_id)
         return True
 
     def close(self, timeout: float = 3.0) -> bool:
@@ -190,9 +204,7 @@ class IPythonSession:
                 if source is None:
                     break
                 try:
-                    self.shell.run_cell(source, store_history=True, silent=False)
-                except (KeyboardInterrupt, SystemExit) as exc:
-                    self._write_output(f"{type(exc).__name__}: {exc}\n")
+                    self._run_cell(source)
                 finally:
                     self._idle.set()
                     self._notify_busy(False)
@@ -201,6 +213,28 @@ class IPythonSession:
             self._notify_busy(False)
             self._worker_id = None
             self._restore_globals()
+
+    def _run_cell(self, source: str) -> None:
+        try:
+            with self._interrupt_lock:
+                self._in_cell = True
+            self.shell.run_cell(source, store_history=True, silent=False)
+        except (KeyboardInterrupt, SystemExit) as exc:
+            self._write_output(f"{type(exc).__name__}: {exc}\n")
+        finally:
+            self._leave_cell()
+
+    def _leave_cell(self) -> None:
+        # An interrupt sent just before the cell ended may still be pending or
+        # may arrive right here; swallow it and retry until the flag is down.
+        while True:
+            try:
+                with self._interrupt_lock:
+                    self._in_cell = False
+                    _clear_pending_interrupt(threading.get_ident())
+                return
+            except KeyboardInterrupt:
+                continue
 
     def _input(self, prompt: str = "") -> str:
         if threading.get_ident() == self._worker_id:

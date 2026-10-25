@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from helpers import FakeApp
 
 from iyzee.tui.ipython_controller import Completion, IPythonSession
@@ -88,5 +90,41 @@ def test_output_contains_no_ansi_escape_codes() -> None:
         rendered = "".join(output)
         assert "ZeroDivisionError" in rendered and "Docstring" in rendered
         assert "\x1b" not in rendered
+    finally:
+        assert session.close()
+
+
+def test_interrupt_stops_a_python_loop_and_console_stays_usable() -> None:
+    session, output = _session()
+    try:
+        assert session.submit("while True: pass")
+        deadline = time.monotonic() + 5
+        while not session._idle.wait(0.05):  # interrupt() is a no-op until the cell starts
+            assert time.monotonic() < deadline, "cell was not interrupted"
+            session.interrupt()
+        assert "KeyboardInterrupt" in "".join(output)
+        assert session.submit("6 * 7")
+        _finish(session)
+    finally:
+        assert session.close()
+
+
+def test_stray_interrupts_never_kill_the_worker() -> None:
+    session, output = _session()
+    try:
+        # Interrupts fired at cell boundaries (queued, finishing, idle) must be
+        # ignored; one landing in the worker's own bookkeeping used to kill it
+        # and leave the console permanently busy.
+        deadline = time.monotonic() + 20
+        for _ in range(150):
+            assert session.submit("pass")
+            while session.executing:
+                assert time.monotonic() < deadline, "console is stuck busy"
+                session.interrupt()
+            session.interrupt()
+            assert session._thread is not None and session._thread.is_alive()
+        assert session.submit("6 * 7")
+        _finish(session)
+        assert "42" in "".join(output)
     finally:
         assert session.close()
