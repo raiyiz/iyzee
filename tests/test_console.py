@@ -73,6 +73,8 @@ async def test_tab_completes_in_insert_mode_and_indents_without_matches() -> Non
         await pilot.press("i")
         await pilot.pause()
         editor = pilot.app.query_one(VimTextArea)
+        await pilot.press("i")
+        await pilot.pause()
         assert editor.mode is Mode.INSERT
 
         await pilot.press("p", "r", "i", "tab")
