@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import signal
 import threading
 import time
@@ -223,7 +222,6 @@ class IyzeeApp(App):
         self,
         *,
         console_history_file: str | Path | None = None,
-        console_editing_mode: str = "vi",
         prefs_file: str | Path | None = None,
         session_dir: str | Path | None = None,
         handle_signals: bool = False,
@@ -279,8 +277,6 @@ class IyzeeApp(App):
         # documents. Real persistence is opt-in, from the real entry point
         # only (see `run()` below).
         self.console_history_file = console_history_file
-        # IPython's own editing mode for the console: "vi" or "emacs".
-        self.console_editing_mode = console_editing_mode
         # Set by ConsoleScreen; closed on exit (see on_unmount).
         self.console_session: IPythonSession | None = None
         # Instruments whose link died while connected: key -> why. A lost link
@@ -608,7 +604,6 @@ def run() -> None:
     install_crash_diagnostics(logging_support.LOG_ROOT)
     IyzeeApp(
         console_history_file=default_history_file(),
-        console_editing_mode=os.environ.get("IYZEE_EDITING_MODE", "vi"),
         prefs_file=default_prefs_file(),
         session_dir=logging_support.LOG_ROOT,
         handle_signals=True,
