@@ -67,7 +67,6 @@ async def test_completion_replaces_the_word_under_the_cursor() -> None:
             assert editor.cursor_location == (0, len(expected))
 
 
-
 @async_test
 async def test_tab_completes_in_insert_mode_and_indents_without_matches() -> None:
     async with IyzeeApp().run_test(size=(110, 32)) as pilot:

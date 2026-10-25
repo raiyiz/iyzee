@@ -275,7 +275,6 @@ async def test_handles_that_cannot_tell_are_never_dropped() -> None:
         app.handles.clear()  # nothing to disconnect on the way out
 
 
-
 @async_test
 async def test_shutdown_stays_open_when_a_console_cell_ignores_interrupt() -> None:
     app = IyzeeApp()
