@@ -48,9 +48,9 @@ class _ThreadStream:
             self._default.flush()
 
     def isatty(self) -> bool:
-        return False if threading.get_ident() == self._session._worker_id else bool(
-            self._default.isatty()
-        )
+        if threading.get_ident() == self._session._worker_id:
+            return False
+        return bool(self._default.isatty())
 
     def fileno(self) -> int:
         if threading.get_ident() == self._session._worker_id:
@@ -126,8 +126,8 @@ class IPythonSession:
             if self._closed or not self._idle.is_set():
                 return False
             self._idle.clear()
+            self._notify_busy(True)
             self._jobs.put(source)
-        self._notify_busy(True)
         return True
 
     def complete(self, source: str, cursor_pos: int | None = None) -> list[str]:
