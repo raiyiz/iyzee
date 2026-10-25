@@ -135,7 +135,6 @@ async def test_apply_writes_only_changes_and_shows_what_the_scope_reports() -> N
         assert scope.calls == []
 
 
-
 @async_test
 async def test_apply_after_the_scope_disconnects_releases_the_busy_flag_and_keeps_the_state() -> (
     None

@@ -73,10 +73,10 @@ async def test_connect_errors_and_probe_failure_leave_no_handle(
         screen, table = await enter_on_first_row(app, pilot)
 
         for message in messages:
-            await wait_until(
-                pilot,
-                lambda message=message: Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == message,
-            )
+            def current_detail_matches(expected: str = message) -> bool:
+                return Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == expected
+
+            await wait_until(pilot, current_detail_matches)
             await _row_is(pilot, table, "error")
             await wait_until(pilot, lambda: not screen._busy)
             # Rendering must keep bracketed driver text literal, not interpret it as markup.
