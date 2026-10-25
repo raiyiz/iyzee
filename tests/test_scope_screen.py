@@ -99,7 +99,7 @@ async def test_editing_a_field_while_a_retrieve_is_in_flight_does_not_break_the_
 
 @async_test
 async def test_apply_writes_only_changes_and_shows_what_the_scope_reports() -> None:
-    scope = TriggerScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
+    scope = ScreenScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
     async with IyzeeApp().run_test() as pilot:
         app = pilot.app
         assert isinstance(app, IyzeeApp)
@@ -134,16 +134,6 @@ async def test_apply_writes_only_changes_and_shows_what_the_scope_reports() -> N
         await wait_until(pilot, lambda: "No changes to apply." in _log(screen))
         assert scope.calls == []
 
-        # Channel and trigger applies share the same editor/log lifecycle.
-        _set(screen, "trig-level", "0.25")
-        screen.query_one("#trig-slope", Select).value = TriggerSlope.NEGATIVE.value
-        screen.query_one("#apply-settings", Button).press()
-        await wait_until(pilot, lambda: "Applied and verified changes." in _log(screen))
-
-        verified = screen._trigger_state
-        assert verified is not None
-        assert verified.level_volts == 0.25 and verified.slope is TriggerSlope.NEGATIVE
-        assert not screen._busy and screen._synced
 
 
 @async_test
@@ -200,6 +190,24 @@ class TriggerScope(ScreenScope):
     def set_trigger_slope(self, source: Channel, slope: TriggerSlope) -> None:
         super().set_trigger_slope(source, slope)
         self.trigger_state = replace(self.trigger_state, slope=slope)
+
+
+@async_test
+async def test_applying_trigger_changes_shows_what_the_scope_reports() -> None:
+    scope = TriggerScope()
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open(pilot, scope)
+        await _synced(pilot, screen)
+
+        _set(screen, "trig-level", "0.25")
+        screen.query_one("#trig-slope", Select).value = TriggerSlope.NEGATIVE.value
+        screen.query_one("#apply-settings", Button).press()
+        await wait_until(pilot, lambda: "Applied and verified changes." in _log(screen))
+
+        verified = screen._trigger_state
+        assert verified is not None
+        assert verified.level_volts == 0.25 and verified.slope is TriggerSlope.NEGATIVE
+        assert not screen._busy and screen._synced
 
 
 @async_test

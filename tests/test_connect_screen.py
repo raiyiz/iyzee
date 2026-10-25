@@ -75,7 +75,7 @@ async def test_connect_errors_and_probe_failure_leave_no_handle(
         for message in messages:
             await wait_until(
                 pilot,
-                lambda: Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == message,
+                lambda message=message: Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == message,
             )
             await _row_is(pilot, table, "error")
             await wait_until(pilot, lambda: not screen._busy)

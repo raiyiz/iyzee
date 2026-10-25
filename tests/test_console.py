@@ -69,6 +69,8 @@ async def test_editor_completion_indentation_and_vim_editing() -> None:
             assert editor.text == expected
             assert editor.cursor_location == (0, len(expected))
 
+        editor.text = ""
+        editor.cursor_location = (0, 0)
         await pilot.press("p", "r", "i", "tab")
         assert editor.text == "print"
 
