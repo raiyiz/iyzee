@@ -29,7 +29,7 @@ The first native-cell baseline (before the Vim editor, stdin guard, interrupt-bo
 
 That is 590 fewer source lines than the original six-module implementation (39.2% reduction).
 
-The defined related test-file set is 1,000 lines now, compared with 1,077 before. It consists of `test_ipython.py`, `test_console.py`, `test_ipython_controller.py`, `test_app.py` and `test_layout.py`; the app/layout files also cover broader behavior. The set shrank by 77 lines (7.1%). These are source-only and test-only counts, not PR-wide +/- totals.
+The defined related test-file set is 1,002 lines now, compared with 1,077 before. It consists of `test_ipython.py`, `test_console.py`, `test_ipython_controller.py`, `test_app.py` and `test_layout.py`; the app/layout files also cover broader behavior. The set shrank by 75 lines (7.0%). These are source-only and test-only counts, not PR-wide +/- totals.
 
 ## Design decisions
 
@@ -118,7 +118,7 @@ These are accepted consequences of moving from a terminal-based IPython frontend
 - Ctrl+C is explicitly best-effort, while blocking device I/O is bounded by finite driver timeouts.
 - Normal user-requested shutdown waits up to 12 s after a best-effort interrupt; if a cell is still active, ordinary quit is cancelled and the app stays open. The worker is a daemon only as a last-resort abnormal-exit fallback. No concurrent instrument disconnection or “safe force quit” is offered.
 - `pyte` is absent; `prompt-toolkit` and `jedi` are transitive through IPython, not unnecessary direct dependencies; syntax highlighting is not enabled without its extra.
-- Console source remains at or below 930 lines and the defined related-test set at or below 1,010 lines. Current measured counts are 917 source lines and 1,000 related-test lines. Coverage must not be deleted solely to meet these budgets.
+- Console source remains at or below 930 lines and the defined related-test set at or below 1,010 lines. Current measured counts are 917 source lines and 1,002 related-test lines. Coverage must not be deleted solely to meet these budgets.
 - README and architecture/TUI guides accurately state the supported features and intentional losses.
 - The latest head passes CI (tests, Ruff, mypy, docs, doc-links, notebooks); any check that could not be run is identified honestly.
 
