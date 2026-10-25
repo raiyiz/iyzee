@@ -83,9 +83,9 @@ async def test_every_control_stays_reachable_at_the_extreme_sizes() -> None:
                         f"{selector} at {size}"
                     )
 
-        await _resize(pilot, (80, 16))  # and the console terminal on a short terminal
+        await _resize(pilot, (80, 16))  # the cell editor must remain reachable
         await _show(pilot, "console")
-        terminal = app.query_one("#console-terminal")
+        terminal = app.query_one("#console-editor")
         await wait_until(pilot, lambda: app.focused is terminal)
         assert (await _scroll_to(pilot, terminal)).overlaps(terminal.region)
 
