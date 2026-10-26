@@ -117,12 +117,12 @@ Page-specific commands are available where useful, for example <code>:run</code>
 
 Outside text-entry widgets:
 
-- <code>j</code> / <code>k</code> move focus.
+- <code>j</code> / <code>k</code> move the cursor or scroll on tables, lists and logs, and move focus elsewhere; <code>gg</code> / <code>G</code> jump to the top / bottom and <code>Ctrl+D</code> / <code>Ctrl+U</code> move half a page.
 - <code>Escape</code> leaves a text field.
 - <code>Ctrl+\\</code> opens Textual's command palette.
 - <code>Ctrl+Q</code> quits immediately; <code>q</code> quits after a second press.
 
-The embedded console deliberately keeps normal terminal editing keys for IPython.
+The embedded console is IPython's own vi-mode prompt and keeps its editing keys. <code>Escape</code> leaves insert mode at once; in normal mode with nothing half-typed (or while a cell is running), <code>Escape</code> hands the keyboard back to the app and <code>:</code> opens the command line, so every page stays reachable from the keyboard. <code>i</code> or <code>F4</code> return to the prompt. <code>.</code> repeats the last change, and yanked text is copied to the system clipboard (OSC 52).
 
 ---
 

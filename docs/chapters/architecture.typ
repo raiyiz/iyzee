@@ -1366,6 +1366,8 @@ question it answers.
   [#source("src/iyzee/tui/termkeys.py", [tui/termkeys.py])], [Keyboard event translation into terminal input bytes],
   [#source("src/iyzee/tui/vterm.py", [tui/vterm.py])], [Terminal-emulator state and scrollback via `pyte`],
   [#source("src/iyzee/tui/terminal_view.py", [tui/terminal_view.py])], [Rendering of the virtual terminal inside Textual],
+  [#source("src/iyzee/tui/vi_keys.py", [tui/vi_keys.py])], [Vim behaviour added to prompt_toolkit's vi engine: eager Escape, `.` repeat, clipboard, mode state],
+  [#source("src/iyzee/tui/motions.py", [tui/motions.py])], [`j k gg G Ctrl+D Ctrl+U` for the focused table, list or log],
   [#source("src/iyzee/tui/workers.py", [tui/workers.py])], [Small worker-facing result objects such as `LastRun`],
   [#source("src/iyzee/analysis.py", [analysis.py])], [Typed summaries of saved sweep and scope recordings, shared by scripts and the Results page],
   [#source("src/iyzee/waveform_math.py", [waveform_math.py])], [Reusable numerical operations on waveform recordings],
