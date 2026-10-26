@@ -41,6 +41,7 @@ from .screens.rb import RbScreen
 from .screens.results import ResultsScreen
 from .screens.scope import ScopeScreen
 from .screens.sweep import SweepScreen
+from .terminal_view import TerminalView
 from .workers import LastRun
 
 log = logging.getLogger("iyzee.tui")
@@ -178,7 +179,8 @@ class IyzeeApp(App):
     # handle — see termkeys.py's own comment on this split). So Scope is
     # reachable everywhere via "o", the nav rail, and the command palette,
     # just without a dedicated function key. "l" for the Log page (added
-    # later) follows the same reasoning.
+    # later) follows the same reasoning. From inside the console the letters
+    # work once Escape (in vi normal mode) has returned the keyboard to the app.
     BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("c", "show_page('connect')", "Connect"),
         Binding("s", "show_page('sweep')", "Sweep"),
@@ -376,7 +378,9 @@ class IyzeeApp(App):
         if action == "show_page" and parameters:
             switcher = self.query(ContentSwitcher)
             if switcher and parameters[0] == switcher.first().current:
-                return False
+                # ...except the console while its terminal does not have the keyboard: ``i``
+                # (or F4) is how you go back to typing, as in Vim.
+                return parameters[0] == "console" and not isinstance(self.focused, TerminalView)
         return True
 
     @property
@@ -445,9 +449,10 @@ class IyzeeApp(App):
     def action_command_mode(self) -> None:
         self.query_one(CommandBar).open()
 
-    def _current_page(self) -> Page | None:
+    def _current_page(self) -> Page | ConsoleScreen | None:
         current = self.query_one(ContentSwitcher).current
-        return self.query_one(f"#{current}", Page) if current else None
+        # The console is a page in the switcher but not a ``Page`` (it hosts a terminal).
+        return cast("Page | ConsoleScreen", self.query_one(f"#{current}")) if current else None
 
     def command_registry(self) -> CommandRegistry:
         """Global commands plus those of the page being shown (which may shadow them)."""
