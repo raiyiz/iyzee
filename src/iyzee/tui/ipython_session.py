@@ -58,6 +58,8 @@ from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.output.vt100 import Vt100_Output
 
 from .ipython import AppState, lab_namespace, shell_config
+from .vi_keys import ViExtras
+from .vi_keys import install as install_vi_extras
 
 log = logging.getLogger("iyzee.tui")
 
@@ -200,12 +202,14 @@ class IPythonSession:
         cols: int = 80,
         on_output: Callable[[str], object] | None = None,
         on_busy: Callable[[bool], None] | None = None,
+        on_copy: Callable[[str], object] | None = None,
     ) -> None:
         try:
             self._loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
         except RuntimeError:
             self._loop = None
         self._on_busy = on_busy
+        self._on_copy = on_copy
         self._size = Size(rows=max(1, rows), columns=max(1, cols))
         self._thread: threading.Thread | None = None
         self._thread_id: int | None = None
@@ -247,6 +251,10 @@ class IPythonSession:
         # whole process to do it. The prompt's [ins]/[nav] prefix already
         # shows the mode.
         terminal.modal_cursor = False
+        # IPython adds emacs shortcuts to vi insert mode, among them every Alt+letter as Esc then
+        # letter. A fast ``Esc d d`` or ``Esc b`` is then read as an Alt chord and never leaves
+        # insert mode (see vi_keys.py). This is a vi console; Vim's own keys are the point.
+        terminal.emacs_bindings_in_vi_insert_mode = False
         # IPython would otherwise write a window-title escape sequence to the
         # *real* terminal Textual owns.
         terminal.term_title = False
@@ -258,6 +266,9 @@ class IPythonSession:
             self.shell = TerminalInteractiveShell(
                 config=config, user_ns=lab_namespace(app, namespace)
             )
+        self.vi: ViExtras | None = None
+        if editing_mode == "vi" and self.shell.pt_app is not None:
+            self.vi = install_vi_extras(self.shell.pt_app, on_copy=self._copy_to_clipboard)
         # IPython registers this handler during construction. Its vi-mode cleanup
         # writes ESC[0 q directly to process-wide stdout, which is Textual's real
         # terminal after this session closes. Keep IPython's cleanup, but route its
@@ -323,8 +334,8 @@ class IPythonSession:
         self._sink.write(
             f"{_BOLD}iyzee console{_RESET}{_DIM} · IPython {IPython.__version__} · "
             f"{mode} mode{_RESET}\n"
-            f"{_DIM}lab.mx / lab.psu / lab.shutter / lab.scope · F1-F4 switch pages · "
-            f"Ctrl+Q quits iyzee{_RESET}\n\n"
+            f"{_DIM}lab.mx lab.psu lab.shutter lab.scope · Esc in normal mode or F1-F4 "
+            f"leave · : command line{_RESET}\n\n"
         )
 
     def close(self, timeout: float = 3.0) -> None:
@@ -388,6 +399,37 @@ class IPythonSession:
 
     # -- state -------------------------------------------------------------------------
 
+    def _copy_to_clipboard(self, text: str) -> None:
+        """Yanked text, from the shell's thread, to the app's clipboard on the UI thread."""
+        callback, loop = self._on_copy, self._loop
+        if callback is None or loop is None:
+            return
+        with contextlib.suppress(RuntimeError):  # the loop is closed: the app is going away
+            loop.call_soon_threadsafe(callback, text)
+
+    @property
+    def vi_mode(self) -> str | None:
+        """``insert``/``normal``/``replace``/``visual``... at a vi prompt, else ``None``."""
+        if self.vi is None or self._closed or self._prompt_depth == 0:
+            return None
+        try:
+            return self.vi.mode
+        except AttributeError:  # the prompt is being torn down or rebuilt under us
+            return None
+
+    @property
+    def at_rest(self) -> bool:
+        """True when Escape and ``:`` are the app's: a vi prompt in normal mode with nothing
+        half-typed, or no prompt at all because a cell is running (so you can leave it behind)."""
+        if self.vi is None or self._closed:
+            return False
+        if self.executing:
+            return True
+        try:
+            return self.vi.at_rest
+        except AttributeError:
+            return False
+
     @property
     def executing(self) -> bool:
         """True while a cell (not a prompt) is running."""
@@ -434,7 +476,9 @@ class IPythonSession:
         if self._closing:
             self.shell.keep_running = False
             return
-        print(f"{_DIM}This console stays open — F1-F4 switch pages, Ctrl+Q quits iyzee.{_RESET}")
+        print(
+            f"{_DIM}This console stays open — F1-F4 or Escape leave it, Ctrl+Q quits iyzee.{_RESET}"
+        )
 
     @staticmethod
     def _show_in_pager_hook(shell: Any, data: Any, start: int = 0, screen_lines: int = 0) -> None:
