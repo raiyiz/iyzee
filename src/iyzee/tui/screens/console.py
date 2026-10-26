@@ -23,6 +23,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Static
 from textual_plotext import PlotextPlot
 
+from ..commands import Command, CommandError
 from ..ipython import AppState
 from ..ipython_session import IPythonSession
 from ..plotting import draw_series, figure_series
@@ -61,6 +62,16 @@ class ConsoleScreen(Vertical):
     def on_mount(self) -> None:
         self.console = self.query_one(IyzeeConsole)
         cast("IyzeeApp", self.app).console_session = self.console.session
+
+    def commands(self) -> list[Command]:
+        """``:`` commands for this page (see ``tui/commands.py``)."""
+
+        def clear(args: list[str]) -> None:
+            if args:
+                raise CommandError(":clear takes no arguments")
+            self.console.session.send(b"\x0c")  # Ctrl+L: IPython's own clear-screen
+
+        return [Command("clear", clear, "Clear the console screen")]
 
     def on_show(self) -> None:
         # Screen.AUTO_FOCUS (what used to put focus on the input every time
@@ -157,6 +168,16 @@ class IyzeeConsole(Vertical):
     def _on_output(self, text: str) -> None:
         if self._view is not None:
             self._view.feed(text)
+
+    def on_terminal_view_leave_requested(self, event: TerminalView.LeaveRequested) -> None:
+        event.stop()
+        cast("IyzeeApp", self.app).action_blur_focused()
+
+    def on_terminal_view_command_line_requested(
+        self, event: TerminalView.CommandLineRequested
+    ) -> None:
+        event.stop()
+        cast("IyzeeApp", self.app).action_command_mode()
 
     def _on_busy(self, busy: bool) -> None:
         self._busy = busy

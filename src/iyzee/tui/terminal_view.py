@@ -13,6 +13,7 @@ from typing import Protocol
 from rich.segment import Segment
 from rich.style import Style
 from textual import events
+from textual.message import Message
 from textual.strip import Strip
 from textual.widget import Widget
 
@@ -22,7 +23,8 @@ from .vterm import VTermScreen
 # Keys the *app* owns, so they are never sent to the terminal: page switching
 # (F1-F4), quit, and the command palette. Everything else is the terminal's.
 # That includes Tab, Escape and Ctrl+P/N/R — IPython's completion, vi mode and
-# history — which is why leaving the terminal is done with the F-keys.
+# history. The exception is a backend that reports itself ``at_rest`` (a vi prompt in normal
+# mode with nothing half-typed): there Escape and ``:`` are the app's, as in any other page.
 _APP_KEYS = frozenset({"f1", "f2", "f3", "f4", "ctrl+q", "ctrl+backslash"})
 
 # Lines moved per mouse-wheel notch, and per Shift+PageUp/PageDown press
@@ -36,6 +38,13 @@ class TerminalBackend(Protocol):
     def send(self, data: bytes) -> None: ...
     def resize(self, rows: int, cols: int) -> None: ...
     def interrupt(self) -> None: ...
+
+    # Optional, read with getattr: a backend with a vi-style prompt reports its mode (drawn as
+    # the cursor shape) and whether Escape / ":" should leave the terminal for the app.
+    @property
+    def vi_mode(self) -> str | None: ...
+    @property
+    def at_rest(self) -> bool: ...
 
 
 class TerminalView(Widget, can_focus=True):
@@ -53,6 +62,12 @@ class TerminalView(Widget, can_focus=True):
         border: round $accent;
     }
     """
+
+    class LeaveRequested(Message):
+        """Escape at a resting vi prompt: hand the keyboard back to the app."""
+
+    class CommandLineRequested(Message):
+        """``:`` at a resting vi prompt: open the app's command line."""
 
     def __init__(self, *, id: str | None = None) -> None:  # Textual's own parameter name
         super().__init__(id=id)
@@ -99,7 +114,7 @@ class TerminalView(Widget, can_focus=True):
     def render_line(self, y: int) -> Strip:
         if y >= self.vterm.rows:
             return Strip.blank(self.size.width)
-        cursor_style = Style(reverse=True) if self.has_focus else Style(underline=True)
+        cursor_style = self._cursor_style()
         segments = self.vterm.row_segments(
             y, offset=self._offset, cursor=True, cursor_style=cursor_style
         )
@@ -108,6 +123,17 @@ class TerminalView(Widget, can_focus=True):
         if y == 0 and self._offset > 0:
             strip = self._with_scrollback_marker(strip, width)
         return strip.adjust_cell_length(width)
+
+    def _cursor_style(self) -> Style:
+        """Block in normal mode, underline in insert, both in replace; dim when unfocused."""
+        if not self.has_focus:
+            return Style(underline=True, dim=True)
+        mode = getattr(self._backend, "vi_mode", None)
+        if mode == "insert":
+            return Style(underline=True, bold=True)
+        if mode == "replace":
+            return Style(reverse=True, underline=True)
+        return Style(reverse=True)
 
     def _with_scrollback_marker(self, strip: Strip, width: int) -> Strip:
         label = f" ↑ {self._offset} lines back — End or type to return "
@@ -137,6 +163,14 @@ class TerminalView(Widget, can_focus=True):
 
         event.stop()
         event.prevent_default()
+
+        if getattr(self._backend, "at_rest", False):
+            if key == "escape":
+                self.post_message(self.LeaveRequested())
+                return
+            if event.character == ":":
+                self.post_message(self.CommandLineRequested())
+                return
 
         if key == "shift+pageup":
             self._scroll(self.vterm.rows)
