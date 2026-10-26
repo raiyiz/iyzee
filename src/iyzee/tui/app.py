@@ -31,6 +31,7 @@ from .ipython import default_history_file
 from .ipython_session import IPythonSession
 from .logging_support import LogEntry
 from .logging_support import install as install_logging
+from .motions import move
 from .prefs import Prefs, default_prefs_file
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
@@ -204,8 +205,14 @@ class IyzeeApp(App):
         # Vim-style command line (``:help`` lists the commands available on this page).
         Binding("colon", "command_mode", "Command", show=False),
         Binding("escape", "blur_focused", "Leave field", show=False),
-        Binding("j", "focus_next", "Focus next", show=False),
-        Binding("k", "focus_previous", "Focus previous", show=False),
+        # Vim motions: on a table, list, dropdown or log they move the cursor / scroll; anywhere
+        # else j/k move focus as before (see motions.py).
+        Binding("j", "move('down')", "Down", show=False),
+        Binding("k", "move('up')", "Up", show=False),
+        Binding("g", "g_prefix", "Top (gg)", show=False),
+        Binding("G", "move('bottom')", "Bottom", show=False),
+        Binding("ctrl+d", "move('half_down')", "Half page down", show=False),
+        Binding("ctrl+u", "move('half_up')", "Half page up", show=False),
     ]
 
     # One page widget per entry, held all at once inside a ContentSwitcher
@@ -239,6 +246,7 @@ class IyzeeApp(App):
         # Like the console history, persistent only for real runs (see ``run()``).
         self.prefs = Prefs(Path(prefs_file) if prefs_file else None)
         self._quit_armed_until = 0.0  # monotonic deadline for the second "q"
+        self._g_armed_until = 0.0  # monotonic deadline for the second "g" of "gg"
         # Installed first, before anything else in this constructor can
         # fail: this is the sink for every log.exception/log.warning/
         # log.info call anywhere in the app (see logging_support's module
@@ -588,6 +596,26 @@ class IyzeeApp(App):
             timeout=self.QUIT_CONFIRM_S,
             markup=False,
         )
+
+    def action_move(self, motion: str) -> None:
+        """``j``/``k``/``G``/``Ctrl+D``/``Ctrl+U`` on the focused widget; ``j``/``k`` fall back to focus."""
+        if move(self.focused, motion):
+            return
+        if motion == "down":
+            self.action_focus_next()
+        elif motion == "up":
+            self.action_focus_previous()
+
+    G_PREFIX_S = 1.0
+
+    def action_g_prefix(self) -> None:
+        """``g``: the second one within a moment is ``gg`` (jump to the top)."""
+        now = time.monotonic()
+        if now <= self._g_armed_until:
+            self._g_armed_until = 0.0
+            self.action_move("top")
+        else:
+            self._g_armed_until = now + self.G_PREFIX_S
 
     def action_blur_focused(self) -> None:
         """Leave the currently focused field, if any.
