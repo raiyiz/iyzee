@@ -118,6 +118,7 @@ class IyzeeConsole(Vertical):
             editing_mode=editing_mode,
             on_output=self._on_output,
             on_busy=self._on_busy,
+            on_copy=self.app.copy_to_clipboard,  # yanks reach the system clipboard (OSC 52)
         )
 
     def compose(self) -> ComposeResult:
