@@ -2,7 +2,7 @@
 
 > **Goal.** Make iyzee a *whole Vim-like application*, starting from the IPython console: practical, flexible, and with as little hand-maintained Vim code as possible.
 > **Decision (2026-10-26).** Build on **`main`'s real IPython console** (prompt_toolkit's vi engine, shown through a virtual terminal). The hand-rolled Vim of the `refactor/ipython-console` branch is **abandoned**.
-> **State.** The first batch is **finalized as a 4-commit patch series** (`patches/`) on top of `main@428702d`: code, type-checked (`mypy`, `ruff`), documented (README, guide, architecture), doc links valid. **No tests have been written or run** for it; three fixes were verified by probe. See [§6](#6-status-what-is-and-is-not-verified) and [§7](#7-remaining-work-in-order).
+> **State.** **8-commit patch series** (`patches/`) on top of `main@428702d`: code, tests, docs. `ruff`, `mypy src tests/<new files>` and the doc-link check are clean; the 76 new tests plus the 35 existing tests in the affected files pass (no full-suite run, by request). Everything ran in Textual's pilot, **never in a real terminal**. See [§6](#6-status-what-is-and-is-not-verified) and [§7](#7-whats-left-for-the-ultimate-vim-experience).
 
 ---
 
@@ -50,12 +50,12 @@ Thirty commits touched these files since Sep 11; the two most recent were fixes 
 
 ## 3. Findings on `main` (reproduced, root-caused)
 
-### 3.1 Escape takes ~1.4 s to leave INSERT mode — **fixed, verified**
+### 3.1 Escape takes ~1.4 s to leave INSERT mode — **fixed, tested**
 - **Measured:** 1441 ms and 1437 ms (`probes/probe_escape_latency.py`).
 - **Root cause:** IPython applies its `timeoutlen`/`ttimeoutlen` settings only inside a getter that is installed when `modal_cursor=True` (`IPython/terminal/shortcuts/__init__.py` ≈ l.362). `main` sets `modal_cursor=False` (to stop cursor escape codes leaking), so prompt_toolkit's defaults apply (`timeoutlen=1.0`, `ttimeoutlen=0.5`).
 - **Still ~0.5 s even with IPython's intended values**, because Escape is ambiguous (see 3.2).
 
-### 3.2 Fast `Esc` + a letter is read as an Alt chord — **fixed, verified**
+### 3.2 Fast `Esc` + a letter is read as an Alt chord — **fixed, tested**
 IPython enables emacs bindings in vi insert mode (`emacs_bindings_in_vi_insert_mode=True`), including every `Alt+<letter>` as `Esc <letter>`.
 
 | Typed quickly | Expected (Vim) | Observed on `main` |
@@ -66,7 +66,7 @@ IPython enables emacs bindings in vi insert mode (`emacs_bindings_in_vi_insert_m
 
 Reproduce with `probes/probe_escape_misfire.py`. This is data-damaging for a vim user.
 
-### 3.3 The console strands the keyboard — **fixed, verified (probe only)**
+### 3.3 The console strands the keyboard — **fixed, tested**
 - The terminal view claims *all* keys, and Escape belongs to prompt_toolkit, so only `F1–F4` could leave the console. **Scope, Power, Rb and Log were unreachable by keyboard.**
 - `:` in normal mode did nothing (prompt_toolkit has no ex line).
 - `i`/F4 did nothing while already on the console page (`check_action` hid it).
@@ -74,7 +74,7 @@ Reproduce with `probes/probe_escape_misfire.py`. This is data-damaging for a vim
 ### 3.4 Latent crash: `_current_page()` rejects the console — **fixed**
 `App._current_page()` did `query_one(..., Page)`, but `ConsoleScreen` is a `Vertical`, not a `Page` → every `:` command typed with the console current raised `WrongType` ("command failed"). It was invisible on `main` only because `:` never reached the app from the console.
 
-### 3.5 `j`/`k` jump focus instead of moving rows — **fixed (untested)**
+### 3.5 `j`/`k` jump focus instead of moving rows — **fixed, tested**
 `j`/`k` were global `focus_next/previous`. On a `DataTable`, `ListView` or log they left the widget instead of moving the cursor / scrolling.
 
 ### 3.6 Smaller
@@ -94,7 +94,7 @@ Reproduce with `probes/probe_escape_misfire.py`. This is data-damaging for a vim
 
 ---
 
-## 5. What is written (branch `feat/vim-console`, 4 commits)
+## 5. What is written (branch `feat/vim-console`, 8 commits)
 
 Base: `main@428702d`. Apply with `git am patches/*.patch`.
 
@@ -104,8 +104,12 @@ Base: `main@428702d`. Apply with `git am patches/*.patch`.
 | 2 | `feat(console): Escape and : at a resting prompt return the keyboard to the app` | `terminal_view.py`, `console.py`, `app.py` (`_current_page`, `check_action`) |
 | 3 | `feat(app): Vim motions on tables, lists, dropdowns and logs` | `motions.py`, `app.py` |
 | 4 | `docs(console): …` | README, `tui-and-devices.typ`, `architecture.typ` |
+| 5 | `fix(console): only yanks reach the system clipboard` | `vi_keys.py` (decision 2) |
+| 6 | `feat(app): counts for Vim motions; :q asks and :qq quits at once` | `app.py`, `motions.py`, `tests/test_command_bar.py` (decision 5) |
+| 7 | `test(console): cover the Vim console, …` | `tests/test_vi_keys.py`, `tests/test_console_vim.py`, `tests/test_motions.py` |
+| 8 | `docs: yank-only clipboard, :qq and motion counts` | README, guide |
 
-Each commit type-checks on its own.
+Commits 1–4 type-check on their own; the series applies cleanly to `main@428702d` and yields a tree identical to the branch.
 
 ### New files
 - **`src/iyzee/tui/vi_keys.py`** — `ViExtras`, layered on prompt_toolkit's engine:
@@ -126,8 +130,9 @@ Each commit type-checks on its own.
 ### Behaviour now
 - `Esc` leaves INSERT instantly; a second `Esc` in normal mode at rest returns the keyboard to the app (letters switch pages, `j/k` move). `i` or `F4` goes back.
 - `:` at rest opens the shared command line (completion, history, `:help`): `:scope`, `:power`, `:q`, `:clear` …
-- `.` repeats the last change; yanks go to the system clipboard (OSC 52 via `App.copy_to_clipboard`).
-- `j/k/gg/G/Ctrl-D/Ctrl-U` on tables, lists, dropdowns and logs.
+- `.` repeats the last change; **yanks only** (`y{motion}`, `yy`, `Y`, visual `y`) go to the system clipboard (OSC 52 via `App.copy_to_clipboard`); deletes stay in the prompt's register.
+- `j/k/gg/G/Ctrl-D/Ctrl-U` on tables, lists, dropdowns and logs; counts: `5j`, `12G`, `3gg`.
+- `:q` asks exactly like the `q` key; `:qq` (aliases `:quit!`, `:q!`) quits at once; `Ctrl+Q` unchanged.
 
 ---
 
@@ -135,58 +140,62 @@ Each commit type-checks on its own.
 
 | Item | Status |
 |---|---|
-| Escape latency 1.44 s → ≈80–110 ms (includes pilot overhead) | ✅ probe |
-| `Esc d d`, `Esc b`, `Esc u` behave like Vim | ✅ probe |
-| Esc → normal → Esc leaves; `o` navigates; `i` returns focused; `:` opens the bar; `:power` works from the console | ✅ probe (`probes/probe_leave_and_return.py`; its last two lines had a sequencing mistake — fix when turning it into a test) |
-| Mode-aware cursor | ⚠️ written, never rendered/inspected |
-| `.` repeat | ⚠️ written, **never exercised** |
-| Clipboard bridge | ⚠️ written, never exercised |
-| `j k gg G Ctrl-D Ctrl-U` | ⚠️ written, type-clean; never exercised (check that Textual names the key `G`) |
-| `:clear`, banner, `check_action` change | ⚠️ written, not exercised in tests |
-| `mypy src/iyzee`, `ruff format/check`, `check_doc_links.py` | ✅ clean (no test suite run, by request) |
-| Real terminal behaviour | ❌ everything so far ran in Textual's pilot only |
+| Escape latency 1.44 s → under 0.6 s bound (≈80–110 ms measured) | ✅ test (`test_escape_leaves_insert_mode_at_once`), fails on the old config |
+| `Esc d d` / `Esc u` behave like Vim | ✅ test, fails on the old config |
+| Esc → normal → Esc leaves; `o` navigates; `i`/F4 return; Esc with a pending operator stays; Esc while a cell runs leaves | ✅ tests |
+| `:` at rest opens the shared bar; `:power` from the console; `:clear`; `_current_page()` | ✅ tests |
+| Mode-aware cursor (style object per mode) | ✅ test of the style; **not looked at on screen** |
+| `.` repeat (9 cases, new prompt, fresh-prompt typing) | ✅ headless + real prompt tests; mutation-checked |
+| Yank-only clipboard (11 cases) and `App.clipboard` end to end | ✅ tests; mutation-checked; **OSC 52 itself not seen working in a real terminal** |
+| `j k gg G Ctrl-D Ctrl-U`, counts, expiry, `0` rule, digits still typed into fields/console | ✅ tests (found and fixed the squeezed-Button scroll bug) |
+| `:q` asks / `:qq` quits | ✅ tests |
+| `mypy src tests/<new>`, `ruff`, doc links, 35 existing tests in affected files | ✅ |
+| Real terminal behaviour (kitty/iTerm/tmux, Shift+Enter, OSC 52, cursor look) | ❌ |
+| Full test suite | ❌ not run |
 
-**Type errors** found earlier (`motions.py` ancestors typed `DOMNode`; `pt_app` possibly `None`) are fixed in the series. Existing tests were grepped for the old banner text, `F1-F4` wording and `j/k = focus_next` and none assert them, but they were not run.
-
----
-
-## 7. Remaining work, in order
-
-### 7.1 Make it correct
-- [x] Type errors fixed; `ruff` and `mypy` clean.
-- [ ] **`tests/test_vi_keys.py`** — headless, no Textual (use the `HeadlessVi` idea from `spike/spike_ptk_vi.py`, or a real `IPythonSession`):
-  - eager Escape: `Esc d d` empties the line and ends in normal mode; `Esc` latency via `Application.ttimeoutlen`/behaviour, not wall-clock if avoidable
-  - `.`: `dw..`, `ciwXY<Esc>w.`, `A;<Esc>` then `.` on another line, `3.`, `.` after a macro, no-op when nothing recorded, **not recorded**: yank, motion, undo, visual operator; survives a new prompt without replaying stale keys
-  - `_is_change` unit table (leading count vs `r5`, `gu` vs `gg`)
-  - clipboard: a yank/delete calls `on_copy` once with the text; exception in `on_copy` is swallowed
-  - `mode` / `at_rest` truth table (pending `d`, `3`, `"a`, `/`, visual, completion menu)
-- [ ] **Console/app tests** (extend `tests/test_console_screen.py` / `tests/test_terminal.py`, same pilot pattern, wait with `pilot.pause`):
-  - Esc, Esc leaves; `i`/F4 returns; Esc with a pending operator does **not** leave; Esc while a cell is running leaves
-  - `:power` from the console navigates; `_current_page()` returns the console; `:clear`
-  - `TerminalView` cursor style per `vi_mode` (assert on the style object)
-  - `motions.move` on `DataTable` / `ListView` / `RichLog` / a `Button` (returns `False`); `gg`, `G`, `Ctrl-D/U`; `j/k` still move focus on forms
-- [x] Grepped for tests asserting the old banner text, `F1-F4` wording or `j/k = focus` bindings: none found (not run).
-
-### 7.2 Make it nice
-- [ ] **External editor** for real Vim on big edits. IPython already binds `F2` and (emacs-insert) `Ctrl-X Ctrl-E` to open `$EDITOR`, but here `F2` is a page key, the editor would write to Textual's real TTY, and `emacs_bindings_in_vi_insert_mode=False` may have switched the chord off (verify). Plan: add a console `:edit` and a normal-mode key that patches `Buffer.open_in_editor` to run `$EDITOR` on a temp `.py` file inside `app.suspend()` (called from the shell thread via `app.call_from_thread`), put the result back in the buffer; fall back to a plain subprocess when the driver cannot suspend (tests/CI).
-- [ ] Optional `jk`/`jj` → Escape preference (needs an eager binding in `vi_keys.py`).
-- [ ] Footer/hints: show `Esc Esc` / `:` on the console page. (The stale "F1-F4 switch pages" message and `app.py` comment are already updated.)
-- [ ] Beyond the console, for the "whole Vim app" goal: `/` search and `n/N` in the Log and Results pages, counts for motions (`5j`), `h/l` for horizontal scroll, `Ctrl-W`-style page switching, `:` commands per page.
-
-### 7.3 Document and ship
-- [x] README, `tui-and-devices.typ` (key table, console section) and `architecture.typ` module table updated. Still to add when tests exist: a short "not full Vim" list in the README.
-- [ ] `scripts/ci.sh`: add the new test files to a shard (they do not exist yet).
-- [x] Clean 4-commit series exported to `patches/`.
+Existing tests were grepped for the old banner text, `F1-F4` wording and `j/k = focus_next`; none asserted them.
 
 ---
 
-## 8. Open decisions (need the owner's call)
+## 7. What's left for the ultimate Vim experience
 
-1. **Esc-spam.** Vim users tap Escape reflexively; with "Esc at rest leaves", a third tap leaves the console and following letters switch pages (`c`, `s`, `p` …). Harmless but surprising. Option: ignore an Esc that follows another within ≈300 ms. Currently: no grace period.
-2. **Clipboard on deletes.** prompt_toolkit routes `x`/`dd` through the same clipboard as yanks, so every delete is copied (Vim's `unnamedplus`). Option: copy only yanks or only text longer than N characters.
-3. **`3.` semantics.** Vim *replaces* the original count; this repeats the recorded sequence three times. Same result for most deletes, different for some.
-4. **Emacs-in-vi-insert is off for good?** It was disabled because it makes Escape ambiguous. A user who wants `Ctrl-A/E/K` in insert mode could get them back as explicit non-Alt bindings.
-5. **`:q` quits immediately** (documented as such); consider the same two-step safety as `q` when the console is current.
+Ordered by how much it would change day-to-day flow. None of it is started unless marked.
+
+### 7.1 Check what only a real terminal can show (do first, ~30 min, no code)
+- [ ] Cursor look per mode (block / bold underline / reverse underline / dim), in your terminal and in tmux.
+- [ ] OSC 52: `yw` in the console, paste in another app. Many terminals/tmux need clipboard-write enabled.
+- [ ] `Esc d d`, `Esc b`, `.` and `gg` by hand at your normal typing speed.
+- [ ] Whether you want the Esc grace period (see [§8](#8-open-decisions)).
+
+### 7.2 Highest value next
+- [ ] **Real Vim for big edits** (`:edit`, and a normal-mode key). Cleanest design: patch `Buffer.open_in_editor` to run `$EDITOR` on a temp `.py` file inside `app.suspend()` (called from the shell thread via `app.call_from_thread`), put the result back in the buffer, fall back to a plain subprocess when the driver cannot suspend. IPython's built-in `F2` / `Ctrl-X Ctrl-E` do not fit (F2 is a page key; the editor would write to Textual's real TTY; the emacs chord is probably off since `emacs_bindings_in_vi_insert_mode=False`). Needs a real terminal to verify.
+- [ ] **`/` search and `n` / `N`** in the Log and Results pages (and `:` filters), the most-missed Vim motion outside the prompt.
+- [ ] **Per-page `:` commands** for the pages that still lack them (the registry and `Page.commands()` are there).
+- [ ] **`jk` / `jj` as Escape** (optional preference): an eager binding in `vi_keys.py`.
+- [ ] **Mode and pending keys in the status line** (`-- INSERT --`, `3d`), using `ViExtras.mode` and `key_processor.arg/key_buffer`.
+
+### 7.3 Nice to have
+- [ ] `h` / `l` for horizontal scroll and table columns; `Ctrl-W`-style page switching; `H`/`M`/`L` in tables; `zz`/`zt`.
+- [ ] Upstream to prompt_toolkit: dot-repeat (issue #503), the `"ayw` `IndexError`, `dap` blank-line behaviour, `i"` across lines.
+- [ ] Optional re-enable of selected emacs insert keys (`Ctrl-A/E/K`) as non-Alt bindings.
+- [ ] README "not full Vim" list (see §9) once the above settles.
+
+### 7.4 Housekeeping
+- [ ] Run the full suite once (`uv run pytest`) before merging; only the affected files were run.
+- [ ] Consider adding the pilot tests to whatever slow-test marker the repo uses (~25 s for `test_console_vim.py`).
+
+---
+
+## 8. Open decisions
+
+Resolved this round:
+- ✅ **Clipboard on deletes** → only yanks reach the system clipboard (any length). prompt_toolkit has one clipboard, so yank vs delete is told apart by the running operator; the 10-character fallback was not needed and would have dropped short yanks like `yiw`.
+- ✅ **Quit** → `:q` asks like `q`; `:qq` quits at once.
+
+Still yours:
+1. **Esc-spam.** With "Esc at rest leaves", a third tap leaves the console and following letters switch pages (`c`, `s`, `p` …). Harmless but surprising. Option: ignore an Esc within ≈300 ms of the previous one. Currently no grace period.
+2. **`3.` semantics.** Vim *replaces* the original count; this repeats the recorded sequence three times. Same for most deletes, different for some.
+3. **Emacs-in-vi-insert stays off?** It was disabled because it makes Escape ambiguous. `Ctrl-A/E/K` could return as explicit non-Alt bindings.
 
 ---
 
@@ -229,8 +238,10 @@ uv run python probes/probe_escape_misfire.py             # 'Esc d d' leaves text
 uv run python probes/probe_leave_and_return.py
 
 # only the tests you touch
-uv run pytest tests/test_terminal.py tests/test_console_screen.py -q
-uv run mypy src/iyzee/tui && uv run ruff check src tests && uv run ruff format --check .
+uv run pytest tests/test_vi_keys.py tests/test_console_vim.py tests/test_motions.py \
+              tests/test_terminal.py tests/test_console_screen.py tests/test_command_bar.py -q
+uv run mypy src tests/test_vi_keys.py tests/test_console_vim.py tests/test_motions.py
+uv run ruff check src tests && uv run ruff format --check .
 ```
 
 Notes for whoever continues:
@@ -246,9 +257,9 @@ Notes for whoever continues:
 | Path | What |
 |---|---|
 | `PLAN-vim-console.md` | this document (put it at `docs/PLAN-vim-console.md` or the repo root) |
-| `patches/000{1..4}-*.patch` | the finalized series against `main@428702d` (`git am patches/*.patch`) |
+| `patches/000{1..8}-*.patch` | the finalized series against `main@428702d` (`git am patches/*.patch`) |
 | `probes/probe_escape_latency.py` | measures Escape → normal latency |
 | `probes/probe_escape_misfire.py` | `Esc`+letter misfire cases |
-| `probes/probe_leave_and_return.py` | leave / return / `:` flow (fix its last two sequences) |
+| `probes/probe_leave_and_return.py` | the original exploratory probe; superseded by `tests/test_console_vim.py` |
 | `spike/spike_ptk_vi.py` | headless prompt_toolkit vi harness with 14 behaviour checks |
 | `archive-refactor-branch/000{1,2,3}-*.patch` | abandoned hand-rolled Vim (text objects, f/t, `.`, shared command line) — kept for reference; the `:`-command and `_current_page` ideas were carried over |
