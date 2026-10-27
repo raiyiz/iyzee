@@ -348,8 +348,9 @@ Key handling relies on Textual's own focus and binding priority, with no app-spe
   [`:`], [vim-style command line; `:help` lists what the current page offers],
   [`Ctrl+Q`], [quit at once],
   [`q`], [quit on a second press within #fact("tui.quit_confirm_s") s, so a stray key cannot close an app holding live instruments],
+  [`:q` / `:qq`], [`:q` asks exactly like `q`; `:qq` quits at once],
   [`j` / `k`], [move the cursor or scroll on tables, lists and logs; elsewhere move focus (#code("move"))],
-  [`gg` / `G`, `Ctrl+D` / `Ctrl+U`], [top / bottom, half a page, on the same widgets],
+  [`gg` / `G`, `Ctrl+D` / `Ctrl+U`], [top / bottom, half a page, on the same widgets; a count repeats a motion (`5j`) or names the line (`12G`)],
   [`Escape`], [leave a text field; in the console, from vi normal mode, return the keyboard to the app],
   [`Ctrl+\\`], [Textual's command palette (not `Ctrl+P`, which IPython uses for history)],
 )
@@ -370,7 +371,7 @@ The layout reflows at #fact("tui.breakpoints.1.0") and #fact("tui.breakpoints.2.
 
 The Console page runs IPython's own terminal UI (prompt_toolkit's prompt with vi or emacs editing, completion, history search, `%magics`, `?` help and `%debug`) inside the application process, so `lab.mx` is the live instrument rather than a copy. prompt_toolkit is a terminal application, so it is given virtual terminals (#code("IPythonSession")): keystrokes are encoded by `termkeys.py` into a pipe input, and its output is interpreted by a `pyte`-based screen (`vterm.py`) painted by `terminal_view.py`. The shell runs in its own thread, so a slow cell cannot freeze the UI; Ctrl+C interrupts the running cell. While the terminal has focus only `F1`–`F4`, `Ctrl+Q` and `Ctrl+\\` reach the app, plus `Escape` and `:` when the prompt is at rest (vi normal mode with nothing half-typed, or a cell running), which return the keyboard to the app and open its command line (`i` or `F4` go back); Ctrl+Z is never forwarded because IPython binds it to "suspend". During shutdown, IPython's normal cleanup still runs, but its terminal-reset output is routed through the virtual-terminal sink rather than leaking escape sequences into the host terminal.
 
-The vi behaviour is prompt_toolkit's own engine (motions, operators, text objects, registers, macros, `/` search); #code("ViExtras") only adds what it lacks or gets wrong. Escape is bound eagerly and IPython's emacs shortcuts in vi insert mode are off: with them a quick `Esc d d` was read as the Alt-d chord and never left insert mode, and a lone Escape waited over a second. `.` repeats the last change (prompt_toolkit has no `.`), yanks reach the system clipboard through OSC 52 because the terminal view owns the mouse, and the cursor changes shape with the vi mode.
+The vi behaviour is prompt_toolkit's own engine (motions, operators, text objects, registers, macros, `/` search); #code("ViExtras") only adds what it lacks or gets wrong. Escape is bound eagerly and IPython's emacs shortcuts in vi insert mode are off: with them a quick `Esc d d` was read as the Alt-d chord and never left insert mode, and a lone Escape waited over a second. `.` repeats the last change (prompt_toolkit has no `.`), yanks (but not deletes, as with Vim's `"+y`) reach the system clipboard through OSC 52 because the terminal view owns the mouse, and the cursor changes shape with the vi mode.
 
 #callout(
   "Two different things are called lab",
