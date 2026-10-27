@@ -25,6 +25,27 @@ def move(widget: Widget | None, motion: str) -> bool:
     return _scroll(widget, motion)
 
 
+def go_to(widget: Widget | None, line: int) -> bool:
+    """``<N>G`` / ``<N>gg``: the cursor or scroll position to line ``N`` (1-based, clamped)."""
+    line = max(1, line)
+    if isinstance(widget, DataTable):
+        if widget.row_count:
+            widget.move_cursor(row=min(line, widget.row_count) - 1)
+            return True
+    elif isinstance(widget, ListView):
+        if len(widget):
+            widget.index = min(line, len(widget)) - 1
+            return True
+    elif isinstance(widget, OptionList):
+        if widget.option_count:
+            widget.highlighted = min(line, widget.option_count) - 1
+            return True
+    elif widget is not None and _can_scroll(widget):
+        widget.scroll_to(y=line - 1, animate=False)
+        return True
+    return False
+
+
 def _move_cursor(widget: DataTable | ListView | OptionList, motion: str) -> bool:
     if motion == "down":
         widget.action_cursor_down()
@@ -45,15 +66,20 @@ def _move_cursor(widget: DataTable | ListView | OptionList, motion: str) -> bool
     return True
 
 
+def _can_scroll(widget: Widget) -> bool:
+    # ``max_scroll_y`` alone is not enough: a squeezed button reports a positive one.
+    return widget.allow_vertical_scroll and widget.max_scroll_y > 0
+
+
 def _scroll(widget: Widget, motion: str) -> bool:
     """Scroll ``widget``, or for the big jumps the nearest scrollable ancestor (a tall page)."""
     if motion in ("down", "up"):
-        if widget.max_scroll_y <= 0:
+        if not _can_scroll(widget):
             return False  # a button, a field: the caller moves focus instead
         (widget.scroll_down if motion == "down" else widget.scroll_up)(animate=False)
         return True
     candidates = (widget, *(a for a in widget.ancestors if isinstance(a, Widget)))
-    target = next((w for w in candidates if w.max_scroll_y > 0), None)
+    target = next((w for w in candidates if _can_scroll(w)), None)
     if target is None:
         return False
     if motion == "top":

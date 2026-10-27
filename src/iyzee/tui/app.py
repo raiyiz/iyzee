@@ -31,7 +31,7 @@ from .ipython import default_history_file
 from .ipython_session import IPythonSession
 from .logging_support import LogEntry
 from .logging_support import install as install_logging
-from .motions import move
+from .motions import go_to, move
 from .prefs import Prefs, default_prefs_file
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
@@ -210,6 +210,7 @@ class IyzeeApp(App):
         Binding("j", "move('down')", "Down", show=False),
         Binding("k", "move('up')", "Up", show=False),
         Binding("g", "g_prefix", "Top (gg)", show=False),
+        *(Binding(str(digit), f"count_digit({digit})", "Count", show=False) for digit in range(10)),
         Binding("G", "move('bottom')", "Bottom", show=False),
         Binding("ctrl+d", "move('half_down')", "Half page down", show=False),
         Binding("ctrl+u", "move('half_up')", "Half page up", show=False),
@@ -247,6 +248,8 @@ class IyzeeApp(App):
         self.prefs = Prefs(Path(prefs_file) if prefs_file else None)
         self._quit_armed_until = 0.0  # monotonic deadline for the second "q"
         self._g_armed_until = 0.0  # monotonic deadline for the second "g" of "gg"
+        self._count = 0  # a typed count (``5j``) and the deadline after which it is forgotten
+        self._count_until = 0.0
         # Installed first, before anything else in this constructor can
         # fail: this is the sink for every log.exception/log.warning/
         # log.info call anywhere in the app (see logging_support's module
@@ -389,6 +392,9 @@ class IyzeeApp(App):
                 # ...except the console while its terminal does not have the keyboard: ``i``
                 # (or F4) is how you go back to typing, as in Vim.
                 return parameters[0] == "console" and not isinstance(self.focused, TerminalView)
+        if action == "count_digit" and parameters == (0,):
+            # 0 only continues a count (``10j``); on its own it is not ours to take.
+            return bool(self._count) and time.monotonic() <= self._count_until
         return True
 
     @property
@@ -534,6 +540,9 @@ class IyzeeApp(App):
             return self.command_registry().help_text(args[0] if args else None)
 
         def quit_(args: list[str]) -> None:
+            self.action_request_quit()  # like the q key: asks first, a second one quits
+
+        def quit_now(args: list[str]) -> None:
             self.exit()
 
         commands = [
@@ -563,7 +572,8 @@ class IyzeeApp(App):
                 ],
                 aliases=("h",),
             ),
-            Command("quit", quit_, "Quit now (q asks for confirmation instead)", aliases=("q",)),
+            Command("quit", quit_, "Quit; asks first, as the q key does", aliases=("q",)),
+            Command("qq", quit_now, "Quit now, without asking", aliases=("quit!", "q!")),
         ]
         for page_id, label, key in (
             ("sweep", "Sweep", "s"),
@@ -591,20 +601,43 @@ class IyzeeApp(App):
         connected = len(self.handles)
         extra = f" {connected} connected instrument(s) will be disconnected." if connected else ""
         self.notify(
-            f"Press q again to quit.{extra}",
+            f"Press q again to quit (or :qq to quit now).{extra}",
             severity="warning",
             timeout=self.QUIT_CONFIRM_S,
             markup=False,
         )
 
+    COUNT_WINDOW_S = 1.5
+
+    def action_count_digit(self, digit: int) -> None:
+        """A digit of a count for the next motion (``5j``, ``12G``)."""
+        now = time.monotonic()
+        if now > self._count_until:
+            self._count = 0
+        self._count = min(self._count * 10 + digit, 9999)
+        self._count_until = now + self.COUNT_WINDOW_S
+
+    def _take_count(self) -> int | None:
+        count, live = self._count, time.monotonic() <= self._count_until
+        self._count = 0
+        return count if live and count else None
+
     def action_move(self, motion: str) -> None:
-        """``j``/``k``/``G``/``Ctrl+D``/``Ctrl+U`` on the focused widget; ``j``/``k`` fall back to focus."""
-        if move(self.focused, motion):
+        """``j``/``k``/``G``/``Ctrl+D``/``Ctrl+U`` on the focused widget; ``j``/``k`` fall back to focus.
+
+        A count repeats the motion (``5j``); with ``G`` or ``gg`` it names the line (``3G``).
+        """
+        count = self._take_count()
+        if motion in ("top", "bottom") and count is not None:
+            go_to(self.focused, count)
             return
-        if motion == "down":
-            self.action_focus_next()
-        elif motion == "up":
-            self.action_focus_previous()
+        for _ in range(count or 1):
+            if move(self.focused, motion):
+                continue
+            if motion == "down":
+                self.action_focus_next()
+            elif motion == "up":
+                self.action_focus_previous()
 
     G_PREFIX_S = 1.0
 
