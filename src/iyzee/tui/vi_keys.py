@@ -15,8 +15,10 @@ motion, operator, text object, register and macro stays prompt_toolkit's and is 
   prompt_toolkit's vi mode does not have (python-prompt-toolkit issue #503). It is recorded from
   the key sequences of the engine's own handler calls and replayed by feeding them back, so it
   repeats whatever the engine does, including operators and text objects added upstream later.
-* **Yanks reach the system clipboard** through ``on_copy`` (the app passes OSC 52), as with Vim's
-  ``clipboard=unnamedplus``; the terminal view captures the mouse, so there is no other way out.
+* **Yanks reach the system clipboard** through ``on_copy`` (the app passes OSC 52), like Vim's
+  ``"+y``; deletes and changes stay in the prompt's own register, as in plain Vim. The terminal
+  view captures the mouse, so there is no other way to get text out. prompt_toolkit has a single
+  clipboard, so a yank is told from a delete by the operator that is running (see ``_is_yank``).
 * :attr:`ViExtras.mode` and :attr:`ViExtras.at_rest` let the view draw a mode-aware cursor and
   decide whether Escape / ``:`` belong to the prompt or to the app.
 
@@ -69,16 +71,27 @@ def _is_change(keys: list[KeyPress]) -> bool:
     return typed[0] in _CHANGE_KEYS
 
 
-class BridgingClipboard(InMemoryClipboard):
-    """prompt_toolkit's in-memory clipboard that also hands every copied text to ``on_copy``."""
+# The operator function prompt_toolkit's ``y{motion}`` / ``y{text object}`` runs.
+_YANK_OPERATOR = "_yank"
 
-    def __init__(self, on_copy: Callable[[str], object]) -> None:
+
+class BridgingClipboard(InMemoryClipboard):
+    """prompt_toolkit's in-memory clipboard that also hands copied text to ``on_copy``.
+
+    ``should_copy`` is asked at the moment of each ``set_data``; it is how yanks (copied out) are
+    told from deletes (kept in the prompt's register only).
+    """
+
+    def __init__(
+        self, on_copy: Callable[[str], object], should_copy: Callable[[], bool] = lambda: True
+    ) -> None:
         super().__init__()
         self._on_copy = on_copy
+        self._should_copy = should_copy
 
     def set_data(self, data: ClipboardData) -> None:
         super().set_data(data)
-        if data.text:
+        if data.text and self._should_copy():
             try:
                 self._on_copy(data.text)
             except Exception:
@@ -95,6 +108,7 @@ class ViExtras:
         self._recording: list[KeyPress] = []
         self._recording_from_rest = False
         self._replaying = False
+        self._yanking = False
 
     # -- state the UI reads (from the UI thread; plain attribute reads) ---------------------
 
@@ -146,7 +160,7 @@ class ViExtras:
         self._session.key_bindings = _merge(self._session.key_bindings, bindings)
         self._record_changes()
         if on_copy is not None:
-            self._session.clipboard = BridgingClipboard(on_copy)
+            self._session.clipboard = BridgingClipboard(on_copy, lambda: self._yanking)
 
     def _bindings(self) -> KeyBindings:
         kb = KeyBindings()
@@ -175,6 +189,15 @@ class ViExtras:
 
         return kb
 
+    def _is_yank(self, key_sequence: list[KeyPress]) -> bool:
+        """Is the handler about to run a yank (``y{motion}``, ``yy``, ``Y``, visual ``y``)?"""
+        keys = [k.key for k in key_sequence]
+        operator = getattr(self.app.vi_state.operator_func, "__name__", "")
+        visual = self._session.default_buffer.selection_state is not None
+        return (
+            operator == _YANK_OPERATOR or keys in (["y", "y"], ["Y"]) or (visual and keys == ["y"])
+        )
+
     def _record_changes(self) -> None:
         """Record each repeatable change, from the engine's own handler calls."""
         processor = self.app.key_processor
@@ -184,7 +207,11 @@ class ViExtras:
         def recording_call_handler(handler: Any, key_sequence: list[KeyPress]) -> None:
             replaying = self._replaying
             from_rest = self._at_rest(ignore_key_buffer=True)
-            call_handler(handler, key_sequence)
+            self._yanking = self._is_yank(key_sequence)
+            try:
+                call_handler(handler, key_sequence)
+            finally:
+                self._yanking = False
             if replaying:
                 return
             if from_rest:
