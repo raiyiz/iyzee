@@ -405,7 +405,7 @@ The names are `mx`, `psu`, `shutter`, `scope` and `wavemeter` (the proxy maps `m
 - an `acquisition` block says whether a running acquisition was stopped for the download (trigger mode AUTO or NORMAL; SINGLE and STOP are left alone), the prior mode, and non-fatal warnings;
 - the NPZ is SHA-256 hashed after writing and the digest is stored in the manifest.
 
-Calibrated values come from the scope's own `VERTICAL_GAIN`/`VERTICAL_OFFSET` (`value = gain × code − offset`); the form's V/div and offset are recorded as configuration provenance, never mistaken for readback. The time axis is `time_offset + index × time_interval`. Statistics are convenience summaries of the calibrated arrays, with non-finite samples excluded. The storage layer is shared with sweeps through #code("save_numeric_recording") (atomic `.part` replacement, pickle-free numeric archives, manifest, checksum), so there is one persistence implementation.
+Calibrated values come from the scope's own `VERTICAL_GAIN`/`VERTICAL_OFFSET` (`value = gain × code − offset`); the form's V/div and offset are recorded as configuration source, never mistaken for readback. The time axis is `time_offset + index × time_interval`. Statistics are convenience summaries of the calibrated arrays, with non-finite samples excluded. The storage layer is shared with sweeps through #code("save_numeric_recording") (atomic `.part` replacement, pickle-free numeric archives, manifest, checksum), so there is one persistence implementation.
 
 = Typical session, start to finish <sec-session>
 

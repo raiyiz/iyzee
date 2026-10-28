@@ -185,7 +185,7 @@ def test_waveform_figures_label_axes_and_save_a_real_png(tmp_path):
         (ax,) = fig.axes
         labels = [line.get_label() for line in ax.lines]
         assert len(labels) == 2 and ax.get_legend() is not None and labels[1] == "C2"
-        assert "0.5 V/div" in labels[0] and "D1M" in labels[0]  # provenance in the legend
+        assert "0.5 V/div" in labels[0] and "D1M" in labels[0]  # source in the legend
         assert (ax.get_xlabel(), ax.get_ylabel(), ax.get_title()) == (
             "Time (S)",
             "Signal (V)",

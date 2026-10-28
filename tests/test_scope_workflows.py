@@ -227,7 +227,7 @@ def test_acquiring_and_saving_a_scope_recording(tmp_path):
     assert manifest["configuration"]["applied_channel_settings"] is None
     assert len(manifest["data_sha256"]) == 64
 
-    # -- manifest records provenance
+    # -- manifest records source
     scope = FakeScope()
     scope.query = lambda command: "LECROY,WS452,LCRY1234,9.0.0"
 
@@ -398,7 +398,7 @@ class StatefulScope(FakeScope):
         self._update(channel, enabled=value)
 
 
-# -- acquisition: consistency and provenance -----------------------------------------------
+# -- acquisition: consistency and source -----------------------------------------------
 
 
 class TimebaseScope(FakeScope):
