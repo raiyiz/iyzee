@@ -2,7 +2,7 @@
 
 > **Goal.** Make iyzee a *whole Vim-like application*, starting from the IPython console: practical, flexible, and with as little hand-maintained Vim code as possible.
 > **Decision (2026-10-26).** Build on **`main`'s real IPython console** (prompt_toolkit's vi engine, shown through a virtual terminal). The hand-rolled Vim of the `refactor/ipython-console` branch is **abandoned**.
-> **State.** **8-commit patch series** (`patches/`) on top of `main@428702d`: code, tests, docs. `ruff`, `mypy src tests/<new files>` and the doc-link check are clean; the 76 new tests plus the 35 existing tests in the affected files pass (no full-suite run, by request). Everything ran in Textual's pilot, **never in a real terminal**. See [§6](#6-status-what-is-and-is-not-verified) and [§7](#7-whats-left-for-the-ultimate-vim-experience).
+> **State.** **9-commit patch series** (`patches/`) on top of `main@428702d`: code, tests, docs. `ruff`, `mypy src tests` and the doc-link check are clean. The full suite (190 collected cases, 23 hardware tests skipped) passes in ~5 min, down from 339 cases / 7.5 min after the test consolidation in the last commit; line coverage of `src` is unchanged (87.7%). Everything ran in Textual's pilot, **never in a real terminal**. See [§6](#6-status-what-is-and-is-not-verified) and [§7](#7-whats-left-for-the-ultimate-vim-experience).
 
 ---
 
@@ -108,8 +108,9 @@ Base: `main@428702d`. Apply with `git am patches/*.patch`.
 | 6 | `feat(app): counts for Vim motions; :q asks and :qq quits at once` | `app.py`, `motions.py`, `tests/test_command_bar.py` (decision 5) |
 | 7 | `test(console): cover the Vim console, …` | `tests/test_vi_keys.py`, `tests/test_console_vim.py`, `tests/test_motions.py` |
 | 8 | `docs: yank-only clipboard, :qq and motion counts` | README, guide |
+| 9 | `test: consolidate the suite into fewer, fuller tests` | all test files (293 → 167 functions, 7m30s → 5m03s, coverage unchanged) |
 
-Commits 1–4 type-check on their own; the series applies cleanly to `main@428702d` and yields a tree identical to the branch.
+Commits 1–4 type-check on their own (commit 9 only touches tests); the series applies cleanly to `main@428702d` and yields a tree identical to the branch.
 
 ### New files
 - **`src/iyzee/tui/vi_keys.py`** — `ViExtras`, layered on prompt_toolkit's engine:
@@ -181,7 +182,7 @@ Ordered by how much it would change day-to-day flow. None of it is started unles
 - [ ] README "not full Vim" list (see §9) once the above settles.
 
 ### 7.4 Housekeeping
-- [ ] Run the full suite once (`uv run pytest`) before merging; only the affected files were run.
+- [x] Full suite run (190 cases pass, 23 hardware skipped). Install the `notebooks` group (`uv sync --group notebooks`) to run the 43 notebook tests, which are otherwise skipped silently.
 - [ ] Consider adding the pilot tests to whatever slow-test marker the repo uses (~25 s for `test_console_vim.py`).
 
 ---
@@ -257,7 +258,7 @@ Notes for whoever continues:
 | Path | What |
 |---|---|
 | `PLAN-vim-console.md` | this document (put it at `docs/PLAN-vim-console.md` or the repo root) |
-| `patches/000{1..8}-*.patch` | the finalized series against `main@428702d` (`git am patches/*.patch`) |
+| `patches/000{1..9}-*.patch` | the finalized series against `main@428702d` (`git am patches/*.patch`) |
 | `probes/probe_escape_latency.py` | measures Escape → normal latency |
 | `probes/probe_escape_misfire.py` | `Esc`+letter misfire cases |
 | `probes/probe_leave_and_return.py` | the original exploratory probe; superseded by `tests/test_console_vim.py` |
