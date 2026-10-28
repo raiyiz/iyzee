@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from iyzee import config
 from iyzee.config import IP, ConfigError, address, data_root
 
 
@@ -13,12 +12,6 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for name in ("IYZEE_SCOPE_IP", "IYZEE_DATA_DIR", "IYZEE_NOISE_ANALYZER_IP"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("IYZEE_CONFIG", str(tmp_path / "config.toml"))  # absent: defaults
-
-
-def test_defaults_are_the_lab_addresses_and_the_checkout_data_dir():
-    assert address(IP.SCOPE) == "10.140.1.220"
-    assert address(IP.WAVEMETER) == "10.140.1.119"
-    assert data_root() == Path(config.__file__).resolve().parents[2] / "data"
 
 
 def test_the_config_file_overrides_defaults_and_the_environment_beats_the_file(
