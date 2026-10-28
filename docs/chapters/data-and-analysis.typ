@@ -139,7 +139,7 @@ Both end up as ordinary NumPy arrays. To ask what a recording *means* instead of
 `waveform_math` take and return #code("Trace") objects with no Textual or hardware import (#code("subtract_traces"), #code("subtract_background"), #code("scale_trace"));
 the Results page calls the same ones.
 
-#tested-by("test_load_sweep_example_reads_what_save_step_results_wrote", "test_load_scope_example_reads_what_save_scope_acquisition_wrote", "test_a_bandwidth_sweep_reports_requested_setpoints_and_relative_noise")
+#tested-by("test_load_sweep_example_reads_what_save_step_results_wrote", "test_load_scope_example_reads_what_save_scope_acquisition_wrote", "test_sweep_summaries_plot_the_right_axis_and_honour_the_statistic")
 
 
 = Notebook workbench <data-workbench>
