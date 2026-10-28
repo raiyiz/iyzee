@@ -40,7 +40,8 @@ def test_parse_si_understands_suffixes_and_rejects_garbage():
         parse_si("fast")
 
 
-def test_exact_name_alias_and_unique_prefix_resolve_and_pass_arguments():
+def test_names_aliases_and_prefixes_resolve_and_misses_are_user_errors():
+    # -- exact name alias and unique prefix resolve and pass arguments
     calls: list = []
     registry = make_registry(calls)
 
@@ -55,21 +56,24 @@ def test_exact_name_alias_and_unique_prefix_resolve_and_pass_arguments():
         ("quit", []),
     ]
 
-
-def test_an_exact_alias_beats_prefix_matching_and_blank_lines_do_nothing():
+    # -- an exact alias beats prefix matching and blank lines do nothing
     calls: list = []
     registry = make_registry(calls)
     registry.execute("s")  # would be ambiguous as a prefix of sweep/... only if aliases didn't win
     assert calls == [("sweep", [])]
     assert registry.execute("  :  ") is None
 
-
-def test_ambiguous_and_unknown_commands_are_user_errors():
+    # -- ambiguous and unknown commands are user errors
     registry = make_registry([])
     with pytest.raises(CommandError, match=r"ambiguous :con.*connect, console"):
         registry.execute("con")
     with pytest.raises(CommandError, match="unknown command :zap"):
         registry.execute("zap")
+
+    # -- a later registration shadows an earlier one
+    registry = make_registry([])
+    registry.add(Command("sweep", lambda args: "page-specific", "shadow"))
+    assert registry.execute("sweep") == "page-specific"
 
 
 def test_quoted_arguments_stay_together_and_bad_quoting_is_an_error():
@@ -80,13 +84,8 @@ def test_quoted_arguments_stay_together_and_bad_quoting_is_an_error():
         make_registry([]).execute('connect "oops')
 
 
-def test_a_later_registration_shadows_an_earlier_one():
-    registry = make_registry([])
-    registry.add(Command("sweep", lambda args: "page-specific", "shadow"))
-    assert registry.execute("sweep") == "page-specific"
-
-
-def test_tab_completion_of_command_words_and_arguments():
+def test_completion_and_help_list_commands_and_their_arguments():
+    # -- tab completion of command words and arguments
     registry = make_registry([])
     assert registry.complete("swe") == ("sweep ", ["sweep"])
     line, candidates = registry.complete("con")
@@ -100,8 +99,7 @@ def test_tab_completion_of_command_words_and_arguments():
     ]  # already-given ones are skipped
     assert registry.complete("zzz") == ("zzz", [])
 
-
-def test_help_lists_every_command_and_details_one():
+    # -- help lists every command and details one
     registry = make_registry([])
     listing = registry.help_text()
     assert all(f":{name}" in listing for name in registry.names)

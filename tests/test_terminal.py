@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from helpers import FakeApp, async_test
 from prompt_toolkit.input.vt100_parser import Vt100Parser
+from textual import events
 from textual.widgets import ContentSwitcher
 
 from iyzee.tui import ipython_session
@@ -26,6 +27,7 @@ from iyzee.tui.screens.console import IyzeeConsole
 from iyzee.tui.terminal_view import TerminalView
 from iyzee.tui.termkeys import key_to_bytes
 from iyzee.tui.vterm import VTermScreen
+from iyzee.tui.workers import LastRun
 
 # -- screen model ---------------------------------------------------------------------
 
@@ -254,16 +256,24 @@ async def _wait(pilot, app, needle: str, timeout: float = 10.0) -> bool:
 
 
 @async_test
-async def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
+async def test_the_console_page_types_into_ipython_keeps_app_keys_scrolls_and_interrupts() -> None:
     app = IyzeeApp()
     async with app.run_test(size=(110, 32)) as pilot:
         await pilot.press("i")
         view = app.screen.query_one(TerminalView)
         assert app.screen.focused is view
         assert await _wait(pilot, app, "In [1]")
+        session = app.query_one(IyzeeConsole).session
 
         await pilot.press(*_keys("40 + 2"), "enter")  # real key events
         assert await _wait(pilot, app, "Out[1]: 42")
+
+        # `lab` sees the running app's live state without any refresh (the proxy's properties
+        # are unit-tested in test_ipython.py; this proves the real console wires it to the app).
+        lab = session.shell.user_ns["lab"]
+        assert lab.results == [] and lab.last_run is None
+        app.last_run = LastRun(kind="bandwidth", results=[], path=None)
+        assert lab.last_run is not None and lab.last_run.kind == "bandwidth"
 
         # Keys the terminal owns are NOT app bindings while it has focus...
         await pilot.press("c")  # goes into IPython's line, not the app's page switch
@@ -276,7 +286,7 @@ async def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
         assert app.query_one(ContentSwitcher).current == "console"
 
         # Bracketed paste arrives as one edit, not as typed lines.
-        view.post_message(__import__("textual.events", fromlist=["Paste"]).Paste("x = 5"))
+        view.post_message(events.Paste("x = 5"))
         await pilot.pause(0.2)
         await pilot.press("enter")
         await pilot.press(*_keys("x"), "enter")
@@ -284,18 +294,8 @@ async def test_console_page_types_into_ipython_and_keeps_app_keys() -> None:
         await pilot.press("up")
         assert await _wait(pilot, app, "In [4]: x"), _console_text(app)
 
-
-@async_test
-async def test_console_interrupt_scrollback_and_shutdown() -> None:
-    app = IyzeeApp()
-    async with app.run_test(size=(110, 32)) as pilot:
-        await pilot.press("i")
-        assert await _wait(pilot, app, "In [1]")
-        session = app.query_one(IyzeeConsole).session
-        view = app.screen.query_one(TerminalView)
-
         # Output longer than the screen scrolls into scrollback, reachable by keyboard.
-        session.send(b"for i in range(80): print('line', i)\r\r")
+        session.send(b"\x15for i in range(80): print('line', i)\r\r")
         assert await _wait(pilot, app, "line 79")
         assert view.vterm.scrollback_lines > 0
         await pilot.press("shift+pageup")
@@ -341,25 +341,15 @@ def _session_whose_shell_thread_ends_at_once(monkeypatch: pytest.MonkeyPatch):
 
 
 @async_test
-async def test_the_shell_threads_id_is_forgotten_when_that_thread_ends(
+async def test_interrupt_never_aims_at_a_thread_that_is_not_the_live_shell(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, injected = _session_whose_shell_thread_ends_at_once(monkeypatch)
     try:
-        assert session._thread_id is None
+        assert session._thread_id is None  # forgotten when the shell thread ended
         session.interrupt()
         assert injected == []
-    finally:
-        session.close()
-
-
-@async_test
-async def test_interrupt_checks_the_thread_is_alive_even_if_an_id_were_left_behind(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, injected = _session_whose_shell_thread_ends_at_once(monkeypatch)
-    try:
-        session._thread_id = 123456  # a stale id, as before the fix
+        session._thread_id = 123456  # a stale id, as before the fix: liveness is checked too
         session.interrupt()
         assert injected == [], "interrupt() aimed at a thread that is not the (dead) shell"
     finally:

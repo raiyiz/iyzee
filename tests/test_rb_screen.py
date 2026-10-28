@@ -19,7 +19,9 @@ def _drawn(plot: PlotextPlot) -> str:
     return _ANSI.sub("", plot.plt.build())
 
 
-def test_every_transition_is_parsed_with_its_own_isotope_centre() -> None:
+def test_transitions_are_parsed_with_their_isotope_and_decoded_into_f_numbers_and_detuning() -> (
+    None
+):
     lines = rb_lines()
     expected = [label for label, _ in Rb_transitions if not label.endswith("_center")]
     assert [line.label for line in lines] == expected
@@ -29,12 +31,8 @@ def test_every_transition_is_parsed_with_its_own_isotope_centre() -> None:
         ("D2", 85),
         ("D2", 87),
     }
-
-
-def test_labels_are_decoded_into_f_numbers_and_detuning() -> None:
-    by_label = {line.label: line for line in rb_lines()}
     # Rb85 D2, F=3 -> F'=4: the cycling transition.
-    cycling = by_label["D2 - Rb85_F34"]
+    cycling = {line.label: line for line in lines}["D2 - Rb85_F34"]
     assert (cycling.f_ground, cycling.f_excited) == (3, 4)
     assert cycling.name == "D2 Rb85 F=3→F'=4"
     # Steck: ground-state offset -1.264888516 GHz, excited-state offset +0.100357 GHz.
@@ -42,26 +40,21 @@ def test_labels_are_decoded_into_f_numbers_and_detuning() -> None:
 
 
 @async_test
-async def test_rb_page_lists_every_transition_and_draws_both_lines() -> None:
+async def test_the_rb_page_lists_every_transition_draws_both_lines_and_marks_the_highlighted_one() -> (
+    None
+):
     app = IyzeeApp()
     async with app.run_test(size=(140, 50)) as pilot:
         await pilot.press("r")
         await pilot.pause()
         assert app.query_one(ContentSwitcher).current == "rb"
-        assert app.query_one("#rb-table", DataTable).row_count == len(rb_lines())
+        table = app.query_one("#rb-table", DataTable)
+        assert table.row_count == len(rb_lines())
         for line in ("d1", "d2"):
             text = _drawn(app.query_one(f"#rb-{line}", PlotextPlot))
             assert f"Rb {line.upper()}" in text
             assert "Rb85" in text and "Rb87" in text
 
-
-@async_test
-async def test_highlighting_a_row_marks_that_transition_in_its_plot() -> None:
-    app = IyzeeApp()
-    async with app.run_test(size=(140, 50)) as pilot:
-        await pilot.press("r")
-        await pilot.pause()
-        table = app.query_one("#rb-table", DataTable)
         # The table has focus when the page opens; move to the last D2 row.
         target = rb_lines()[-1]
         table.move_cursor(row=table.get_row_index(target.label))

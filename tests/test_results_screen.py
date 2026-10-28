@@ -174,156 +174,163 @@ async def test_frequency_sweep_keeps_requested_and_measured_frequency_navigation
 
 
 @async_test
-async def test_scope_channel_selection_changes_the_actual_preview(
+async def test_scope_previews_follow_the_selection_and_never_show_a_stale_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _save_scope_run(tmp_path)
-    drawn: list[list[str | None]] = []
-    real_draw = results_mod.draw_series
+    # -- scope channel selection changes the actual preview
+    async def _scope_channel_selection_changes_the_actu():
+        _save_scope_run(tmp_path)
+        drawn: list[list[str | None]] = []
+        real_draw = results_mod.draw_series
 
-    def spy(plot, series, **kwargs):  # type: ignore[no-untyped-def]
-        drawn.append([label for _x, _y, label in series])
-        return real_draw(plot, series, **kwargs)
+        def spy(plot, series, **kwargs):  # type: ignore[no-untyped-def]
+            drawn.append([label for _x, _y, label in series])
+            return real_draw(plot, series, **kwargs)
 
-    monkeypatch.setattr(results_mod, "draw_series", spy)
+        monkeypatch.setattr(results_mod, "draw_series", spy)
 
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1", "C2"])
-        screen._checkboxes["C2"].value = False
-        await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1"])
+        async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
+            await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1", "C2"])
+            screen._checkboxes["C2"].value = False
+            await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1"])
+
+    await _scope_channel_selection_changes_the_actu()
+
+    # -- slow scope preview cannot overwrite a newer selection
+    async def _slow_scope_preview_cannot_overwrite_a_ne():
+        _save_scope_run(tmp_path)
+        entered = threading.Event()
+        release = threading.Event()
+        real_prepare = plotting_mod.prepare_series
+        call_count = 0
+
+        def gated_prepare(x, y, label, *args, **kwargs):  # type: ignore[no-untyped-def]
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                entered.set()
+                release.wait(timeout=5)
+            return real_prepare(x, y, label, *args, **kwargs)
+
+        monkeypatch.setattr(plotting_mod, "prepare_series", gated_prepare)
+        drawn: list[list[str | None]] = []
+        real_draw = results_mod.draw_series
+
+        def spy(plot, series, **kwargs):  # type: ignore[no-untyped-def]
+            drawn.append([label for _x, _y, label in series])
+            return real_draw(plot, series, **kwargs)
+
+        monkeypatch.setattr(results_mod, "draw_series", spy)
+
+        async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
+            await wait_until(pilot, entered.is_set)
+            generation = screen._render_generation
+            screen._checkboxes["C2"].value = False
+            await wait_until(pilot, lambda: screen._render_generation != generation)
+            release.set()
+            await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1"])
+            await pilot.pause(0.2)
+            assert drawn == [["C1"]]
+
+    await _slow_scope_preview_cannot_overwrite_a_ne()
 
 
 @async_test
-async def test_scope_operations_apply_and_chain_through_derived_traces(
+async def test_scope_operations_apply_chain_and_refuse_bad_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _save_scope_run(tmp_path)
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, lambda: set(screen._measured) == {"C1", "C2"})
-        a = screen._measured["C1"]
-        b = screen._measured["C2"]
-        known: set[str] = set()
+    # -- scope operations apply and chain through derived traces
+    async def _scope_operations_apply_and_chain_through():
+        _save_scope_run(tmp_path)
+        async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
+            await wait_until(pilot, lambda: set(screen._measured) == {"C1", "C2"})
+            a = screen._measured["C1"]
+            b = screen._measured["C2"]
+            known: set[str] = set()
 
-        def expect_one_new(label: str) -> None:
-            """Each operation adds exactly one derived trace and disturbs no other."""
-            known.add(label)
-            assert set(screen._derived) == known
+            def expect_one_new(label: str) -> None:
+                """Each operation adds exactly one derived trace and disturbs no other."""
+                known.add(label)
+                assert set(screen._derived) == known
 
-        await _apply_op(screen, pilot, "subtract", a="C1", b="C2")
-        subtracted = subtract_traces(a, b)
-        expect_one_new(subtracted.label)
-        np.testing.assert_allclose(screen._derived[subtracted.label].values, subtracted.values)
+            await _apply_op(screen, pilot, "subtract", a="C1", b="C2")
+            subtracted = subtract_traces(a, b)
+            expect_one_new(subtracted.label)
+            np.testing.assert_allclose(screen._derived[subtracted.label].values, subtracted.values)
 
-        lo = float(a.time[0])
-        hi = float(a.time[min(1, len(a.time) - 1)])
-        await _apply_op(
-            screen,
-            pilot,
-            "background-region",
-            a="C1",
-            region_lo=str(lo),
-            region_hi=str(hi),
-        )
-        expected = subtract_background(a, region=(lo, hi))
-        expect_one_new(expected.label)
-        np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
-
-        await _apply_op(screen, pilot, "background-reference", a="C1", b="C2")
-        expected = subtract_background(a, reference=b)
-        expect_one_new(expected.label)
-        np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
-
-        await _apply_op(
-            screen,
-            pilot,
-            "scale",
-            a="C1",
-            xscale="2",
-            xoffset="1",
-            yscale="3",
-            yoffset="4",
-        )
-        expected = scale_trace(a, x_scale=2.0, x_offset=1.0, y_scale=3.0, y_offset=4.0)
-        expect_one_new(expected.label)
-        np.testing.assert_allclose(screen._derived[expected.label].time, expected.time)
-        np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
-
-        await _apply_op(
-            screen,
-            pilot,
-            "scale",
-            a=subtracted.label,
-            xscale="1",
-            xoffset="0",
-            yscale="1000",
-            yoffset="0",
-        )
-        chained = scale_trace(screen._derived[subtracted.label], y_scale=1000.0)
-        expect_one_new(chained.label)
-        np.testing.assert_allclose(screen._derived[chained.label].values, chained.values)
-
-
-@async_test
-async def test_the_operation_form_shows_only_relevant_fields_and_bad_input_makes_no_trace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path)
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, lambda: set(screen._measured) == {"C1", "C2"})
-        screen.query_one("#results-op", Select).value = "background-region"
-        await pilot.pause()
-        assert screen.query_one("#results-field-chan-a").display
-        assert screen.query_one("#results-field-region-lo").display
-        assert screen.query_one("#results-field-region-hi").display
-        assert not screen.query_one("#results-field-chan-b").display
-        assert not screen.query_one("#results-field-yscale").display
-
-        for invalid in ("not-a-number", "nan", "inf"):
-            await _apply_op(screen, pilot, "scale", a="C1", yscale=invalid)
-            assert screen._derived == {}
-            assert screen.query_one("#results-yscale").has_class("-invalid")
-            assert any(
-                "Y scale" in message for message in notifications(cast(app_mod.IyzeeApp, pilot.app))
+            lo = float(a.time[0])
+            hi = float(a.time[min(1, len(a.time) - 1)])
+            await _apply_op(
+                screen,
+                pilot,
+                "background-region",
+                a="C1",
+                region_lo=str(lo),
+                region_hi=str(hi),
             )
+            expected = subtract_background(a, region=(lo, hi))
+            expect_one_new(expected.label)
+            np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
+            await _apply_op(screen, pilot, "background-reference", a="C1", b="C2")
+            expected = subtract_background(a, reference=b)
+            expect_one_new(expected.label)
+            np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
-@async_test
-async def test_slow_scope_preview_cannot_overwrite_a_newer_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _save_scope_run(tmp_path)
-    entered = threading.Event()
-    release = threading.Event()
-    real_prepare = plotting_mod.prepare_series
-    call_count = 0
+            await _apply_op(
+                screen,
+                pilot,
+                "scale",
+                a="C1",
+                xscale="2",
+                xoffset="1",
+                yscale="3",
+                yoffset="4",
+            )
+            expected = scale_trace(a, x_scale=2.0, x_offset=1.0, y_scale=3.0, y_offset=4.0)
+            expect_one_new(expected.label)
+            np.testing.assert_allclose(screen._derived[expected.label].time, expected.time)
+            np.testing.assert_allclose(screen._derived[expected.label].values, expected.values)
 
-    def gated_prepare(x, y, label, *args, **kwargs):  # type: ignore[no-untyped-def]
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            entered.set()
-            release.wait(timeout=5)
-        return real_prepare(x, y, label, *args, **kwargs)
+            await _apply_op(
+                screen,
+                pilot,
+                "scale",
+                a=subtracted.label,
+                xscale="1",
+                xoffset="0",
+                yscale="1000",
+                yoffset="0",
+            )
+            chained = scale_trace(screen._derived[subtracted.label], y_scale=1000.0)
+            expect_one_new(chained.label)
+            np.testing.assert_allclose(screen._derived[chained.label].values, chained.values)
 
-    monkeypatch.setattr(plotting_mod, "prepare_series", gated_prepare)
-    drawn: list[list[str | None]] = []
-    real_draw = results_mod.draw_series
+    await _scope_operations_apply_and_chain_through()
 
-    def spy(plot, series, **kwargs):  # type: ignore[no-untyped-def]
-        drawn.append([label for _x, _y, label in series])
-        return real_draw(plot, series, **kwargs)
+    # -- the operation form shows only relevant fields and bad input makes no trace
+    async def _the_operation_form_shows_only_relevant_f():
+        _save_scope_run(tmp_path)
+        async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
+            await wait_until(pilot, lambda: set(screen._measured) == {"C1", "C2"})
+            screen.query_one("#results-op", Select).value = "background-region"
+            await pilot.pause()
+            assert screen.query_one("#results-field-chan-a").display
+            assert screen.query_one("#results-field-region-lo").display
+            assert screen.query_one("#results-field-region-hi").display
+            assert not screen.query_one("#results-field-chan-b").display
+            assert not screen.query_one("#results-field-yscale").display
 
-    monkeypatch.setattr(results_mod, "draw_series", spy)
+            for invalid in ("not-a-number", "nan", "inf"):
+                await _apply_op(screen, pilot, "scale", a="C1", yscale=invalid)
+                assert screen._derived == {}
+                assert screen.query_one("#results-yscale").has_class("-invalid")
+                assert any(
+                    "Y scale" in message
+                    for message in notifications(cast(app_mod.IyzeeApp, pilot.app))
+                )
 
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, entered.is_set)
-        generation = screen._render_generation
-        screen._checkboxes["C2"].value = False
-        await wait_until(pilot, lambda: screen._render_generation != generation)
-        release.set()
-        await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1"])
-        await pilot.pause(0.2)
-        assert drawn == [["C1"]]
+    await _the_operation_form_shows_only_relevant_f()
 
 
 @async_test

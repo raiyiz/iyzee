@@ -172,7 +172,8 @@ def _settings(channel: Channel, **overrides) -> ChannelSettings:
     return ChannelSettings(**defaults)
 
 
-def test_acquire_scope_recording_retains_calibration_and_statistics():
+def test_acquiring_and_saving_a_scope_recording(tmp_path):
+    # -- acquire scope recording retains calibration and statistics
     scope = FakeScope()
     settings = (_settings(Channel.C1), _settings(Channel.C2))
     trigger = TriggerSettings(
@@ -207,8 +208,7 @@ def test_acquire_scope_recording_retains_calibration_and_statistics():
     assert waveform.stats["min"] == 1.0
     assert waveform.stats["peak_to_peak"] == 2.0
 
-
-def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path):
+    # -- save scope acquisition writes data manifest checksum and stats
     scope = FakeScope()
     recording = acquire_scope_recording(
         scope, [Channel.C1], channel_settings=(_settings(Channel.C1),)
@@ -227,6 +227,19 @@ def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path
     assert manifest["configuration"]["applied_channel_settings"] is None
     assert len(manifest["data_sha256"]) == 64
 
+    # -- manifest records provenance
+    scope = FakeScope()
+    scope.query = lambda command: "LECROY,WS452,LCRY1234,9.0.0"
+
+    recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
+    manifest = json.loads(
+        save_scope_acquisition(recording, tmp_path).with_suffix(".json").read_text()
+    )
+
+    assert manifest["instrument"]["identity"] == "LECROY,WS452,LCRY1234,9.0.0"
+    assert manifest["acquisition"] == {"frozen": True, "prior_trigger_mode": "AUTO", "warnings": []}
+    assert "errors" not in manifest
+
 
 # -- apply_channel_settings ---------------------------------------------------------------
 
@@ -240,7 +253,8 @@ def test_save_scope_acquisition_writes_data_manifest_checksum_and_stats(tmp_path
 # -- apply_trigger_settings ----------------------------------------------------------------
 
 
-def test_apply_trigger_settings_writes_every_field_or_only_what_changed():
+def test_trigger_settings_are_applied_and_read_back():
+    # -- apply trigger settings writes every field or only what changed
     scope = FakeScope()
     settings = TriggerSettings(
         source=Channel.C2,
@@ -280,11 +294,7 @@ def test_apply_trigger_settings_writes_every_field_or_only_what_changed():
     apply_trigger_settings(scope, replace(baseline, time_per_div=5e-6), current_settings=baseline)
     assert read_trigger_settings(scope).time_per_div == 5e-6
 
-
-# -- selective trigger apply ----------------------------------------------------------------
-
-
-def test_read_trigger_settings_reads_the_armed_source_and_failures_raise():
+    # -- read trigger settings reads the armed source and failures raise
     scope = FakeScope()
     scope.trigger_state = TriggerSettings(
         source=Channel.C2,
@@ -304,6 +314,9 @@ def test_read_trigger_settings_reads_the_armed_source_and_failures_raise():
     scope.get_trigger_mode = lambda: (_ for _ in ()).throw(RuntimeError("nope"))
     with pytest.raises(RuntimeError, match="nope"):
         read_trigger_settings(scope)
+
+
+# -- selective trigger apply ----------------------------------------------------------------
 
 
 # -- a failed timebase read is reported against every channel that needed it ----------------
@@ -396,7 +409,8 @@ class TimebaseScope(FakeScope):
         return ("S", 0.0, self.INTERVALS[channel])
 
 
-def test_each_channel_gets_a_time_axis_from_its_own_timebase():
+def test_the_download_gets_each_timebase_freezes_a_running_acquisition_and_fails_safely():
+    # -- each channel gets a time axis from its own timebase
     scope = TimebaseScope()
 
     recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
@@ -405,12 +419,7 @@ def test_each_channel_gets_a_time_axis_from_its_own_timebase():
     assert c1.time_interval == 1e-6 and c2.time_interval == 5e-6
     np.testing.assert_allclose(c2.time, [0.0, 5e-6, 10e-6])
 
-
-def _mode_calls(scope):
-    return [c for c in scope.calls if c[0] == "set_trigger_mode"]
-
-
-def test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_one_is_left_alone():
+    # -- a running acquisition is frozen for the download and restored a held one is left alone
     for mode in (TriggerMode.AUTO, TriggerMode.NORMAL):
         scope = FakeScope()
         scope.trigger_state = TriggerSettings(
@@ -442,8 +451,7 @@ def test_a_running_acquisition_is_frozen_for_the_download_and_restored_a_held_on
     assert _mode_calls(scope) == [] and not any(c[0] == "get_trigger_mode" for c in scope.calls)
     assert recording.frozen is False
 
-
-def test_freeze_restore_and_identity_failures_are_warnings_and_the_download_still_happens():
+    # -- freeze restore and identity failures are warnings and the download still happens
     scope = FakeScope()
 
     def boom(mode):
@@ -481,6 +489,33 @@ def test_freeze_restore_and_identity_failures_are_warnings_and_the_download_stil
     assert recording.instrument_id is None
     assert any("identity unavailable" in w for w in recording.warnings)
 
+    # -- acquisition failures raise and restore the trigger mode
+    scope = FakeScope(fail_channels=frozenset({Channel.C1}))
+    with pytest.raises(RuntimeError, match="C1 refused"):
+        acquire_scope_recording(scope, [Channel.C1, Channel.C2])
+    assert _mode_calls(scope)[-1] == ("set_trigger_mode", TriggerMode.AUTO)
+    assert ("getDataFloatsDetailed", Channel.C2) not in scope.calls
+
+    with pytest.raises(RuntimeError, match="did not respond"):  # a failed timebase read
+        acquire_scope_recording(FakeScope(fail_hor=True), [Channel.C1, Channel.C2])
+
+    class Empty(FakeScope):
+        def getDataFloatsDetailed(self, channel, block="DAT1"):
+            return {
+                "unit": "V",
+                "values": [],
+                "raw_codes": [],
+                "vertical_gain": 1.0,
+                "vertical_offset": 0.0,
+            }
+
+    with pytest.raises(ValueError, match="empty waveform"):
+        acquire_scope_recording(Empty(), [Channel.C1])
+
+
+def _mode_calls(scope):
+    return [c for c in scope.calls if c[0] == "set_trigger_mode"]
+
 
 def test_parse_seconds_accepts_the_reply_shapes_the_scope_uses_and_rejects_garbage():
     from iyzee.scope_workflows import _parse_seconds
@@ -503,7 +538,8 @@ def _set_calls(scope):
 # -- channel apply / read ---------------------------------------------------------------------
 
 
-def test_apply_channel_settings_writes_every_field_or_only_what_changed():
+def test_channel_settings_are_applied_and_read_under_the_driver_lock():
+    # -- apply channel settings writes every field or only what changed
     scope = FakeScope()
     apply_channel_settings(
         scope, [_settings(Channel.C1, volts_per_div=1.0, offset=0.2, enabled=False)]
@@ -531,8 +567,7 @@ def test_apply_channel_settings_writes_every_field_or_only_what_changed():
         )
     assert scope.calls == []
 
-
-def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_first_failure():
+    # -- apply channel settings returns what the scope reports and stops at the first failure
     scope = StatefulScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
     c1, c2 = apply_channel_settings(
         scope,
@@ -550,8 +585,7 @@ def test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_
     assert all(c[1] == Channel.C1 for c in _set_calls(scope))
     assert not any(c[0].startswith("get_") for c in scope.calls)  # no read-back after a failure
 
-
-def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_first_failure():
+    # -- read channel settings reads every field parses units and stops at the first failure
     scope = FakeScope()
     scope.channel_state[Channel.C1] = _settings(
         Channel.C1, enabled=False, volts_per_div=1.0, offset=-0.25, coupling=Coupling.DC_50
@@ -572,8 +606,7 @@ def test_read_channel_settings_reads_every_field_parses_units_and_stops_at_the_f
         read_channel_settings(scope, [Channel.C1, Channel.C2])
     assert {c[1] for c in scope.calls} == {Channel.C1}
 
-
-def test_batches_hold_the_driver_lock_throughout():
+    # -- batches hold the driver lock throughout
     scope = StatefulScope()
     held: list[bool] = []
     original = scope.get_volts_per_div
@@ -590,41 +623,3 @@ def test_batches_hold_the_driver_lock_throughout():
 
 
 # -- acquisition failures ---------------------------------------------------------------------
-
-
-def test_acquisition_failures_raise_and_restore_the_trigger_mode():
-    scope = FakeScope(fail_channels=frozenset({Channel.C1}))
-    with pytest.raises(RuntimeError, match="C1 refused"):
-        acquire_scope_recording(scope, [Channel.C1, Channel.C2])
-    assert _mode_calls(scope)[-1] == ("set_trigger_mode", TriggerMode.AUTO)
-    assert ("getDataFloatsDetailed", Channel.C2) not in scope.calls
-
-    with pytest.raises(RuntimeError, match="did not respond"):  # a failed timebase read
-        acquire_scope_recording(FakeScope(fail_hor=True), [Channel.C1, Channel.C2])
-
-    class Empty(FakeScope):
-        def getDataFloatsDetailed(self, channel, block="DAT1"):
-            return {
-                "unit": "V",
-                "values": [],
-                "raw_codes": [],
-                "vertical_gain": 1.0,
-                "vertical_offset": 0.0,
-            }
-
-    with pytest.raises(ValueError, match="empty waveform"):
-        acquire_scope_recording(Empty(), [Channel.C1])
-
-
-def test_manifest_records_provenance(tmp_path):
-    scope = FakeScope()
-    scope.query = lambda command: "LECROY,WS452,LCRY1234,9.0.0"
-
-    recording = acquire_scope_recording(scope, [Channel.C1, Channel.C2])
-    manifest = json.loads(
-        save_scope_acquisition(recording, tmp_path).with_suffix(".json").read_text()
-    )
-
-    assert manifest["instrument"]["identity"] == "LECROY,WS452,LCRY1234,9.0.0"
-    assert manifest["acquisition"] == {"frozen": True, "prior_trigger_mode": "AUTO", "warnings": []}
-    assert "errors" not in manifest

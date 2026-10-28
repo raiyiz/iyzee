@@ -23,9 +23,10 @@ def raising(failure: BaseException):
     return fail
 
 
-def test_read_frequency_uses_the_requested_and_default_channel(
+def test_the_wavemeter_reads_the_right_channel_at_the_configured_host_and_posts_pid_setpoints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # -- read frequency uses the requested and default channel
     seen: list[tuple[str, dict[str, Any]]] = []
 
     def get(url: str, **kwargs: Any) -> requests.Response:
@@ -43,14 +44,39 @@ def test_read_frequency_uses_the_requested_and_default_channel(
         (f"{client.base_url}frequency/{wavemeter.DEFAULT_CHANNEL}/", timeout),
     ]
 
-
-def test_host_uses_the_configured_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    # -- host uses the configured address
     monkeypatch.setenv("IYZEE_WAVEMETER_IP", "192.0.2.7")
     client = Wavemeter()
     assert client.base_url == f"http://192.0.2.7:{wavemeter.WAVEMETER_PORT}/api/"
 
     explicit = Wavemeter(host="198.51.100.1")
     assert explicit.base_url == f"http://198.51.100.1:{wavemeter.WAVEMETER_PORT}/api/"
+
+    # -- set pid setpoint posts the expected form
+    posted: list[dict[str, Any]] = []
+
+    def post(url: str, data: dict[str, Any] | None = None, timeout: float | None = None) -> Any:
+        posted.append({"url": url, "data": data, "timeout": timeout})
+        return response("")
+
+    monkeypatch.setattr(wavemeter.requests, "post", post)
+    client = Wavemeter()
+
+    client.set_pid_setpoint(377.1052, 4)
+    client.set_pid_setpoint(377.1052)
+
+    expected = {
+        "url": f"{client.base_url}set_pid/",
+        "data": {"freq_thz": 377.1052, "channel": 4},
+        "timeout": wavemeter.SETPOINT_TIMEOUT_S,
+    }
+    assert posted == [
+        expected,
+        {
+            **expected,
+            "data": {"freq_thz": 377.1052, "channel": wavemeter.DEFAULT_CHANNEL},
+        },
+    ]
 
 
 def test_failures_are_raised_as_they_are_never_wrapped_or_swallowed(
@@ -80,30 +106,3 @@ def test_failures_are_raised_as_they_are_never_wrapped_or_swallowed(
     monkeypatch.setattr(wavemeter.requests, "get", lambda *a, **k: response("not-a-frequency"))
     with pytest.raises(ValueError, match="not-a-frequency"):  # an unparseable reading
         Wavemeter().read_frequency(1)
-
-
-def test_set_pid_setpoint_posts_the_expected_form(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[dict[str, Any]] = []
-
-    def post(url: str, data: dict[str, Any] | None = None, timeout: float | None = None) -> Any:
-        seen.append({"url": url, "data": data, "timeout": timeout})
-        return response("")
-
-    monkeypatch.setattr(wavemeter.requests, "post", post)
-    client = Wavemeter()
-
-    client.set_pid_setpoint(377.1052, 4)
-    client.set_pid_setpoint(377.1052)
-
-    expected = {
-        "url": f"{client.base_url}set_pid/",
-        "data": {"freq_thz": 377.1052, "channel": 4},
-        "timeout": wavemeter.SETPOINT_TIMEOUT_S,
-    }
-    assert seen == [
-        expected,
-        {
-            **expected,
-            "data": {"freq_thz": 377.1052, "channel": wavemeter.DEFAULT_CHANNEL},
-        },
-    ]

@@ -42,7 +42,8 @@ def visa_timeout() -> VisaIOError:
 # -- connection ------------------------------------------------------------------------------
 
 
-def test_connect_applies_timeout_and_chunk_size_and_failures_are_clear():
+def test_connecting_and_the_identity_query_fail_clearly():
+    # -- connect applies timeout and chunk size and failures are clear
     manager = FakeResourceManager()
     scope = LeCroy("10.0.0.1", timeout_ms=7_000, resource_manager=manager)
     assert not scope.connected
@@ -67,16 +68,14 @@ def test_connect_applies_timeout_and_chunk_size_and_failures_are_clear():
         refused.connect()
     assert not refused.connected
 
-
-def test_a_silent_scope_raises_lecroy_timeout_and_drops_the_connection():
+    # -- a silent scope raises lecroy timeout and drops the connection
     for read in (lambda s: s.query("C1:VOLT_DIV?"), lambda s: s._read_words("C1", "DAT1")):
         scope, resource = connected(visa_timeout())
         with pytest.raises(LeCroyTimeoutError):
             read(scope)
         assert scope.connected is False and resource.closed
 
-
-def test_idn_asks_for_the_identity_and_can_widen_the_timeout():
+    # -- idn asks for the identity and can widen the timeout
     scope, resource = connected("LECROY,WP804HD-MS,SN,11.6.0\n")
 
     assert scope.idn(timeout=15.0) == "LECROY,WP804HD-MS,SN,11.6.0"
@@ -88,8 +87,8 @@ def test_idn_asks_for_the_identity_and_can_widen_the_timeout():
 # -- waveform download -----------------------------------------------------------------------
 
 
-def test_waveform_download_decodes_calibrates_and_rejects_malformed_blocks():
-    # 0x0A bytes inside the data must not end the read early.
+def test_waveforms_and_settings_use_the_documented_commands_and_refuse_bad_input():
+    # -- waveform download decodes calibrates and rejects malformed blocks
     scope, resource = connected(wf_block(struct.pack("<3h", -32768, 10, 32767)))
     codes = scope._read_words("C1", "DAT1")
     assert resource.written == ["CFMT DEF9,WORD,BIN", "CORD LO", "C1:WF? DAT1"]
@@ -123,11 +122,7 @@ def test_waveform_download_decodes_calibrates_and_rejects_malformed_blocks():
             scope._read_words("C1", "DAT1")
         assert scope.connected and not resource.closed  # the whole reply was read: stream aligned
 
-
-# -- channel / trigger control ---------------------------------------------------------------
-
-
-def test_setters_and_getters_use_the_documented_commands():
+    # -- setters and getters use the documented commands
     for call, expected in (
         (lambda s: s.set_volts_per_div(Channel.C1, 0.5), "C1:VOLT_DIV 0.5"),
         (lambda s: s.set_offset(Channel.C2, -0.3), "C2:OFFSET -0.3"),
@@ -161,8 +156,7 @@ def test_setters_and_getters_use_the_documented_commands():
         assert call(scope) == "reply text"  # trimmed
         assert resource.written == [command]
 
-
-def test_bad_names_and_numbers_are_refused_before_anything_is_written():
+    # -- bad names and numbers are refused before anything is written
     scope, resource = connected()
 
     for bad in ("C1:VOLT_DIV 1;C2", "C1\n"):  # free-form names must be plain identifiers
@@ -182,3 +176,6 @@ def test_bad_names_and_numbers_are_refused_before_anything_is_written():
             scope.set_time_per_div(bad_time)
 
     assert not resource.written
+
+
+# -- channel / trigger control ---------------------------------------------------------------

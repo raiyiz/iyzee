@@ -18,7 +18,8 @@ def _saved_sweep(tmp_path: Path, results: list[StepResult], *, name: str) -> Rec
     return load_recording(path)
 
 
-def test_a_bandwidth_sweep_reports_requested_setpoints_and_relative_noise(tmp_path):
+def test_sweep_summaries_plot_the_right_axis_and_honour_the_statistic(tmp_path):
+    # -- a bandwidth sweep reports requested setpoints and relative noise
     recording = _saved_sweep(
         tmp_path,
         [
@@ -41,8 +42,7 @@ def test_a_bandwidth_sweep_reports_requested_setpoints_and_relative_noise(tmp_pa
     assert sweep.points[1].relative_noise_db is None
     assert sweep.points[0].x == 20e3
 
-
-def test_a_frequency_sweep_plots_at_the_measured_frequency(tmp_path):
+    # -- a frequency sweep plots at the measured frequency
     recording = _saved_sweep(
         tmp_path,
         [
@@ -74,8 +74,7 @@ def test_a_frequency_sweep_plots_at_the_measured_frequency(tmp_path):
     assert sweep.points[1].measured is None
     assert sweep.points[1].x == 377.2
 
-
-def test_sweep_summaries_honour_the_statistic_and_survive_thin_recordings(tmp_path):
+    # -- sweep summaries honour the statistic and survive thin recordings
     recording = _saved_sweep(
         tmp_path,
         [StepResult("p", 1.0, "Hz", {"squeezing": [-61.0, -50.0], "shot_noise": [-58.0, -58.0]})],
@@ -111,7 +110,8 @@ def _trace(label: str) -> Trace:
     return Trace(label, np.zeros(2), np.zeros(2), "S", "V")
 
 
-def test_a_scope_summary_collects_identity_stats_and_timebase():
+def test_scope_summaries_collect_identity_stats_and_timebases():
+    # -- a scope summary collects identity stats and timebase
     waveform = {
         "channel": "C1",
         "time_offset": -5e-6,
@@ -140,8 +140,7 @@ def test_a_scope_summary_collects_identity_stats_and_timebase():
     assert timebase.channels == ("C1",)
     assert (timebase.offset, timebase.interval, timebase.samples) == (-5e-6, 1e-9, 10)
 
-
-def test_scope_timebases_are_grouped_and_a_damaged_manifest_never_breaks_the_summary():
+    # -- scope timebases are grouped and a damaged manifest never breaks the summary
     def waveform(channel: str) -> dict:
         return {
             "channel": channel,

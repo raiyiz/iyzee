@@ -32,9 +32,8 @@ def _dead_pid() -> int:
 # -- the session marker ----------------------------------------------------------------------
 
 
-def test_the_marker_lives_while_the_session_runs_is_updated_and_removed_on_clean_exit(
-    tmp_path: Path,
-) -> None:
+def test_the_marker_is_kept_while_running_and_stale_ones_are_reported_once(tmp_path: Path) -> None:
+    # -- the marker lives while the session runs is updated and removed on clean exit
     marker = SessionMarker(tmp_path)
 
     assert marker.start() == []
@@ -47,10 +46,7 @@ def test_the_marker_lives_while_the_session_runs_is_updated_and_removed_on_clean
     marker.stop()
     assert not marker.path.exists()
 
-
-def test_only_markers_of_dead_processes_are_reported_once_and_damage_never_stops_startup(
-    tmp_path: Path,
-) -> None:
+    # -- only markers of dead processes are reported once and damage never stops startup
     left_behind = tmp_path / "session-1.json"
     left_behind.write_text(
         json.dumps(

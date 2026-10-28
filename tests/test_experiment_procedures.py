@@ -97,7 +97,8 @@ def _wavemeter(events, frequency=377.1):
 # -- builders and defaults ----------------------------------------------------------------------
 
 
-def test_the_builders_and_their_defaults():
+def test_sweep_builders_and_their_steps_declare_what_they_need():
+    # -- the builders and their defaults
     steps = bandwidth_sweep_steps()
     assert [s.rbw_hz for s in steps] == [20e3 * i for i in range(1, 20)]
 
@@ -137,8 +138,7 @@ def test_the_builders_and_their_defaults():
     assert gaps and all(gap == pytest.approx(10e-6) for gap in gaps)
     assert 377.0 in [pytest.approx(s.frequency_thz) for s in freq_steps]  # still from the centre
 
-
-def test_every_sweep_kind_is_a_step_that_names_itself_and_declares_what_it_needs():
+    # -- every sweep kind is a step that names itself and declares what it needs
     assert set(SWEEP_KINDS) == {"bandwidth", "frequency"}
     for kind, step_type in SWEEP_KINDS.items():
         assert issubclass(step_type, SweepStep) and step_type.kind == kind
@@ -153,7 +153,8 @@ def test_every_sweep_kind_is_a_step_that_names_itself_and_declares_what_it_needs
 # -- steps --------------------------------------------------------------------------------------
 
 
-def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(monkeypatch):
+def test_each_step_drives_the_caller_owned_devices_in_order(monkeypatch):
+    # -- a bandwidth step sets vbw to twice rbw and ignores the shutter
     monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
     mx, shutter = FakeMXA(), FakeShutterControl()
     ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter)
@@ -166,8 +167,7 @@ def test_a_bandwidth_step_sets_vbw_to_twice_rbw_and_ignores_the_shutter(monkeypa
     assert result.meta == {"rbw_hz": 1000, "vbw_hz": 2000}
     assert shutter.events == []
 
-
-def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter(monkeypatch):
+    # -- a frequency step goes there settles reads then records with the shutter
     events = []
     monkeypatch.setattr(
         "iyzee.experiment.procedures.time.sleep", lambda s: events.append(("sleep", s))
@@ -193,8 +193,7 @@ def test_a_frequency_step_goes_there_settles_reads_then_records_with_the_shutter
     assert shutter.events == ["open", "close"]  # opened only for the squeezing trace
     assert result.meta["measured_frequency_thz"] == pytest.approx(377.100002)
 
-
-def test_a_frequency_step_names_what_the_context_lacks_and_touches_nothing_without_it():
+    # -- a frequency step names what the context lacks and touches nothing without it
     with pytest.raises(ValueError, match=r"ctx\.shutter, ctx\.wavemeter"):
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1).run(
             ExperimentContext(mx=FakeMXA(), run_id="t")
@@ -206,11 +205,7 @@ def test_a_frequency_step_names_what_the_context_lacks_and_touches_nothing_witho
         FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
     assert shutter.events == [] and mx.trace_calls == []
 
-
-# -- running a sweep ----------------------------------------------------------------------------
-
-
-def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkeypatch):
+    # -- sweeps run on the caller owned devices and never build their own
     _quiet(monkeypatch)
     prepared = []
     monkeypatch.setattr(
@@ -243,8 +238,7 @@ def test_sweeps_run_on_the_caller_owned_devices_and_never_build_their_own(monkey
     with pytest.raises(RuntimeError, match="boom"):  # a failure propagates; nothing is disconnected
         run_bandwidth_sweep(mx)
 
-
-def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(monkeypatch):
+    # -- trace acquisition always disables the trace and closes the shutter
     mx = FakeMXAForTraceAcquisition()
     with pytest.raises(RuntimeError, match="sweep failed"):
         acquire_trace(mx, 1)
@@ -262,3 +256,6 @@ def test_trace_acquisition_always_disables_the_trace_and_closes_the_shutter(monk
     with pytest.raises(RuntimeError, match="sweep failed"):
         acquire_pair(FakeMXA(), shutter)
     assert shutter.events == ["open", "close"]  # closed even though the trace failed
+
+
+# -- running a sweep ----------------------------------------------------------------------------

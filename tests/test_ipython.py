@@ -70,7 +70,10 @@ class IyzeeIPython:
         self.shell.atexit_operations()
 
 
-def test_ipython_keeps_its_namespace_and_a_users_own_variables_never_collide_with_lab() -> None:
+def test_the_lab_namespace_is_live_read_only_and_never_collides_with_user_variables(
+    monkeypatch,
+) -> None:
+    # -- ipython keeps its namespace and a users own variables never collide with lab
     marker = object()
     shell = IyzeeIPython(FakeApp(), namespace={"instrument": marker})
 
@@ -86,8 +89,7 @@ def test_ipython_keeps_its_namespace_and_a_users_own_variables_never_collide_wit
     assert "10" in shell.execute("mx * 2").stdout
     assert isinstance(shell.shell.user_ns["lab"], LabProxy)  # lab is untouched
 
-
-def test_lab_reflects_the_current_handles_live_lists_every_name_and_is_read_only() -> None:
+    # -- lab reflects the current handles live lists every name and is read only
     device = object()
     app = FakeApp(
         handles={"mxa": FakeHandle(device=device), "scope": FakeHandle(device="scope-device")}
@@ -111,8 +113,7 @@ def test_lab_reflects_the_current_handles_live_lists_every_name_and_is_read_only
     with pytest.raises(AttributeError):
         lab.mx = "nope"
 
-
-def test_the_wavemeter_is_on_lab_before_connecting_and_behind_the_lock_after(monkeypatch) -> None:
+    # -- the wavemeter is on lab before connecting and behind the lock after
     monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
 
     lab = LabProxy(FakeApp())  # not connected: a plain client is still there
@@ -125,8 +126,7 @@ def test_the_wavemeter_is_on_lab_before_connecting_and_behind_the_lock_after(mon
     app = FakeApp(handles={"wavemeter": FakeHandle(device=Wavemeter())})  # connected
     assert LabProxy(app).wavemeter.read_frequency(4) == pytest.approx(377.105)
 
-
-def test_lab_results_and_last_run_reflect_the_latest_sweep() -> None:
+    # -- lab results and last run reflect the latest sweep
     app = FakeApp()
     lab = LabProxy(app)
     assert lab.results == []
@@ -161,40 +161,26 @@ def test_lab_tab_completion_lists_lab_attributes_and_device_methods() -> None:
     assert ".single_sweep_wait" in matches
 
 
-def test_history_skips_repeated_commands() -> None:
-    shell = IyzeeIPython(FakeApp())
-    for src in ["x = 1", "y = 2", "y = 2", "z = x + y"]:
-        shell.execute(src)
-
-    assert shell.history == ["x = 1", "y = 2", "z = x + y"]
-
-
-def test_memory_history_is_private_to_each_shell_instance() -> None:
-    """A fresh shell must not inherit input history from another instance.
-
-    The app deliberately uses a private ``:memory:`` SQLite database by default.
-    That is an isolation boundary, not merely an optimization: IPython's normal
-    persistent history points every shell at a shared on-disk database, while this
-    application owns the lifecycle of its shell and should not leak commands across
-    app instances.
-    """
+def test_history_skips_repeated_commands_and_is_private_to_each_shell() -> None:
+    """Memory history is an isolation boundary: a fresh shell must not inherit another's input
+    (IPython's normal history points every shell at one shared on-disk database)."""
     first = IyzeeIPython(FakeApp())
-    first.execute("secret = 1")
-    assert first.history == ["secret = 1"]
+    for src in ["x = 1", "y = 2", "y = 2", "z = x + y"]:
+        first.execute(src)
+    assert first.history == ["x = 1", "y = 2", "z = x + y"]
     assert history_manager(first.shell).hist_file == ":memory:"
 
-    second = IyzeeIPython(FakeApp())
-    assert second.history == []
+    assert IyzeeIPython(FakeApp()).history == []
 
 
-def test_file_history_persists_and_creates_its_parent(tmp_path: Path) -> None:
-    """An explicit history file is opt-in and must survive a shell restart.
-
-    IPython may buffer recent history entries in memory, so this test flushes
-    the first shell's cache explicitly before constructing the second shell.
-    That proves persistence without calling ``atexit_operations`` twice on one
-    shell, which is not how the real app lifecycle behaves.
-    """
+def test_history_files_persist_and_default_to_a_per_user_directory(tmp_path: Path) -> None:
+    # -- file history persists and creates its parent
+    # An explicit history file is opt-in and must survive a shell restart.
+    #
+    # IPython may buffer recent history entries in memory, so this test flushes
+    # the first shell's cache explicitly before constructing the second shell.
+    # That proves persistence without calling ``atexit_operations`` twice on one
+    # shell, which is not how the real app lifecycle behaves.
     history_file = tmp_path / "not" / "yet" / "created" / "console_history.sqlite"
     assert not history_file.parent.exists()
 
@@ -208,14 +194,13 @@ def test_file_history_persists_and_creates_its_parent(tmp_path: Path) -> None:
     assert history_file.parent.exists()
     assert second_run.history == ["yesterday = 1", "today = 2"]
 
-
-def test_default_history_file_is_under_a_per_user_data_directory() -> None:
-    """Deliberately *not* IPython's own default location
-    (`~/.ipython/profile_default/history.sqlite`) -- that one's shared by
-    every InteractiveShell on the machine, this app's included, which is
-    exactly what caused real test-suite hangs before `:memory:` became
-    IyzeeIPython's own default (see the tests above). This app gets its
-    own dedicated file instead."""
+    # -- default history file is under a per user data directory
+    # Deliberately *not* IPython's own default location
+    # (`~/.ipython/profile_default/history.sqlite`) -- that one's shared by
+    # every InteractiveShell on the machine, this app's included, which is
+    # exactly what caused real test-suite hangs before `:memory:` became
+    # IyzeeIPython's own default (see the tests above). This app gets its
+    # own dedicated file instead.
     path = default_history_file()
 
     assert path.name == "console_history.sqlite"

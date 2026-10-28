@@ -6,7 +6,8 @@ import pytest
 from iyzee.tui.plotting import describe_timebase, format_si, time_axis, time_series
 
 
-def test_si_formatting_and_the_timebase_description():
+def test_si_formatting_the_timebase_and_time_axes():
+    # -- si formatting and the timebase description
     for value, text in ((2.5e-6, "2.5 µs"), (1e-9, "1 ns"), (0.5, "500 ms"), (3.0, "3 s")):
         assert format_si(value, "s") == text
     assert format_si(1e9, "S/s") == "1 GS/s"
@@ -15,8 +16,7 @@ def test_si_formatting_and_the_timebase_description():
     assert lines[0] == "Window: -5 µs to 4.999 µs (10 µs, 10000 samples)"
     assert lines[1] == "Sample interval: 1 ns, 1 GS/s"
 
-
-def test_time_axes_pick_a_readable_unit_and_one_axis_serves_every_trace():
+    # -- time axes pick a readable unit and one axis serves every trace
     assert time_axis("S", 4e-6) == (pytest.approx(1e6), "µs")
     assert time_axis("S", 2.0) == (1.0, "s")
     assert time_axis("div", 10.0) == (1.0, "div")  # other units are left alone
