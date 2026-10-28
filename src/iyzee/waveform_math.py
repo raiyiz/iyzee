@@ -52,7 +52,7 @@ class Trace:
     time_unit: str
     value_unit: str
     meta: dict[str, Any] = field(default_factory=dict)
-    """Freeform provenance shown in a plot legend (channel, V/div, coupling,
+    """Freeform source shown in a plot legend (channel, V/div, coupling,
     how a derived trace was built) — display-only. The math operations below
     never read it back; they only ever set their own ``"source"`` entry on
     what they return."""
@@ -240,7 +240,7 @@ def scale_trace(
 
 
 def _legend_label(trace: Trace) -> str:
-    """One legend entry carrying a trace's provenance, e.g.
+    """One legend entry carrying a trace's source, e.g.
     ``"C1 (0.5 V/div, D1M)"`` or ``"C1 - C2 (bg-corrected)"``."""
     meta = trace.meta
     detail = []
@@ -258,7 +258,7 @@ def build_waveform_figure(traces: Sequence[Trace], *, title: str | None = None) 
     """Build (but do not display or save) a matplotlib figure for ``traces``.
 
     A real ``Figure``/``Axes`` pair — labeled axes, a legend built from each
-    trace's provenance, a light grid — mirroring ``experiment.io.
+    trace's source, a light grid — mirroring ``experiment.io.
     build_figure`` for sweep results. This is the one place that decides how
     a set of waveforms becomes a figure; :func:`save_waveform_figure` saves
     it as an image, and the Results screen's inline preview extracts its line

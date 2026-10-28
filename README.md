@@ -185,7 +185,7 @@ A present but invalid configuration file is an error; iyzee does not silently fa
 
 ## Data
 
-Measurements are written below <code>data/YYYY-MM/</code> by default, as a `.npz` (numbers) plus a `.json` manifest (meaning and provenance). The [Data & analysis](docs/chapters/data-and-analysis.typ) part describes every field.
+Measurements are written below <code>data/YYYY-MM/</code> by default, as a `.npz` (numbers) plus a `.json` manifest (meaning and source). The [Data & analysis](docs/chapters/data-and-analysis.typ) part describes every field.
 
 Sweep results contain the acquired traces together with the analyzer/scan metadata needed to interpret each point. Scope acquisitions store numeric waveform data plus a JSON manifest containing the requested and read-back configuration, instrument identity, calibration and derived quantities.
 
