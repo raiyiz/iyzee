@@ -654,7 +654,7 @@ reports, so repeat-to-repeat scatter you actually observe is dominated by someth
 traces) and should be measured by repeating a point, not read off this table. Instrument-specific effects (the detector type, the filter shape, correlation between
 neighbouring trace points) change the constants, which is another reason to treat the table as a floor.
 
-#tested-by("test_log_averaging_constants_quoted_in_the_physics_part", "test_log_bias_cancels_in_the_difference_and_scatter_follows_the_formula", "test_the_reported_number_is_the_mean_of_per_sample_db_differences", "test_squeezing_parameter_and_loss_formulas_round_trip")
+#tested-by("test_log_averaging_matches_the_physics_chapter", "test_log_averaging_matches_the_physics_chapter", "test_log_averaging_matches_the_physics_chapter", "test_squeezing_parameter_and_loss_formulas_round_trip")
 
 = Mapping the physics into iyzee
 
