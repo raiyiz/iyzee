@@ -679,7 +679,7 @@ would not freeze, the trigger mode could not be restored, `*IDN?` did not answer
 are collected in `ScopeAcquisition.warnings` and written to the manifest, so a
 recording says honestly how trustworthy it is.
 
-#tested-by("test_acquisition_failures_raise_and_restore_the_trigger_mode", "test_apply_channel_settings_returns_what_the_scope_reports_and_stops_at_the_first_failure", "test_freeze_restore_and_identity_failures_are_warnings_and_the_download_still_happens")
+#tested-by("test_the_download_gets_each_timebase_freezes_a_running_acquisition_and_fails_safely", "test_channel_settings_are_applied_and_read_under_the_driver_lock", "test_acquiring_and_saving_a_scope_recording")
 
 = The scope transport: VISA over VXI-11 <arch-scope-transport>
 
@@ -743,7 +743,7 @@ order (`CFMT DEF9,WORD,BIN`, `CORD LO`) are written *before* each waveform reque
 because the scope encodes the reply when it executes `WF?`.
 
 #anchors("LeCroy", "LeCroy._io", "LeCroy._read_words", "devices.scope._definite_block", "LeCroy.getDataFloatsDetailed")
-#tested-by("test_a_silent_scope_raises_lecroy_timeout_and_drops_the_connection", "test_waveform_download_decodes_calibrates_and_rejects_malformed_blocks", "test_bad_names_and_numbers_are_refused_before_anything_is_written")
+#tested-by("test_connecting_and_the_identity_query_fail_clearly", "test_the_download_gets_each_timebase_freezes_a_running_acquisition_and_fails_safely", "test_waveforms_and_settings_use_the_documented_commands_and_refuse_bad_input")
 
 = Transport state and link monitoring <arch-link-monitoring>
 
