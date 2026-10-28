@@ -99,7 +99,8 @@ def test_save_step_results_names_files_safely_uniquely_or_exactly_as_asked(tmp_p
 # -- multiplot / difference_series -------------------------------------------------------
 
 
-def test_difference_statistics_and_series_handle_unusable_traces():
+def test_difference_statistics_and_multiplots_cope_with_unusable_traces(monkeypatch):
+    # -- difference statistics and series handle unusable traces
     assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "mean") == pytest.approx(2.5)
     assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "minimum") == pytest.approx(2.0)
     assert io.difference_statistic([np.nan, 4.0], [1.0, 1.0], "mean") == pytest.approx(3.0)
@@ -121,8 +122,7 @@ def test_difference_statistics_and_series_handle_unusable_traces():
         ["first", "missing", "third"],
     ) == [([0, 1], [2.0, 3.0], "first"), ([0, 1], [3.0, 4.0], "third")]
 
-
-def test_multiplot_plots_each_result(monkeypatch):
+    # -- multiplot plots each result
     plotted = []
 
     class FakeAx:

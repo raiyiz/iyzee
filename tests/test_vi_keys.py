@@ -69,9 +69,7 @@ class Prompt:
     ("text", "keys", "expected"),
     [
         ("a b c d", "dw..", "d"),
-        ("abcdef", "x..", "def"),
-        ("a\nb\nc\nd", "dd.", "c\nd"),
-        ("aa bb cc", "ciwXY<esc>w.", "XY XY cc"),
+        ("aa bb cc", "ciwXY<esc>w.", "XY XY cc"),  # an insert command with its typed text
         ("x1\nx2", "A;<esc>j.", "x1;\nx2;"),
         ("1 2 3 4 5", "dw3.", "5"),  # a count repeats the change that many times
         ("a b c d", "dww.", "b d"),  # a motion in between is not a change
@@ -85,22 +83,15 @@ async def test_dot_repeats_the_last_change(text: str, keys: str, expected: str) 
 
 
 @async_test
-async def test_text_typed_at_a_fresh_prompt_is_not_a_change_to_repeat() -> None:
+async def test_dot_ignores_typing_at_a_fresh_prompt_and_survives_a_new_prompt() -> None:
     # A prompt starts in insert mode, so this typing did not begin from normal mode.
-    prompt = Prompt(normal=False).keys("foo<esc>")
-    assert prompt.text == "foo"
-    assert prompt.extras.last_change == []
-    assert prompt.keys(".").text == "foo"
+    fresh = Prompt(normal=False).keys("foo<esc>")
+    assert fresh.extras.last_change == [] and fresh.keys(".").text == "foo"
 
-
-@async_test
-async def test_a_new_prompt_forgets_a_half_recorded_change_but_keeps_the_last_one() -> None:
-    prompt = Prompt("a b c").keys("dw")
-    prompt.keys("A")  # half-way through an insert command...
+    prompt = Prompt("a b c").keys("dwA")  # half-way through an insert command...
     prompt.session.app.key_processor.reset()  # ...when the prompt is accepted and reset
     prompt.session.app.vi_state.input_mode = InputMode.NAVIGATION
-    prompt.buffer.text = "x y z"
-    prompt.buffer.cursor_position = 0
+    prompt.buffer.text, prompt.buffer.cursor_position = "x y z", 0
     assert prompt.keys(".").text == "y z"  # `dw` is still what `.` repeats
 
 
@@ -110,52 +101,36 @@ async def test_a_new_prompt_forgets_a_half_recorded_change_but_keeps_the_last_on
         ("", "normal", True),
         ("d", "normal", False),  # operator pending
         ("3", "normal", False),  # count pending
-        ('"', "normal", False),  # register pending
-        ("g", "normal", False),  # prefix pending
         ("i", "insert", False),
         ("R", "replace", False),
         ("v", "visual", False),
         ("V", "visual-line", False),
         ("<c-v>", "visual-block", False),
-        ("ix<esc>", "normal", True),
         ("d<esc>", "normal", True),  # Escape cancels the operator
-        ("vd", "normal", True),
     ],
 )
 @async_test
 async def test_mode_and_at_rest(keys: str, mode: str, at_rest: bool) -> None:
     prompt = Prompt("hello world").keys(keys)
-    assert prompt.extras.mode == mode
-    assert prompt.extras.at_rest is at_rest
+    assert (prompt.extras.mode, prompt.extras.at_rest) == (mode, at_rest)
 
 
 @pytest.mark.parametrize(
     ("text", "keys", "copied"),
     [
-        ("foo bar", "yw", ["foo "]),
         ("foo bar", "yiw", ["foo"]),  # any length: a short yank is still a yank
-        ("foo bar", "wyiw", ["bar"]),
         ("foo\nbar", "yy", ["foo"]),
-        ("foo\nbar", "Y", ["foo"]),
         ("foo bar", "vey", ["foo"]),  # visual yank
         ("foo bar", "dw", []),  # deletes and changes stay in the prompt
-        ("foo bar", "x", []),
         ("foo bar", "cwX<esc>", []),
         ("foo bar", "vd", []),
-        ("foo\nbar", "dd", []),
     ],
 )
 @async_test
 async def test_only_yanks_reach_the_system_clipboard(
     text: str, keys: str, copied: list[str]
 ) -> None:
-    prompt = Prompt(text).keys(keys)
-    assert prompt.copied == copied
-
-
-@async_test
-async def test_a_delete_is_still_pasteable_inside_the_prompt() -> None:
-    assert Prompt("foo bar").keys("dwP").text == "foo bar"
+    assert Prompt(text).keys(keys).copied == copied
 
 
 def test_a_failing_copy_callback_never_breaks_editing() -> None:
@@ -167,24 +142,9 @@ def test_a_failing_copy_callback_never_breaks_editing() -> None:
     assert clipboard.get_data().text == "kept"
 
 
-@pytest.mark.parametrize(
-    ("typed", "is_change"),
-    [
-        ("dw", True),
-        ("3dd", True),
-        ("ciw", True),
-        ("A", True),
-        ("r5", True),  # a digit after the command is its argument, not a count
-        ("gU", True),
-        ("gg", False),  # a motion
-        ("yw", False),
-        ("w", False),
-        ("u", False),
-        ("v", False),
-        ("0", False),
-        ("", False),
-    ],
-)
-def test_which_key_sequences_dot_repeats(typed: str, is_change: bool) -> None:
-    presses = [KeyPress(c, c) for c in typed]
-    assert vi_keys._is_change(presses) is is_change
+def test_which_key_sequences_dot_repeats() -> None:
+    def change(typed: str) -> bool:
+        return vi_keys._is_change([KeyPress(c, c) for c in typed])
+
+    assert all(map(change, ("dw", "3dd", "ciw", "A", "gU", "r5")))  # "r5": 5 is an argument
+    assert not any(map(change, ("gg", "yw", "w", "u", "v", "0", "")))

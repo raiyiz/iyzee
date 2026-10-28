@@ -16,14 +16,14 @@ DB = 10 / math.log(10)  # dB per neper of power
 EULER_GAMMA = 0.5772156649015329
 
 
-def test_log_averaging_constants_quoted_in_the_physics_part() -> None:
+def test_log_averaging_matches_the_physics_chapter() -> None:
+    # -- log averaging constants quoted in the physics part
     power = np.random.default_rng(1).exponential(1.0, 2_000_000)  # Gaussian-noise power
     db = 10 * np.log10(power)
     assert abs(db.mean() - (-EULER_GAMMA * DB)) < 0.01  # 2.51 dB low
     assert abs(db.std() - math.pi / math.sqrt(6) * DB) < 0.02  # 5.57 dB per sample
 
-
-def test_log_bias_cancels_in_the_difference_and_scatter_follows_the_formula() -> None:
+    # -- log bias cancels in the difference and scatter follows the formula
     rng = np.random.default_rng(2)
     n, reps, true_ratio = 1000, 2000, 0.8
     squeezed = 10 * np.log10(rng.exponential(1.0, (reps, n)) * true_ratio).mean(axis=1)
@@ -33,8 +33,7 @@ def test_log_bias_cancels_in_the_difference_and_scatter_follows_the_formula() ->
     predicted = math.sqrt(2) * math.pi / math.sqrt(6) * DB / math.sqrt(n)
     assert abs(difference.std() / predicted - 1) < 0.1
 
-
-def test_the_reported_number_is_the_mean_of_per_sample_db_differences() -> None:
+    # -- the reported number is the mean of per sample db differences
     squeezing = np.array([[-60.0, -62.0]])
     shot = np.array([[-58.0, -58.0]])
     reported = difference_values_many(squeezing, shot, "mean")[0]

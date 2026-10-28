@@ -79,6 +79,20 @@ async def test_page_navigation_and_footer_contracts() -> None:
         await pilot.pause()
         assert pilot.app.screen.focused is pilot.app.screen.query_one("#instrument-table")
 
+        app = pilot.app
+        assert isinstance(app, IyzeeApp)
+        # q needs a second immediate press (a stray key must not close an app holding live
+        # instruments); one after the window only re-arms it.
+        await pilot.press("q")
+        await pilot.pause()
+        assert app.is_running
+        assert any("Press q again" in message for message in notifications(app))
+        app._quit_armed_until = 0.0
+        await pilot.press("q")
+        assert app.is_running
+        await pilot.press("q")
+        await wait_until(pilot, lambda: not app.is_running)
+
 
 @async_test
 async def test_nav_rail_and_sweep_banner_update_the_moment_a_connect_finishes(
@@ -123,29 +137,6 @@ async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(
         await pilot.press("i")
         console = app.screen.query_one(IyzeeConsole)
         assert history_manager(console.session.shell).hist_file == str(history_file)
-
-
-@async_test
-async def test_q_requires_a_second_immediate_press() -> None:
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-
-        await pilot.press("q")
-        await pilot.pause()
-        assert app.is_running
-        assert any("Press q again" in message for message in notifications(app))
-
-        # A second press after the confirmation window must only re-arm it.
-        app._quit_armed_until = 0.0
-        await pilot.press("q")
-        assert app.is_running
-
-        # A genuinely immediate second press quits.
-        await pilot.press("q")
-        await wait_until(pilot, lambda: not app.is_running)
-
-    assert not app.is_running
 
 
 @async_test

@@ -15,7 +15,8 @@ def make_lab(*handles: FakeHandle, keys=("a", "b")) -> Lab:
     return Lab(specs)
 
 
-def test_connect_registers_the_handle_and_returns_the_probe_detail():
+def test_connect_and_disconnect_register_close_and_say_what_is_missing():
+    # -- connect registers the handle and returns the probe detail
     handle = FakeHandle()
     lab = make_lab(handle)
 
@@ -24,8 +25,7 @@ def test_connect_registers_the_handle_and_returns_the_probe_detail():
     assert lab.connected == ("a",) and lab["a"] is handle
     assert detail == handle.probe()
 
-
-def test_a_failed_connect_closes_the_half_open_link_and_registers_nothing():
+    # -- a failed connect closes the half open link and registers nothing
     handle = FakeHandle(connect_error="no route")
     lab = make_lab(handle)
 
@@ -34,8 +34,7 @@ def test_a_failed_connect_closes_the_half_open_link_and_registers_nothing():
 
     assert lab.connected == () and handle.disconnected
 
-
-def test_disconnect_unregisters_closes_and_tolerates_unknown_keys():
+    # -- disconnect unregisters closes and tolerates unknown keys
     handle = FakeHandle()
     lab = make_lab(handle)
     lab.connect("a")
@@ -47,8 +46,17 @@ def test_disconnect_unregisters_closes_and_tolerates_unknown_keys():
     with pytest.raises(NotConnectedError):
         lab["a"]
 
+    # -- device returns the driver and a missing instrument says so
+    handle = FakeHandle(device="the driver")
+    lab = make_lab(handle)
+    with pytest.raises(NotConnectedError, match="not connected"):
+        lab.device("a")
+    lab.connect("a")
+    assert lab.device("a") == "the driver"
 
-def test_drop_dead_links_unregisters_only_the_dead_ones_and_releases_them():
+
+def test_dead_links_are_dropped_and_close_all_never_waits_past_its_timeout():
+    # -- drop dead links unregisters only the dead ones and releases them
     alive, dead = FakeHandle(), FakeHandle()
     lab = make_lab(alive, dead)
     lab.connect("a")
@@ -62,8 +70,7 @@ def test_drop_dead_links_unregisters_only_the_dead_ones_and_releases_them():
         time.sleep(0.01)
     assert dead.disconnected and not alive.disconnected
 
-
-def test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument():
+    # -- close all never waits longer than its timeout for a busy instrument
     busy, idle = FakeHandle(), FakeHandle()
     lab = make_lab(busy, idle)
     lab.connect("a")
@@ -88,15 +95,6 @@ def test_close_all_never_waits_longer_than_its_timeout_for_a_busy_instrument():
     assert elapsed < 1.5
     assert idle.disconnected and not busy.disconnected
     assert lab.connected == ()
-
-
-def test_device_returns_the_driver_and_a_missing_instrument_says_so():
-    handle = FakeHandle(device="the driver")
-    lab = make_lab(handle)
-    with pytest.raises(NotConnectedError, match="not connected"):
-        lab.device("a")
-    lab.connect("a")
-    assert lab.device("a") == "the driver"
 
 
 # -- instruments that are a part of another (the shutter on the PSU) -------------------
@@ -135,7 +133,8 @@ def make_parent_lab(parent: FakeHandle | None = None, part: PartHandle | None = 
     return lab, parent, built, events
 
 
-def test_connecting_a_part_connects_its_parent_once_and_builds_it_on_the_parent_handle():
+def test_a_part_connects_its_parent_once_and_is_closed_before_it():
+    # -- connecting a part connects its parent once and builds it on the parent handle
     lab, parent, built, _ = make_parent_lab()
 
     lab.connect("shutter")
@@ -150,8 +149,7 @@ def test_connecting_a_part_connects_its_parent_once_and_builds_it_on_the_parent_
         failing.connect("shutter")
     assert failing.connected == ()  # neither registered
 
-
-def test_a_part_is_closed_before_its_parent_however_they_are_released():
+    # -- a part is closed before its parent however they are released
     for release in (lambda lab: lab.disconnect("psu"), lambda lab: lab.close_all()):
         lab, parent, _, events = make_parent_lab()
         lab.connect("shutter")

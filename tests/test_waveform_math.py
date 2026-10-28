@@ -67,7 +67,8 @@ def _recording(waveforms: list[dict], applied: list[dict] | None = None, **extra
 # -- traces_from_scope_recording ------------------------------------------------------------
 
 
-def test_scope_recordings_become_traces_with_units_and_applied_settings():
+def test_trace_math_converts_subtracts_corrects_and_scales():
+    # -- scope recordings become traces with units and applied settings
     recording = _recording(
         [
             {
@@ -95,11 +96,7 @@ def test_scope_recordings_become_traces_with_units_and_applied_settings():
     other = Recording(path=Path("fake.npz"), arrays={}, metadata={"kind": "sweep"})
     assert traces_from_scope_recording(other) == []  # not a scope recording: no traces
 
-
-# -- subtract_traces / subtract_background ----------------------------------------------------
-
-
-def test_subtract_traces_is_exact_resamples_and_never_mutates_or_mixes_units():
+    # -- subtract traces is exact resamples and never mutates or mixes units
     a = _trace("C1", [0.0, 1.0, 2.0], [5.0, 6.0, 7.0])
     b = _trace("C2", [0.0, 1.0, 2.0], [1.0, 1.0, 1.0])
     a_before, b_before = a.values.copy(), b.values.copy()
@@ -122,8 +119,7 @@ def test_subtract_traces_is_exact_resamples_and_never_mutates_or_mixes_units():
         with pytest.raises(ValueError, match="different units"):
             operation(volts, amps)
 
-
-def test_background_correction_by_region_or_reference_and_its_input_checks():
+    # -- background correction by region or reference and its input checks
     trace = _trace("C1", [0.0, 1.0, 2.0, 3.0], [10.0, 12.0, 100.0, 100.0])
 
     result = subtract_background(trace, region=(0.0, 1.0))  # mean of [10, 12] == 11
@@ -142,8 +138,7 @@ def test_background_correction_by_region_or_reference_and_its_input_checks():
         with pytest.raises(ValueError, match="exactly one"):
             subtract_background(flat, **kwargs)
 
-
-def test_scale_trace_is_affine_defaults_to_identity_and_refuses_bad_scales():
+    # -- scale trace is affine defaults to identity and refuses bad scales
     trace = _trace("C1", [0.0, 1.0, 2.0], [1.0, 2.0, 3.0])
 
     result = scale_trace(trace, x_scale=2.0, x_offset=1.0, y_scale=1000.0, y_offset=-5.0)
@@ -164,6 +159,9 @@ def test_scale_trace_is_affine_defaults_to_identity_and_refuses_bad_scales():
             scale_trace(trace, **kwargs)
 
 
+# -- subtract_traces / subtract_background ----------------------------------------------------
+
+
 # -- figures -----------------------------------------------------------------------------------
 
 
@@ -177,7 +175,8 @@ def _figure(traces, **kwargs):
         plt.close(fig)
 
 
-def test_waveform_figures_label_lines_and_axes_without_guessing_units():
+def test_waveform_figures_label_axes_and_save_a_real_png(tmp_path):
+    # -- waveform figures label lines and axes without guessing units
     traces = [
         _trace("C1", [0.0, 1.0], [1.0, 2.0], volts_per_div=0.5, coupling="D1M"),
         _trace("C2", [0.0, 1.0], [3.0, 4.0]),
@@ -199,8 +198,7 @@ def test_waveform_figures_label_lines_and_axes_without_guessing_units():
     with _figure([]) as fig:  # nothing to draw does not crash
         assert len(fig.axes[0].lines) == 0
 
-
-def test_save_waveform_figure_writes_a_real_png_and_closes_the_figure(tmp_path):
+    # -- save waveform figure writes a real png and closes the figure
     traces = [_trace("C1", [0.0, 1.0, 2.0], [1.0, 2.0, 1.0])]
     open_before = len(plt.get_fignums())
 

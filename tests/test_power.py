@@ -27,7 +27,8 @@ class FakeResourceManager:
         return instrument
 
 
-def test_psu_sends_the_documented_commands_and_closes_its_transport():
+def test_psu_commands_and_the_shutter_channel_it_lends():
+    # -- psu sends the documented commands and closes its transport
     resource_manager = FakeResourceManager()
 
     psu = PSU(ip=IP.POWER_SUPPLY, resource_manager=resource_manager)
@@ -63,8 +64,7 @@ def test_psu_sends_the_documented_commands_and_closes_its_transport():
         instrument = managed.instrument
     assert managed.instrument is None and instrument.close_calls == 1  # closed on exit
 
-
-def test_the_shutter_is_a_channel_of_a_psu_it_borrows():
+    # -- the shutter is a channel of a psu it borrows
     resource_manager = FakeResourceManager()
     psu = PSU(resource_manager=resource_manager)
     shutter = ShutterControl(psu)
@@ -164,7 +164,8 @@ def _connected_psu(supply):
     return psu
 
 
-def test_retrieve_state_reports_what_the_supply_says():
+def test_retrieving_state_reports_asks_only_and_refuses_to_guess():
+    # -- retrieve state reports what the supply says
     supply = FakeHMP()
     psu = _connected_psu(supply)
     assert supply.read_termination == "\n"  # set on open, so queries can return
@@ -193,8 +194,7 @@ def test_retrieve_state_reports_what_the_supply_says():
     )
     assert state.is_live(3) and not state.is_live(1)
 
-
-def test_retrieve_state_only_asks_and_puts_the_selected_channel_back():
+    # -- retrieve state only asks and puts the selected channel back
     supply = FakeHMP()
     psu = _connected_psu(supply)
     psu.set_voltage(5.0, 2)  # leaves channel 2 selected
@@ -213,8 +213,7 @@ def test_retrieve_state_only_asks_and_puts_the_selected_channel_back():
         psu.retrieve_state()
     assert supply.selected == 2
 
-
-def test_bad_channels_and_bad_replies_are_errors_never_guesses():
+    # -- bad channels and bad replies are errors never guesses
     supply = FakeHMP()
     psu = _connected_psu(supply)
     supply.log.clear()
@@ -244,8 +243,7 @@ def test_bad_channels_and_bad_replies_are_errors_never_guesses():
             with pytest.raises(ValueError, match="expected 0 or 1"):
                 psu.retrieve_state()
 
-
-def test_the_shutter_reports_open_only_when_the_supply_says_it_is_powered():
+    # -- the shutter reports open only when the supply says it is powered
     supply = FakeHMP()
     shutter = ShutterControl(_connected_psu(supply), chan=2)
     shutter.configure()

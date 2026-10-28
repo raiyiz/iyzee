@@ -93,16 +93,62 @@ class _FakeVisaDevice:
         return self._idn
 
 
-def test_visa_handle_probes_with_idn_falls_back_without_it_and_disconnect_closes() -> None:
+def test_handles_probe_their_instruments(monkeypatch: pytest.MonkeyPatch) -> None:
+    # -- visa handle probes with idn falls back without it and disconnect closes
     device = _FakeVisaDevice(idn="Keysight,MXA,SN1,FW2")
-    handle = _VisaHandle(device)
-    handle.connect()
-    assert handle.probe() == "Keysight,MXA,SN1,FW2" and device.connected is True
-    handle.disconnect()
+    visa = _VisaHandle(device)
+    visa.connect()
+    assert visa.probe() == "Keysight,MXA,SN1,FW2" and device.connected is True
+    visa.disconnect()
     assert device.closed is True
 
     no_idn = _VisaHandle(_FakeVisaDeviceNoIdn(ip="10.140.1.42"))  # e.g. a driver without *IDN?
     assert no_idn.probe() == "connected @ 10.140.1.42"
+
+    # -- wavemeter handle probe reads the default channel and propagates errors
+    seen: list[int] = []
+
+    def read(self, channel: int = DEFAULT_CHANNEL):
+        seen.append(channel)
+        return 377.105
+
+    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
+    wavemeter_handle = WavemeterHandle()
+    assert wavemeter_handle.probe() == "wavemeter = 377.105000 THz"
+    assert isinstance(wavemeter_handle.device, instruments_mod.Wavemeter)
+    assert seen == [DEFAULT_CHANNEL]
+
+    failure = OSError("switch unreachable")
+
+    def fail(self, channel: int = 4) -> float:
+        raise failure
+
+    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", fail)
+    with pytest.raises(OSError, match="switch unreachable") as caught:
+        WavemeterHandle().probe()
+    assert caught.value is failure
+
+    # -- scope scope_handle identifies the scope reports a silent one and follows its state
+    monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
+    scope_handle = ScopeHandle()
+    scope_handle.connect()
+    scope = cast(_FakeLeCroy, scope_handle.device)
+    assert scope.connected_to == str(scope_handle._ip) and scope_handle.alive
+
+    assert scope_handle.probe() == "LECROY,WS452,SN1,9.0"
+    # the first reply gets the widened bound, not the steady-state one
+    assert scope.idn_timeouts == [ScopeHandle.FIRST_RESPONSE_TIMEOUT]
+
+    scope.connected = False  # e.g. dropped after a timeout
+    assert not scope_handle.alive
+
+    monkeypatch.setattr(_FakeLeCroy, "answer", LeCroyTimeoutError("no response after 15.0s"))
+    silent = ScopeHandle()
+    silent.connect()
+    with pytest.raises(ConnectionError, match=r"did not answer \*IDN\? within 15s"):
+        silent.probe()
+
+    assert instruments_mod._LockedHandle().alive is True  # handles that cannot tell report alive
 
 
 class _FakeVisaDeviceNoIdn:
@@ -142,7 +188,10 @@ class _FakePsuHandle:
         self.alive = True
 
 
-def test_shutter_handle_is_a_channel_of_the_psu_it_is_built_on() -> None:
+def test_the_shutter_handle_is_a_channel_of_a_connected_psu_and_never_touches_a_closed_one() -> (
+    None
+):
+    # -- shutter handle is a channel of the psu it is built on
     psu = _FakePsuDevice()
     psu_handle = _FakePsuHandle(psu)
     handle = ShutterHandle(cast(Any, psu_handle), chan=3)
@@ -156,8 +205,7 @@ def test_shutter_handle_is_a_channel_of_the_psu_it_is_built_on() -> None:
     handle.disconnect()  # closes the shutter, leaves the supply connected
     assert psu.commands[-1] == ("off", (3,)) and psu.instrument is not None
 
-
-def test_shutter_handle_needs_a_connected_psu_and_never_touches_a_closed_one() -> None:
+    # -- shutter handle needs a connected psu and never touches a closed one
     for psu_handle in (_FakePsuHandle(None), _FakePsuHandle(_FakePsuDevice(connected=False))):
         with pytest.raises(ConnectionError, match="PSU"):
             ShutterHandle(cast(Any, psu_handle)).connect()
@@ -172,31 +220,6 @@ def test_shutter_handle_needs_a_connected_psu_and_never_touches_a_closed_one() -
 
 
 # -- WavemeterHandle ----------------------------------------------------------
-
-
-def test_wavemeter_handle_probe_reads_the_default_channel_and_propagates_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    seen: list[int] = []
-
-    def read(self, channel: int = DEFAULT_CHANNEL):
-        seen.append(channel)
-        return 377.105
-
-    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
-    handle = WavemeterHandle()
-    assert handle.probe() == "wavemeter = 377.105000 THz"
-    assert isinstance(handle.device, instruments_mod.Wavemeter) and seen == [DEFAULT_CHANNEL]
-
-    failure = OSError("switch unreachable")
-
-    def fail(self, channel: int = 4) -> float:
-        raise failure
-
-    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", fail)
-    with pytest.raises(OSError, match="switch unreachable") as caught:
-        WavemeterHandle().probe()
-    assert caught.value is failure
 
 
 # -- ScopeHandle ----------------------------------------------------------
@@ -225,31 +248,6 @@ class _FakeLeCroy:
         if isinstance(self.answer, Exception):
             raise self.answer
         return self.answer
-
-
-def test_scope_handle_identifies_the_scope_reports_a_silent_one_and_follows_its_state(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
-    handle = ScopeHandle()
-    handle.connect()
-    scope = cast(_FakeLeCroy, handle.device)
-    assert scope.connected_to == str(handle._ip) and handle.alive
-
-    assert handle.probe() == "LECROY,WS452,SN1,9.0"
-    # the first reply gets the widened bound, not the steady-state one
-    assert scope.idn_timeouts == [ScopeHandle.FIRST_RESPONSE_TIMEOUT]
-
-    scope.connected = False  # e.g. dropped after a timeout
-    assert not handle.alive
-
-    monkeypatch.setattr(_FakeLeCroy, "answer", LeCroyTimeoutError("no response after 15.0s"))
-    silent = ScopeHandle()
-    silent.connect()
-    with pytest.raises(ConnectionError, match=r"did not answer \*IDN\? within 15s"):
-        silent.probe()
-
-    assert instruments_mod._LockedHandle().alive is True  # handles that cannot tell report alive
 
 
 # -- registry ----------------------------------------------------------

@@ -59,93 +59,101 @@ async def _open_sweep_screen(pilot: Pilot[Any]) -> SweepScreen:
 
 
 @async_test
-async def test_form_defaults_build_the_documented_runs_and_the_duration_applies_to_both() -> None:
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open_sweep_screen(pilot)
-        bandwidth = screen._build_bandwidth_run()
-        assert len(bandwidth.steps) == 19
-        assert bandwidth.config.res_bw_hz == pytest.approx(20000.0)
-        frequency = screen._build_frequency_run()
-        assert len(frequency.steps) == 5
-        # The defaults the issue asked for: 10 ms sweeps, 10 MHz between laser points.
-        assert bandwidth.config.sweep_duration_ms == frequency.config.sweep_duration_ms == 10
-        gaps = [b.x_value - a.x_value for a, b in itertools.pairwise(frequency.steps)]
-        assert all(gap == pytest.approx(10e-6) for gap in gaps)  # 10 MHz, in THz
+async def test_the_form_defaults_validation_and_missing_instruments() -> None:
+    # -- form defaults build the documented runs and the duration applies to both
+    async def _form_defaults_build_the_documented_runs_():
+        async with IyzeeApp().run_test() as pilot:
+            screen = await _open_sweep_screen(pilot)
+            bandwidth = screen._build_bandwidth_run()
+            assert len(bandwidth.steps) == 19
+            assert bandwidth.config.res_bw_hz == pytest.approx(20000.0)
+            frequency = screen._build_frequency_run()
+            assert len(frequency.steps) == 5
+            # The defaults the issue asked for: 10 ms sweeps, 10 MHz between laser points.
+            assert bandwidth.config.sweep_duration_ms == frequency.config.sweep_duration_ms == 10
+            gaps = [b.x_value - a.x_value for a, b in itertools.pairwise(frequency.steps)]
+            assert all(gap == pytest.approx(10e-6) for gap in gaps)  # 10 MHz, in THz
 
-        screen.query_one("#sweep-duration", Input).value = "25"
-        await pilot.pause()
-        assert screen._build_bandwidth_run().config.sweep_duration_ms == 25
-        assert screen._build_frequency_run().config.sweep_duration_ms == 25
-
-
-@async_test
-async def test_an_invalid_field_is_named_marked_and_focused() -> None:
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        screen = await _open_sweep_screen(pilot)
-        for key in ("mxa", "shutter", "wavemeter"):
-            app.handles[key] = FakeHandle()
-        for field_id, label, bad, kind in (
-            ("rbw-stop", "RBW stop", "abc", "bandwidth"),
-            ("rbw-steps", "Steps", "0", "bandwidth"),
-            ("freq-points", "Points", "5000", "frequency"),
-            ("sweep-duration", "Sweep duration", "abc", "frequency"),
-        ):
-            screen.query_one("#sweep-type", Select).value = kind
+            screen.query_one("#sweep-duration", Input).value = "25"
             await pilot.pause()
-            field = screen.query_one(f"#{field_id}", Input)
-            good = field.value
-            field.value = bad
-            await pilot.pause()
+            assert screen._build_bandwidth_run().config.sweep_duration_ms == 25
+            assert screen._build_frequency_run().config.sweep_duration_ms == 25
 
-            build = (
-                screen._build_bandwidth_run if kind == "bandwidth" else screen._build_frequency_run
-            )
-            with pytest.raises(FieldError) as excinfo:
-                build()
-            assert excinfo.value.field_id == field_id and label in str(excinfo.value)
+    await _form_defaults_build_the_documented_runs_()
 
-            screen._start_sweep()
-            await pilot.pause()
-            assert field.has_class("-invalid") and app.focused is field
-            assert any(m.startswith("Invalid sweep parameters") for m in notifications(app))
-            assert not app.sweep_running
+    # -- an invalid field is named marked and focused
+    async def _an_invalid_field_is_named_marked_and_foc():
+        app = IyzeeApp()
+        async with app.run_test() as pilot:
+            screen = await _open_sweep_screen(pilot)
+            for key in ("mxa", "shutter", "wavemeter"):
+                app.handles[key] = FakeHandle()
+            for field_id, label, bad, kind in (
+                ("rbw-stop", "RBW stop", "abc", "bandwidth"),
+                ("rbw-steps", "Steps", "0", "bandwidth"),
+                ("freq-points", "Points", "5000", "frequency"),
+                ("sweep-duration", "Sweep duration", "abc", "frequency"),
+            ):
+                screen.query_one("#sweep-type", Select).value = kind
+                await pilot.pause()
+                field = screen.query_one(f"#{field_id}", Input)
+                good = field.value
+                field.value = bad
+                await pilot.pause()
 
-            field.value = good  # editing clears the marker
-            await pilot.pause()
-            assert not field.has_class("-invalid")
+                build = (
+                    screen._build_bandwidth_run
+                    if kind == "bandwidth"
+                    else screen._build_frequency_run
+                )
+                with pytest.raises(FieldError) as excinfo:
+                    build()
+                assert excinfo.value.field_id == field_id and label in str(excinfo.value)
+
+                screen._start_sweep()
+                await pilot.pause()
+                assert field.has_class("-invalid") and app.focused is field
+                assert any(m.startswith("Invalid sweep parameters") for m in notifications(app))
+                assert not app.sweep_running
+
+                field.value = good  # editing clears the marker
+                await pilot.pause()
+                assert not field.has_class("-invalid")
+
+    await _an_invalid_field_is_named_marked_and_foc()
+
+    # -- starting without the needed instrument notifies and launches nothing
+    async def _starting_without_the_needed_instrument_n():
+        app = IyzeeApp()
+        async with app.run_test() as pilot:
+            screen = await _open_sweep_screen(pilot)
+            for kind, connected, action, expected, button in (
+                ("bandwidth", (), "_start_sweep", "Connect the MXA", "#run-sweep"),
+                ("bandwidth", (), "_start_capture", "Connect the MXA", "#capture-trace"),
+                ("frequency", ("mxa",), "_start_sweep", "Connect the shutter", "#run-sweep"),
+                (
+                    "frequency",
+                    ("mxa", "shutter"),
+                    "_start_sweep",
+                    "Connect the wavemeter",
+                    "#run-sweep",
+                ),
+            ):
+                app.handles.clear()
+                for key in connected:
+                    app.handles[key] = FakeHandle()
+                screen.query_one("#sweep-type", Select).value = kind
+                await pilot.pause()
+
+                getattr(screen, action)()
+                await pilot.pause()
+                assert expected in notifications(app)[-1]
+                assert screen.query_one(button).disabled is False
+
+    await _starting_without_the_needed_instrument_n()
 
 
 # -- pre-flight guards and the "not ready" banner ------------------------------------------
-
-
-@async_test
-async def test_starting_without_the_needed_instrument_notifies_and_launches_nothing() -> None:
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        screen = await _open_sweep_screen(pilot)
-        for kind, connected, action, expected, button in (
-            ("bandwidth", (), "_start_sweep", "Connect the MXA", "#run-sweep"),
-            ("bandwidth", (), "_start_capture", "Connect the MXA", "#capture-trace"),
-            ("frequency", ("mxa",), "_start_sweep", "Connect the shutter", "#run-sweep"),
-            (
-                "frequency",
-                ("mxa", "shutter"),
-                "_start_sweep",
-                "Connect the wavemeter",
-                "#run-sweep",
-            ),
-        ):
-            app.handles.clear()
-            for key in connected:
-                app.handles[key] = FakeHandle()
-            screen.query_one("#sweep-type", Select).value = kind
-            await pilot.pause()
-
-            getattr(screen, action)()
-            await pilot.pause()
-            assert expected in notifications(app)[-1]
-            assert screen.query_one(button).disabled is False
 
 
 @async_test

@@ -50,7 +50,8 @@ def _record_with(*outcomes: Exception | None):
     return record
 
 
-def test_a_run_record_reports_how_the_run_ended_and_names_failed_steps_as_plain_json():
+def test_a_run_record_reports_how_the_run_ended_and_can_be_fed_by_run_sequence():
+    # -- a run record reports how the run ended and names failed steps as plain json
     import json
 
     for outcomes, finish, status in (
@@ -75,8 +76,7 @@ def test_a_run_record_reports_how_the_run_ended_and_names_failed_steps_as_plain_
     ]
     assert meta["config"] == {"center_hz": 1e6} and meta["run_id"] == record.run_id
 
-
-def test_run_record_can_be_fed_by_run_sequence():
+    # -- run record can be fed by run sequence
     from iyzee.experiment.core import RunRecord
 
     class Boom:

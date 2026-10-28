@@ -180,7 +180,8 @@ def test_verification_reports_digest_mismatch(tmp_path):
     assert verify(catalog)["integrity"].to_list() == ["MISMATCH"]
 
 
-def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch, tmp_path):
+def test_scope_traces_decode_decimate_and_flow_through_the_analysis_helpers(monkeypatch, tmp_path):
+    # -- scope trace decoding is cached across display options
     path = tmp_path / "scope.npz"
     np.savez(path, placeholder=np.arange(4))
     calls = 0
@@ -229,8 +230,7 @@ def test_scope_trace_decoding_is_cached_across_display_options(monkeypatch, tmp_
     assert first["synthetic"].to_list() == [True] * first.height
     assert second["synthetic"].to_list() == [True] * second.height
 
-
-def test_scope_decimation_preserves_extrema_within_the_point_budget():
+    # -- scope decimation preserves extrema within the point budget
     time = np.arange(1000, dtype=float)
     values = np.zeros(1000)
     values[117] = 25.0
@@ -243,8 +243,7 @@ def test_scope_decimation_preserves_extrema_within_the_point_budget():
     assert reduced_values.max() == 25.0
     assert reduced_values.min() == -22.0
 
-
-def test_synthetic_scope_recordings_flow_through_analysis_helpers(tmp_path):
+    # -- synthetic scope recordings flow through analysis helpers
     paths = write_demo(
         tmp_path,
         now=datetime(2026, 10, 19, 12, tzinfo=UTC),

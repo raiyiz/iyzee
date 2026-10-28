@@ -98,64 +98,135 @@ async def test_editing_a_field_while_a_retrieve_is_in_flight_does_not_break_the_
 
 
 @async_test
-async def test_apply_writes_only_changes_and_shows_what_the_scope_reports() -> None:
-    scope = ScreenScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-        scope.calls.clear()
+async def test_apply_writes_changes_trigger_changes_and_reports_a_refusal() -> None:
+    # -- apply writes only changes and shows what the scope reports
+    async def _apply_writes_only_changes_and_shows_what():
+        scope = ScreenScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
+        async with IyzeeApp().run_test() as pilot:
+            app = pilot.app
+            assert isinstance(app, IyzeeApp)
+            screen = await _open(pilot, scope)
+            await _synced(pilot, screen)
+            scope.calls.clear()
 
-        _set(screen, "C1-vdiv", "0.123")
-        screen.query_one("#apply-settings", Button).press()
-        await wait_until(pilot, lambda: "Applied and verified" in _log(screen))
+            _set(screen, "C1-vdiv", "0.123")
+            screen.query_one("#apply-settings", Button).press()
+            await wait_until(pilot, lambda: "Applied and verified" in _log(screen))
 
-        assert [c for c in scope.calls if c[0].startswith("set_")] == [
-            ("set_volts_per_div", Channel.C1, 0.123)
-        ]  # nothing else was written
-        assert float(screen.query_one("#C1-vdiv", Input).value) == pytest.approx(0.1)
-        assert "C1 V/div: requested 0.123, scope set 0.1" in _log(screen)
-        assert screen._channel_state is not None
-        assert screen._channel_state[0].volts_per_div == pytest.approx(0.1)
+            assert [c for c in scope.calls if c[0].startswith("set_")] == [
+                ("set_volts_per_div", Channel.C1, 0.123)
+            ]  # nothing else was written
+            assert float(screen.query_one("#C1-vdiv", Input).value) == pytest.approx(0.1)
+            assert "C1 V/div: requested 0.123, scope set 0.1" in _log(screen)
+            assert screen._channel_state is not None
+            assert screen._channel_state[0].volts_per_div == pytest.approx(0.1)
 
-        screen.query_one("#C2-coupling", Select).value = Coupling.DC_50.value
-        screen.query_one("#apply-settings", Button).press()
-        await wait_until(pilot, lambda: "coupling is" in _log(screen))
+            screen.query_one("#C2-coupling", Select).value = Coupling.DC_50.value
+            screen.query_one("#apply-settings", Button).press()
+            await wait_until(pilot, lambda: "coupling is" in _log(screen))
 
-        assert "C2 coupling is D1M but D50 was requested" in _log(screen)
-        assert any("Some channel changes failed" in n for n in notifications(app))
-        # The form now shows the truth (the scope ignored the command).
-        assert screen.query_one("#C2-coupling", Select).value == Coupling.DC_1M.value
-        assert not screen._busy
+            assert "C2 coupling is D1M but D50 was requested" in _log(screen)
+            assert any("Some channel changes failed" in n for n in notifications(app))
+            # The form now shows the truth (the scope ignored the command).
+            assert screen.query_one("#C2-coupling", Select).value == Coupling.DC_1M.value
+            assert not screen._busy
 
-        scope.calls.clear()  # and applying with nothing changed writes nothing
-        screen.query_one("#apply-settings", Button).press()
-        await wait_until(pilot, lambda: "No changes to apply." in _log(screen))
-        assert scope.calls == []
+            scope.calls.clear()  # and applying with nothing changed writes nothing
+            screen.query_one("#apply-settings", Button).press()
+            await wait_until(pilot, lambda: "No changes to apply." in _log(screen))
+            assert scope.calls == []
+
+    await _apply_writes_only_changes_and_shows_what()
+
+    # -- applying trigger changes shows what the scope reports
+    async def _applying_trigger_changes_shows_what_the_():
+        scope = TriggerScope()
+        async with IyzeeApp().run_test() as pilot:
+            screen = await _open(pilot, scope)
+            await _synced(pilot, screen)
+
+            _set(screen, "trig-level", "0.25")
+            screen.query_one("#trig-slope", Select).value = TriggerSlope.NEGATIVE.value
+            screen.query_one("#apply-settings", Button).press()
+            await wait_until(pilot, lambda: "Applied and verified changes." in _log(screen))
+
+            verified = screen._trigger_state
+            assert verified is not None
+            assert verified.level_volts == 0.25 and verified.slope is TriggerSlope.NEGATIVE
+            assert not screen._busy and screen._synced
+
+    await _applying_trigger_changes_shows_what_the_()
+
+    # -- a refused apply is reported keeps the edit and requires a retrieve
+    async def _a_refused_apply_is_reported_keeps_the_ed():
+        scope = TriggerScope(refuse_level=True)
+        async with IyzeeApp().run_test() as pilot:
+            app = pilot.app
+            assert isinstance(app, IyzeeApp)
+            screen = await _open(pilot, scope)
+            await _synced(pilot, screen)
+
+            _set(screen, "trig-level", "0.25")
+            screen.query_one("#apply-settings", Button).press()
+            await wait_until(pilot, lambda: "level refused" in _log(screen))
+
+            assert not screen._busy
+            assert (
+                screen.query_one("#trig-level", Input).value == "0.25"
+            )  # still editable, to retry
+            assert not screen._synced  # what the scope holds is unknown until the next Retrieve
+            assert screen.query_one("#apply-settings", Button).disabled
+            assert any("Applying settings failed" in n for n in notifications(app))
+
+    await _a_refused_apply_is_reported_keeps_the_ed()
 
 
 @async_test
-async def test_apply_after_the_scope_disconnects_releases_the_busy_flag_and_keeps_the_state() -> (
-    None
-):
-    scope = ScreenScope()
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-        state = screen._channel_state
-        trigger = screen._trigger_state
-        assert state is not None and trigger is not None
+async def test_a_scope_that_disconnects_mid_operation_never_leaves_the_page_busy() -> None:
+    # -- apply after the scope disconnects releases the busy flag and keeps the state
+    async def _apply_after_the_scope_disconnects_releas():
+        scope = ScreenScope()
+        async with IyzeeApp().run_test() as pilot:
+            app = pilot.app
+            assert isinstance(app, IyzeeApp)
+            screen = await _open(pilot, scope)
+            await _synced(pilot, screen)
+            state = screen._channel_state
+            trigger = screen._trigger_state
+            assert state is not None and trigger is not None
 
-        app.handles.pop("scope")  # disconnected between the click and the worker starting
-        screen._busy = True
-        screen._apply(scope, [state[0]], None, state, trigger)
+            app.handles.pop("scope")  # disconnected between the click and the worker starting
+            screen._busy = True
+            screen._apply(scope, [state[0]], None, state, trigger)
 
-        # Not stuck "busy", and the stale result is discarded: state untouched.
-        await wait_until(pilot, lambda: not screen._busy)
-        assert screen._channel_state == state
+            # Not stuck "busy", and the stale result is discarded: state untouched.
+            await wait_until(pilot, lambda: not screen._busy)
+            assert screen._channel_state == state
+
+    await _apply_after_the_scope_disconnects_releas()
+
+    # -- acquire when the scope disconnects first does not leave the button disabled
+    async def _acquire_when_the_scope_disconnects_first():
+        scope = ScreenScope()
+        async with IyzeeApp().run_test() as pilot:
+            app = pilot.app
+            assert isinstance(app, IyzeeApp)
+            screen = await _open(pilot, scope)
+            await _synced(pilot, screen)
+            settings = tuple(screen._read_channel_settings())
+            trigger = screen._read_trigger_settings()
+
+            app.handles.pop("scope")  # gone before the worker runs: this was a KeyError
+            screen.query_one("#acquire-waveforms", Button).disabled = True
+            screen._acquire(scope, [Channel.C1], settings, trigger, None, None)
+
+            await wait_until(
+                pilot, lambda: not screen.query_one("#acquire-waveforms", Button).disabled
+            )
+            assert "disconnected before acquisition started" in _log(screen)
+            assert any("Acquisition failed" in n for n in notifications(app))
+
+    await _acquire_when_the_scope_disconnects_first()
 
 
 class TriggerScope(ScreenScope):
@@ -191,44 +262,6 @@ class TriggerScope(ScreenScope):
         self.trigger_state = replace(self.trigger_state, slope=slope)
 
 
-@async_test
-async def test_applying_trigger_changes_shows_what_the_scope_reports() -> None:
-    scope = TriggerScope()
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-
-        _set(screen, "trig-level", "0.25")
-        screen.query_one("#trig-slope", Select).value = TriggerSlope.NEGATIVE.value
-        screen.query_one("#apply-settings", Button).press()
-        await wait_until(pilot, lambda: "Applied and verified changes." in _log(screen))
-
-        verified = screen._trigger_state
-        assert verified is not None
-        assert verified.level_volts == 0.25 and verified.slope is TriggerSlope.NEGATIVE
-        assert not screen._busy and screen._synced
-
-
-@async_test
-async def test_a_refused_apply_is_reported_keeps_the_edit_and_requires_a_retrieve() -> None:
-    scope = TriggerScope(refuse_level=True)
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-
-        _set(screen, "trig-level", "0.25")
-        screen.query_one("#apply-settings", Button).press()
-        await wait_until(pilot, lambda: "level refused" in _log(screen))
-
-        assert not screen._busy
-        assert screen.query_one("#trig-level", Input).value == "0.25"  # still editable, to retry
-        assert not screen._synced  # what the scope holds is unknown until the next Retrieve
-        assert screen.query_one("#apply-settings", Button).disabled
-        assert any("Applying settings failed" in n for n in notifications(app))
-
-
 @pytest.mark.parametrize("operation", ["retrieve"])
 @async_test
 async def test_an_operation_finishing_after_a_disconnect_releases_its_flags(
@@ -259,20 +292,40 @@ async def test_an_operation_finishing_after_a_disconnect_releases_its_flags(
 
 
 @async_test
-async def test_acquire_refuses_while_the_form_has_changes_the_scope_does_not() -> None:
-    scope = ScreenScope()
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
+async def test_the_form_refuses_unapplied_changes_and_flags_invalid_selects() -> None:
+    # -- acquire refuses while the form has changes the scope does not
+    async def _acquire_refuses_while_the_form_has_chang():
+        scope = ScreenScope()
+        async with IyzeeApp().run_test() as pilot:
+            app = pilot.app
+            assert isinstance(app, IyzeeApp)
+            screen = await _open(pilot, scope)
+            await _synced(pilot, screen)
 
-        _set(screen, "trig-level", "0.25")
-        screen.query_one("#acquire-waveforms", Button).press()
-        await pilot.pause()
+            _set(screen, "trig-level", "0.25")
+            screen.query_one("#acquire-waveforms", Button).press()
+            await pilot.pause()
 
-        assert any("press Apply" in n for n in notifications(app))
-        assert "Acquiring" not in _log(screen)
+            assert any("press Apply" in n for n in notifications(app))
+            assert "Acquiring" not in _log(screen)
+
+    await _acquire_refuses_while_the_form_has_chang()
+
+    # -- flagging a select as invalid marks and focuses it
+    # ``_flag_invalid`` used to assume an ``Input``; a bad ``Select`` would crash it.
+    async def _flagging_a_select_as_invalid_marks_and_f():
+        async with IyzeeApp().run_test() as pilot:
+            screen = await _open(pilot)
+
+            screen._flag_invalid("C1-coupling")
+            await pilot.pause()
+
+            select = screen.query_one("#C1-coupling", Select)
+            assert select.has_class("-invalid")
+            screen._flag_invalid("C1-vdiv")  # moving on clears the previous marker
+            assert not select.has_class("-invalid")
+
+    await _flagging_a_select_as_invalid_marks_and_f()
 
 
 # -- acquire ---------------------------------------------------------------------------------
@@ -301,28 +354,6 @@ async def test_acquire_saves_and_reports_that_a_running_acquisition_was_paused(
 
 
 @async_test
-async def test_acquire_when_the_scope_disconnects_first_does_not_leave_the_button_disabled() -> (
-    None
-):
-    scope = ScreenScope()
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-        settings = tuple(screen._read_channel_settings())
-        trigger = screen._read_trigger_settings()
-
-        app.handles.pop("scope")  # gone before the worker runs: this was a KeyError
-        screen.query_one("#acquire-waveforms", Button).disabled = True
-        screen._acquire(scope, [Channel.C1], settings, trigger, None, None)
-
-        await wait_until(pilot, lambda: not screen.query_one("#acquire-waveforms", Button).disabled)
-        assert "disconnected before acquisition started" in _log(screen)
-        assert any("Acquisition failed" in n for n in notifications(app))
-
-
-@async_test
 async def test_an_unexpected_acquire_error_re_enables_the_button(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -343,18 +374,3 @@ async def test_an_unexpected_acquire_error_re_enables_the_button(
 
 
 # -- form plumbing ---------------------------------------------------------------------------
-
-
-@async_test
-async def test_flagging_a_select_as_invalid_marks_and_focuses_it() -> None:
-    """``_flag_invalid`` used to assume an ``Input``; a bad ``Select`` would crash it."""
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot)
-
-        screen._flag_invalid("C1-coupling")
-        await pilot.pause()
-
-        select = screen.query_one("#C1-coupling", Select)
-        assert select.has_class("-invalid")
-        screen._flag_invalid("C1-vdiv")  # moving on clears the previous marker
-        assert not select.has_class("-invalid")

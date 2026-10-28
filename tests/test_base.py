@@ -23,66 +23,43 @@ class FakeResourceManager:
         return self.instrument
 
 
-def test_base_device_accepts_injected_resource_manager():
+def test_base_device_opens_lazily_once_closes_idempotently_and_reconnects():
     resource_manager = FakeResourceManager()
-
-    device = BaseDevice(ip=IP.POWER_SUPPLY, resource_manager=resource_manager)
-
+    device = BaseDevice(ip=IP.POWER_SUPPLY, resource_manager=resource_manager)  # injected
     assert device.rm is resource_manager
-    assert resource_manager.open_calls == 0
-    assert device.instrument is None
+    assert resource_manager.open_calls == 0 and device.instrument is None
+
+    device.close()  # closing a device that was never opened does nothing
+    device.close()
+    assert resource_manager.instrument.close_calls == 0
 
     device.connect()
+    device.connect()  # and connecting twice opens once
     assert resource_manager.open_calls == 1
     assert device.instrument is resource_manager.instrument
 
     device.close()
     assert resource_manager.instrument.close_calls == 1
+    device.connect()  # reconnecting opens a fresh link
+    assert resource_manager.open_calls == 2
 
 
-def test_base_device_does_not_open_more_than_once(monkeypatch):
+def test_base_device_as_a_context_manager_opens_once_and_closes_even_when_the_block_raises(
+    monkeypatch,
+):
     resource_manager = FakeResourceManager()
     monkeypatch.setattr(pyvisa, "ResourceManager", lambda: resource_manager)
-
     device = BaseDevice(ip=IP.POWER_SUPPLY)
     assert resource_manager.open_calls == 0
 
     with device as managed:
         assert managed is device
         assert resource_manager.open_calls == 1
-
         device.connect()
         assert resource_manager.open_calls == 1
-
     assert resource_manager.instrument.close_calls == 1
-
-
-def test_base_device_can_reconnect_after_close(monkeypatch):
-    resource_manager = FakeResourceManager()
-    monkeypatch.setattr(pyvisa, "ResourceManager", lambda: resource_manager)
-
-    device = BaseDevice(ip=IP.POWER_SUPPLY)
-    device.close()
-    device.close()
-    assert resource_manager.instrument.close_calls == 0
-
-    device.connect()
-    assert resource_manager.open_calls == 1
-
-    device.close()
-    assert resource_manager.instrument.close_calls == 1
-
-    device.connect()
-    assert resource_manager.open_calls == 2
-
-
-def test_base_device_closes_when_the_with_block_raises(monkeypatch):
-    resource_manager = FakeResourceManager()
-    monkeypatch.setattr(pyvisa, "ResourceManager", lambda: resource_manager)
-    device = BaseDevice(ip=IP.POWER_SUPPLY)
 
     with pytest.raises(RuntimeError), device:
         raise RuntimeError("acquisition failed")
-
     assert device.instrument is None
-    assert resource_manager.instrument.close_calls == 1
+    assert resource_manager.instrument.close_calls == 2
