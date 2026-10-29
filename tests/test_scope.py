@@ -64,9 +64,11 @@ def test_connecting_and_the_identity_query_fail_clearly():
             raise visa_timeout()
 
     refused = LeCroy("10.0.0.1", resource_manager=Refusing())
-    with pytest.raises(LeCroyTimeoutError, match=r"10\.0\.0\.1"):
+    with pytest.raises(LeCroyTimeoutError, match=r"10\.0\.0\.1") as failure:
         refused.connect()
     assert not refused.connected
+    assert "LXI/VXI-11" in " ".join(failure.value.__notes__)
+    assert "TCPIP0::10.0.0.1::inst0::INSTR" in str(failure.value.__notes__)
 
     # -- idn asks for the identity and can widen the timeout
     scope, resource = connected("LECROY,WP804HD-MS,SN,11.6.0\n")
@@ -151,3 +153,20 @@ def test_waveforms_and_settings_use_the_documented_commands_and_refuse_bad_input
 
 
 # -- channel / trigger control ---------------------------------------------------------------
+
+
+def test_query_timeout_names_command_resource_and_drops_connection():
+    scope, resource = connected(visa_timeout())
+
+    with pytest.raises(
+        LeCroyTimeoutError,
+        match=r"C1:VOLT_DIV\?.*after 15s",
+    ) as failure:
+        scope.query("C1:VOLT_DIV?", timeout=15.0)
+
+    assert resource.closed
+    assert not scope.connected
+    notes = " ".join(failure.value.__notes__)
+    assert "TCPIP0::10.0.0.1::inst0::INSTR" in notes
+    assert "backend '<injected>'" in notes
+    assert "LXI/VXI-11" in notes

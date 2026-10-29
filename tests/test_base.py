@@ -48,8 +48,14 @@ def test_base_device_as_a_context_manager_opens_once_and_closes_even_when_the_bl
     monkeypatch,
 ):
     resource_manager = FakeResourceManager()
-    monkeypatch.setattr(pyvisa, "ResourceManager", lambda: resource_manager)
+    selected_backends = []
+    monkeypatch.setattr(
+        pyvisa,
+        "ResourceManager",
+        lambda backend: selected_backends.append(backend) or resource_manager,
+    )
     device = BaseDevice(ip=IP.POWER_SUPPLY)
+    assert selected_backends == ["@py"]
     assert resource_manager.open_calls == 0
 
     with device as managed:

@@ -3,7 +3,8 @@
 The defaults describe the lab; each can be overridden without touching code,
 in this order of precedence:
 
-1. an environment variable (``IYZEE_<NAME>_IP``, ``IYZEE_DATA_DIR``),
+1. an environment variable (``IYZEE_<NAME>_IP``, ``IYZEE_DATA_DIR``,
+   ``IYZEE_VISA_BACKEND``),
 2. the TOML file ``IYZEE_CONFIG`` points at, else ``<user config dir>/iyzee/config.toml``::
 
        [addresses]
@@ -12,11 +13,15 @@ in this order of precedence:
        [paths]
        data = "/srv/iyzee-data"
 
+       [visa]
+       backend = "@py"  # or a supported VISA library name/path
+
 3. the default below.
 
 A config file that exists but cannot be parsed raises :class:`ConfigError`
 rather than being ignored: silently talking to the wrong instrument is worse
-than not starting.
+than not starting. VISA backend selection follows the same environment-over-file
+precedence; it defaults to PyVISA-py (@py) so backend choice is predictable.
 
 Guide: :guide:`arch-config`
 """
@@ -69,6 +74,19 @@ def address(instrument: IP) -> str:
         return from_env
     value = _load().get("addresses", {}).get(name)
     return str(value) if value else str(instrument.value)
+
+
+def visa_backend() -> str:
+    """PyVISA backend selector from IYZEE_VISA_BACKEND or [visa].backend.
+
+    Defaults to @py (PyVISA-py). A native VISA library can be selected by
+    setting this to its PyVISA library name or full library path.
+    """
+    from_env = os.environ.get("IYZEE_VISA_BACKEND")
+    if from_env:
+        return from_env
+    configured = _load().get("visa", {}).get("backend")
+    return str(configured) if configured else "@py"
 
 
 def data_root() -> Path:

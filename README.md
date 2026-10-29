@@ -169,6 +169,7 @@ IYZEE_NOISE_ANALYZER_IP
 IYZEE_POWER_SUPPLY_IP
 IYZEE_WAVEMETER_IP
 IYZEE_DATA_DIR
+IYZEE_VISA_BACKEND
 ~~~
 
 Or use <code>config.toml</code> in the user config directory (or set <code>IYZEE_CONFIG</code>):
@@ -179,7 +180,17 @@ scope = "10.140.1.221"
 
 [paths]
 data = "/srv/iyzee-data"
+
+[visa]
+backend = "@py"  # PyVISA-py; alternatively set a supported VISA library name/path
 ~~~
+
+The VISA backend defaults to `@py` (PyVISA-py). `IYZEE_VISA_BACKEND` overrides
+`[visa].backend`; use a supported native VISA library selector/path when the lab
+needs one. Backend selection chooses the VISA implementation, not the instrument
+protocol. The LeCroy driver uses `TCPIP0::<ip>::inst0::INSTR` and requires the
+scope to be set to **LXI (VXI-11)**; VICP is a different protocol and is never
+tried as an automatic fallback.
 
 A present but invalid configuration file is an error; iyzee does not silently fall back to defaults.
 
