@@ -200,7 +200,7 @@ sweeps) over the range that all of them cover, so nothing is extrapolated. A gro
 two runs for a spread, and a group of one run shows only its mean. The A minus B difference uses
 Welch's unequal-variance standard error; a point is flagged when the difference exceeds two
 standard errors. That flag is a rough guide to whether a gap is larger than the run-to-run
-scatter, not a p-value, and with fewer than three runs per group it is only indicative.
+scatter, not a p-value, and with fewer than three runs per group it is only indicative. Because every shared-grid point is checked separately, comparing many points also increases the chance of seeing one or more flags by chance; treat these flags as exploratory and confirm a pre-specified hypothesis with a suitable analysis.
 
 For frequency sweeps, plotted offsets use one median reference shared by all marked frequency
 runs; the code does not re-center each run independently, so measured drift remains visible.

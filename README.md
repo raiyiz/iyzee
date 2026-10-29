@@ -240,7 +240,7 @@ uv run --group notebooks marimo edit notebooks/reproduce_frequency_sweep.py
 Try the whole workflow without connecting to hardware:
 
 ~~~sh
-uv run iyz-demo demo-data
+uv run --extra analysis iyz-demo demo-data
 IYZEE_DATA_DIR=demo-data uv run --extra analysis --group notebooks marimo edit notebooks/workbench.py
 ~~~
 

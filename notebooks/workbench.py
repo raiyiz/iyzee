@@ -1,11 +1,11 @@
 """Interactive, read-only workbench for iyzee measurement recordings.
 
 Launch with:
-    uv run --group notebooks marimo edit notebooks/workbench.py
+    uv run --extra analysis --group notebooks marimo edit notebooks/workbench.py
 
 To try it without instruments:
-    uv run iyz-demo demo-data
-    IYZEE_DATA_DIR=demo-data uv run --group notebooks marimo edit notebooks/workbench.py
+    uv run --extra analysis iyz-demo demo-data
+    IYZEE_DATA_DIR=demo-data uv run --extra analysis --group notebooks marimo edit notebooks/workbench.py
 
 The flow is: find recordings -> build a working set -> every later section analyses that
 set. The set is a ``Workset`` (see ``iyzee.workbench.workset``), so everything below is also
@@ -116,7 +116,7 @@ def _(mo, refresh_index, root, scan_catalog):
     elif catalog.is_empty():
         index_status = mo.md(
             f"No .npz recordings found in {root}. Create demo data with "
-            "`uv run iyz-demo demo-data` and point the directory above at it."
+            "`uv run --extra analysis iyz-demo demo-data` and point the directory above at it."
         )
     else:
         index_status = mo.md(f"Indexed **{catalog.height:,} recordings** in {root}.")

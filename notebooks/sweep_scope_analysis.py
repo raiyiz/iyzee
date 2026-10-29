@@ -29,7 +29,7 @@ def _(mo):
     mo.md("""
     # iyzee · Analysis recipes
 
-    Choose recordings in **one line**, then analyse. Run `uv run iyz-demo demo-data` first
+    Choose recordings in **one line**, then analyse. Run `uv run --extra analysis iyz-demo demo-data` first
     if you have no recordings; synthetic runs are labelled and are not measurements.
     """)
     return

@@ -276,7 +276,7 @@ def main() -> None:
     print(f"wrote {len(written)} synthetic recordings under {args.out}")
     print(
         f"Try them with: IYZEE_DATA_DIR={args.out} "
-        "uv run --group notebooks marimo edit notebooks/workbench.py"
+        "uv run --extra analysis --group notebooks marimo edit notebooks/workbench.py"
     )
 
 

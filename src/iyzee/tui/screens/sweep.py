@@ -45,7 +45,7 @@ from ...experiment import (
     build_frequency_sweep,
     difference_series,
 )
-from ...experiment.runner import SweepAborted, run_recorded_sweep
+from ...experiment.runner import run_recorded_sweep
 from ..commands import Command
 from ..plotting import draw_series, prepare_series
 from ..text import one_line

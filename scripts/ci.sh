@@ -33,8 +33,8 @@ doc_links() {
 
 notebooks() {
     uv sync --locked --group dev --group notebooks
-    uv run --locked --group notebooks marimo check --strict notebooks/workbench.py notebooks/sweep_scope_analysis.py notebooks/reproduce_frequency_sweep.py
-    uv run --locked --group notebooks pytest tests/test_notebooks.py
+    uv run --locked --group dev --group notebooks marimo check --strict notebooks/workbench.py notebooks/sweep_scope_analysis.py notebooks/reproduce_frequency_sweep.py
+    uv run --locked --group dev --group notebooks pytest tests/test_notebooks.py
 }
 
 all() {
