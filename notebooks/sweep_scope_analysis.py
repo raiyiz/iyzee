@@ -14,19 +14,12 @@ app = marimo.App(width="medium", app_title="iyzee · analysis recipes")
 
 @app.cell
 def _():
-    import sys
-    from pathlib import Path
-
     import marimo as mo
     import polars as pl
 
     from iyzee.config import data_root
 
-    notebook_dir = str(Path(__file__).resolve().parent)
-    if notebook_dir not in sys.path:
-        sys.path.insert(0, notebook_dir)
-
-    from workset import Workset
+    from iyzee.workbench import Workset
 
     return Workset, data_root, mo, pl
 
@@ -36,7 +29,7 @@ def _(mo):
     mo.md("""
     # iyzee · Analysis recipes
 
-    Choose recordings in **one line**, then analyse. Run `scripts/demo_data.py` first
+    Choose recordings in **one line**, then analyse. Run `uv run iyz-demo demo-data` first
     if you have no recordings; synthetic runs are labelled and are not measurements.
     """)
     return

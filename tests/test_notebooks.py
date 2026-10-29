@@ -20,12 +20,16 @@ pytest.importorskip("marimo")
 
 ROOT = Path(__file__).parents[1]
 NOTEBOOKS = ROOT / "notebooks"
-sys.path.insert(0, str(NOTEBOOKS))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from demo_data import write_demo  # noqa: E402
-from toolbox import group_difference, pick, scan_catalog  # noqa: E402
-from workset import Workset, WorksetStore  # noqa: E402
+from iyzee.workbench import (
+    Workset,
+    WorksetStore,
+    group_difference,
+    pick,
+    scan_catalog,
+)  # noqa: E402
 
 
 @pytest.fixture(scope="module")

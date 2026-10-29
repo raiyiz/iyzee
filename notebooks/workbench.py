@@ -4,11 +4,11 @@ Launch with:
     uv run --group notebooks marimo edit notebooks/workbench.py
 
 To try it without instruments:
-    uv run scripts/demo_data.py demo-data
+    uv run iyz-demo demo-data
     IYZEE_DATA_DIR=demo-data uv run --group notebooks marimo edit notebooks/workbench.py
 
 The flow is: find recordings -> build a working set -> every later section analyses that
-set. The set is a ``Workset`` (see ``notebooks/workset.py``), so everything below is also
+set. The set is a ``Workset`` (see ``iyzee.workbench.workset``), so everything below is also
 available in a script or IPython with two lines of code.
 """
 
@@ -20,7 +20,6 @@ app = marimo.App(width="full", app_title="iyzee · data workbench")
 
 @app.cell
 def _():
-    import sys
     from pathlib import Path
 
     import marimo as mo
@@ -28,14 +27,12 @@ def _():
 
     from iyzee.config import data_root
 
-    notebook_dir = str(Path(__file__).resolve().parent)
-    if notebook_dir not in sys.path:
-        sys.path.insert(0, notebook_dir)
-
-    from toolbox import (
+    from iyzee.workbench import (
         BAND_CHOICES,
         KINDS,
         SWEEP_METRICS,
+        Workset,
+        WorksetStore,
         default_selection,
         figure_bytes,
         pick,
@@ -43,7 +40,6 @@ def _():
         read_manifest,
         scan_catalog,
     )
-    from workset import Workset, WorksetStore
 
     return (
         BAND_CHOICES,
@@ -120,7 +116,7 @@ def _(mo, refresh_index, root, scan_catalog):
     elif catalog.is_empty():
         index_status = mo.md(
             f"No .npz recordings found in {root}. Create demo data with "
-            "`uv run scripts/demo_data.py demo-data` and point the directory above at it."
+            "`uv run iyz-demo demo-data` and point the directory above at it."
         )
     else:
         index_status = mo.md(f"Indexed **{catalog.height:,} recordings** in {root}.")
@@ -1143,7 +1139,7 @@ def _(mo):
     The same working set is available in code, with no notebook widgets:
 
     ~~~python
-    from workset import Workset            # run from notebooks/, or add it to sys.path
+    from iyzee.workbench import Workset
 
     ws = Workset.open("demo-data", kind="frequency", latest=3)   # filter on load
     ws = Workset.open("demo-data", ["#02", "#05", "scan-pumped"])  # or pick by #ref / name

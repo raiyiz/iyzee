@@ -228,10 +228,10 @@ scripts/ci.sh all         # run everything
 
 GitHub Actions and GitLab use the same <code>scripts/ci.sh</code> targets. <code>hardware</code> is deliberately not part of <code>all</code> or CI.
 
-The notebook tools use the optional <code>notebooks</code> dependency group. <code>workbench.py</code> is the read-only analysis front end. It indexes JSON sidecars first and gives every recording a stable `#ref`. You filter the list (type, status, origin, date range, text), tick rows to preview them, and add them to a **working set** that stays visible in the sidebar and at the top of every section; every plot gives a run the same colour. From that set it provides a sweep scoreboard, standard sweep/scope comparisons, a point inspector (squeezing vs shot noise), raw arrays overlaid across runs, comparison against a reference run, a plot builder (colour, line style, panels, log axes, PNG/SVG/PDF export), groups with mean ± spread bands and an A-vs-B difference with standard errors, SHA-256 verification, and CSV exports. Working sets can be saved by name (in your iyzee config folder, never in the data directory) and reloaded with their groups. The same working set is an ordinary Python object (<code>notebooks/workset.py</code>), so `Workset.open("demo-data", kind="frequency", latest=3).scoreboard()` works in a script or IPython; <code>sweep_scope_analysis.py</code> is a short code-first example. <code>reproduce_frequency_sweep.py</code> is a separate hardware diagnostic that replays the frequency sweep with explicit confirmation; it changes the laser setpoint, opens/closes the shutter, and reconfigures the MXA. Close the TUI before running it, and use it only when you intend to operate the bench. The shared Polars analysis helpers live in <code>notebooks/toolbox.py</code>.
+The analysis workbench uses the optional <code>analysis</code> extra for Polars and the <code>notebooks</code> group for marimo. <code>workbench.py</code> is the read-only analysis front end. It indexes JSON sidecars first and gives every recording a stable `#ref`. You filter the list (type, status, origin, date range, text), tick rows to preview them, and add them to a **working set** that stays visible in the sidebar and at the top of every section; every plot gives a run the same colour. From that set it provides a sweep scoreboard, standard sweep/scope comparisons, a point inspector (squeezing vs shot noise), raw arrays overlaid across runs, comparison against a reference run, a plot builder (colour, line style, panels, log axes, PNG/SVG/PDF export), groups with mean ± spread bands and an A-vs-B difference with standard errors, SHA-256 verification, and CSV exports. Working sets can be saved by name (in your iyzee config folder, never in the data directory) and reloaded with their groups. The same working set is an ordinary Python object (<code>iyzee.workbench.workset</code>), so `Workset.open("demo-data", kind="frequency", latest=3).scoreboard()` works in a script or IPython; <code>sweep_scope_analysis.py</code> is a short code-first example. <code>reproduce_frequency_sweep.py</code> is a separate hardware diagnostic that replays the frequency sweep with explicit confirmation; it changes the laser setpoint, opens/closes the shutter, and reconfigures the MXA. Close the TUI before running it, and use it only when you intend to operate the bench. The shared Polars analysis helpers live in <code>iyzee.workbench</code>.
 
 ~~~sh
-uv run --group notebooks marimo edit notebooks/workbench.py
+uv run --extra analysis --group notebooks marimo edit notebooks/workbench.py
 
 # Hardware-driving diagnostic only; close the TUI first
 uv run --group notebooks marimo edit notebooks/reproduce_frequency_sweep.py
@@ -240,8 +240,8 @@ uv run --group notebooks marimo edit notebooks/reproduce_frequency_sweep.py
 Try the whole workflow without connecting to hardware:
 
 ~~~sh
-uv run scripts/demo_data.py demo-data
-IYZEE_DATA_DIR=demo-data uv run --group notebooks marimo edit notebooks/workbench.py
+uv run iyz-demo demo-data
+IYZEE_DATA_DIR=demo-data uv run --extra analysis --group notebooks marimo edit notebooks/workbench.py
 ~~~
 
 Synthetic runs are marked in the catalog; their signal shapes are for learning the interface, not scientific results. <code>scripts/ci.sh notebooks</code> runs the notebook-specific lint and analysis tests in the optional environment.

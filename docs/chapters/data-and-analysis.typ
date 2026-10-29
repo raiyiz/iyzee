@@ -151,7 +151,7 @@ does not read every waveform into memory.
 
 Install the optional notebook dependencies and launch it from the repository root:
 
-#raw("uv sync --group notebooks\nuv run --group notebooks marimo edit notebooks/workbench.py", lang: "sh", block: true)
+#raw("uv sync --group notebooks\nuv run --extra analysis --group notebooks marimo edit notebooks/workbench.py", lang: "sh", block: true)
 
 Use the directory control to select a recording folder (or set `IYZEE_DATA_DIR` before
 launching), then press *Refresh index* after adding or changing files. The browser shows
@@ -224,11 +224,13 @@ This notebook operates real instruments: it changes the laser setpoint, opens an
 shutter, and reconfigures the MXA. It requires explicit confirmation and the TUI must be
 closed first. It is intentionally separate from the read-only workbench.
 
-The shared helpers in
-#file("notebooks/toolbox.py", label: "toolbox.py")
-and the working-set class in
-#file("notebooks/workset.py", label: "workset.py")
-remain ordinary Python; the data path uses the same
+The reusable analysis library is split by responsibility:
+#file("src/iyzee/workbench/catalog.py", label: "catalog"),
+#file("src/iyzee/workbench/tables.py", label: "analysis tables"),
+#file("src/iyzee/workbench/groups.py", label: "group statistics"),
+#file("src/iyzee/workbench/charts.py", label: "plotting and exports"),
+and #file("src/iyzee/workbench/workset.py", label: "working sets").
+These modules remain ordinary Python; the data path uses the same
 #file("src/iyzee/experiment/io.py", label: "recording loader")
 and
 #file("src/iyzee/analysis.py", label: "analysis summaries")
