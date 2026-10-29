@@ -1,4 +1,5 @@
 """Plot tidy workbench tables and export figures or CSV data."""
+
 from __future__ import annotations
 
 import math

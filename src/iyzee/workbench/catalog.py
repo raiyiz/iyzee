@@ -1,4 +1,5 @@
 """Catalog saved recordings and provide stable, composable selections."""
+
 from __future__ import annotations
 
 import hashlib

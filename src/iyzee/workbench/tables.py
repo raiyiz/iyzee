@@ -1,4 +1,5 @@
 """Build tidy analysis tables from saved iyzee recordings."""
+
 from __future__ import annotations
 
 import math

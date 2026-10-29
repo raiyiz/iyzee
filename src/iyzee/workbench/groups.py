@@ -1,4 +1,5 @@
 """Compare sweep groups on a shared, non-extrapolated grid."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
