@@ -24,8 +24,12 @@ dependencies = [
     "traitlets>=5.14",
 ]
 
+[project.optional-dependencies]
+analysis = ["polars>=2.0.0"]
+
 [project.scripts]
 iyz = "iyzee.tui.app:run"
+iyz-demo = "iyzee.workbench.demo:main"
 
 [build-system]
 requires = ["uv_build>=0.12.6,<0.13.0"]
@@ -71,6 +75,7 @@ ignore_missing_imports = true
 dev = [
     "ipdb>=0.13.13",
     "mypy>=1.18.2",
+    "polars>=2.0.0",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "ruff>=0.13.0",
@@ -78,5 +83,4 @@ dev = [
 ]
 notebooks = [
     "marimo>=0.25.1",
-    "polars>=2.0.0",
 ]
