@@ -77,23 +77,23 @@ def _encode_terminal_key(base: str, modifiers: set[str]) -> bytes | None:
     if base in _CURSOR_FINAL:
         final = _CURSOR_FINAL[base]
         if not modifiers:
-            return f"\\x1b[{final}".encode()
-        return f"\\x1b[1;{parameter}{final}".encode()
+            return f"\x1b[{final}".encode()
+        return f"\x1b[1;{parameter}{final}".encode()
     if base in _TILDE_NUMBER:
         number = _TILDE_NUMBER[base]
         if not modifiers:
-            return f"\\x1b[{number}~".encode()
-        return f"\\x1b[{number};{parameter}~".encode()
+            return f"\x1b[{number}~".encode()
+        return f"\x1b[{number};{parameter}~".encode()
     if base in _FUNCTION_SS3:
         final = _FUNCTION_SS3[base]
         if not modifiers:
-            return f"\\x1bO{final}".encode()
-        return f"\\x1b[1;{parameter}{final}".encode()
+            return f"\x1bO{final}".encode()
+        return f"\x1b[1;{parameter}{final}".encode()
     if base in _FUNCTION_TILDE:
         number = _FUNCTION_TILDE[base]
         if not modifiers:
-            return f"\\x1b[{number}~".encode()
-        return f"\\x1b[{number};{parameter}~".encode()
+            return f"\x1b[{number}~".encode()
+        return f"\x1b[{number};{parameter}~".encode()
     return None
 
 
@@ -121,7 +121,7 @@ def _alt_prefix(
         return True, None
     if base in _CURSOR_FINAL or base in _TILDE_NUMBER:
         return False, None
-    return True, b"\\x1b" + inner
+    return True, b"\x1b" + inner
 
 
 def key_to_bytes(key: str, character: str | None = None) -> bytes | None:
