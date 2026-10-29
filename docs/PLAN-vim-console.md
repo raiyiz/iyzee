@@ -2,7 +2,7 @@
 
 > **Goal.** Make iyzee a *whole Vim-like application*, starting from the IPython console: practical, flexible, and with as little hand-maintained Vim code as possible.
 > **Decision (2026-10-26).** Build on **`main`'s real IPython console** (prompt_toolkit's vi engine, shown through a virtual terminal). The hand-rolled Vim of the `refactor/ipython-console` branch is **abandoned**.
-> **State.** **9-commit patch series** (`patches/`) on top of `main@428702d`: code, tests, docs. `ruff`, `mypy src tests` and the doc-link check are clean. The full suite (190 collected cases, 23 hardware tests skipped) passes in ~5 min, down from 339 cases / 7.5 min after the test consolidation in the last commit; line coverage of `src` is unchanged (87.7%). Everything ran in Textual's pilot, **never in a real terminal**. See [§6](#6-status-what-is-and-is-not-verified) and [§7](#7-whats-left-for-the-ultimate-vim-experience).
+> **State.** **10-commit patch series** (`patches/`) on top of `main@428702d`: code, tests, docs. `ruff`, `mypy src tests` and the doc-link check are clean. The full suite (137 collected cases, 23 hardware tests skipped) passes in ~3 min, down from 339 cases / 7.5 min after the two test commits (consolidation, then pruning to one representative per behaviour; the notebooks are now three full end-to-end runs plus one pipeline test). Everything ran in Textual's pilot, **never in a real terminal**. See [§6](#6-status-what-is-and-is-not-verified) and [§7](#7-whats-left-for-the-ultimate-vim-experience).
 
 ---
 
@@ -109,6 +109,7 @@ Base: `main@428702d`. Apply with `git am patches/*.patch`.
 | 7 | `test(console): cover the Vim console, …` | `tests/test_vi_keys.py`, `tests/test_console_vim.py`, `tests/test_motions.py` |
 | 8 | `docs: yank-only clipboard, :qq and motion counts` | README, guide |
 | 9 | `test: consolidate the suite into fewer, fuller tests` | all test files (293 → 167 functions, 7m30s → 5m03s, coverage unchanged) |
+| 10 | `test: prune to one representative per behaviour; notebooks to full runs` | past-bug and edge-case tests removed; 167 → 115 functions, 5m03s → 2m53s |
 
 Commits 1–4 type-check on their own (commit 9 only touches tests); the series applies cleanly to `main@428702d` and yields a tree identical to the branch.
 
@@ -182,7 +183,7 @@ Ordered by how much it would change day-to-day flow. None of it is started unles
 - [ ] README "not full Vim" list (see §9) once the above settles.
 
 ### 7.4 Housekeeping
-- [x] Full suite run (190 cases pass, 23 hardware skipped). Install the `notebooks` group (`uv sync --group notebooks`) to run the 43 notebook tests, which are otherwise skipped silently.
+- [x] Full suite run (137 cases pass, 23 hardware skipped). Install the `notebooks` group (`uv sync --group notebooks`) to run `tests/test_notebooks.py` (three notebooks end to end + one pipeline test), which is otherwise skipped silently.
 - [ ] Consider adding the pilot tests to whatever slow-test marker the repo uses (~25 s for `test_console_vim.py`).
 
 ---
@@ -240,7 +241,7 @@ uv run python probes/probe_leave_and_return.py
 
 # only the tests you touch
 uv run pytest tests/test_vi_keys.py tests/test_console_vim.py tests/test_motions.py \
-              tests/test_terminal.py tests/test_console_screen.py tests/test_command_bar.py -q
+              tests/test_terminal.py tests/test_command_bar.py -q
 uv run mypy src tests/test_vi_keys.py tests/test_console_vim.py tests/test_motions.py
 uv run ruff check src tests && uv run ruff format --check .
 ```
@@ -258,7 +259,7 @@ Notes for whoever continues:
 | Path | What |
 |---|---|
 | `PLAN-vim-console.md` | this document (put it at `docs/PLAN-vim-console.md` or the repo root) |
-| `patches/000{1..9}-*.patch` | the finalized series against `main@428702d` (`git am patches/*.patch`) |
+| `patches/000{1..10}-*.patch` | the finalized series against `main@428702d` (`git am patches/*.patch`) |
 | `probes/probe_escape_latency.py` | measures Escape → normal latency |
 | `probes/probe_escape_misfire.py` | `Esc`+letter misfire cases |
 | `probes/probe_leave_and_return.py` | the original exploratory probe; superseded by `tests/test_console_vim.py` |
