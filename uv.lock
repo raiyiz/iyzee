@@ -770,6 +770,7 @@ requires-dist = [
 dev = [
     { name = "ipdb", specifier = ">=0.13.13" },
     { name = "mypy", specifier = ">=1.18.2" },
+    { name = "polars", specifier = ">=2.0.0" },
     { name = "pre-commit", specifier = ">=4.6.2" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.13.0" },
@@ -777,7 +778,6 @@ dev = [
 ]
 notebooks = [
     { name = "marimo", specifier = ">=0.25.1" },
-    { name = "polars", specifier = ">=2.0.0" },
 ]
 
 [[package]]
