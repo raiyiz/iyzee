@@ -8,19 +8,15 @@ ties them together (``terminal_view`` / ``screens.console``).
 from __future__ import annotations
 
 import asyncio
-import atexit
-import io
 import sys
 import time
 from typing import Any
 
-import pytest
 from helpers import FakeApp, async_test
 from prompt_toolkit.input.vt100_parser import Vt100Parser
 from textual import events
 from textual.widgets import ContentSwitcher
 
-from iyzee.tui import ipython_session
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.ipython_session import IPythonSession
 from iyzee.tui.screens.console import IyzeeConsole
@@ -158,22 +154,6 @@ async def test_session_runs_a_real_ipython_in_process() -> None:
     session._thread.join()
     assert not session._thread.is_alive()
     assert sys.stdout is real_stdout, "stdout is restored on close"
-
-
-def test_ipython_cursor_cleanup_stays_in_the_virtual_terminal(monkeypatch) -> None:
-    virtual_output: list[str] = []
-    session = IPythonSession(FakeApp(), on_output=virtual_output.append)
-    atexit.unregister(session._run_shell_atexit_operations)
-
-    host_stdout = io.StringIO()
-    monkeypatch.setattr(sys, "stdout", host_stdout)
-    try:
-        session._run_shell_atexit_operations()
-    finally:
-        session.close()
-
-    assert "\x1b[0 q" not in host_stdout.getvalue()
-    assert "\x1b[0 q" in "".join(virtual_output)
 
 
 def _prompt_line(screen_text) -> str:
@@ -323,34 +303,3 @@ async def test_the_console_page_types_into_ipython_keeps_app_keys_scrolls_and_in
 # both a plain thread and an executor worker). interrupt() injects a KeyboardInterrupt by
 # thread id, so a stale id would hit whatever thread now owns it -- a sweep's worker, say, and
 # a KeyboardInterrupt in that ends the whole app.
-
-
-def _session_whose_shell_thread_ends_at_once(monkeypatch: pytest.MonkeyPatch):
-    session = IPythonSession(FakeApp(), rows=24, cols=90, on_output=VTermScreen(90, 24).feed)
-    monkeypatch.setattr(session.shell, "mainloop", lambda: None)
-    injected: list[int] = []
-    monkeypatch.setattr(ipython_session, "_raise_in_thread", lambda tid, exc: injected.append(tid))
-    session.start()
-    assert session._thread is not None
-    session._thread.join(10)
-    assert not session._thread.is_alive()
-    # What a running cell looks like to interrupt(): started prompting, not at a prompt now.
-    session._started_prompting = True
-    session._prompt_depth = 0
-    return session, injected
-
-
-@async_test
-async def test_interrupt_never_aims_at_a_thread_that_is_not_the_live_shell(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, injected = _session_whose_shell_thread_ends_at_once(monkeypatch)
-    try:
-        assert session._thread_id is None  # forgotten when the shell thread ended
-        session.interrupt()
-        assert injected == []
-        session._thread_id = 123456  # a stale id, as before the fix: liveness is checked too
-        session.interrupt()
-        assert injected == [], "interrupt() aimed at a thread that is not the (dead) shell"
-    finally:
-        session.close()

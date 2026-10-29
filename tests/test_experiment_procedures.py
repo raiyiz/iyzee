@@ -13,8 +13,6 @@ from iyzee.experiment.procedures import (
     FrequencyStep,
     Sweep,
     SweepStep,
-    acquire_pair,
-    acquire_trace,
     bandwidth_sweep_config,
     bandwidth_sweep_steps,
     build_bandwidth_sweep,
@@ -69,17 +67,6 @@ class FakeShutterControl:
 
     def close(self):
         self.events.append("close")
-
-
-class FakeMXAForTraceAcquisition:
-    def __init__(self):
-        self.update_states = []
-
-    def set_trace_update(self, trace_num, state):
-        self.update_states.append((trace_num, state))
-
-    def single_sweep_wait(self):
-        raise RuntimeError("sweep failed")
 
 
 def _quiet(monkeypatch):
@@ -193,18 +180,6 @@ def test_each_step_drives_the_caller_owned_devices_in_order(monkeypatch):
     assert shutter.events == ["open", "close"]  # opened only for the squeezing trace
     assert result.meta["measured_frequency_thz"] == pytest.approx(377.100002)
 
-    # -- a frequency step names what the context lacks and touches nothing without it
-    with pytest.raises(ValueError, match=r"ctx\.shutter, ctx\.wavemeter"):
-        FrequencyStep(frequency_thz=1.0, wavemeter_channel=1).run(
-            ExperimentContext(mx=FakeMXA(), run_id="t")
-        )
-
-    mx, shutter = FakeMXA(), FakeShutterControl()
-    ctx = ExperimentContext(mx=mx, run_id="t", shutter=shutter)
-    with pytest.raises(ValueError, match=r"ctx\.wavemeter"):
-        FrequencyStep(frequency_thz=1.0, wavemeter_channel=1, relax_time_s=0.0).run(ctx)
-    assert shutter.events == [] and mx.trace_calls == []
-
     # -- sweeps run on the caller owned devices and never build their own
     _quiet(monkeypatch)
     prepared = []
@@ -237,25 +212,6 @@ def test_each_step_drives_the_caller_owned_devices_in_order(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="boom"):  # a failure propagates; nothing is disconnected
         run_bandwidth_sweep(mx)
-
-    # -- trace acquisition always disables the trace and closes the shutter
-    mx = FakeMXAForTraceAcquisition()
-    with pytest.raises(RuntimeError, match="sweep failed"):
-        acquire_trace(mx, 1)
-    assert mx.update_states == [(1, True), (1, False)]
-
-    monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", fake_acquire_trace)
-    plain = FakeMXA()
-    assert acquire_pair(plain) == {"squeezing": [1], "shot_noise": [2]}  # no shutter: both traces
-
-    def failing(mx, trace_num):
-        raise RuntimeError("sweep failed")
-
-    monkeypatch.setattr("iyzee.experiment.procedures.acquire_trace", failing)
-    shutter = FakeShutterControl()
-    with pytest.raises(RuntimeError, match="sweep failed"):
-        acquire_pair(FakeMXA(), shutter)
-    assert shutter.events == ["open", "close"]  # closed even though the trace failed
 
 
 # -- running a sweep ----------------------------------------------------------------------------

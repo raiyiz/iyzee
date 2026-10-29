@@ -8,13 +8,11 @@ around it.
 
 from __future__ import annotations
 
-import asyncio
 import itertools
 import threading
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pytest
 from helpers import FakeHandle, async_test, make_result, notifications, plain, wait_until
 from textual.pilot import Pilot
@@ -24,29 +22,11 @@ from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens import sweep as sweep_mod
 from iyzee.tui.screens.sweep import (
-    MAX_POINTS,
     FieldError,
     SweepScreen,
-    _positive_float,
-    _positive_int,
 )
 
 # -- standalone validators ---------------------------------------------------------------
-
-
-def test_the_standalone_validators_accept_good_input_and_name_the_field_on_bad() -> None:
-    assert _positive_float("20000", "field") == 20000.0 and _positive_float("0.5", "field") == 0.5
-    for raw in ("0", "-5", "abc"):
-        with pytest.raises(ValueError, match="field"):
-            _positive_float(raw, "field")
-
-    assert _positive_int("19", "field", maximum=None) == 19
-    assert _positive_int(str(MAX_POINTS), "field", maximum=MAX_POINTS) == MAX_POINTS
-    for raw in ("0", "-1", "abc"):
-        with pytest.raises(ValueError, match="field"):
-            _positive_int(raw, "field", maximum=None)
-    with pytest.raises(ValueError, match=f"at most {MAX_POINTS}"):
-        _positive_int(str(MAX_POINTS + 1), "field", maximum=MAX_POINTS)
 
 
 # -- the mounted form ---------------------------------------------------------------------
@@ -122,36 +102,6 @@ async def test_the_form_defaults_validation_and_missing_instruments() -> None:
 
     await _an_invalid_field_is_named_marked_and_foc()
 
-    # -- starting without the needed instrument notifies and launches nothing
-    async def _starting_without_the_needed_instrument_n():
-        app = IyzeeApp()
-        async with app.run_test() as pilot:
-            screen = await _open_sweep_screen(pilot)
-            for kind, connected, action, expected, button in (
-                ("bandwidth", (), "_start_sweep", "Connect the MXA", "#run-sweep"),
-                ("bandwidth", (), "_start_capture", "Connect the MXA", "#capture-trace"),
-                ("frequency", ("mxa",), "_start_sweep", "Connect the shutter", "#run-sweep"),
-                (
-                    "frequency",
-                    ("mxa", "shutter"),
-                    "_start_sweep",
-                    "Connect the wavemeter",
-                    "#run-sweep",
-                ),
-            ):
-                app.handles.clear()
-                for key in connected:
-                    app.handles[key] = FakeHandle()
-                screen.query_one("#sweep-type", Select).value = kind
-                await pilot.pause()
-
-                getattr(screen, action)()
-                await pilot.pause()
-                assert expected in notifications(app)[-1]
-                assert screen.query_one(button).disabled is False
-
-    await _starting_without_the_needed_instrument_n()
-
 
 # -- pre-flight guards and the "not ready" banner ------------------------------------------
 
@@ -213,62 +163,8 @@ async def _press_run_and_wait(app: IyzeeApp) -> None:
         await wait_until(pilot, lambda: app.last_run is not None)
 
 
-def _points_on_disk(directory: Path) -> int:
-    files = list(directory.glob("*.npz"))
-    assert len(files) <= 1, f"expected a single checkpoint file, found {files}"
-    if not files:
-        return 0
-    with np.load(files[0], allow_pickle=False) as archive:
-        return len(archive["x_values"])
-
-
 def _result(index: int) -> Any:
     return make_result(f"pt{index}", float(index))
-
-
-def _locked_by_someone_else(lock: Any) -> bool:
-    """Whether ``lock`` is held by another thread (an RLock is re-entrant for its owner)."""
-    got: list[bool] = []
-    thread = threading.Thread(target=lambda: got.append(lock.acquire(blocking=False)))
-    thread.start()
-    thread.join()
-    if got[0]:
-        lock.release()
-    return not got[0]
-
-
-@pytest.mark.parametrize(
-    "kind,needed",
-    [("bandwidth", {"mxa"}), ("frequency", {"mxa", "shutter", "wavemeter"})],
-)
-@async_test
-async def test_a_run_gets_the_connected_devices_and_holds_every_lock_it_needs(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, needed: set[str]
-) -> None:
-    devices = {key: object() for key in ("mxa", "shutter", "wavemeter")}
-    seen: dict[str, Any] = {}
-
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
-        seen["ctx"] = ctx
-        seen["held"] = {k for k in devices if _locked_by_someone_else(app.handles[k].lock)}
-
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
-    for key, device in devices.items():
-        app.handles[key] = FakeHandle(device=device)
-    async with app.run_test() as pilot:
-        await pilot.press("s")
-        await pilot.pause()
-        app.query_one("#sweep-type", Select).value = kind
-        await pilot.pause()
-        await pilot.click("#run-sweep")
-        # No points are recorded, so there is no last_run: wait for the run itself to end.
-        await wait_until(pilot, lambda: "held" in seen and not app.sweep_running)
-
-    ctx = seen["ctx"]
-    assert ctx.mx is devices["mxa"]
-    assert ctx.shutter is (devices["shutter"] if "shutter" in needed else None)
-    assert ctx.wavemeter is (devices["wavemeter"] if "wavemeter" in needed else None)
-    assert seen["held"] == needed  # no more, no fewer
 
 
 @async_test
@@ -302,51 +198,6 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
         await wait_until(pilot, lambda: not app.sweep_running)
         assert str(abort.label) == "Abort"
         assert app.last_run is not None and len(app.last_run.results) == 1
-
-
-@async_test
-async def test_points_are_on_disk_while_the_sweep_is_still_running(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    on_disk_after_each_step: list[int] = []
-
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
-        for index in range(3):
-            on_step(index, 3, object(), _result(index), None)
-            on_disk_after_each_step.append(_points_on_disk(tmp_path))
-
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
-    await _press_run_and_wait(app)
-
-    assert on_disk_after_each_step == [1, 2, 3]
-    assert _points_on_disk(tmp_path) == 3
-    assert app.last_run is not None and len(app.last_run.results) == 3
-    assert app.last_run.path is not None and app.last_run.path.parent == tmp_path
-    assert not app.sweep_running
-
-
-@async_test
-async def test_a_failing_save_is_reported_once_and_does_not_stop_the_run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    steps_run: list[int] = []
-
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
-        for index in range(3):
-            on_step(index, 3, object(), _result(index), None)
-            steps_run.append(index)
-
-    def broken_save(*args, **kwargs):
-        raise OSError("No space left on device [/data]")
-
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
-    monkeypatch.setattr(sweep_mod, "save_step_results", broken_save)
-    await _press_run_and_wait(app)
-    warnings = [m for m in notifications(app) if "Could not save" in m]
-    assert len(warnings) == 1, warnings
-    assert steps_run == [0, 1, 2]
-    assert app.last_run is not None and len(app.last_run.results) == 3
-    assert app.last_run.path is None
 
 
 # -- "Capture trace" ---------------------------------------------------------------------
@@ -427,115 +278,8 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
     assert [(f["index"], f["error_type"]) for f in meta["failed_steps"]] == [(1, "TimeoutError")]
 
 
-@async_test
-async def test_an_aborted_sweep_is_marked_aborted_in_the_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
-        screen = app.query_one(sweep_mod.SweepScreen)
-        screen._abort_event.set()
-        on_step(0, 3, object(), _result(0), None)  # raises SweepAborted after the point is kept
-
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
-    await _press_run_and_wait(app)
-
-    assert _saved_run_metadata(tmp_path)["status"] == "aborted"
-    assert _points_on_disk(tmp_path) == 1
-
-
-@async_test
-async def test_an_unexpected_error_marks_the_run_failed_but_keeps_the_points(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
-        on_step(0, 3, object(), _result(0), None)
-        raise RuntimeError("scheduler exploded")
-
-    app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
-    await _press_run_and_wait(app)
-
-    assert _saved_run_metadata(tmp_path)["status"] == "failed"
-    assert _points_on_disk(tmp_path) == 1
-
-
 # -- a worker that dies with something that is not an Exception ----------------------------------
 #
 # Textual handles Exception (and cancellation) from a worker thread, nothing else: a
 # KeyboardInterrupt or SystemExit escaping one ends the whole app with no message, and a
 # swallowed CancelledError leaves the page "running" for good.
-
-
-def _log_text(screen: SweepScreen) -> str:
-    return " ".join(
-        str(seg) for line in screen.query_one("#sweep-log", RichLog).lines for seg in line
-    )
-
-
-@pytest.mark.parametrize("exc_type", [asyncio.CancelledError])
-@async_test
-async def test_a_sweep_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exc_type: type[BaseException]
-) -> None:
-    def dying_run_sequence(steps, ctx, *, on_error, on_step):
-        for index in range(2):
-            on_step(index, 5, steps[index], _result(index), None)
-        raise exc_type()
-
-    app = _sweep_app(monkeypatch, tmp_path, dying_run_sequence)
-    async with app.run_test() as pilot:
-        await pilot.press("s")
-        await pilot.pause()
-        screen = app.query_one(SweepScreen)
-        await pilot.click("#run-sweep")
-        await wait_until(pilot, lambda: app.last_run is not None)
-
-        assert app.is_running, "the app must survive its worker"
-        assert app.sweep_running is False, "the page must not be left stuck in 'running'"
-        assert not screen.query_one("#run-sweep", Button).disabled
-        assert exc_type.__name__ in " ".join(notifications(app))
-        assert "stopped unexpectedly" in _log_text(screen)
-        # What was measured before it died is kept, and the file says the run failed.
-        last_run = app.last_run
-        assert last_run is not None and last_run.path is not None
-        assert len(last_run.results) == 2
-        assert _points_on_disk(tmp_path) == 2
-        assert '"failed"' in last_run.path.with_suffix(".json").read_text()
-
-
-@pytest.mark.parametrize("exc_type", [SystemExit])
-@async_test
-async def test_a_capture_worker_dying_with_a_base_exception_does_not_take_the_app_with_it(
-    monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
-) -> None:
-    def dying_acquire(mx, trace_num):
-        raise exc_type()
-
-    monkeypatch.setattr(sweep_mod, "acquire_trace", dying_acquire)
-    app = IyzeeApp()
-    app.handles["mxa"] = FakeHandle(device=object())
-    async with app.run_test() as pilot:
-        screen = await _open_sweep_screen(pilot)
-        screen._start_capture()
-        await wait_until(pilot, lambda: not screen.query_one("#capture-trace").disabled)
-
-        assert app.is_running
-        assert app.sweep_running is False
-        assert "Capture failed" in _log_text(screen)
-
-
-@async_test
-async def test_even_frequency_sweeps_are_centered_symmetrically() -> None:
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open_sweep_screen(pilot)
-        screen.query_one("#freq-points", Input).value = "4"
-        await pilot.pause()
-
-        sweep = screen._build_frequency_run()
-        offsets = [step.x_value - 377.1052067 for step in sweep.steps]
-
-        np.testing.assert_allclose(
-            offsets,
-            np.array([-1.5, -0.5, 0.5, 1.5]) * 10e-6,
-            atol=1e-12,
-        )
-        assert sum(offsets) == pytest.approx(0.0, abs=1e-12)

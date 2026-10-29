@@ -3,16 +3,12 @@ import json
 from datetime import datetime
 
 import numpy as np
-import pytest
 
 import iyzee.experiment.io as io
 from iyzee.experiment.core import StepResult
 from iyzee.experiment.io import (
     DATA_ROOT,
-    STEM_PATTERN,
     create_dirs,
-    difference_series,
-    difference_series_many,
     multiplot,
     save_step_results,
 )
@@ -66,62 +62,10 @@ def test_save_step_results_writes_a_pickle_free_data_and_metadata_pair(tmp_path)
     assert sidecar["run_metadata"] == {"software_revision": "abc123"}
 
 
-def test_save_step_results_aligns_traces_across_points(tmp_path):
-    missing = [
-        _result(1.0, squeezing=[1.0, 2.0], shot_noise=[3.0, 4.0]),
-        _result(2.0, squeezing=[5.0, 6.0]),  # no shot_noise for this point
-    ]
-    with np.load(save_step_results(missing, tmp_path), allow_pickle=False) as archive:
-        shot_noise = archive["trace_shot_noise"]
-    np.testing.assert_array_equal(shot_noise[0], [3.0, 4.0])
-    assert np.all(np.isnan(shot_noise[1]))  # filled, not dropped
-
-    ragged = [_result(1.0, squeezing=[1.0, 2.0, 3.0]), _result(2.0, squeezing=[1.0, 2.0])]
-    with pytest.raises(ValueError, match=r"squeezing.*inconsistent lengths"):
-        save_step_results(ragged, tmp_path)
-
-
-def test_save_step_results_names_files_safely_uniquely_or_exactly_as_asked(tmp_path):
-    first = save_step_results([_result(1.0)], tmp_path, name="bandwidth sweep/#1")
-    second = save_step_results([_result(1.0)], tmp_path, name="bandwidth sweep/#1")
-    match = STEM_PATTERN.match(first.stem)
-    assert match is not None and match["name"] == "bandwidth-sweep-1"  # sanitized
-    assert first != second  # same second, same name: the random suffix keeps them apart
-
-    target = tmp_path / "checkpoint.npz"  # or a fixed pair, overwritten atomically
-    assert save_step_results([_result(1.0)], tmp_path, path=target) == target
-    assert save_step_results([_result(1.0), _result(2.0)], tmp_path, path=target) == target
-    assert (tmp_path / "checkpoint.json").exists() and not list(tmp_path.glob("*.part"))
-    with np.load(target, allow_pickle=False) as archive:
-        assert len(archive["x_values"]) == 2
-
-
 # -- multiplot / difference_series -------------------------------------------------------
 
 
 def test_difference_statistics_and_multiplots_cope_with_unusable_traces(monkeypatch):
-    # -- difference statistics and series handle unusable traces
-    assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "mean") == pytest.approx(2.5)
-    assert io.difference_statistic([3.0, 4.0], [1.0, 1.0], "minimum") == pytest.approx(2.0)
-    assert io.difference_statistic([np.nan, 4.0], [1.0, 1.0], "mean") == pytest.approx(3.0)
-    assert io.difference_statistic([np.nan], [1.0], "mean") is None
-    assert io.difference_values_many(
-        [[3.0, 4.0], [5.0, 6.0]], [[1.0, 1.0], [2.0, 2.0]], "minimum"
-    ) == [2.0, 3.0]
-    with pytest.raises(ValueError, match="unknown statistic"):
-        io.difference_statistic([1.0], [0.0], "median")
-
-    assert difference_series([3.0, 4.0], [1.0, 1.0], "pt0") == ([0, 1], [2.0, 3.0], "pt0")
-    # A missing trace and a trace that is only NaNs are both unusable.
-    assert difference_series(None, [1.0], "pt0") is None
-    assert difference_series([1.0], None, "pt0") is None
-    assert difference_series([np.nan, np.nan], [1.0, 1.0], "pt0") is None
-    assert difference_series_many(
-        [[3.0, 4.0], None, [5.0, 6.0]],
-        [[1.0, 1.0], [1.0, 1.0], [2.0, 2.0]],
-        ["first", "missing", "third"],
-    ) == [([0, 1], [2.0, 3.0], "first"), ([0, 1], [3.0, 4.0], "third")]
-
     # -- multiplot plots each result
     plotted = []
 

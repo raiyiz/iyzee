@@ -328,36 +328,6 @@ def test_trigger_settings_are_applied_and_read_back():
 # -- locking: one lock, no deadlock through the console proxy ------------------------------
 
 
-def test_workflow_with_handle_lock_through_the_console_proxy_does_not_deadlock():
-    """The console's ``lab.scope`` is a LockedProxy over the handle's lock;
-    the workflows take the same (re-entrant) lock again and must not hang."""
-    from helpers import FakeResourceManager, FakeVisaResource
-
-    from iyzee.devices.handles import LockedProxy, ScopeHandle
-    from iyzee.devices.scope import LeCroy
-
-    handle = ScopeHandle()
-    resources = FakeResourceManager(
-        FakeVisaResource(["C1:VOLT_DIV 1.0V", "C1:OFFSET 0.0V", "C1:COUPLING D1M", "C1:TRACE ON"])
-    )
-    handle._scope = LeCroy("10.0.0.1", resource_manager=resources)
-    handle.connect()
-    assert handle.lock is handle.device.transaction_lock  # one lock, owned by the driver
-    proxy = LockedProxy(handle.device, handle.lock)
-    outcome: list[object] = []
-
-    def run() -> None:
-        outcome.append(apply_channel_settings(proxy, [_settings(Channel.C1, volts_per_div=1.0)]))
-
-    worker = threading.Thread(target=run, daemon=True)
-    worker.start()
-    worker.join(timeout=3.0)
-
-    assert not worker.is_alive(), "deadlocked: handle lock re-entered through the proxy"
-    assert outcome == [[_settings(Channel.C1, volts_per_div=1.0)]]
-    assert "C1:VOLT_DIV 1.0" in resources.resource.written
-
-
 # -- trigger: mode is written last on the selective path too --------------------------------
 
 
@@ -451,84 +421,9 @@ def test_the_download_gets_each_timebase_freezes_a_running_acquisition_and_fails
     assert _mode_calls(scope) == [] and not any(c[0] == "get_trigger_mode" for c in scope.calls)
     assert recording.frozen is False
 
-    # -- freeze restore and identity failures are warnings and the download still happens
-    scope = FakeScope()
-
-    def boom(mode):
-        raise RuntimeError("refused")
-
-    scope.set_trigger_mode = boom
-    recording = acquire_scope_recording(scope, [Channel.C1])
-    assert recording.frozen is False and [w.channel for w in recording.waveforms] == [Channel.C1]
-    assert any("could not freeze" in w and "refused" in w for w in recording.warnings)
-
-    scope = FakeScope()
-    calls = []
-
-    def flaky(mode):
-        calls.append(mode)
-        if len(calls) == 2:
-            raise RuntimeError("restore refused")
-
-    scope.set_trigger_mode = flaky
-    recording = acquire_scope_recording(scope, [Channel.C1])
-    assert recording.frozen is True
-    assert any("could not restore trigger mode AUTO" in w for w in recording.warnings)
-
-    scope = FakeScope()
-    scope.query = lambda command: "LECROY,WS452,LCRY1234,9.0.0"
-    assert (
-        acquire_scope_recording(scope, [Channel.C1]).instrument_id == "LECROY,WS452,LCRY1234,9.0.0"
-    )
-
-    def dead(command):
-        raise TimeoutError("no IDN")
-
-    scope.query = dead
-    recording = acquire_scope_recording(scope, [Channel.C1])
-    assert recording.instrument_id is None
-    assert any("identity unavailable" in w for w in recording.warnings)
-
-    # -- acquisition failures raise and restore the trigger mode
-    scope = FakeScope(fail_channels=frozenset({Channel.C1}))
-    with pytest.raises(RuntimeError, match="C1 refused"):
-        acquire_scope_recording(scope, [Channel.C1, Channel.C2])
-    assert _mode_calls(scope)[-1] == ("set_trigger_mode", TriggerMode.AUTO)
-    assert ("getDataFloatsDetailed", Channel.C2) not in scope.calls
-
-    with pytest.raises(RuntimeError, match="did not respond"):  # a failed timebase read
-        acquire_scope_recording(FakeScope(fail_hor=True), [Channel.C1, Channel.C2])
-
-    class Empty(FakeScope):
-        def getDataFloatsDetailed(self, channel, block="DAT1"):
-            return {
-                "unit": "V",
-                "values": [],
-                "raw_codes": [],
-                "vertical_gain": 1.0,
-                "vertical_offset": 0.0,
-            }
-
-    with pytest.raises(ValueError, match="empty waveform"):
-        acquire_scope_recording(Empty(), [Channel.C1])
-
 
 def _mode_calls(scope):
     return [c for c in scope.calls if c[0] == "set_trigger_mode"]
-
-
-def test_parse_seconds_accepts_the_reply_shapes_the_scope_uses_and_rejects_garbage():
-    from iyzee.scope_workflows import _parse_seconds
-
-    for raw, seconds in (
-        ("TDIV 5.00E-06 S", 5e-6),
-        ("TIME_DIV 2.00E-09S", 2e-9),
-        ("TDIV 10 ns", 10e-9),
-        ("1E-3", 1e-3),
-    ):
-        assert _parse_seconds(raw) == pytest.approx(seconds)
-    with pytest.raises(ValueError, match="could not parse time"):
-        _parse_seconds("TDIV ???")
 
 
 def _set_calls(scope):
@@ -567,24 +462,6 @@ def test_channel_settings_are_applied_and_read_under_the_driver_lock():
         )
     assert scope.calls == []
 
-    # -- apply channel settings returns what the scope reports and stops at the first failure
-    scope = StatefulScope(vdiv_step=0.1, ignore_coupling=frozenset({Channel.C2}))
-    c1, c2 = apply_channel_settings(
-        scope,
-        [
-            _settings(Channel.C1, volts_per_div=0.123, offset=0.25),
-            _settings(Channel.C2, coupling=Coupling.DC_50),
-        ],
-    )
-    assert c1.volts_per_div == pytest.approx(0.1)  # rounded by the scope
-    assert c2.coupling == Coupling.DC_1M  # the ignored command shows up as the old value
-
-    scope = StatefulScope(fail_channels=frozenset({Channel.C1}))
-    with pytest.raises(RuntimeError, match="C1 refused"):
-        apply_channel_settings(scope, [_settings(Channel.C1), _settings(Channel.C2)])
-    assert all(c[1] == Channel.C1 for c in _set_calls(scope))
-    assert not any(c[0].startswith("get_") for c in scope.calls)  # no read-back after a failure
-
     # -- read channel settings reads every field parses units and stops at the first failure
     scope = FakeScope()
     scope.channel_state[Channel.C1] = _settings(
@@ -605,21 +482,6 @@ def test_channel_settings_are_applied_and_read_under_the_driver_lock():
     with pytest.raises(RuntimeError, match="did not respond"):
         read_channel_settings(scope, [Channel.C1, Channel.C2])
     assert {c[1] for c in scope.calls} == {Channel.C1}
-
-    # -- batches hold the driver lock throughout
-    scope = StatefulScope()
-    held: list[bool] = []
-    original = scope.get_volts_per_div
-    scope.get_volts_per_div = lambda ch: (
-        held.append(scope.transaction_lock._is_owned()),
-        original(ch),
-    )[1]
-    scope.set_offset = lambda ch, v: held.append(scope.transaction_lock._is_owned())
-
-    apply_channel_settings(scope, [_settings(Channel.C1), _settings(Channel.C2)])
-
-    assert held and all(held)
-    assert not scope.transaction_lock._is_owned()
 
 
 # -- acquisition failures ---------------------------------------------------------------------

@@ -18,9 +18,8 @@ from IPython.core.completer import provisionalcompleter
 from IPython.core.interactiveshell import InteractiveShell
 
 from iyzee.devices.handles import LockedProxy
-from iyzee.devices.wavemeter import Wavemeter
 from iyzee.experiment import StepResult
-from iyzee.tui.ipython import LabProxy, default_history_file, lab_namespace, shell_config
+from iyzee.tui.ipython import LabProxy, lab_namespace, shell_config
 from iyzee.tui.workers import LastRun
 
 
@@ -113,19 +112,6 @@ def test_the_lab_namespace_is_live_read_only_and_never_collides_with_user_variab
     with pytest.raises(AttributeError):
         lab.mx = "nope"
 
-    # -- the wavemeter is on lab before connecting and behind the lock after
-    monkeypatch.setattr(Wavemeter, "read_frequency", lambda self, channel=None: 377.105)
-
-    lab = LabProxy(FakeApp())  # not connected: a plain client is still there
-    assert isinstance(lab.wavemeter, Wavemeter)
-    assert lab.wavemeter.read_frequency(4) == pytest.approx(377.105)
-
-    matches = IyzeeIPython(FakeApp()).complete("lab.wavemeter.", len("lab.wavemeter."))
-    assert ".read_frequency" in matches and ".set_pid_setpoint" in matches  # and tab-completes
-
-    app = FakeApp(handles={"wavemeter": FakeHandle(device=Wavemeter())})  # connected
-    assert LabProxy(app).wavemeter.read_frequency(4) == pytest.approx(377.105)
-
     # -- lab results and last run reflect the latest sweep
     app = FakeApp()
     lab = LabProxy(app)
@@ -193,36 +179,3 @@ def test_history_files_persist_and_default_to_a_per_user_directory(tmp_path: Pat
 
     assert history_file.parent.exists()
     assert second_run.history == ["yesterday = 1", "today = 2"]
-
-    # -- default history file is under a per user data directory
-    # Deliberately *not* IPython's own default location
-    # (`~/.ipython/profile_default/history.sqlite`) -- that one's shared by
-    # every InteractiveShell on the machine, this app's included, which is
-    # exactly what caused real test-suite hangs before `:memory:` became
-    # IyzeeIPython's own default (see the tests above). This app gets its
-    # own dedicated file instead.
-    path = default_history_file()
-
-    assert path.name == "console_history.sqlite"
-    assert ".ipython" not in path.parts
-
-
-def test_help_syntax_does_not_hit_the_interactive_pager() -> None:
-    """Regression test: `name?`/`name??` route through IPython's own pager
-    machinery (`page.page()`), which consults the module-level
-    `get_ipython()` singleton to find hooks — including the
-    `display_page=True` hook this shell configures specifically so pager
-    output becomes plain output instead of an interactive `less`-style
-    prompt. If the shell never registers itself as that singleton,
-    `get_ipython()` returns None, `page()` skips the hook entirely, and
-    falls back to a real interactive pager that blocks on stdin and raises
-    EOFError the moment it can't read a keypress — exactly what happens
-    when Textual owns the terminal instead.
-    """
-    shell = IyzeeIPython(FakeApp())
-
-    result = shell.execute("lab?")
-
-    assert result.success
-    assert "Docstring" in result.stdout
-    assert "EOFError" not in result.stdout

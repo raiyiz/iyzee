@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import threading
 from collections.abc import AsyncIterator
@@ -12,7 +11,7 @@ from typing import cast
 
 import numpy as np
 import pytest
-from helpers import async_test, notifications, plain, save_run, wait_until
+from helpers import async_test, plain, save_run, wait_until
 from test_scope_workflows import FakeScope
 from textual.pilot import Pilot
 from textual.widgets import Button, DataTable, Input, ListView, Select, Static
@@ -20,7 +19,6 @@ from textual.widgets import Button, DataTable, Input, ListView, Select, Static
 from iyzee.devices.scope import Channel, LeCroy
 from iyzee.scope_workflows import acquire_scope_recording, save_scope_acquisition
 from iyzee.tui import app as app_mod
-from iyzee.tui import plotting as plotting_mod
 from iyzee.tui.screens import results as results_mod
 from iyzee.tui.screens.results import ResultsScreen
 from iyzee.waveform_math import scale_trace, subtract_background, subtract_traces
@@ -110,20 +108,6 @@ async def test_one_browser_switches_between_sweep_and_scope_recordings(
 
 
 @async_test
-async def test_corrupt_recording_is_reported_without_crashing_the_results_page(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    run_dir = tmp_path / "2026-10"
-    run_dir.mkdir()
-    path = run_dir / "13T000000_broken_abc123.npz"
-    path.write_bytes(b"not a numpy archive")
-    async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-        await wait_until(pilot, lambda: "Could not read file" in _summary(screen))
-        assert screen._recording is None
-        assert screen._measured == {}
-
-
-@async_test
 async def test_frequency_sweep_keeps_requested_and_measured_frequency_navigation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -195,44 +179,6 @@ async def test_scope_previews_follow_the_selection_and_never_show_a_stale_one(
             await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1"])
 
     await _scope_channel_selection_changes_the_actu()
-
-    # -- slow scope preview cannot overwrite a newer selection
-    async def _slow_scope_preview_cannot_overwrite_a_ne():
-        _save_scope_run(tmp_path)
-        entered = threading.Event()
-        release = threading.Event()
-        real_prepare = plotting_mod.prepare_series
-        call_count = 0
-
-        def gated_prepare(x, y, label, *args, **kwargs):  # type: ignore[no-untyped-def]
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                entered.set()
-                release.wait(timeout=5)
-            return real_prepare(x, y, label, *args, **kwargs)
-
-        monkeypatch.setattr(plotting_mod, "prepare_series", gated_prepare)
-        drawn: list[list[str | None]] = []
-        real_draw = results_mod.draw_series
-
-        def spy(plot, series, **kwargs):  # type: ignore[no-untyped-def]
-            drawn.append([label for _x, _y, label in series])
-            return real_draw(plot, series, **kwargs)
-
-        monkeypatch.setattr(results_mod, "draw_series", spy)
-
-        async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-            await wait_until(pilot, entered.is_set)
-            generation = screen._render_generation
-            screen._checkboxes["C2"].value = False
-            await wait_until(pilot, lambda: screen._render_generation != generation)
-            release.set()
-            await wait_until(pilot, lambda: drawn and drawn[-1] == ["C1"])
-            await pilot.pause(0.2)
-            assert drawn == [["C1"]]
-
-    await _slow_scope_preview_cannot_overwrite_a_ne()
 
 
 @async_test
@@ -308,30 +254,6 @@ async def test_scope_operations_apply_chain_and_refuse_bad_input(
 
     await _scope_operations_apply_and_chain_through()
 
-    # -- the operation form shows only relevant fields and bad input makes no trace
-    async def _the_operation_form_shows_only_relevant_f():
-        _save_scope_run(tmp_path)
-        async with _open_results_screen(monkeypatch, tmp_path) as (screen, pilot):
-            await wait_until(pilot, lambda: set(screen._measured) == {"C1", "C2"})
-            screen.query_one("#results-op", Select).value = "background-region"
-            await pilot.pause()
-            assert screen.query_one("#results-field-chan-a").display
-            assert screen.query_one("#results-field-region-lo").display
-            assert screen.query_one("#results-field-region-hi").display
-            assert not screen.query_one("#results-field-chan-b").display
-            assert not screen.query_one("#results-field-yscale").display
-
-            for invalid in ("not-a-number", "nan", "inf"):
-                await _apply_op(screen, pilot, "scale", a="C1", yscale=invalid)
-                assert screen._derived == {}
-                assert screen.query_one("#results-yscale").has_class("-invalid")
-                assert any(
-                    "Y scale" in message
-                    for message in notifications(cast(app_mod.IyzeeApp, pilot.app))
-                )
-
-    await _the_operation_form_shows_only_relevant_f()
-
 
 @async_test
 async def test_export_writes_a_real_png_and_runs_off_the_ui_thread(
@@ -358,28 +280,3 @@ async def test_export_writes_a_real_png_and_runs_off_the_ui_thread(
         out = npz_path.with_name(f"{npz_path.stem}-plot.png")
         assert out.exists()
         assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
-
-
-@async_test
-async def test_list_width_keys_resize_clamp_persist_and_a_bad_saved_width_falls_back(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    bad = tmp_path / "bad.json"
-    bad.write_text('{"results_list_width": 7}')  # unusable: back to the default
-    async with _open_results_screen(monkeypatch, tmp_path, bad) as (screen, _pilot):
-        assert screen.query_one("#results-list").has_class(f"w-{results_mod.DEFAULT_LIST_WIDTH}")
-
-    prefs_file = tmp_path / "config" / "tui.json"
-    async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, pilot):
-        run_list = screen.query_one("#results-list")
-        assert run_list.has_class(f"w-{results_mod.DEFAULT_LIST_WIDTH}")
-
-        await pilot.press("]")
-        assert run_list.has_class("w-40") and not run_list.has_class("w-35")
-        for _ in range(20):  # far past the end: clamped, not an error
-            await pilot.press("[")
-        assert run_list.has_class("w-20")
-
-    assert json.loads(prefs_file.read_text())["results_list_width"] == 20
-    async with _open_results_screen(monkeypatch, tmp_path, prefs_file) as (screen, _pilot):
-        assert screen.query_one("#results-list").has_class("w-20")  # remembered

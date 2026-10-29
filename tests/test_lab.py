@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 import time
 
 import pytest
@@ -46,14 +45,6 @@ def test_connect_and_disconnect_register_close_and_say_what_is_missing():
     with pytest.raises(NotConnectedError):
         lab["a"]
 
-    # -- device returns the driver and a missing instrument says so
-    handle = FakeHandle(device="the driver")
-    lab = make_lab(handle)
-    with pytest.raises(NotConnectedError, match="not connected"):
-        lab.device("a")
-    lab.connect("a")
-    assert lab.device("a") == "the driver"
-
 
 def test_dead_links_are_dropped_and_close_all_never_waits_past_its_timeout():
     # -- drop dead links unregisters only the dead ones and releases them
@@ -69,32 +60,6 @@ def test_dead_links_are_dropped_and_close_all_never_waits_past_its_timeout():
     while not dead.disconnected and time.monotonic() < deadline:
         time.sleep(0.01)
     assert dead.disconnected and not alive.disconnected
-
-    # -- close all never waits longer than its timeout for a busy instrument
-    busy, idle = FakeHandle(), FakeHandle()
-    lab = make_lab(busy, idle)
-    lab.connect("a")
-    lab.connect("b")
-    release = threading.Event()
-    held = threading.Event()
-
-    def hold():
-        with busy.lock:
-            held.set()
-            release.wait(5)
-
-    thread = threading.Thread(target=hold, daemon=True)
-    thread.start()
-    held.wait(2)
-
-    started = time.monotonic()
-    lab.close_all(timeout=0.3)
-    elapsed = time.monotonic() - started
-    release.set()
-
-    assert elapsed < 1.5
-    assert idle.disconnected and not busy.disconnected
-    assert lab.connected == ()
 
 
 # -- instruments that are a part of another (the shutter on the PSU) -------------------

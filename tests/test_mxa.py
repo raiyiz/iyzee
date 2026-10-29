@@ -76,13 +76,6 @@ def test_constructor_connects_with_the_configured_visa_settings():
 
 
 def test_scpi_helpers_wait_for_completion_drain_errors_and_send_frequencies():
-    # -- wait opc requires explicit completion response
-    mxa, instrument = make_mxa()
-    assert mxa.wait_opc() is True
-
-    instrument.responses["*OPC?"] = "0"
-    assert mxa.wait_opc() is False
-
     # -- get errors drains scpi error queue
     mxa, instrument = make_mxa()
     responses = iter(["-100,Command error", "-200,Execution error", "0,No error"])

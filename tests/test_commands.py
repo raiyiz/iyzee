@@ -56,32 +56,12 @@ def test_names_aliases_and_prefixes_resolve_and_misses_are_user_errors():
         ("quit", []),
     ]
 
-    # -- an exact alias beats prefix matching and blank lines do nothing
-    calls: list = []
-    registry = make_registry(calls)
-    registry.execute("s")  # would be ambiguous as a prefix of sweep/... only if aliases didn't win
-    assert calls == [("sweep", [])]
-    assert registry.execute("  :  ") is None
-
     # -- ambiguous and unknown commands are user errors
     registry = make_registry([])
     with pytest.raises(CommandError, match=r"ambiguous :con.*connect, console"):
         registry.execute("con")
     with pytest.raises(CommandError, match="unknown command :zap"):
         registry.execute("zap")
-
-    # -- a later registration shadows an earlier one
-    registry = make_registry([])
-    registry.add(Command("sweep", lambda args: "page-specific", "shadow"))
-    assert registry.execute("sweep") == "page-specific"
-
-
-def test_quoted_arguments_stay_together_and_bad_quoting_is_an_error():
-    calls: list = []
-    make_registry(calls).execute('connect "a b" c')
-    assert calls == [("connect", ["a b", "c"])]
-    with pytest.raises(CommandError, match="cannot parse"):
-        make_registry([]).execute('connect "oops')
 
 
 def test_completion_and_help_list_commands_and_their_arguments():

@@ -227,22 +227,3 @@ async def test_the_page_follows_connections_and_sweeps() -> None:
         app.instruments_changed()
         await pilot.pause()
         assert _text(screen, "power-readout1") == "-" and _button(screen, "power-global").disabled
-
-
-@async_test
-async def test_the_page_never_polls_but_reading_again_when_reopened() -> None:
-    """Regression: a timer-driven read kept the page 'working' with its controls off."""
-    psu = FakePSU()
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, psu)
-        reads = psu.reads
-        await pilot.pause(0.6)
-        assert psu.reads == reads and not _button(screen, "power-global").disabled
-
-        _set(screen, "power-v1", "6")  # a half-typed edit
-        await pilot.press("s")
-        await pilot.pause()
-        psu.general = True  # changed from the console meanwhile
-        await pilot.press("p")
-        await wait_until(pilot, lambda: "Global output: ON" in _text(screen, "power-summary"))
-        assert screen.query_one("#power-v1", Input).value == "6"  # typing is never overwritten

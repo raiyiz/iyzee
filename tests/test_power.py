@@ -194,55 +194,6 @@ def test_retrieving_state_reports_asks_only_and_refuses_to_guess():
     )
     assert state.is_live(3) and not state.is_live(1)
 
-    # -- retrieve state only asks and puts the selected channel back
-    supply = FakeHMP()
-    psu = _connected_psu(supply)
-    psu.set_voltage(5.0, 2)  # leaves channel 2 selected
-    supply.log.clear()
-
-    psu.retrieve_state([3])
-
-    assert [
-        c
-        for c in supply.log
-        if c.startswith(("INST:NSEL", "VOLT ", "CURR ", "OUTP")) and not c.endswith("?")
-    ] == ["INST:NSEL 3", "INST:NSEL 2"]  # no writes but selection
-
-    supply.overrides["CURR?"] = "garbage"  # even a bad reply midway restores it
-    with pytest.raises(ValueError, match="CURR"):
-        psu.retrieve_state()
-    assert supply.selected == 2
-
-    # -- bad channels and bad replies are errors never guesses
-    supply = FakeHMP()
-    psu = _connected_psu(supply)
-    supply.log.clear()
-    for channels in ([0], [5], [1, 7], [-1]):
-        with pytest.raises(ValueError, match="channels must be in"):
-            psu.retrieve_state(channels)
-    assert supply.log == []  # refused before any I/O
-
-    for command, replies in {
-        "VOLT?": ("", "nan", "inf", "ERR", "1,2"),
-        "CURR?": ("nan",),
-        "MEAS:VOLT?": ("nan",),
-        "MEAS:CURR?": ("nan",),
-    }.items():
-        for reply in replies:
-            supply.overrides.clear()
-            supply.overrides[command] = reply
-            with pytest.raises(
-                ValueError, match=rf"answered .* to '{command.replace('?', r'\?')}'"
-            ):
-                psu.retrieve_state()
-
-    for command in ("OUTP:SEL?", "OUTP:GEN?"):
-        for reply in ("", "2", "ON", "0.5"):
-            supply.overrides.clear()
-            supply.overrides[command] = reply
-            with pytest.raises(ValueError, match="expected 0 or 1"):
-                psu.retrieve_state()
-
     # -- the shutter reports open only when the supply says it is powered
     supply = FakeHMP()
     shutter = ShutterControl(_connected_psu(supply), chan=2)

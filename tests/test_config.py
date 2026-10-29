@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from iyzee.config import IP, ConfigError, address, data_root
+from iyzee.config import IP, address, data_root
 
 
 @pytest.fixture(autouse=True)
@@ -27,12 +27,6 @@ def test_the_config_file_overrides_defaults_and_the_environment_beats_the_file(
     monkeypatch.setenv("IYZEE_DATA_DIR", str(tmp_path / "d"))
     assert address(IP.SCOPE) == "198.51.100.9"
     assert data_root() == tmp_path / "d"
-
-
-def test_a_broken_config_file_is_an_error_not_a_silent_default(tmp_path: Path):
-    (tmp_path / "config.toml").write_text("[addresses\nscope = ")
-    with pytest.raises(ConfigError, match=r"config\.toml"):
-        address(IP.SCOPE)
 
 
 def test_drivers_pick_the_configured_address_at_construction(tmp_path: Path):

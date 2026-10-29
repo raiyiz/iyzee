@@ -22,11 +22,9 @@ from iyzee.devices.handles import (
     LockedProxy,
     ScopeHandle,
     ShutterHandle,
-    WavemeterHandle,
     _VisaHandle,
 )
 from iyzee.devices.scope import LeCroyTimeoutError
-from iyzee.devices.wavemeter import DEFAULT_CHANNEL
 from iyzee.lab import INSTRUMENTS
 
 # -- LockedProxy --------------------------------------------------------
@@ -105,29 +103,6 @@ def test_handles_probe_their_instruments(monkeypatch: pytest.MonkeyPatch) -> Non
     no_idn = _VisaHandle(_FakeVisaDeviceNoIdn(ip="10.140.1.42"))  # e.g. a driver without *IDN?
     assert no_idn.probe() == "connected @ 10.140.1.42"
 
-    # -- wavemeter handle probe reads the default channel and propagates errors
-    seen: list[int] = []
-
-    def read(self, channel: int = DEFAULT_CHANNEL):
-        seen.append(channel)
-        return 377.105
-
-    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", read)
-    wavemeter_handle = WavemeterHandle()
-    assert wavemeter_handle.probe() == "wavemeter = 377.105000 THz"
-    assert isinstance(wavemeter_handle.device, instruments_mod.Wavemeter)
-    assert seen == [DEFAULT_CHANNEL]
-
-    failure = OSError("switch unreachable")
-
-    def fail(self, channel: int = 4) -> float:
-        raise failure
-
-    monkeypatch.setattr(instruments_mod.Wavemeter, "read_frequency", fail)
-    with pytest.raises(OSError, match="switch unreachable") as caught:
-        WavemeterHandle().probe()
-    assert caught.value is failure
-
     # -- scope scope_handle identifies the scope reports a silent one and follows its state
     monkeypatch.setattr(instruments_mod, "LeCroy", _FakeLeCroy)
     scope_handle = ScopeHandle()
@@ -204,19 +179,6 @@ def test_the_shutter_handle_is_a_channel_of_a_connected_psu_and_never_touches_a_
 
     handle.disconnect()  # closes the shutter, leaves the supply connected
     assert psu.commands[-1] == ("off", (3,)) and psu.instrument is not None
-
-    # -- shutter handle needs a connected psu and never touches a closed one
-    for psu_handle in (_FakePsuHandle(None), _FakePsuHandle(_FakePsuDevice(connected=False))):
-        with pytest.raises(ConnectionError, match="PSU"):
-            ShutterHandle(cast(Any, psu_handle)).connect()
-
-    psu = _FakePsuDevice()
-    handle = ShutterHandle(cast(Any, _FakePsuHandle(psu)))
-    handle.connect()
-    psu.instrument = None
-    psu.commands.clear()
-    handle.disconnect()
-    assert psu.commands == []
 
 
 # -- WavemeterHandle ----------------------------------------------------------

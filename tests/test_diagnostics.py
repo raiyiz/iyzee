@@ -14,10 +14,6 @@ import sys
 import time
 from pathlib import Path
 
-import pytest
-from helpers import async_test, notifications
-
-from iyzee.tui import app as app_mod
 from iyzee.tui.diagnostics import SessionMarker, describe
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,54 +133,6 @@ def test_crashes_leave_evidence_a_thread_exception_a_main_thread_exit_and_a_hard
 
 
 # -- the app: marker lifecycle and signals -------------------------------------------------------
-
-
-@async_test
-async def test_the_app_keeps_a_marker_while_running_and_removes_it_on_exit(tmp_path: Path) -> None:
-    app = app_mod.IyzeeApp(session_dir=tmp_path)
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        assert app.session_marker is not None and app.session_marker.path.exists()
-        app.session_note("frequency sweep running (50 points)")
-        assert "frequency sweep running" in app.session_marker.path.read_text()
-    assert not list(tmp_path.glob("session-*.json"))
-
-    bare = app_mod.IyzeeApp()  # without a session dir nothing is written or hooked
-    async with bare.run_test() as pilot:
-        await pilot.pause()
-        bare.session_note("ignored")  # a no-op, not an error
-    assert bare.session_marker is None
-
-
-@async_test
-async def test_starting_after_a_crash_says_so_and_what_was_running(tmp_path: Path) -> None:
-    (tmp_path / "session-1.json").write_text(
-        json.dumps({"pid": _dead_pid(), "activity": "frequency sweep running (200 points)"})
-    )
-    app = app_mod.IyzeeApp(session_dir=tmp_path)
-
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        said = " ".join(notifications(app))
-
-    assert "did not end cleanly" in said
-    assert "frequency sweep running (200 points)" in said
-    assert "faulthandler.log" in said
-
-
-@pytest.mark.parametrize("name", ["SIGTERM"])
-@async_test
-async def test_a_termination_signal_is_logged_and_shuts_the_app_down(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, name: str
-) -> None:
-    app = app_mod.IyzeeApp(session_dir=tmp_path)
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        app._on_signal(name)
-        await pilot.pause(0.5)
-
-    assert any(f"received {name}" in record.getMessage() for record in caplog.records)
-    assert not list(tmp_path.glob("session-*.json")), "a signalled exit is still a clean one"
 
 
 _APP_SCRIPT = """

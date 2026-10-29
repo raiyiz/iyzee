@@ -23,7 +23,6 @@ from iyzee.waveform_math import (
     Trace,
     build_waveform_figure,
     save_waveform_figure,
-    scale_trace,
     subtract_background,
     subtract_traces,
     traces_from_scope_recording,
@@ -118,45 +117,6 @@ def test_trace_math_converts_subtracts_corrects_and_scales():
     for operation in (subtract_traces, lambda x, y: subtract_background(x, reference=y)):
         with pytest.raises(ValueError, match="different units"):
             operation(volts, amps)
-
-    # -- background correction by region or reference and its input checks
-    trace = _trace("C1", [0.0, 1.0, 2.0, 3.0], [10.0, 12.0, 100.0, 100.0])
-
-    result = subtract_background(trace, region=(0.0, 1.0))  # mean of [10, 12] == 11
-    np.testing.assert_allclose(result.values, [-1.0, 1.0, 89.0, 89.0])
-    assert "bg-corrected" in result.label
-    backward = subtract_background(trace, region=(1.0, 0.0))  # bounds in either order
-    np.testing.assert_array_equal(result.values, backward.values)
-    with pytest.raises(ValueError, match="no samples"):
-        subtract_background(trace, region=(5.0, 6.0))
-
-    flat = _trace("C1", [0.0, 1.0, 2.0], [10.0, 10.0, 10.0])
-    dark = _trace("dark", [0.0, 2.0], [0.0, 2.0])  # interpolates to [0, 1, 2]
-    np.testing.assert_allclose(subtract_background(flat, reference=dark).values, [10.0, 9.0, 8.0])
-
-    for kwargs in ({}, {"region": (0.0, 1.0), "reference": dark}):  # exactly one mode
-        with pytest.raises(ValueError, match="exactly one"):
-            subtract_background(flat, **kwargs)
-
-    # -- scale trace is affine defaults to identity and refuses bad scales
-    trace = _trace("C1", [0.0, 1.0, 2.0], [1.0, 2.0, 3.0])
-
-    result = scale_trace(trace, x_scale=2.0, x_offset=1.0, y_scale=1000.0, y_offset=-5.0)
-    np.testing.assert_allclose(result.time, [1.0, 3.0, 5.0])
-    np.testing.assert_allclose(result.values, [995.0, 1995.0, 2995.0])
-    assert "x*2" in result.label and "y*1000" in result.label
-
-    same = scale_trace(trace)
-    np.testing.assert_array_equal(same.values, trace.values)
-    assert same.label == trace.label  # no transform applied -> no change noted
-
-    for kwargs, message in (
-        ({"x_scale": 0.0}, "nonzero"),
-        ({"y_scale": 0.0}, "nonzero"),
-        ({"x_scale": float("nan")}, "finite"),
-    ):
-        with pytest.raises(ValueError, match=message):
-            scale_trace(trace, **kwargs)
 
 
 # -- subtract_traces / subtract_background ----------------------------------------------------

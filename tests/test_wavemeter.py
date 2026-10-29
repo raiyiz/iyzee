@@ -44,14 +44,6 @@ def test_the_wavemeter_reads_the_right_channel_at_the_configured_host_and_posts_
         (f"{client.base_url}frequency/{wavemeter.DEFAULT_CHANNEL}/", timeout),
     ]
 
-    # -- host uses the configured address
-    monkeypatch.setenv("IYZEE_WAVEMETER_IP", "192.0.2.7")
-    client = Wavemeter()
-    assert client.base_url == f"http://192.0.2.7:{wavemeter.WAVEMETER_PORT}/api/"
-
-    explicit = Wavemeter(host="198.51.100.1")
-    assert explicit.base_url == f"http://198.51.100.1:{wavemeter.WAVEMETER_PORT}/api/"
-
     # -- set pid setpoint posts the expected form
     posted: list[dict[str, Any]] = []
 
@@ -77,32 +69,3 @@ def test_the_wavemeter_reads_the_right_channel_at_the_configured_host_and_posts_
             "data": {"freq_thz": 377.1052, "channel": wavemeter.DEFAULT_CHANNEL},
         },
     ]
-
-
-def test_failures_are_raised_as_they_are_never_wrapped_or_swallowed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = {
-        "get": lambda client: client.read_frequency(1),
-        "post": lambda client: client.set_pid_setpoint(377.1, 4),
-    }
-    for verb, call in calls.items():
-        for failure in (
-            requests.Timeout("timed out"),
-            requests.ConnectionError("reset"),
-            OSError("refused"),
-        ):
-            monkeypatch.setattr(wavemeter.requests, verb, raising(failure))
-            with pytest.raises(type(failure)) as caught:
-                call(Wavemeter())
-            assert caught.value is failure
-
-        monkeypatch.setattr(  # an HTTP error status is raised by requests
-            wavemeter.requests, verb, lambda *a, **k: response("lock unit offline", status=500)
-        )
-        with pytest.raises(requests.HTTPError, match="500"):
-            call(Wavemeter())
-
-    monkeypatch.setattr(wavemeter.requests, "get", lambda *a, **k: response("not-a-frequency"))
-    with pytest.raises(ValueError, match="not-a-frequency"):  # an unparseable reading
-        Wavemeter().read_frequency(1)

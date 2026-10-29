@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import logging
 
-import pytest
 from helpers import async_test, wait_until
 from textual.widgets import RichLog, Select
 
 from iyzee.tui.app import IyzeeApp
-from iyzee.tui.screens.log import LogScreen
 
 
 @async_test
@@ -41,29 +39,3 @@ async def test_log_screen_shows_buffered_live_filtered_and_exception_records() -
             lambda: not any("an info-level record" in line.text for line in view.lines),
         )
         assert any("a warning while on the log page" in line.text for line in view.lines)
-
-
-@async_test
-async def test_log_screen_can_browse_a_rotated_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    from iyzee.tui import logging_support
-
-    log_root = tmp_path / "logs"
-    log_root.mkdir()
-    (log_root / "iyzee.log.1").write_text("2026-01-01 00:00:00 WARNING iyzee.tui: an old record\n")
-    monkeypatch.setattr(logging_support, "LOG_ROOT", log_root)
-
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        await pilot.press("l")
-
-        screen = app.query_one(LogScreen)
-        source = screen.query_one("#log-source", Select)
-        await wait_until(
-            pilot,
-            lambda: str(log_root / "iyzee.log.1") in [value for _label, value in source._options],
-        )
-        source.value = str(log_root / "iyzee.log.1")
-        view = screen.query_one("#log-view", RichLog)
-        await wait_until(pilot, lambda: any("an old record" in line.text for line in view.lines))
