@@ -35,6 +35,9 @@ def _trace_settings(trace: int) -> list[Setting]:
 #: manual value switches auto off, so the flag has to come after), ``INIT:CONT`` last.
 MXA_SETTINGS: tuple[Setting, ...] = (
     Setting("center", "FREQ:CENT?", "FREQ:CENT {}"),
+    # Zero span conflicts with auto-coupled sweep time. Force manual mode before
+    # restoring the span, then restore the original auto flag after the time value.
+    Setting("sweep_time_auto_off", "SWE:TIME:AUTO?", "SWE:TIME:AUTO OFF"),
     Setting("span", "FREQ:SPAN?", "FREQ:SPAN {}"),
     Setting("rbw", "BWID?", "BWID {}"),
     Setting("rbw_auto", "BWID:AUTO?", "BWID:AUTO {}"),
