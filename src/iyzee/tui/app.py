@@ -508,9 +508,7 @@ class IyzeeApp(App):
             raise CommandError(f":{page_id} takes no arguments")
         self.action_show_page(page_id)
 
-    def _connect_command(
-        self, args: list[str], *, instrument_keys: list[str]
-    ) -> str | None:
+    def _connect_command(self, args: list[str], *, instrument_keys: list[str]) -> str | None:
         if not args:
             self.action_show_page("connect")
             return None
@@ -518,9 +516,7 @@ class IyzeeApp(App):
         targets = self._instrument_targets(args, instrument_keys)
         return "; ".join(screen.request_connect(key) for key in targets)
 
-    def _disconnect_command(
-        self, args: list[str], *, instrument_keys: list[str]
-    ) -> str:
+    def _disconnect_command(self, args: list[str], *, instrument_keys: list[str]) -> str:
         if not args:
             raise CommandError("usage: :disconnect <instrument>... | all")
         screen = self.query_one(ConnectScreen)
@@ -531,9 +527,7 @@ class IyzeeApp(App):
         del args
         lines = []
         for spec in INSTRUMENTS:
-            state = (
-                "connected" if spec.key in self.handles else self.lost_links.get(spec.key, "-")
-            )
+            state = "connected" if spec.key in self.handles else self.lost_links.get(spec.key, "-")
             lines.append(f"{spec.key}: {state}")
         return "\n".join(lines)
 

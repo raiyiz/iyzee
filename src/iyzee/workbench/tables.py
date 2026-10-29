@@ -23,10 +23,12 @@ def _cached_recording(path: str, mtime_ns: int, size: int) -> Recording:
     """Read each file once per file version, so several views of a run share one load."""
     return load_recording(Path(path))
 
+
 def _load(row: dict[str, Any]) -> Recording:
     path = Path(row["path"])
     stat = path.stat()
     return _cached_recording(str(path), stat.st_mtime_ns, stat.st_size)
+
 
 def _trace_level(array: np.ndarray | None, index: int) -> float:
     if array is None or index >= len(array):
@@ -34,6 +36,7 @@ def _trace_level(array: np.ndarray | None, index: int) -> float:
     values = np.asarray(array[index], dtype=float)
     values = values[np.isfinite(values)]
     return float(values.mean()) if values.size else math.nan
+
 
 def sweep_points(rows: pl.DataFrame, issues: list[dict[str, str]] | None = None) -> pl.DataFrame:
     """Long table: one row per sweep point from the selected recordings.
@@ -103,6 +106,7 @@ def sweep_points(rows: pl.DataFrame, issues: list[dict[str, str]] | None = None)
     }
     return pl.DataFrame(output, schema=schema)
 
+
 def best_points(points: pl.DataFrame, metric: str = "rel_noise_mean_db") -> pl.DataFrame:
     """Return each run's lowest (best) value of a sweep metric, sorted best first."""
     if metric not in SWEEP_METRICS:
@@ -116,6 +120,7 @@ def best_points(points: pl.DataFrame, metric: str = "rel_noise_mean_db") -> pl.D
         .first()
         .sort(metric)
     )
+
 
 def scoreboard(points: pl.DataFrame, metric: str = "rel_noise_mean_db") -> pl.DataFrame:
     """One row per sweep: the quick "which run was best, and where" table.
@@ -157,6 +162,7 @@ def scoreboard(points: pl.DataFrame, metric: str = "rel_noise_mean_db") -> pl.Da
             }
         )
     return pl.DataFrame(rows, schema=schema).sort("best_db", nulls_last=True)
+
 
 def delta_to_reference(
     points: pl.DataFrame, reference_run_id: str, metric: str = "rel_noise_mean_db"
@@ -207,10 +213,12 @@ def delta_to_reference(
         )
     return pl.DataFrame(rows, schema=schema)
 
+
 def _finite_number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return float(value) if math.isfinite(value) else None
+
 
 def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
     """Long table of per-channel statistics stored in each scope manifest."""
@@ -269,6 +277,7 @@ def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
     }
     return pl.DataFrame(output, schema=schema)
 
+
 def decimate(
     time: np.ndarray, values: np.ndarray, budget: int = 1600
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -293,10 +302,12 @@ def decimate(
     index = np.asarray(keep, dtype=int)
     return time[index], values[index]
 
+
 @lru_cache(maxsize=4)
 def _cached_scope_traces(path: str, mtime_ns: int, size: int) -> tuple[Any, ...]:
     """Decode a scope file once per file version; reuse traces when display controls change."""
     return tuple(traces_from_scope_recording(load_recording(Path(path))))
+
 
 def scope_traces(
     rows: pl.DataFrame,
@@ -347,10 +358,12 @@ def scope_traces(
         },
     )
 
+
 def channels_in(rows: pl.DataFrame) -> list[str]:
     """Channels available in the selected scope recordings."""
     frame = scope_channels(rows)
     return sorted(frame["channel"].unique().to_list()) if not frame.is_empty() else []
+
 
 def pair_trace(row: dict[str, Any], point: int) -> pl.DataFrame:
     """The raw squeezing and shot-noise traces for one selected sweep point."""
@@ -379,6 +392,7 @@ def pair_trace(row: dict[str, Any], point: int) -> pl.DataFrame:
         }
     )
 
+
 def array_frame(array: np.ndarray, index: int = 0) -> pl.DataFrame:
     """Make a 1-D array, or one row of a 2-D array, ready to plot or export.
 
@@ -400,6 +414,7 @@ def array_frame(array: np.ndarray, index: int = 0) -> pl.DataFrame:
     selected = np.asarray(selected, dtype=float)
     return pl.DataFrame({"sample": np.arange(selected.size, dtype=np.int64), "value": selected})
 
+
 def preview_facts(row: Mapping[str, Any]) -> list[tuple[str, str]]:
     """Human-readable facts about one catalog row, for a quick look before selecting it."""
     started = row.get("started")
@@ -416,6 +431,7 @@ def preview_facts(row: Mapping[str, Any]) -> list[tuple[str, str]]:
         ("Checksum", str(row["digest"])),
         ("File", str(row["path"])),
     ]
+
 
 def array_inventory(rows: pl.DataFrame, issues: list[dict[str, str]] | None = None) -> pl.DataFrame:
     """Every saved array of every run (name, shape, dtype), to see what a file holds."""
@@ -449,6 +465,7 @@ def array_inventory(rows: pl.DataFrame, issues: list[dict[str, str]] | None = No
             "dtype": pl.String,
         },
     )
+
 
 def array_overlay(
     rows: pl.DataFrame,

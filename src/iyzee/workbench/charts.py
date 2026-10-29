@@ -104,8 +104,7 @@ def _draw_series(
     elif mark == "bars":
         width = 0.8 / bucket_count
         shifted = [
-            categories.index(value) + (position - (bucket_count - 1) / 2) * width
-            for value in xs
+            categories.index(value) + (position - (bucket_count - 1) / 2) * width for value in xs
         ]
         artist = slot.bar(shifted, ys, width=width, alpha=0.85, **style)
     else:
@@ -130,7 +129,9 @@ def _draw_series(
             marker="o" if len(xs) <= 80 else None,
             markersize=3.5,
             linewidth=1.5,
-            linestyle=styles.get(named[detail], "-") if detail is not None and detail in named else "-",
+            linestyle=styles.get(named[detail], "-")
+            if detail is not None and detail in named
+            else "-",
             **style,
         )
     if label and label not in handles:
@@ -293,6 +294,7 @@ def figure_bytes(figure: Any, fmt: str = "png", dpi: int = 200) -> bytes:
     buffer = io.BytesIO()
     figure.savefig(buffer, format=fmt, dpi=dpi)
     return buffer.getvalue()
+
 
 def csv_bytes(frame: pl.DataFrame) -> bytes:
     """CSV bytes suitable for a marimo download control."""

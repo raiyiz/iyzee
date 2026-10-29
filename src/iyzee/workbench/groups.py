@@ -37,11 +37,13 @@ def _title(column: str) -> str:
 
 BAND_CHOICES = ("std", "sem", "minmax", "none")
 
+
 def _sweep_axis(kind: str) -> tuple[str, bool]:
     """x column of a sweep kind and whether it is naturally logarithmic."""
     if kind not in SWEEP_KINDS:
         raise ValueError(f"unsupported sweep kind: {kind!r}")
     return ("offset_mhz", False) if kind == "frequency" else ("rbw_khz", True)
+
 
 def _common_grid(curves: list[tuple[np.ndarray, np.ndarray]], log: bool) -> np.ndarray:
     """One x grid every curve covers: their shared x values, else an even grid over the overlap."""
@@ -54,6 +56,7 @@ def _common_grid(curves: list[tuple[np.ndarray, np.ndarray]], log: bool) -> np.n
         return first[(first >= low) & (first <= high)]
     count = max(int(np.median([len(x) for x, _ in curves])), 2)
     return np.geomspace(low, high, count) if log and low > 0 else np.linspace(low, high, count)
+
 
 def _group_matrices(
     points: pl.DataFrame,
@@ -97,6 +100,7 @@ def _group_matrices(
         )
         matrices.setdefault(groups[run_id], []).append(values)
     return kind, x, grid, {name: np.vstack(rows) for name, rows in matrices.items()}
+
 
 def group_curves(
     points: pl.DataFrame,
@@ -161,6 +165,7 @@ def group_curves(
         )
     return pl.concat(frames) if frames else pl.DataFrame(schema=schema)
 
+
 def group_difference(
     points: pl.DataFrame,
     groups: Mapping[str, str],
@@ -209,6 +214,7 @@ def group_difference(
             "significant": np.abs(t) > 2,
         }
     ).with_columns(pl.col(pl.Float64).fill_nan(None), pl.col("n_a", "n_b").cast(pl.Int64))
+
 
 def group_summary(board: pl.DataFrame, groups: Mapping[str, str]) -> pl.DataFrame:
     """Per group and sweep kind: run count and the spread of each run's best point.

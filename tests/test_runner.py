@@ -74,9 +74,7 @@ def test_save_failure_is_reported_once_without_stopping_measurement(
     monkeypatch.setattr(runner, "create_dirs", lambda: tmp_path)
     monkeypatch.setattr(runner, "save_step_results", save)
 
-    outcome = runner.run_recorded_sweep(
-        _sweep(), mx=FakeMXA(), on_save_error=errors.append
-    )
+    outcome = runner.run_recorded_sweep(_sweep(), mx=FakeMXA(), on_save_error=errors.append)
 
     assert attempts == 3
     assert len(errors) == 1
@@ -104,9 +102,7 @@ def test_abort_finishes_and_checkpoints_the_partial_run(
     monkeypatch.setattr(runner, "create_dirs", lambda: tmp_path)
     monkeypatch.setattr(runner, "save_step_results", save)
 
-    outcome = runner.run_recorded_sweep(
-        _sweep(), mx=FakeMXA(), should_abort=lambda: True
-    )
+    outcome = runner.run_recorded_sweep(_sweep(), mx=FakeMXA(), should_abort=lambda: True)
 
     assert outcome.aborted and not outcome.failed
     assert outcome.record is not None and outcome.record.status == "aborted"
@@ -126,7 +122,6 @@ def test_runner_reports_analyzer_setup_failure_without_creating_a_record(
     assert isinstance(outcome.setup_error, RuntimeError)
     assert outcome.record is None
     assert outcome.results == []
-
 
 
 def test_runner_marks_unexpected_failure_after_partial_results(

@@ -46,5 +46,3 @@ def test_each_notebook_runs_every_cell_on_generated_data(notebook: str, demo: Pa
         check=False,
     )
     assert result.returncode == 0, result.stderr[-2000:]
-
-

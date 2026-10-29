@@ -76,7 +76,6 @@ def test_figure_series_extracts_lines_and_axis_labels() -> None:
     assert labels == {"xlabel": "x", "ylabel": "y"}
 
 
-
 def test_prepare_series_preserves_endpoints_and_local_extrema_when_thinning() -> None:
     x = np.arange(10_000, dtype=float)
     y = np.zeros_like(x)

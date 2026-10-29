@@ -53,6 +53,7 @@ CATALOG_SCHEMA = {
     "path": pl.String,
 }
 
+
 def _manifest(path: Path) -> dict[str, Any]:
     """Return a sidecar object; a missing or malformed sidecar is not fatal."""
     try:
@@ -61,12 +62,15 @@ def _manifest(path: Path) -> dict[str, Any]:
         return {}
     return value if isinstance(value, dict) else {}
 
+
 def read_manifest(path: Path | str) -> dict[str, Any]:
     """The JSON sidecar of a recording as a dict (empty if missing or malformed)."""
     return _manifest(Path(path))
 
+
 def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
 
 def _started(path: Path, manifest: dict[str, Any]) -> datetime | None:
     run = _mapping(manifest.get("run_metadata"))
@@ -89,6 +93,7 @@ def _started(path: Path, manifest: dict[str, Any]) -> datetime | None:
         except OSError:
             return None
 
+
 def _kind(path: Path, manifest: dict[str, Any]) -> str:
     if manifest.get("kind") == "scope-acquisition" or manifest.get("waveforms"):
         return "scope"
@@ -106,6 +111,7 @@ def _kind(path: Path, manifest: dict[str, Any]) -> str:
             return kind
     return "unknown"
 
+
 def _unique_labels(frame: pl.DataFrame) -> pl.Series:
     labels: list[str] = []
     counts: dict[str, int] = {}
@@ -116,6 +122,7 @@ def _unique_labels(frame: pl.DataFrame) -> pl.Series:
         counts[base] = counts.get(base, 0) + 1
         labels.append(base if counts[base] == 1 else f"{base} ({counts[base]})")
     return pl.Series("label", labels, dtype=pl.String)
+
 
 def _refs(frame: pl.DataFrame) -> pl.Series:
     """Short chronological ids (``#01`` is the oldest recording in the catalog).
@@ -134,6 +141,7 @@ def _refs(frame: pl.DataFrame) -> pl.Series:
     for rank, index in enumerate(order, start=1):
         refs[index] = f"#{rank:0{width}d}"
     return pl.Series("ref", refs, dtype=pl.String)
+
 
 def scan_catalog(root: Path) -> pl.DataFrame:
     """Index each saved NPZ once, using sidecars only (no waveform arrays are loaded)."""
@@ -181,12 +189,14 @@ def scan_catalog(root: Path) -> pl.DataFrame:
     frame = frame.sort("started", descending=True, nulls_last=True)
     return frame.with_columns(_unique_labels(frame), _refs(frame))
 
+
 def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
     if isinstance(value, str | bytes) or not isinstance(value, Sequence | set | frozenset):
         return [value]
     return list(value)
+
 
 def pick(
     catalog: pl.DataFrame,
@@ -246,6 +256,7 @@ def pick(
         frame = frame.filter(pl.col("path").is_in(newest["path"].to_list()))
     return frame
 
+
 def default_selection(root: Path, count: int = 3) -> list[str]:
     """Paths of the newest recordings, found from file names alone (no sidecar is read).
 
@@ -257,6 +268,7 @@ def default_selection(root: Path, count: int = 3) -> list[str]:
         return []
     return [str(path.resolve()) for path in sorted(root.rglob("*.npz"))[-count:]]
 
+
 def describe(rows: pl.DataFrame) -> dict[str, Any]:
     """Compact overview values for a marked set of catalog rows."""
     if rows.is_empty():
@@ -267,6 +279,7 @@ def describe(rows: pl.DataFrame) -> dict[str, Any]:
         "synthetic": int(rows["synthetic"].sum()),
         "by_kind": dict(rows.group_by("kind").len().sort("kind").iter_rows()),
     }
+
 
 def verify(rows: pl.DataFrame) -> pl.DataFrame:
     """Compare each marked NPZ against the SHA-256 recorded in its JSON sidecar."""
