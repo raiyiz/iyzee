@@ -235,16 +235,22 @@ class LeCroy(BaseDevice):
             "control to be set to LXI/VXI-11; VICP is a different protocol and resource type."
         )
 
-    def _translate(self, exc: pyvisa.errors.VisaIOError, operation: str) -> Exception:
+    def _translate(
+        self,
+        exc: pyvisa.errors.VisaIOError,
+        operation: str,
+        timeout_ms: int | None = None,
+    ) -> Exception:
         if exc.error_code == StatusCode.error_timeout:
+            timeout_ms = self.timeout_ms if timeout_ms is None else timeout_ms
             return LeCroyTimeoutError(
                 f"LeCroy {operation} at {self.visa_address} timed out after "
-                f"{self.timeout_ms / 1000:g}s"
+                f"{timeout_ms / 1000:g}s"
             )
         return exc
 
     @contextmanager
-    def _io(self, operation: str) -> Iterator:
+    def _io(self, operation: str, *, timeout_ms: int | None = None) -> Iterator:
         """Serialize one VISA exchange; drop the session and annotate I/O failures."""
         with self._lock:
             inst = self.instrument
@@ -255,7 +261,7 @@ class LeCroy(BaseDevice):
             except pyvisa.errors.VisaIOError as exc:
                 self._drop()
                 note = self._diagnostic_note(operation)
-                translated = self._translate(exc, operation)
+                translated = self._translate(exc, operation, timeout_ms)
                 if translated is exc:
                     exc.add_note(note)
                     raise
@@ -274,7 +280,8 @@ class LeCroy(BaseDevice):
         """
         if timeout is not None and timeout <= 0:
             raise ValueError("timeout must be positive")
-        with self._io(f"query {message!r}") as inst:
+        query_timeout_ms = int(timeout * 1000) if timeout is not None else None
+        with self._io(f"query {message!r}", timeout_ms=query_timeout_ms) as inst:
             previous = inst.timeout
             if timeout is not None:
                 inst.timeout = int(timeout * 1000)

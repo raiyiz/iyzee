@@ -3,7 +3,8 @@
 The defaults describe the lab; each can be overridden without touching code,
 in this order of precedence:
 
-1. an environment variable (``IYZEE_<NAME>_IP``, ``IYZEE_DATA_DIR``),
+1. an environment variable (``IYZEE_<NAME>_IP``, ``IYZEE_DATA_DIR``,
+   ``IYZEE_VISA_BACKEND``),
 2. the TOML file ``IYZEE_CONFIG`` points at, else ``<user config dir>/iyzee/config.toml``::
 
        [addresses]
@@ -11,6 +12,9 @@ in this order of precedence:
 
        [paths]
        data = "/srv/iyzee-data"
+
+       [visa]
+       backend = "@py"  # or a supported VISA library name/path
 
 3. the default below.
 

@@ -158,8 +158,11 @@ def test_waveforms_and_settings_use_the_documented_commands_and_refuse_bad_input
 def test_query_timeout_names_command_resource_and_drops_connection():
     scope, resource = connected(visa_timeout())
 
-    with pytest.raises(LeCroyTimeoutError, match=r"C1:VOLT_DIV\?") as failure:
-        scope.query("C1:VOLT_DIV?")
+    with pytest.raises(
+        LeCroyTimeoutError,
+        match=r"C1:VOLT_DIV\?.*after 15s",
+    ) as failure:
+        scope.query("C1:VOLT_DIV?", timeout=15.0)
 
     assert resource.closed
     assert not scope.connected
