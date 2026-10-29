@@ -244,8 +244,7 @@ class LeCroy(BaseDevice):
         if exc.error_code == StatusCode.error_timeout:
             timeout_ms = self.timeout_ms if timeout_ms is None else timeout_ms
             return LeCroyTimeoutError(
-                f"LeCroy {operation} at {self.visa_address} timed out after "
-                f"{timeout_ms / 1000:g}s"
+                f"LeCroy {operation} at {self.visa_address} timed out after {timeout_ms / 1000:g}s"
             )
         return exc
 
