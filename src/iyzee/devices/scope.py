@@ -207,7 +207,14 @@ class LeCroy(BaseDevice):
                 super().connect()
             except pyvisa.errors.VisaIOError as exc:
                 self._drop()
-                raise self._translate(exc) from exc
+                operation = f"open VISA resource {self.visa_address!r}"
+                translated = self._translate(exc, operation)
+                note = self._diagnostic_note(operation)
+                if translated is exc:
+                    exc.add_note(note)
+                    raise
+                translated.add_note(note)
+                raise translated from exc
             if self.instrument:
                 self.instrument.chunk_size = self.CHUNK_SIZE
 
@@ -221,16 +228,26 @@ class LeCroy(BaseDevice):
         except Exception:  # noqa: BLE001 - disconnect is best effort after transport failure
             self.instrument = None
 
-    def _translate(self, exc: pyvisa.errors.VisaIOError) -> Exception:
+    def _diagnostic_note(self, operation: str) -> str:
+        return (
+            f"LeCroy operation: {operation}; VISA resource {self.visa_address!r}; "
+            f"backend {self.visa_backend!r}. This driver expects the scope's remote "
+            "control to be set to LXI/VXI-11; VICP is a different protocol and resource type."
+        )
+
+    def _translate(
+        self, exc: pyvisa.errors.VisaIOError, operation: str
+    ) -> Exception:
         if exc.error_code == StatusCode.error_timeout:
             return LeCroyTimeoutError(
-                f"{self.ip} did not respond within {self.timeout_ms / 1000:g}s"
+                f"LeCroy {operation} at {self.visa_address} timed out after "
+                f"{self.timeout_ms / 1000:g}s"
             )
         return exc
 
     @contextmanager
-    def _io(self) -> Iterator:
-        """Hold the lock for one VISA exchange; any I/O failure drops the connection."""
+    def _io(self, operation: str) -> Iterator:
+        """Serialize one VISA exchange; drop the session and annotate I/O failures."""
         with self._lock:
             inst = self.instrument
             if inst is None:
@@ -239,14 +256,17 @@ class LeCroy(BaseDevice):
                 yield inst
             except pyvisa.errors.VisaIOError as exc:
                 self._drop()
-                translated = self._translate(exc)
+                note = self._diagnostic_note(operation)
+                translated = self._translate(exc, operation)
                 if translated is exc:
+                    exc.add_note(note)
                     raise
+                translated.add_note(note)
                 raise translated from exc
 
     def send(self, message: str) -> None:
         """Send one command."""
-        with self._io() as inst:
+        with self._io(f"write {message!r}") as inst:
             inst.write(message)
 
     def query(self, message: str, *, timeout: float | None = None) -> str:
@@ -256,7 +276,7 @@ class LeCroy(BaseDevice):
         """
         if timeout is not None and timeout <= 0:
             raise ValueError("timeout must be positive")
-        with self._io() as inst:
+        with self._io(f"query {message!r}") as inst:
             previous = inst.timeout
             if timeout is not None:
                 inst.timeout = int(timeout * 1000)
@@ -405,7 +425,7 @@ class LeCroy(BaseDevice):
     def _read_words(self, channel: str, block: str) -> np.ndarray:
         """Download one waveform as signed 16-bit codes (little-endian on the wire)."""
         channel, block = _ident(channel, "channel"), _ident(block, "block")
-        with self._io() as inst:
+        with self._io(f"download waveform {channel}:WF? {block}") as inst:
             # Format and byte order must be in force *before* the waveform is
             # requested: the scope encodes the WF? reply when it executes it.
             inst.write("CFMT DEF9,WORD,BIN")

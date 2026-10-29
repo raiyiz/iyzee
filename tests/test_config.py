@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from iyzee.config import IP, address, data_root, visa_backend
+from iyzee.config import IP, address, data_root
 
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    for name in ("IYZEE_SCOPE_IP", "IYZEE_DATA_DIR", "IYZEE_NOISE_ANALYZER_IP", "IYZEE_VISA_BACKEND"):
+    for name in ("IYZEE_SCOPE_IP", "IYZEE_DATA_DIR", "IYZEE_NOISE_ANALYZER_IP"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("IYZEE_CONFIG", str(tmp_path / "config.toml"))  # absent: defaults
 
@@ -41,17 +41,3 @@ def test_drivers_pick_the_configured_address_at_construction(tmp_path: Path):
     assert (
         KeysightMXA("203.0.113.1", resource_manager=object()).ip == "203.0.113.1"
     )  # explicit wins
-
-
-def test_visa_backend_defaults_to_py_and_obeys_environment_precedence(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    path = tmp_path / "config.toml"
-    monkeypatch.setenv("IYZEE_CONFIG", str(path))
-    assert visa_backend() == "@py"
-
-    path.write_text('[visa]\nbackend = "/usr/lib/libvisa.so"\n')
-    assert visa_backend() == "/usr/lib/libvisa.so"
-
-    monkeypatch.setenv("IYZEE_VISA_BACKEND", "@py")
-    assert visa_backend() == "@py"

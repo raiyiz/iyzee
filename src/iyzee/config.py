@@ -16,8 +16,7 @@ in this order of precedence:
 
 A config file that exists but cannot be parsed raises :class:`ConfigError`
 rather than being ignored: silently talking to the wrong instrument is worse
-than not starting. VISA backend selection follows the same environment-over-file
-precedence; it defaults to PyVISA-py (@py) so backend choice is predictable.
+than not starting.
 
 Guide: :guide:`arch-config`
 """
@@ -70,19 +69,6 @@ def address(instrument: IP) -> str:
         return from_env
     value = _load().get("addresses", {}).get(name)
     return str(value) if value else str(instrument.value)
-
-
-def visa_backend() -> str:
-    """PyVISA backend selector from IYZEE_VISA_BACKEND or [visa].backend.
-
-    Defaults to @py (PyVISA-py). A native VISA library can be selected by
-    setting this to its PyVISA library name or full library path.
-    """
-    from_env = os.environ.get("IYZEE_VISA_BACKEND")
-    if from_env:
-        return from_env
-    configured = _load().get("visa", {}).get("backend")
-    return str(configured) if configured else "@py"
 
 
 def data_root() -> Path:
