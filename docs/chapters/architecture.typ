@@ -707,6 +707,13 @@ no read termination is configured, because waveform bytes may legitimately conta
 `0x0A` and VXI-11 marks the end of a reply itself; and the VISA read chunk is raised to
 #fact("drivers.scope_chunk_size") bytes because the default is far too small for long records.
 
+The VISA implementation is selected explicitly by `IYZEE_VISA_BACKEND`, then
+`[visa].backend` in `config.toml`; it defaults to PyVISA-py (`@py`). A supported
+native VISA implementation can be selected with its PyVISA library name or path.
+This setting selects the backend, not the scope protocol: this driver still opens
+the VXI-11 resource above. VICP uses a different resource/protocol and is not tried
+as a fallback. The scope's remote-control mode and resource string must agree.
+
 == Every exchange goes through one door
 
 All I/O passes through #code("LeCroy._io"), a context manager that holds the
