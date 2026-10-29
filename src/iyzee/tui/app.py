@@ -5,12 +5,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from functools import partial
 import os
 import signal
 import threading
 import time
-from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import ClassVar, cast
 

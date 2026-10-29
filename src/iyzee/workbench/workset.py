@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
+
 from .catalog import PALETTE, SWEEP_KINDS, SWEEP_METRICS, describe, pick, scan_catalog, verify
 from .charts import csv_bytes, field_chart, figure_bytes
 from .groups import group_curves, group_difference, group_summary

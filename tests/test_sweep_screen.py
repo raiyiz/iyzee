@@ -18,9 +18,9 @@ from helpers import FakeHandle, async_test, make_result, notifications, plain, w
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, RichLog, Select, Static
 
+from iyzee.experiment import runner as runner_mod
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
-from iyzee.experiment import runner as runner_mod
 from iyzee.tui.screens.sweep import (
     FieldError,
     SweepScreen,

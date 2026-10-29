@@ -62,7 +62,7 @@ class _CheckpointWriter:
                 name=self.sweep.kind,
                 path=self.save_path,
             )
-        except Exception as exc:  # noqa: BLE001 - persistence must never stop a measurement
+        except Exception as exc:
             if not self.warned:
                 self.warned = True
                 log.exception("sweep: could not save results")
@@ -133,7 +133,7 @@ def run_recorded_sweep(
 
         try:
             prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), sweep.config)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - preserve analyzer setup failure for the caller
             outcome.setup_error = exc
             return outcome
 
@@ -154,7 +154,7 @@ def run_recorded_sweep(
             run_sequence(sweep.steps, ctx, on_error="skip", on_step=observer)
         except SweepAborted:
             outcome.aborted = True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - record unexpected run failures
             outcome.failed = True
             outcome.error = exc
             log.exception("sweep: run failed unexpectedly")

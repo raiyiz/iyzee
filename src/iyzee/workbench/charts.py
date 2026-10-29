@@ -1,8 +1,8 @@
 """Plot tidy workbench tables and export figures or CSV data."""
 from __future__ import annotations
 
-from collections.abc import Mapping
 import math
+from collections.abc import Mapping
 from typing import Any
 
 import polars as pl

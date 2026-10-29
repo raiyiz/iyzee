@@ -1,10 +1,10 @@
 """Build tidy analysis tables from saved iyzee recordings."""
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from itertools import pairwise
-import math
 from pathlib import Path
 from typing import Any
 
@@ -304,7 +304,7 @@ def scope_traces(
     issues: list[dict[str, str]] | None = None,
 ) -> pl.DataFrame:
     """Long waveform table for selected channels, lightly decimated for responsive plotting."""
-    output = []
+    output: list[dict[str, Any]] = []
     for row in rows.filter(pl.col("kind") == "scope").iter_rows(named=True):
         try:
             path = Path(row["path"])

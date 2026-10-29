@@ -43,8 +43,8 @@ from ...experiment import (
     acquire_trace,
     build_bandwidth_sweep,
     build_frequency_sweep,
-    difference_series,
     create_dirs,
+    difference_series,
     save_step_results,
 )
 from ...experiment.runner import run_recorded_sweep

@@ -72,7 +72,7 @@ def test_workbench_selects_scores_compares_groups_and_saves_working_sets(
     diff = group_difference(points, groups, "A", "B")
     assert diff["delta"].mean() == pytest.approx(-1.0, abs=0.15)
     assert diff["significant"].all()
-    assert all(row["delta_low"] < row["delta"] for row in diff.iter_rows(named=True))
+    assert diff.select((pl.col("delta_low") < pl.col("delta")).all()).item()
     quiet, same = _synthetic_sweeps(offsets=(-1.0, -1.0), seed=4)
     assert group_difference(quiet, same, "A", "B")["significant"].mean() < 0.3
 
