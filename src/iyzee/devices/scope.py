@@ -235,9 +235,7 @@ class LeCroy(BaseDevice):
             "control to be set to LXI/VXI-11; VICP is a different protocol and resource type."
         )
 
-    def _translate(
-        self, exc: pyvisa.errors.VisaIOError, operation: str
-    ) -> Exception:
+    def _translate(self, exc: pyvisa.errors.VisaIOError, operation: str) -> Exception:
         if exc.error_code == StatusCode.error_timeout:
             return LeCroyTimeoutError(
                 f"LeCroy {operation} at {self.visa_address} timed out after "

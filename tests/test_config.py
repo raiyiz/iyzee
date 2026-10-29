@@ -9,7 +9,12 @@ from iyzee.config import IP, address, data_root, visa_backend
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    for name in ("IYZEE_SCOPE_IP", "IYZEE_DATA_DIR", "IYZEE_NOISE_ANALYZER_IP", "IYZEE_VISA_BACKEND"):
+    for name in (
+        "IYZEE_SCOPE_IP",
+        "IYZEE_DATA_DIR",
+        "IYZEE_NOISE_ANALYZER_IP",
+        "IYZEE_VISA_BACKEND",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("IYZEE_CONFIG", str(tmp_path / "config.toml"))  # absent: defaults
 
