@@ -88,8 +88,11 @@ def test_scpi_helpers_wait_for_completion_drain_errors_and_send_frequencies():
     mxa.set_center_freq(1e6)
     mxa.set_span(100e3)
     mxa.set_rbw(10e3)
+    mxa.set_sweep_duration(10)
     assert instrument.commands == [
         "FREQ:CENT 1000000.0",
         "FREQ:SPAN 100000.0",
         "BWID 10000.0",
+        "SWE:TIME:AUTO OFF",
+        "SWE:TIME 10ms",
     ]

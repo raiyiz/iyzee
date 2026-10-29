@@ -142,6 +142,8 @@ class KeysightMXA(BaseDevice):
     # Sweep / Acquisition Control
     # ------------------------------------------------------------------
     def set_sweep_duration(self, time: int):
+        """Select a manual sweep time (required for zero-span measurements)."""
+        self.write("SWE:TIME:AUTO OFF")
         self.write(f"SWE:TIME {time}ms")
 
     def set_sweep_points(self, points: int):

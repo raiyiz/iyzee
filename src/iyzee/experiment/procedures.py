@@ -49,12 +49,14 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
     config = config or AnalyzerConfig()
 
     mx.set_center_freq(config.center_hz)
+    # Disable auto-coupled sweep time before entering zero span; the MXA rejects
+    # auto-coupled sweep time in zero span with SCPI error -221.
+    mx.set_sweep_duration(config.sweep_duration_ms)
     mx.set_span(config.span_hz)
     mx.set_rbw(config.res_bw_hz)
     mx.set_vbw(config.res_bw_hz, auto=True)
     mx.set_attenuation_auto(True)
     mx.set_trigger_source(config.trig_source)
-    mx.set_sweep_duration(config.sweep_duration_ms)
     mx.set_average_count(config.avg_count)
     mx.set_average_type(config.avg_type)
 
