@@ -21,6 +21,7 @@ from textual.widgets import Button, Input, RichLog, Select, Static
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens import sweep as sweep_mod
+from iyzee.experiment import runner as runner_mod
 from iyzee.tui.screens.sweep import (
     FieldError,
     SweepScreen,
@@ -147,9 +148,9 @@ async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
 
 def _sweep_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_run_sequence: Any) -> IyzeeApp:
     """An app wired so pressing Run drives fake_run_sequence instead of hardware."""
-    monkeypatch.setattr(sweep_mod, "create_dirs", lambda: tmp_path)
-    monkeypatch.setattr(sweep_mod, "prepare_analyzer", lambda *a, **k: None)
-    monkeypatch.setattr(sweep_mod, "run_sequence", fake_run_sequence)
+    monkeypatch.setattr(runner_mod, "create_dirs", lambda: tmp_path)
+    monkeypatch.setattr(runner_mod, "prepare_analyzer", lambda *a, **k: None)
+    monkeypatch.setattr(runner_mod, "run_sequence", fake_run_sequence)
     app = app_mod.IyzeeApp()
     app.handles["mxa"] = FakeHandle()
     return app

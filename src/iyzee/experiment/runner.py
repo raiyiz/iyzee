@@ -52,6 +52,7 @@ def run_recorded_sweep(
     on_step: StepCallback | None = None,
     should_abort: Callable[[], bool] | None = None,
     on_record: Callable[[RunRecord], None] | None = None,
+    on_checkpoint: Callable[[Path, Path], None] | None = None,
     on_save_error: Callable[[Exception], None] | None = None,
 ) -> SweepOutcome:
     """Run, checkpoint, and finalize a sweep using already-connected devices.
@@ -80,6 +81,8 @@ def run_recorded_sweep(
                 name=sweep.kind,
                 path=save_path,
             )
+            if on_checkpoint is not None:
+                on_checkpoint(savedir, save_path)
         except Exception as exc:
             if not save_warned:
                 save_warned = True
