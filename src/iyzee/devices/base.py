@@ -25,11 +25,7 @@ class BaseDevice:
         self.read_termination = read_termination
         self.write_termination = write_termination
         self.visa_backend = visa_backend() if resource_manager is None else "<injected>"
-        self.rm = (
-            resource_manager
-            if resource_manager is not None
-            else pyvisa.ResourceManager(self.visa_backend)
-        )
+        self.rm = resource_manager or pyvisa.ResourceManager(self.visa_backend)
         self.instrument: Any = None
         self.visa_address = f"TCPIP0::{self.ip}::inst0::INSTR"
 
