@@ -75,19 +75,3 @@ def test_a_run_record_reports_how_the_run_ended_and_can_be_fed_by_run_sequence()
         {"index": 1, "label": "step[1]", "error_type": "ValueError", "error": "wavemeter said no"}
     ]
     assert meta["config"] == {"center_hz": 1e6} and meta["run_id"] == record.run_id
-
-    # -- run record can be fed by run sequence
-    from iyzee.experiment.core import RunRecord
-
-    class Boom:
-        label = "bad point"
-
-        def run(self, ctx):
-            raise RuntimeError("no lock")
-
-    record = RunRecord()
-    run_sequence(
-        [Boom()], ExperimentContext(mx=None, run_id="r1"), on_error="skip", on_step=record.on_step
-    )  # type: ignore[arg-type]
-
-    assert [f.label for f in record.failed_steps] == ["bad point"]

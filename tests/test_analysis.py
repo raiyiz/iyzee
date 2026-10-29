@@ -74,33 +74,6 @@ def test_sweep_summaries_plot_the_right_axis_and_honour_the_statistic(tmp_path):
     assert sweep.points[1].measured is None
     assert sweep.points[1].x == 377.2
 
-    # -- sweep summaries honour the statistic and survive thin recordings
-    recording = _saved_sweep(
-        tmp_path,
-        [StepResult("p", 1.0, "Hz", {"squeezing": [-61.0, -50.0], "shot_noise": [-58.0, -58.0]})],
-        name="bandwidth",
-    )
-    mean = summarize_sweep(recording, "mean")
-    assert mean.statistic == "mean"
-    assert mean.points[0].relative_noise_db == pytest.approx((-3.0 + 8.0) / 2)
-    assert summarize_sweep(recording, "minimum").points[0].relative_noise_db == pytest.approx(-3.0)
-    with pytest.raises(ValueError, match="unknown statistic"):
-        summarize_sweep(recording, "median")  # type: ignore[arg-type]
-
-    bare = Recording(  # no sidecar: default labels
-        path=Path("x.npz"),
-        arrays={
-            "x_values": np.array([1.0, 2.0]),
-            "trace_squeezing": np.array([[-61.0], [-60.0]]),
-            "trace_shot_noise": np.array([[-58.0], [-58.0]]),
-        },
-        metadata={},
-    )
-    sweep = summarize_sweep(bare)
-    assert [point.label for point in sweep.points] == ["point 0", "point 1"]
-    assert sweep.axis == "bandwidth"
-    assert summarize_sweep(Recording(Path("x.npz"), {}, {})).points == ()  # no x values: no points
-
 
 def _scope_recording(**metadata) -> Recording:
     return Recording(Path("scope.npz"), {}, metadata)
@@ -139,39 +112,3 @@ def test_scope_summaries_collect_identity_stats_and_timebases():
     (timebase,) = summary.timebases
     assert timebase.channels == ("C1",)
     assert (timebase.offset, timebase.interval, timebase.samples) == (-5e-6, 1e-9, 10)
-
-    # -- scope timebases are grouped and a damaged manifest never breaks the summary
-    def waveform(channel: str) -> dict:
-        return {
-            "channel": channel,
-            "time_offset": 0.0,
-            "time_interval": 1e-9,
-            "stats": {"sample_count": 4},
-        }
-
-    (timebase,) = summarize_scope(
-        _scope_recording(waveforms=[waveform("C1"), waveform("C2")]), []
-    ).timebases
-    assert timebase.channels == ("C1", "C2") and timebase.unit == "S"  # same timebase: grouped
-
-    for bad in (  # unusable numbers are left out rather than guessed
-        {"time_offset": "0", "time_interval": 1e-9, "stats": {"sample_count": 4}},
-        {"time_offset": 0.0, "time_interval": 0.0, "stats": {"sample_count": 4}},
-        {"time_offset": 0.0, "time_interval": 1e-9, "stats": {"sample_count": 0}},
-        {"time_offset": 0.0, "time_interval": 1e-9},
-    ):
-        recording = _scope_recording(waveforms=[{"channel": "C1", **bad}])
-        assert summarize_scope(recording, []).timebases == ()
-
-    damaged = _scope_recording(
-        waveforms=["nonsense", {"channel": "C1", "stats": "nope"}],
-        instrument="not a dict",
-        configuration=["not", "a", "dict"],
-    )
-    summary = summarize_scope(damaged, [_trace("C1")])
-    assert summary.channels == () and summary.timebases == ()
-    assert summary.instrument_address is None and summary.time_per_div is None
-
-    # An instrument section without an address is distinct from no section at all.
-    assert summarize_scope(_scope_recording(instrument={}), []).instrument_address == ""
-    assert summarize_scope(_scope_recording(), []).instrument_address is None

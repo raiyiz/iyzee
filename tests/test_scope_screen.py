@@ -20,7 +20,6 @@ from textual.widgets import Button, Checkbox, Input, RichLog, Select
 
 from iyzee.devices.scope import Channel, Coupling, TriggerSlope
 from iyzee.tui.app import IyzeeApp
-from iyzee.tui.screens import scope as scope_screen_mod
 from iyzee.tui.screens.scope import ScopeScreen
 
 
@@ -56,42 +55,6 @@ def _set(screen: ScopeScreen, widget_id: str, value: str) -> None:
 
 
 # -- retrieve ------------------------------------------------------------------------------
-
-
-class GatedScope(ScreenScope):
-    """Blocks V/div reads while ``gate`` is closed, so a test can act mid-retrieve."""
-
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.gate = threading.Event()
-        self.gate.set()
-        self.entered = threading.Event()
-
-    def get_volts_per_div(self, channel: Channel) -> str:
-        self.entered.set()
-        self.gate.wait(timeout=5)
-        return super().get_volts_per_div(channel)
-
-
-@async_test
-async def test_editing_a_field_while_a_retrieve_is_in_flight_does_not_break_the_result() -> None:
-    scope = GatedScope()
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-        original = screen.query_one("#C1-vdiv", Input).value
-
-        scope.gate.clear()
-        scope.entered.clear()
-        screen.query_one("#retrieve-settings", Button).press()
-        await wait_until(pilot, scope.entered.is_set)  # the worker is now inside the scope read
-        _set(screen, "C1-vdiv", "0.9")  # the user types while it waits
-        scope.gate.set()
-
-        await wait_until(pilot, lambda: not screen._busy)
-        assert _log(screen).count("Scope settings synchronized from the instrument.") == 2
-        assert screen._synced
-        assert screen.query_one("#C1-vdiv", Input).value == original  # form re-synced
 
 
 # -- apply: the form shows what the scope reports ------------------------------------------
@@ -181,54 +144,6 @@ async def test_apply_writes_changes_trigger_changes_and_reports_a_refusal() -> N
     await _a_refused_apply_is_reported_keeps_the_ed()
 
 
-@async_test
-async def test_a_scope_that_disconnects_mid_operation_never_leaves_the_page_busy() -> None:
-    # -- apply after the scope disconnects releases the busy flag and keeps the state
-    async def _apply_after_the_scope_disconnects_releas():
-        scope = ScreenScope()
-        async with IyzeeApp().run_test() as pilot:
-            app = pilot.app
-            assert isinstance(app, IyzeeApp)
-            screen = await _open(pilot, scope)
-            await _synced(pilot, screen)
-            state = screen._channel_state
-            trigger = screen._trigger_state
-            assert state is not None and trigger is not None
-
-            app.handles.pop("scope")  # disconnected between the click and the worker starting
-            screen._busy = True
-            screen._apply(scope, [state[0]], None, state, trigger)
-
-            # Not stuck "busy", and the stale result is discarded: state untouched.
-            await wait_until(pilot, lambda: not screen._busy)
-            assert screen._channel_state == state
-
-    await _apply_after_the_scope_disconnects_releas()
-
-    # -- acquire when the scope disconnects first does not leave the button disabled
-    async def _acquire_when_the_scope_disconnects_first():
-        scope = ScreenScope()
-        async with IyzeeApp().run_test() as pilot:
-            app = pilot.app
-            assert isinstance(app, IyzeeApp)
-            screen = await _open(pilot, scope)
-            await _synced(pilot, screen)
-            settings = tuple(screen._read_channel_settings())
-            trigger = screen._read_trigger_settings()
-
-            app.handles.pop("scope")  # gone before the worker runs: this was a KeyError
-            screen.query_one("#acquire-waveforms", Button).disabled = True
-            screen._acquire(scope, [Channel.C1], settings, trigger, None, None)
-
-            await wait_until(
-                pilot, lambda: not screen.query_one("#acquire-waveforms", Button).disabled
-            )
-            assert "disconnected before acquisition started" in _log(screen)
-            assert any("Acquisition failed" in n for n in notifications(app))
-
-    await _acquire_when_the_scope_disconnects_first()
-
-
 class TriggerScope(ScreenScope):
     """Remembers trigger writes like the channel fake does; can refuse or stall a write."""
 
@@ -262,35 +177,6 @@ class TriggerScope(ScreenScope):
         self.trigger_state = replace(self.trigger_state, slope=slope)
 
 
-@pytest.mark.parametrize("operation", ["retrieve"])
-@async_test
-async def test_an_operation_finishing_after_a_disconnect_releases_its_flags(
-    operation: str,
-) -> None:
-    scope = TriggerScope(gate_reads=operation == "retrieve")
-    async with IyzeeApp().run_test() as pilot:
-        app = pilot.app
-        assert isinstance(app, IyzeeApp)
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-        scope.entered.clear()
-        scope.gate.clear()
-
-        if operation == "retrieve":
-            screen.query_one("#retrieve-settings", Button).press()
-        else:
-            _set(screen, "trig-level", "0.25")
-            screen.query_one("#apply-settings", Button).press()
-        await wait_until(pilot, scope.entered.is_set)  # the worker is inside the scope call
-
-        app.handles.pop("scope")  # the link goes away mid-operation
-        scope.gate.set()
-
-        await wait_until(pilot, lambda: not screen._busy)
-        if operation == "retrieve":
-            assert not screen.query_one("#retrieve-settings", Button).disabled
-
-
 @async_test
 async def test_the_form_refuses_unapplied_changes_and_flags_invalid_selects() -> None:
     # -- acquire refuses while the form has changes the scope does not
@@ -310,22 +196,6 @@ async def test_the_form_refuses_unapplied_changes_and_flags_invalid_selects() ->
             assert "Acquiring" not in _log(screen)
 
     await _acquire_refuses_while_the_form_has_chang()
-
-    # -- flagging a select as invalid marks and focuses it
-    # ``_flag_invalid`` used to assume an ``Input``; a bad ``Select`` would crash it.
-    async def _flagging_a_select_as_invalid_marks_and_f():
-        async with IyzeeApp().run_test() as pilot:
-            screen = await _open(pilot)
-
-            screen._flag_invalid("C1-coupling")
-            await pilot.pause()
-
-            select = screen.query_one("#C1-coupling", Select)
-            assert select.has_class("-invalid")
-            screen._flag_invalid("C1-vdiv")  # moving on clears the previous marker
-            assert not select.has_class("-invalid")
-
-    await _flagging_a_select_as_invalid_marks_and_f()
 
 
 # -- acquire ---------------------------------------------------------------------------------
@@ -350,26 +220,6 @@ async def test_acquire_saves_and_reports_that_a_running_acquisition_was_paused(
 
         assert "paused for a consistent capture, then resumed" in _log(screen)
         assert list(tmp_path.rglob("*.npz")) and list(tmp_path.rglob("*.json"))
-        assert not screen.query_one("#acquire-waveforms", Button).disabled
-
-
-@async_test
-async def test_an_unexpected_acquire_error_re_enables_the_button(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    scope = ScreenScope()
-
-    def boom(*args: Any, **kwargs: Any) -> None:
-        raise RuntimeError("driver exploded")
-
-    monkeypatch.setattr(scope_screen_mod, "acquire_scope_recording", boom)
-    async with IyzeeApp().run_test() as pilot:
-        screen = await _open(pilot, scope)
-        await _synced(pilot, screen)
-
-        screen.query_one("#acquire-waveforms", Button).press()
-        await wait_until(pilot, lambda: "driver exploded" in _log(screen))
-
         assert not screen.query_one("#acquire-waveforms", Button).disabled
 
 

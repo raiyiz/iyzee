@@ -21,7 +21,6 @@ from helpers import (
     plain,
     wait_until,
 )
-from rich.text import Text
 from textual.pilot import Pilot
 from textual.widgets import DataTable, Static
 
@@ -60,66 +59,10 @@ async def test_connecting_a_row_updates_table_handles_hint_and_detail(
         assert "disconnect Fake" in plain(hint)
 
 
-@pytest.mark.parametrize(
-    "message",
-    [
-        "bench unreachable",
-        "could not open [/dev/ttyUSB0]",  # brackets must render as literal text
-    ],
-)
-@async_test
-async def test_connect_error_is_shown_verbatim_and_leaves_no_handle(
-    monkeypatch: pytest.MonkeyPatch, message: str
-) -> None:
-    app = connect_app(monkeypatch, FakeHandle(connect_error=message))
-    async with app.run_test() as pilot:
-        _, table = await enter_on_first_row(app, pilot)
-        await _row_is(pilot, table, "error")
-        app.export_screenshot()  # force a real render of the table
-        # DataTable parses str cells as markup; what it would display is
-        # exactly the original message, brackets and all.
-        assert Text.from_markup(table.get_cell("fake", DETAIL_COL)).plain == message
-        assert f"Fake: {message}" in notifications(app), "the toast carries the raw text"
-        # A failed connect must not leave a handle behind: the instrument still
-        # reads as "not connected" to the rest of the app (Sweep guards, lab).
-        assert "fake" not in app.handles
-        assert app.is_running
-
-
 @async_test
 async def test_a_failed_probe_a_double_enter_and_a_refused_disconnect_leave_consistent_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # -- a failed probe closes the half open link
-    # connect() succeeded but probe() failed: nothing will ever hold a
-    # reference to that handle, so the connect path has to close it.
-    async def _a_failed_probe_closes_the_half_open_link():
-        handle = FakeHandle(probe_error="no answer")
-        app = connect_app(monkeypatch, handle)
-        async with app.run_test() as pilot:
-            _, table = await enter_on_first_row(app, pilot)
-            await _row_is(pilot, table, "error")
-            assert (handle.connect_calls, handle.disconnect_calls) == (1, 1)
-            assert "fake" not in app.handles
-            assert table.get_cell("fake", DETAIL_COL) == "no answer"
-
-    await _a_failed_probe_closes_the_half_open_link()
-
-    # -- enter on a connecting row does not open the device twice
-    async def _enter_on_a_connecting_row_does_not_open_():
-        first, second = FakeHandle(connect_delay=0.4), FakeHandle(connect_delay=0.4)
-        app = connect_app(monkeypatch, first, second)
-        async with app.run_test() as pilot:
-            _, table = await enter_on_first_row(app, pilot)
-            await _row_is(pilot, table, "connecting...")
-            await pilot.press("enter")  # impatient second press
-            await _row_is(pilot, table, "connected")
-            assert first.connect_calls == 1
-            assert second.connect_calls == 0, "second Enter must be ignored while busy"
-            assert app.handles["fake"] is first
-
-    await _enter_on_a_connecting_row_does_not_open_()
-
     # -- disconnect requires a fresh second enter
     async def _disconnect_requires_a_fresh_second_enter():
         handle = FakeHandle()

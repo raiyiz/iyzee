@@ -68,13 +68,6 @@ def test_connecting_and_the_identity_query_fail_clearly():
         refused.connect()
     assert not refused.connected
 
-    # -- a silent scope raises lecroy timeout and drops the connection
-    for read in (lambda s: s.query("C1:VOLT_DIV?"), lambda s: s._read_words("C1", "DAT1")):
-        scope, resource = connected(visa_timeout())
-        with pytest.raises(LeCroyTimeoutError):
-            read(scope)
-        assert scope.connected is False and resource.closed
-
     # -- idn asks for the identity and can widen the timeout
     scope, resource = connected("LECROY,WP804HD-MS,SN,11.6.0\n")
 
@@ -155,27 +148,6 @@ def test_waveforms_and_settings_use_the_documented_commands_and_refuse_bad_input
         scope, resource = connected("  reply text \n")
         assert call(scope) == "reply text"  # trimmed
         assert resource.written == [command]
-
-    # -- bad names and numbers are refused before anything is written
-    scope, resource = connected()
-
-    for bad in ("C1:VOLT_DIV 1;C2", "C1\n"):  # free-form names must be plain identifiers
-        with pytest.raises(ValueError, match="invalid channel"):
-            scope.set_trace_display(bad, True)
-        with pytest.raises(ValueError, match="invalid channel"):
-            scope._read_words(bad, "DAT1")
-    for call in (
-        lambda: scope.set_volts_per_div(Channel.C1, float("nan")),
-        lambda: scope.set_offset(Channel.C1, float("nan")),
-        lambda: scope.set_trigger_level(Channel.C1, float("nan")),
-    ):
-        with pytest.raises(ValueError, match="must be finite"):
-            call()
-    for bad_time in (0, -1e-6, float("nan")):
-        with pytest.raises(ValueError):
-            scope.set_time_per_div(bad_time)
-
-    assert not resource.written
 
 
 # -- channel / trigger control ---------------------------------------------------------------

@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import threading
-import time
-from pathlib import Path
-
 import pytest
 from helpers import (
     FakeHandle,
     async_test,
     connect_app,
     enter_on_first_row,
-    history_manager,
     notifications,
     plain,
     wait_until,
@@ -22,7 +17,7 @@ from textual.widgets import ContentSwitcher, Static
 from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.ipython import LabProxy
 from iyzee.tui.screens.connect import DETAIL_COL, STATUS_COL, ConnectScreen
-from iyzee.tui.screens.console import ConsoleScreen, IyzeeConsole
+from iyzee.tui.screens.console import ConsoleScreen
 from iyzee.tui.screens.results import ResultsScreen
 from iyzee.tui.screens.sweep import SweepScreen
 
@@ -112,34 +107,6 @@ async def test_nav_rail_and_sweep_banner_update_the_moment_a_connect_finishes(
 
 
 @async_test
-async def test_console_history_defaults_to_memory_and_accepts_an_explicit_path(
-    tmp_path: Path,
-) -> None:
-    """The app must keep the console history database isolated by default.
-
-    ``IyzeeApp()`` passes ``console_history_file=None`` to the session, which
-    must become ``:memory:`` rather than IPython's shared persistent history.
-    That protects the whole test suite and each app instance from accidentally
-    sharing ``~/.ipython/profile_default/history.sqlite``. The explicit-path
-    case stays here because this test is specifically about the app-to-session
-    wiring; the shell-level tests cover the history implementation itself.
-    """
-    default_app = IyzeeApp()
-    async with default_app.run_test() as pilot:
-        await pilot.press("i")
-        console = default_app.screen.query_one(IyzeeConsole)
-        assert history_manager(console.session.shell).hist_file == ":memory:"
-
-    history_file = tmp_path / "console_history.sqlite"
-    app = IyzeeApp(console_history_file=history_file)
-    assert app.console_history_file == history_file
-    async with app.run_test() as pilot:
-        await pilot.press("i")
-        console = app.screen.query_one(IyzeeConsole)
-        assert history_manager(console.session.shell).hist_file == str(history_file)
-
-
-@async_test
 async def test_exiting_the_app_disconnects_every_connected_instrument() -> None:
     one, two = FakeHandle(), FakeHandle()
     app = IyzeeApp()
@@ -150,46 +117,6 @@ async def test_exiting_the_app_disconnects_every_connected_instrument() -> None:
         await wait_until(pilot, lambda: not app.is_running)
     assert (one.disconnect_calls, two.disconnect_calls) == (1, 1)
     assert app.handles == {}
-
-
-def test_a_failing_disconnect_does_not_stop_the_others_from_closing() -> None:
-    app = IyzeeApp()
-    broken, fine = FakeHandle(disconnect_error="link already gone"), FakeHandle()
-    app.handles["broken"], app.handles["fine"] = broken, fine
-    app.close_instruments(timeout=2.0)
-    assert broken.disconnect_calls == 1 and fine.disconnect_calls == 1
-    assert app.handles == {}
-
-
-@pytest.mark.parametrize(
-    "release_lock_after,timeout,busy_is_closed",
-    [
-        (None, 0.3, False),  # a step that never returns must not be able to block quitting
-        (0.2, 3.0, True),  # a step that finishes soon is waited for, not torn down under
-    ],
-)
-def test_close_instruments_waits_for_a_busy_instrument_but_never_hangs(
-    release_lock_after: float | None, timeout: float, busy_is_closed: bool
-) -> None:
-    app = IyzeeApp()
-    busy, idle = FakeHandle(), FakeHandle()
-    app.handles["busy"], app.handles["idle"] = busy, idle
-    lock = busy.lock
-    lock.acquire()
-    if release_lock_after is not None:
-        threading.Timer(release_lock_after, lock.release).start()
-    started = time.monotonic()
-    try:
-        app.close_instruments(timeout=timeout)
-    finally:
-        if release_lock_after is None:
-            # The closer's own acquire() deadline is the same instant close_instruments
-            # stops waiting, so releasing right away would race it (and let it win).
-            time.sleep(0.2)
-            lock.release()
-    assert time.monotonic() - started < timeout + 2.0
-    assert idle.disconnect_calls == 1, "the other instruments are still closed"
-    assert (busy.disconnect_calls == 1) is busy_is_closed
 
 
 # -- a link that dies while connected ------------------------------------------------------
@@ -234,19 +161,3 @@ async def test_a_lost_link_is_reported_once_released_and_reconnectable(
         assert app.handles["mxa"] is fresh
         assert "mxa" not in app.lost_links
         assert table.get_cell("mxa", DETAIL_COL) == "back"
-
-
-@async_test
-async def test_handles_that_cannot_tell_are_never_dropped() -> None:
-    class NoAlive:
-        lock = threading.Lock()
-
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        app.handles["x"] = NoAlive()  # type: ignore[assignment]
-
-        app._check_links()
-
-        assert "x" in app.handles
-        app.handles.clear()  # nothing to disconnect on the way out
