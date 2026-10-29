@@ -154,7 +154,7 @@ def run_recorded_sweep(
             run_sequence(sweep.steps, ctx, on_error="skip", on_step=observer)
         except SweepAborted:
             outcome.aborted = True
-        except Exception as exc:  # noqa: BLE001 - record unexpected run failures
+        except Exception as exc:
             outcome.failed = True
             outcome.error = exc
             log.exception("sweep: run failed unexpectedly")

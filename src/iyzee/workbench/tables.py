@@ -17,6 +17,7 @@ from iyzee.waveform_math import traces_from_scope_recording
 
 from .catalog import SWEEP_KINDS, SWEEP_METRICS, _manifest, _mapping
 
+
 @lru_cache(maxsize=6)
 def _cached_recording(path: str, mtime_ns: int, size: int) -> Recording:
     """Read each file once per file version, so several views of a run share one load."""
