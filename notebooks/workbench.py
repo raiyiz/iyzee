@@ -26,7 +26,6 @@ def _():
     import polars as pl
 
     from iyzee.config import data_root
-
     from iyzee.workbench import (
         BAND_CHOICES,
         KINDS,

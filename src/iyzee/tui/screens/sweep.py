@@ -44,6 +44,8 @@ from ...experiment import (
     build_bandwidth_sweep,
     build_frequency_sweep,
     difference_series,
+    create_dirs,
+    save_step_results,
 )
 from ...experiment.runner import run_recorded_sweep
 from ..commands import Command
@@ -70,6 +72,8 @@ _INSTRUMENT_NAMES = {"mxa": "MXA", "shutter": "shutter", "wavemeter": "wavemeter
 
 
 class SweepScreen(Page):
+    _savedir: Path | None
+    _save_path: Path | None
     """Pick a sweep type, configure it, run it, and watch it live.
 
     The form, controls, plot and log together are taller than a small
@@ -480,8 +484,8 @@ class SweepScreen(Page):
     # -- checkpointing ----------------------------------------------------
 
     def _reset_checkpoint(self) -> None:
-        self._savedir: Path | None = None
-        self._save_path: Path | None = None
+        self._savedir = None
+        self._save_path = None
         self._save_warned = False
         self._record = None
 

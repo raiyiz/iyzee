@@ -56,4 +56,4 @@ def test_field_chart_rejects_missing_columns_and_empty_data() -> None:
 
     empty = pl.DataFrame({"x": [], "y": []}, schema={"x": pl.Float64, "y": pl.Float64})
     with pytest.raises(ValueError, match="no usable rows"):
-        field_chart(empty, x="x", y="y")
+        field_chart(empty, x="x", y="y", color=None)

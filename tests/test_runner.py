@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
+from iyzee.experiment import runner
 from iyzee.experiment.core import StepResult
 from iyzee.experiment.procedures import Sweep, build_bandwidth_sweep
-from iyzee.experiment import runner
 
 
 class FakeMXA:

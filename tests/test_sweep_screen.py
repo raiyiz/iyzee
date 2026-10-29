@@ -20,7 +20,6 @@ from textual.widgets import Button, Input, RichLog, Select, Static
 
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
-from iyzee.tui.screens import sweep as sweep_mod
 from iyzee.experiment import runner as runner_mod
 from iyzee.tui.screens.sweep import (
     FieldError,

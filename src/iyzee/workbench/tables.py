@@ -182,7 +182,7 @@ def delta_to_reference(
         return pl.DataFrame(schema=schema)
     ref_x = reference[x].to_numpy()
     ref_y = reference[metric].to_numpy()
-    rows = []
+    rows: list[dict[str, Any]] = []
     for run_id in points["run_id"].unique(maintain_order=True):
         if run_id == reference_run_id:
             continue
@@ -213,7 +213,7 @@ def _finite_number(value: Any) -> float | None:
 
 def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
     """Long table of per-channel statistics stored in each scope manifest."""
-    output = []
+    output: list[dict[str, Any]] = []
     for row in rows.filter(pl.col("kind") == "scope").iter_rows(named=True):
         manifest = _manifest(Path(row["path"]))
         configuration = _mapping(manifest.get("configuration"))
@@ -418,7 +418,7 @@ def preview_facts(row: Mapping[str, Any]) -> list[tuple[str, str]]:
 
 def array_inventory(rows: pl.DataFrame, issues: list[dict[str, str]] | None = None) -> pl.DataFrame:
     """Every saved array of every run (name, shape, dtype), to see what a file holds."""
-    output = []
+    output: list[dict[str, Any]] = []
     for row in rows.iter_rows(named=True):
         try:
             recording = _load(row)

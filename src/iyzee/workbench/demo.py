@@ -273,11 +273,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=7, help="seed for repeatable signal shapes")
     args = parser.parse_args()
     written = write_demo(args.out, seed=args.seed)
-    print(f"wrote {len(written)} synthetic recordings under {args.out}")
+    print(f"wrote {len(written)} synthetic recordings under {args.out}")  # noqa: T201
     print(
         f"Try them with: IYZEE_DATA_DIR={args.out} "
         "uv run --extra analysis --group notebooks marimo edit notebooks/workbench.py"
-    )
+    )  # noqa: T201
 
 
 if __name__ == "__main__":

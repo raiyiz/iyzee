@@ -41,6 +41,64 @@ class SweepOutcome:
     error: Exception | None = None
 
 
+@dataclass(slots=True)
+class _CheckpointWriter:
+    sweep: Sweep
+    results: list[StepResult]
+    on_checkpoint: Callable[[Path, Path], None] | None = None
+    on_save_error: Callable[[Exception], None] | None = None
+    savedir: Path | None = None
+    save_path: Path | None = None
+    warned: bool = False
+
+    def write(self, record: RunRecord) -> None:
+        try:
+            if self.savedir is None:
+                self.savedir = create_dirs()
+            self.save_path = save_step_results(
+                self.results,
+                self.savedir,
+                record.as_metadata(),
+                name=self.sweep.kind,
+                path=self.save_path,
+            )
+        except Exception as exc:  # noqa: BLE001 - persistence must never stop a measurement
+            if not self.warned:
+                self.warned = True
+                log.exception("sweep: could not save results")
+                if self.on_save_error is not None:
+                    self.on_save_error(exc)
+            return
+        if self.on_checkpoint is not None:
+            self.on_checkpoint(self.savedir, self.save_path)
+
+
+@dataclass(slots=True)
+class _StepObserver:
+    record: RunRecord
+    results: list[StepResult]
+    checkpoint: _CheckpointWriter
+    on_step: StepCallback | None
+    should_abort: Callable[[], bool] | None
+
+    def __call__(
+        self,
+        index: int,
+        total: int,
+        step: Step,
+        result: StepResult | None,
+        error: BaseException | None,
+    ) -> None:
+        self.record.on_step(index, total, step, result, error)
+        if result is not None:
+            self.results.append(result)
+            self.checkpoint.write(self.record)
+        if self.on_step is not None:
+            self.on_step(index, total, step, result, error)
+        if self.should_abort is not None and self.should_abort():
+            raise SweepAborted()
+
+
 def run_recorded_sweep(
     sweep: Sweep,
     *,
@@ -65,30 +123,9 @@ def run_recorded_sweep(
     """
     collected = results if results is not None else []
     outcome = SweepOutcome(results=collected, total=len(sweep.steps))
-    savedir: Path | None = None
-    save_path: Path | None = None
-    save_warned = False
-
-    def checkpoint(record: RunRecord) -> None:
-        nonlocal savedir, save_path, save_warned
-        try:
-            if savedir is None:
-                savedir = create_dirs()
-            save_path = save_step_results(
-                collected,
-                savedir,
-                record.as_metadata(),
-                name=sweep.kind,
-                path=save_path,
-            )
-            if on_checkpoint is not None:
-                on_checkpoint(savedir, save_path)
-        except Exception as exc:
-            if not save_warned:
-                save_warned = True
-                log.exception("sweep: could not save results")
-                if on_save_error is not None:
-                    on_save_error(exc)
+    checkpoint = _CheckpointWriter(
+        sweep, collected, on_checkpoint=on_checkpoint, on_save_error=on_save_error
+    )
 
     with contextlib.ExitStack() as stack:
         for lock in locks:
@@ -111,25 +148,10 @@ def run_recorded_sweep(
             wavemeter=wavemeter,
             config=record.config,
         )
-
-        def observe(
-            index: int,
-            total: int,
-            step: Step,
-            result: StepResult | None,
-            error: BaseException | None,
-        ) -> None:
-            record.on_step(index, total, step, result, error)
-            if result is not None:
-                collected.append(result)
-                checkpoint(record)
-            if on_step is not None:
-                on_step(index, total, step, result, error)
-            if should_abort is not None and should_abort():
-                raise SweepAborted()
+        observer = _StepObserver(record, collected, checkpoint, on_step, should_abort)
 
         try:
-            run_sequence(sweep.steps, ctx, on_error="skip", on_step=observe)
+            run_sequence(sweep.steps, ctx, on_error="skip", on_step=observer)
         except SweepAborted:
             outcome.aborted = True
         except Exception as exc:
@@ -139,8 +161,8 @@ def run_recorded_sweep(
         finally:
             record.finish(aborted=outcome.aborted, failed=outcome.failed)
             if collected:
-                checkpoint(record)
+                checkpoint.write(record)
 
-    outcome.savedir = savedir
-    outcome.save_path = save_path
+    outcome.savedir = checkpoint.savedir
+    outcome.save_path = checkpoint.save_path
     return outcome

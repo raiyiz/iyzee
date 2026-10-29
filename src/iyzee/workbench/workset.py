@@ -169,8 +169,8 @@ class Workset:
         clone._cache = {}
         clone._issues = {}
         clone._colors = self._colors  # a subset keeps its parent's colours
-        keep = set(clone.rows["run_id"].to_list())
-        clone._groups = {run: group for run, group in self._groups.items() if run in keep}
+        run_ids = set(clone.rows["run_id"].to_list())
+        clone._groups = {run: group for run, group in self._groups.items() if run in run_ids}
         return clone
 
     # --- identity -------------------------------------------------------------------

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from helpers import async_test
 from textual.app import App
 from textual.widgets import Label

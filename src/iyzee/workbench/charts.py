@@ -129,7 +129,7 @@ def _draw_series(
             marker="o" if len(xs) <= 80 else None,
             markersize=3.5,
             linewidth=1.5,
-            linestyle=styles.get(named.get(detail), "-"),
+            linestyle=styles.get(named[detail], "-") if detail is not None and detail in named else "-",
             **style,
         )
     if label and label not in handles:

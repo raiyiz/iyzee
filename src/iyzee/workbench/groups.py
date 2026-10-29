@@ -8,6 +8,7 @@ import polars as pl
 
 from .catalog import SWEEP_KINDS, SWEEP_METRICS
 
+
 def _title(column: str) -> str:
     known = {
         **SWEEP_METRICS,

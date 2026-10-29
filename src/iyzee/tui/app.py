@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from functools import partial
 import os
 import signal
 import threading
@@ -489,69 +490,76 @@ class IyzeeApp(App):
         if message:
             self.notify(message, timeout=5, markup=False)
 
+    @staticmethod
+    def _complete_instrument_keys(prefix: str, keys: list[str]) -> list[str]:
+        return [key for key in keys if key.startswith(prefix)]
+
+    @staticmethod
+    def _instrument_targets(args: list[str], instrument_keys: list[str]) -> list[str]:
+        chosen = instrument_keys if "all" in args else args
+        unknown = [arg for arg in chosen if arg not in instrument_keys]
+        if unknown:
+            raise CommandError(
+                f"unknown instrument {unknown[0]!r}; known: {', '.join(instrument_keys)}"
+            )
+        return chosen
+
+    def _goto_command(self, page_id: str, args: list[str]) -> None:
+        if args:
+            raise CommandError(f":{page_id} takes no arguments")
+        self.action_show_page(page_id)
+
+    def _connect_command(
+        self, args: list[str], *, instrument_keys: list[str]
+    ) -> str | None:
+        if not args:
+            self.action_show_page("connect")
+            return None
+        screen = self.query_one(ConnectScreen)
+        targets = self._instrument_targets(args, instrument_keys)
+        return "; ".join(screen.request_connect(key) for key in targets)
+
+    def _disconnect_command(
+        self, args: list[str], *, instrument_keys: list[str]
+    ) -> str:
+        if not args:
+            raise CommandError("usage: :disconnect <instrument>... | all")
+        screen = self.query_one(ConnectScreen)
+        targets = self._instrument_targets(args, instrument_keys)
+        return "; ".join(screen.request_disconnect(key) for key in targets)
+
+    def _status_command(self, args: list[str]) -> str:
+        del args
+        lines = []
+        for spec in INSTRUMENTS:
+            state = (
+                "connected" if spec.key in self.handles else self.lost_links.get(spec.key, "-")
+            )
+            lines.append(f"{spec.key}: {state}")
+        return "\n".join(lines)
+
+    def _help_command(self, args: list[str]) -> str:
+        return self.command_registry().help_text(args[0] if args else None)
+
+    def _quit_command(self, args: list[str]) -> None:
+        self.action_request_quit()
+
+    def _quit_now_command(self, args: list[str]) -> None:
+        self.exit()
+
     def _global_commands(self) -> list[Command]:
         instrument_keys = [spec.key for spec in INSTRUMENTS]
         keys_and_all = [*instrument_keys, "all"]
-
-        def complete_keys(prefix: str) -> list[str]:
-            return [k for k in keys_and_all if k.startswith(prefix)]
-
-        def targets(args: list[str]) -> list[str]:
-            chosen = instrument_keys if "all" in args else args
-            unknown = [a for a in chosen if a not in instrument_keys]
-            if unknown:
-                raise CommandError(
-                    f"unknown instrument {unknown[0]!r}; known: {', '.join(instrument_keys)}"
-                )
-            return chosen
-
-        def goto(page_id: str) -> Callable[[list[str]], str | None]:
-            def run(args: list[str]) -> str | None:
-                if args:
-                    raise CommandError(f":{page_id} takes no arguments")
-                self.action_show_page(page_id)
-                return None
-
-            return run
-
-        def connect(args: list[str]) -> str | None:
-            if not args:
-                self.action_show_page("connect")
-                return None
-            screen = self.query_one(ConnectScreen)
-            return "; ".join(screen.request_connect(key) for key in targets(args))
-
-        def disconnect(args: list[str]) -> str | None:
-            if not args:
-                raise CommandError("usage: :disconnect <instrument>... | all")
-            screen = self.query_one(ConnectScreen)
-            return "; ".join(screen.request_disconnect(key) for key in targets(args))
-
-        def status(args: list[str]) -> str:
-            lines = []
-            for spec in INSTRUMENTS:
-                state = (
-                    "connected" if spec.key in self.handles else self.lost_links.get(spec.key, "-")
-                )
-                lines.append(f"{spec.key}: {state}")
-            return "\n".join(lines)
-
-        def help_(args: list[str]) -> str:
-            return self.command_registry().help_text(args[0] if args else None)
-
-        def quit_(args: list[str]) -> None:
-            self.action_request_quit()  # like the q key: asks first, a second one quits
-
-        def quit_now(args: list[str]) -> None:
-            self.exit()
-
-        commands = [
+        complete = partial(self._complete_instrument_keys, keys=keys_and_all)
+        connect = partial(self._connect_command, instrument_keys=instrument_keys)
+        disconnect = partial(self._disconnect_command, instrument_keys=instrument_keys)
+        return [
             Command(
                 "connect",
                 connect,
                 "Connect page, or connect the named instruments",
                 usage="[<instrument>... | all]",
-                complete=complete_keys,
+                complete=complete,
                 aliases=("c",),
             ),
             Command(
@@ -559,35 +567,49 @@ class IyzeeApp(App):
                 disconnect,
                 "Disconnect instruments",
                 usage="<instrument>... | all",
-                complete=complete_keys,
+                complete=complete,
             ),
-            Command("status", status, "Which instruments are connected"),
+            Command("status", self._status_command, "Which instruments are connected"),
             Command(
                 "help",
-                help_,
+                self._help_command,
                 "List the commands available on this page",
                 usage="[command]",
                 complete=lambda prefix: [
-                    n for n in self.command_registry().names if n.startswith(prefix)
+                    name for name in self.command_registry().names if name.startswith(prefix)
                 ],
                 aliases=("h",),
             ),
-            Command("quit", quit_, "Quit; asks first, as the q key does", aliases=("q",)),
-            Command("qq", quit_now, "Quit now, without asking", aliases=("quit!", "q!")),
+            Command(
+                "quit",
+                self._quit_command,
+                "Quit; asks first, as the q key does",
+                aliases=("q",),
+            ),
+            Command(
+                "qq",
+                self._quit_now_command,
+                "Quit now, without asking",
+                aliases=("quit!", "q!"),
+            ),
+            *[
+                Command(
+                    page_id,
+                    partial(self._goto_command, page_id),
+                    f"Go to the {label} page",
+                    aliases=(key,),
+                )
+                for page_id, label, key in (
+                    ("sweep", "Sweep", "s"),
+                    ("scope", "Scope", "o"),
+                    ("power", "Power", "p"),
+                    ("rb", "Rb", "r"),
+                    ("results", "Results", "t"),
+                    ("console", "Console", "i"),
+                    ("log", "Log", "l"),
+                )
+            ],
         ]
-        for page_id, label, key in (
-            ("sweep", "Sweep", "s"),
-            ("scope", "Scope", "o"),
-            ("power", "Power", "p"),
-            ("rb", "Rb", "r"),
-            ("results", "Results", "t"),
-            ("console", "Console", "i"),
-            ("log", "Log", "l"),
-        ):
-            commands.append(
-                Command(page_id, goto(page_id), f"Go to the {label} page", aliases=(key,))
-            )
-        return commands
 
     QUIT_CONFIRM_S = 4.0
 

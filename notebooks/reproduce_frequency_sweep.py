@@ -1,6 +1,6 @@
 """Run the TUI's frequency sweep without the TUI: a debugging aid, and a scripted measurement.
 
-    uv run --group notebooks marimo edit notebooks/reproduce_frequency_sweep.py
+    uv run --extra analysis --group notebooks marimo edit notebooks/reproduce_frequency_sweep.py
 
 This **drives real instruments**: it moves the laser's lock setpoint, opens and closes the
 shutter and reconfigures the spectrum analyzer. So nothing happens when you open the
@@ -149,17 +149,16 @@ def _(mo, run_button, sweep):
         if outcome.record is None:
             raise RuntimeError("sweep finished without a run record")
 
-        mo.md(
-            f"""
-            **Run `{outcome.record.run_id}`: {outcome.record.status}**
+        report = f"""
+        **Run `{outcome.record.run_id}`: {outcome.record.status}**
 
-            {len(outcome.results)} of {outcome.total} points measured · saved to `{outcome.save_path}`
+        {len(outcome.results)} of {outcome.total} points measured · saved to `{outcome.save_path}`
 
-            Open it in `notebooks/workbench.py` (press *Refresh index* there).
-            """
-        )
+        Open it in `notebooks/workbench.py` (press *Refresh index* there).
+        """
     finally:
         lab.close_all()  # the shutter is closed before the supply is released
+    mo.md(report)
     return
 
 

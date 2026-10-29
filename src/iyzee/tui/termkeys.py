@@ -72,6 +72,58 @@ def _modifier_parameter(modifiers: set[str]) -> int:
     return 1 + sum(_MODIFIER_BITS[m] for m in modifiers)
 
 
+def _encode_terminal_key(base: str, modifiers: set[str]) -> bytes | None:
+    parameter = _modifier_parameter(modifiers)
+    if base in _CURSOR_FINAL:
+        final = _CURSOR_FINAL[base]
+        if not modifiers:
+            return f"\\x1b[{final}".encode()
+        return f"\\x1b[1;{parameter}{final}".encode()
+    if base in _TILDE_NUMBER:
+        number = _TILDE_NUMBER[base]
+        if not modifiers:
+            return f"\\x1b[{number}~".encode()
+        return f"\\x1b[{number};{parameter}~".encode()
+    if base in _FUNCTION_SS3:
+        final = _FUNCTION_SS3[base]
+        if not modifiers:
+            return f"\\x1bO{final}".encode()
+        return f"\\x1b[1;{parameter}{final}".encode()
+    if base in _FUNCTION_TILDE:
+        number = _FUNCTION_TILDE[base]
+        if not modifiers:
+            return f"\\x1b[{number}~".encode()
+        return f"\\x1b[{number};{parameter}~".encode()
+    return None
+
+
+def _encode_control_key(base: str) -> bytes | None:
+    if base == "z":
+        return None
+    if _CTRL_LETTER.fullmatch(base):
+        return bytes([ord(base) - 96])
+    return _CTRL_PUNCTUATION.get(base)
+
+
+def _alt_prefix(
+    base: str,
+    character: str | None,
+    modifiers: set[str],
+) -> tuple[bool, bytes | None]:
+    if "alt" not in modifiers:
+        return False, None
+    rest = modifiers - {"alt"}
+    inner_key = "+".join([*sorted(rest), base]) if rest else base
+    inner = key_to_bytes(inner_key, character if len(base) == 1 else None)
+    if inner is None and len(base) == 1:
+        inner = base.encode("utf-8")
+    if inner is None:
+        return True, None
+    if base in _CURSOR_FINAL or base in _TILDE_NUMBER:
+        return False, None
+    return True, b"\\x1b" + inner
+
+
 def key_to_bytes(key: str, character: str | None = None) -> bytes | None:
     """Encode one Textual key event, or return ``None`` if it has no encoding.
 
@@ -82,9 +134,6 @@ def key_to_bytes(key: str, character: str | None = None) -> bytes | None:
     UI binds it to "suspend to background", which stops the whole process —
     here that is the TUI itself, with no way to resume it.
     """
-    # Typed text goes through as-is — but only when no ctrl/alt/meta modifier
-    # is involved: Textual may report ``character="a"`` for Alt+A, and taking
-    # the shortcut then would silently drop the Alt.
     if (
         character is not None
         and character.isprintable()
@@ -97,58 +146,19 @@ def key_to_bytes(key: str, character: str | None = None) -> bytes | None:
         return exact
 
     *modifier_names, base = key.split("+")
-    # "a bare +": ``key`` for the plus sign itself is "plus", so split is safe.
     modifiers = set(modifier_names)
-    unknown = modifiers - set(_MODIFIER_BITS)
-    if unknown:
+    if modifiers - set(_MODIFIER_BITS):
         return None
 
-    # Alt+<anything>: ESC followed by the key. This is how terminals send
-    # Meta/Alt, and how prompt_toolkit expects to receive it.
-    if "alt" in modifiers:
-        rest = modifiers - {"alt"}
-        inner_key = "+".join([*sorted(rest), base]) if rest else base
-        inner = key_to_bytes(inner_key, character if len(base) == 1 else None)
-        if inner is None and len(base) == 1:
-            inner = base.encode("utf-8")
-        if inner is None:
-            return None
-        # For the CSI keys the Alt is folded into the modifier parameter
-        # instead (handled below), not sent as an ESC prefix.
-        if base not in _CURSOR_FINAL and base not in _TILDE_NUMBER:
-            return b"\x1b" + inner
+    handled, encoded = _alt_prefix(base, character, modifiers)
+    if handled:
+        return encoded
 
-    parameter = _modifier_parameter(modifiers)
-
-    if base in _CURSOR_FINAL:
-        final = _CURSOR_FINAL[base]
-        if not modifiers:
-            return f"\x1b[{final}".encode()
-        return f"\x1b[1;{parameter}{final}".encode()
-
-    if base in _TILDE_NUMBER:
-        number = _TILDE_NUMBER[base]
-        if not modifiers:
-            return f"\x1b[{number}~".encode()
-        return f"\x1b[{number};{parameter}~".encode()
-
-    if base in _FUNCTION_SS3:
-        if not modifiers:
-            return f"\x1bO{_FUNCTION_SS3[base]}".encode()
-        return f"\x1b[1;{parameter}{_FUNCTION_SS3[base]}".encode()
-    if base in _FUNCTION_TILDE:
-        number = _FUNCTION_TILDE[base]
-        if not modifiers:
-            return f"\x1b[{number}~".encode()
-        return f"\x1b[{number};{parameter}~".encode()
-
+    terminal = _encode_terminal_key(base, modifiers)
+    if terminal is not None:
+        return terminal
     if modifiers == {"ctrl"}:
-        if base == "z":
-            return None  # see the docstring: would suspend the whole TUI
-        if _CTRL_LETTER.fullmatch(base):
-            return bytes([ord(base) - 96])
-        return _CTRL_PUNCTUATION.get(base)
-
+        return _encode_control_key(base)
     if not modifiers and len(base) == 1:
         return base.encode("utf-8")
     return None
