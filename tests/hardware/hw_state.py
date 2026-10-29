@@ -73,6 +73,15 @@ def restore(
     """
     failures: list[str] = []
     for setting in settings:
+        # Zero span requires manual sweep time. Some analyzers report AUTO=ON
+        # in their saved state even though that combination cannot be restored.
+        if (
+            setting.name == "sweep_time_auto"
+            and values.get("span") is not None
+            and float(values["span"]) == 0
+            and values[setting.name].strip().upper() in {"1", "ON"}
+        ):
+            continue
         try:
             write(setting.restore.format(values[setting.name]))
         except Exception as exc:  # noqa: BLE001 - collected and reported by the caller
