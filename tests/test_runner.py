@@ -126,3 +126,36 @@ def test_runner_reports_analyzer_setup_failure_without_creating_a_record(
     assert isinstance(outcome.setup_error, RuntimeError)
     assert outcome.record is None
     assert outcome.results == []
+
+
+
+def test_runner_marks_unexpected_failure_after_partial_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved: list[dict[str, Any]] = []
+
+    def save(
+        results: list[StepResult],
+        savedir: Path,
+        metadata: dict[str, Any] | None = None,
+        *,
+        name: str = "",
+        path: Path | None = None,
+    ) -> Path:
+        saved.append(metadata or {})
+        return path or savedir / "bandwidth.npz"
+
+    def run_then_fail(steps, ctx, *, on_error, on_step):
+        on_step(0, 2, steps[0], StepResult("first", 20_000.0, "Hz", {"trace": [1.0]}), None)
+        raise RuntimeError("measurement callback failed")
+
+    monkeypatch.setattr(runner, "create_dirs", lambda: tmp_path)
+    monkeypatch.setattr(runner, "save_step_results", save)
+    monkeypatch.setattr(runner, "run_sequence", run_then_fail)
+
+    outcome = runner.run_recorded_sweep(_sweep(), mx=FakeMXA())
+
+    assert outcome.failed and isinstance(outcome.error, RuntimeError)
+    assert outcome.record is not None and outcome.record.status == "failed"
+    assert len(outcome.results) == 1
+    assert saved[-1]["status"] == "failed"

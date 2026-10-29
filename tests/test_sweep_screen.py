@@ -199,6 +199,7 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
         await wait_until(pilot, lambda: not app.sweep_running)
         assert str(abort.label) == "Abort"
         assert app.last_run is not None and len(app.last_run.results) == 1
+        assert _saved_run_metadata(tmp_path)["status"] == "aborted"
 
 
 # -- "Capture trace" ---------------------------------------------------------------------

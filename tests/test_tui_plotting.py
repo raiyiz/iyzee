@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pytest
+
 from helpers import async_test
 from textual.app import App
 from textual.widgets import Label
@@ -10,6 +13,7 @@ from textual_plotext import PlotextPlot
 from iyzee.tui.plotting import (
     draw_series,
     figure_series,
+    prepare_series,
 )
 
 
@@ -71,3 +75,25 @@ def test_figure_series_extracts_lines_and_axis_labels() -> None:
 
     assert lines == [([0, 1], [2, 3], "a")]
     assert labels == {"xlabel": "x", "ylabel": "y"}
+
+
+
+def test_prepare_series_preserves_endpoints_and_local_extrema_when_thinning() -> None:
+    x = np.arange(10_000, dtype=float)
+    y = np.zeros_like(x)
+    y[777] = -42.0
+    y[8_801] = 37.0
+    y[4_321] = np.nan
+
+    xs, ys, label = prepare_series(x, y, "long trace", max_points=80)
+
+    assert len(xs) == len(ys) <= 80
+    assert (xs[0], xs[-1]) == (0.0, 9_999.0)
+    assert xs[ys.index(-42.0)] == 777.0
+    assert xs[ys.index(37.0)] == 8_801.0
+    assert label == "long trace"
+
+
+def test_prepare_series_rejects_a_budget_that_cannot_keep_endpoints() -> None:
+    with pytest.raises(ValueError, match="at least 2"):
+        prepare_series([0, 1], [0, 1], max_points=1)
