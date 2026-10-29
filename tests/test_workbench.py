@@ -76,7 +76,11 @@ def test_workbench_selects_scores_compares_groups_and_saves_working_sets(
     delta = np.asarray(diff["delta"].to_list(), dtype=np.float64)
     assert bool(np.all(delta_low < delta))
     quiet, same = _synthetic_sweeps(offsets=(-1.0, -1.0), seed=4)
-    assert group_difference(quiet, same, "A", "B")["significant"].mean() < 0.3
+    quiet_fraction = np.asarray(
+        group_difference(quiet, same, "A", "B")["significant"].to_list(),
+        dtype=np.float64,
+    ).mean()
+    assert float(quiet_fraction) < 0.3
 
     # Saved sets round-trip through the store, with their groups.
     store = WorksetStore(tmp_path / "config" / "worksets.json")

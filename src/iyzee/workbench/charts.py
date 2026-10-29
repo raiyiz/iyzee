@@ -11,7 +11,6 @@ from .catalog import LINESTYLES, PALETTE
 from .groups import _title
 
 
-
 def _tick_text(value: Any) -> str:
     return (
         f"{value:g}"
