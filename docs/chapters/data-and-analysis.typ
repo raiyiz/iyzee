@@ -224,15 +224,40 @@ This notebook operates real instruments: it changes the laser setpoint, opens an
 shutter, and reconfigures the MXA. It requires explicit confirmation and the TUI must be
 closed first. It is intentionally separate from the read-only workbench.
 
-The shared helpers in
-#file("notebooks/toolbox.py", label: "toolbox.py")
+The analysis behind the workbench is an ordinary, typed library, the `iyzee.workbench` package: catalog and selection in
+#file("src/iyzee/workbench/catalog.py", label: "catalog.py"),
+derived tables in
+#file("src/iyzee/workbench/tables.py", label: "tables.py"),
+group statistics in
+#file("src/iyzee/workbench/groups.py", label: "groups.py"),
+plots and exports in
+#file("src/iyzee/workbench/charts.py", label: "charts.py"),
 and the working-set class in
-#file("notebooks/workset.py", label: "workset.py")
-remain ordinary Python; the data path uses the same
+#file("src/iyzee/workbench/workset.py", label: "workset.py").
+It needs polars (`uv sync --extra analysis`); the TUI never imports it. The notebooks are thin, deliberately rough front ends to it. The data path uses the same
 #file("src/iyzee/experiment/io.py", label: "recording loader")
 and
 #file("src/iyzee/analysis.py", label: "analysis summaries")
 as the rest of iyzee.
+
+== What the group comparison means <data-group-statistics>
+
+Grouping runs (for example "base" and "pumped") compares *replicates*, so the numbers are only as good as the
+claim that the runs within a group are comparable repeats. Each run is first interpolated onto one shared x grid:
+the runs' own x values if they all agree, otherwise an even grid (logarithmic for bandwidth sweeps) over the range
+every run covers. Nothing is extrapolated. Per grid point the group curve is the mean of its runs, with a spread band you
+choose: sample standard deviation (`std`), standard error of the mean (`sem`), the minimum and maximum
+(`minmax`), or none. A group with one run has a mean but no spread.
+
+The difference between two groups (#file("src/iyzee/workbench/groups.py", label: "group_difference")) is the difference of their means at every grid point, with Welch's unequal-variance standard error,
+$ "se" = sqrt(s_a^2 / n_a + s_b^2 / n_b) $
+and $t = Delta / "se"$. The plotted interval is $Delta plus.minus 2 "se"$, and a point is marked *significant* when
+$|t| > 2$. Read that flag as "larger than the run-to-run scatter", a guide for moderate group sizes, and not as more:
+
+- It is not a p-value, and with fewer than three runs per group it says little. Both groups need at least two runs to have a spread; without one the standard error is empty and nothing is flagged.
+- Every grid point is tested on its own, with no correction for looking at many points, so a few flagged points among many are expected by chance. Look for runs of adjacent flagged points.
+- A positive difference means the first group has more relative noise than the second.
+- Interpolation slightly smooths sharp features. Compare groups on the same sweep kind only; the workbench refuses to mix kinds.
 
 = Deciding whether to trust a recording <data-trust>
 
