@@ -9,7 +9,7 @@ sweeps touch, which is what the tests change.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from iyzee.devices.power import PSU
 
@@ -21,6 +21,19 @@ class Setting:
     name: str
     query: str
     restore: str  # a command template; ``{}`` is replaced by the query's reply
+    #: Decides, from the whole snapshot, whether this setting can be written back at all.
+    applies: Callable[[dict[str, str]], bool] = field(default=lambda _values: True)
+
+
+def _span_is_zero(values: dict[str, str]) -> bool:
+    try:
+        return float(values["span"]) == 0
+    except KeyError, ValueError:
+        return False
+
+
+def _not_zero_span(values: dict[str, str]) -> bool:
+    return not _span_is_zero(values)
 
 
 def _trace_settings(trace: int) -> list[Setting]:
@@ -41,7 +54,9 @@ MXA_SETTINGS: tuple[Setting, ...] = (
     Setting("vbw", "BWID:VID?", "BWID:VID {}"),
     Setting("vbw_auto", "BWID:VID:AUTO?", "BWID:VID:AUTO {}"),
     Setting("sweep_time", "SWE:TIME?", "SWE:TIME {}"),
-    Setting("sweep_time_auto", "SWE:TIME:AUTO?", "SWE:TIME:AUTO {}"),
+    # In zero span the sweep time is always the user's: the analyzer refuses AUTO there
+    # (-221 "Settings conflict"), so the flag is only restored when there is a span.
+    Setting("sweep_time_auto", "SWE:TIME:AUTO?", "SWE:TIME:AUTO {}", applies=_not_zero_span),
     Setting("attenuation", "POW:ATT?", "POW:ATT {}"),
     Setting("attenuation_auto", "POW:ATT:AUTO?", "POW:ATT:AUTO {}"),
     Setting("average_count", "AVER:COUN?", "AVER:COUN {}"),
@@ -70,6 +85,8 @@ def restore(
     """
     failures: list[str] = []
     for setting in settings:
+        if not setting.applies(values):
+            continue
         try:
             write(setting.restore.format(values[setting.name]))
         except Exception as exc:  # noqa: BLE001 - collected and reported by the caller

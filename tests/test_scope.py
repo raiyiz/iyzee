@@ -151,3 +151,19 @@ def test_waveforms_and_settings_use_the_documented_commands_and_refuse_bad_input
 
 
 # -- channel / trigger control ---------------------------------------------------------------
+
+
+# -- a scope whose remote interface is not VXI-11 ---------------------------------------------
+
+WRONG_INTERFACE = "WARNING : CURRENT REMOTE CONTROL INTERFACE IS TCPIP\n"
+
+
+def test_the_wrong_remote_interface_warning_is_reported_as_such_not_as_a_reply():
+    scope, _ = connected(WRONG_INTERFACE)
+    with pytest.raises(LeCroyProtocolError, match=r"VXI-11"):
+        scope.get_time_per_div()
+    assert scope.connected  # a whole reply arrived: nothing is left unread
+
+    scope, _ = connected(WRONG_INTERFACE)
+    with pytest.raises(LeCroyProtocolError, match=r"WF\?"):
+        scope._read_words("C1", "DAT1")

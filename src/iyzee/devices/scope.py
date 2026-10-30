@@ -121,6 +121,23 @@ def _finite(value: float, what: str) -> float:
 
 _TERMINATORS = (b"\n", b"\r\n")
 
+#: What a LeCroy answers, in place of the real reply, to a command that arrives on a remote
+#: interface other than the one selected under Utilities > Utilities Setup > Remote. It names
+#: the interface that *is* selected (``TCPIP`` is VICP; ``LXI`` is VXI-11). ``*IDN?`` is
+#: answered regardless, so a scope in this state looks connected until the first real command.
+_WRONG_INTERFACE = "WARNING : CURRENT REMOTE CONTROL INTERFACE IS"
+
+
+def _reject_wrong_interface(reply: str, command: str) -> None:
+    """Raise :class:`LeCroyProtocolError` if ``reply`` is the wrong-remote-interface warning."""
+    text = reply.lstrip()
+    if text.upper().startswith(_WRONG_INTERFACE):
+        raise LeCroyProtocolError(
+            f"the scope answered {command!r} with {text.strip()!r}: its remote control is set to "
+            "another interface than the VXI-11 this driver speaks. On the scope, set "
+            "Utilities > Utilities Setup > Remote to LXI (VXI-11)."
+        )
+
 
 def _definite_block(raw: bytes) -> bytes:
     """The payload of a LeCroy ``DEF9`` binary block (``#9`` + nine-digit byte count).
@@ -261,7 +278,9 @@ class LeCroy(BaseDevice):
             if timeout is not None:
                 inst.timeout = int(timeout * 1000)
             try:
-                return inst.query(message).strip()
+                reply = inst.query(message).strip()
+                _reject_wrong_interface(reply, message)
+                return reply
             finally:
                 if timeout is not None and self.instrument is inst:
                     inst.timeout = previous
@@ -412,6 +431,8 @@ class LeCroy(BaseDevice):
             inst.write("CORD LO")
             inst.write(f"{channel}:WF? {block}")
             raw = inst.read_raw()
+        if b"#9" not in raw:
+            _reject_wrong_interface(raw.decode("ascii", errors="replace"), f"{channel}:WF? {block}")
         data = _definite_block(raw)
         if len(data) % 2:
             raise LeCroyProtocolError(f"odd number of waveform bytes received: {len(data)}")
