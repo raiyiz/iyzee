@@ -60,3 +60,16 @@ def test_anything_under_the_hardware_directory_is_marked_hardware() -> None:
     """Deselecting ``hardware`` leaves nothing in that directory (exit code 5: none selected)."""
     result = _pytest("tests/hardware", "--collect-only", "-q", "-m", "not hardware")
     assert result.returncode == 5, result.stdout + result.stderr
+
+
+def test_restoring_the_mxa_does_not_ask_for_auto_sweep_time_in_zero_span():
+    from hardware.hw_state import MXA_SETTINGS, restore
+
+    def snapshot_with(span: str) -> dict[str, str]:
+        return {setting.name: "1" for setting in MXA_SETTINGS} | {"span": span}
+
+    for span, expect_auto in (("+0.0E+00", False), ("+1.0E+06", True)):
+        written: list[str] = []
+        assert restore(written.append, MXA_SETTINGS, snapshot_with(span)) == []
+        assert ("SWE:TIME:AUTO 1" in written) is expect_auto
+        assert "SWE:TIME 1" in written  # the manual value is always put back

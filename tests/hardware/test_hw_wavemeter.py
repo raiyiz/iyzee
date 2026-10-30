@@ -29,6 +29,18 @@ pytestmark = pytest.mark.wavemeter
 CHANNEL = int(os.environ.get("IYZEE_TEST_WAVEMETER_CHANNEL", DEFAULT_CHANNEL))
 #: Anything a lab laser could be: 300 nm to 3 um. An error code (-3.0, 0) is far below it.
 OPTICAL_THZ = (100.0, 1000.0)
+#: What the server returns in place of a frequency (High Finesse's ``wlmData`` error codes).
+_NOT_A_READING = {
+    0: "no value",
+    -1: "no signal",
+    -2: "bad signal",
+    -3: "low signal (laser off, shuttered, or too little light on this channel)",
+    -4: "signal too big",
+}
+
+
+def _explain(frequency: float) -> str:
+    return _NOT_A_READING.get(int(frequency), "unknown code") if frequency == int(frequency) else ""
 
 
 def test_the_handle_probe_reads_a_real_frequency(wavemeter: Wavemeter) -> None:
@@ -42,7 +54,7 @@ def test_a_reading_is_a_plausible_optical_frequency(wavemeter: Wavemeter) -> Non
     low, high = OPTICAL_THZ
     assert low < frequency < high, (
         f"channel {CHANNEL} read {frequency!r} THz, which is not an optical frequency "
-        "(an error code from the server? no light on that channel?). "
+        f"({_explain(frequency) or 'an error code from the server?'}). "
         "Set IYZEE_TEST_WAVEMETER_CHANNEL if the laser is on another channel."
     )
 
@@ -53,6 +65,10 @@ def test_consecutive_readings_agree(wavemeter: Wavemeter) -> None:
     for _ in range(10):
         readings.append(wavemeter.read_frequency(CHANNEL))
         time.sleep(0.05)
+    # Ten identical error codes have zero spread; they must not pass as a steady laser.
+    assert all(OPTICAL_THZ[0] < reading < OPTICAL_THZ[1] for reading in readings), (
+        f"channel {CHANNEL} gave readings that are not optical frequencies: {readings}"
+    )
     spread = max(readings) - min(readings)
     assert spread < allowed_thz, f"{spread * 1e3:.3f} GHz peak-to-peak over {readings}"
 
