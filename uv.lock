@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -249,7 +249,7 @@ name = "cffi"
 version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser" },
+    { name = "pycparser", marker = "python_full_version < '3.15' and implementation_name != 'PyPy'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9e/ef/008a1939e372c06329a3fce4279c02f328488f3526744906eeec3da7ad5f/cffi-2.1.1.tar.gz", hash = "sha256:dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be", size = 530807, upload-time = "2026-08-03T21:21:18.939Z" }
 wheels = [
@@ -729,10 +729,16 @@ dependencies = [
     { name = "traitlets" },
 ]
 
+[package.optional-dependencies]
+analysis = [
+    { name = "polars" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "ipdb" },
     { name = "mypy" },
+    { name = "polars" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
@@ -749,6 +755,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "numpy", specifier = ">=2.5.2" },
     { name = "platformdirs", specifier = ">=4.0" },
+    { name = "polars", marker = "extra == 'analysis'", specifier = ">=2.0.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.41" },
     { name = "pyte", specifier = ">=0.8.2" },
     { name = "pyvisa", specifier = ">=1.16.2" },
@@ -760,11 +767,13 @@ requires-dist = [
     { name = "textual-vim-textarea", specifier = "==1.2.0" },
     { name = "traitlets", specifier = ">=5.14" },
 ]
+provides-extras = ["analysis"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "ipdb", specifier = ">=0.13.13" },
     { name = "mypy", specifier = ">=1.18.2" },
+    { name = "polars", specifier = ">=2.0.0" },
     { name = "pre-commit", specifier = ">=4.6.2" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.13.0" },
@@ -1962,7 +1971,7 @@ name = "pyzmq"
 version = "27.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "implementation_name == 'pypy'" },
+    { name = "cffi", marker = "python_full_version < '3.15' and implementation_name == 'pypy'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e7/8d/5b3d5631c2f4b4b8862f64cd0c9eb777b5710eeb5125b4be8dd0a200a4c0/pyzmq-27.2.0.tar.gz", hash = "sha256:54d4259d1bfae24ecdb5ca79f7acc2eac6c286a02d6a0ae617797cb45f0726d3", size = 292316, upload-time = "2026-08-20T19:08:21.19Z" }
 wheels = [

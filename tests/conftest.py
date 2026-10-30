@@ -95,3 +95,15 @@ def pytest_report_header(config: pytest.Config) -> list[str] | None:
         targets = f"unreadable config ({exc})"
     actuate = "ON" if config.getoption("--hardware-actuate") else "off"
     return [f"hardware: instruments {targets}", f"hardware: state-changing tests {actuate}"]
+
+
+@pytest.fixture(scope="session")
+def demo(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A data directory of generated (synthetic) recordings, written once per test session."""
+    from datetime import UTC, datetime
+
+    from iyzee.workbench.demo import write_demo
+
+    root = tmp_path_factory.mktemp("demo")
+    write_demo(root, now=datetime(2026, 10, 19, 12, tzinfo=UTC), seed=3)
+    return root

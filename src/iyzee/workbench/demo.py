@@ -1,7 +1,7 @@
 """Write synthetic iyzee recordings to explore the analysis notebooks without hardware.
 
 Example:
-    uv run scripts/demo_data.py demo-data
+    uv run iyz-demo demo-data
     IYZEE_DATA_DIR=demo-data uv run --group notebooks marimo edit notebooks/workbench.py
 
 The signals are illustrative only, and each saved recording is labelled synthetic.
@@ -269,7 +269,13 @@ def write_demo(root: Path, *, now: datetime | None = None, seed: int = 7) -> lis
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("out", type=Path, help="directory to write synthetic recordings under")
+    parser.add_argument(
+        "out",
+        type=Path,
+        nargs="?",
+        default=Path("demo-data"),
+        help="directory to write synthetic recordings under (default: demo-data)",
+    )
     parser.add_argument("--seed", type=int, default=7, help="seed for repeatable signal shapes")
     args = parser.parse_args()
     written = write_demo(args.out, seed=args.seed)
