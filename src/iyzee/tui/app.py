@@ -489,7 +489,7 @@ class IyzeeApp(App):
         if message:
             self.notify(message, timeout=5, markup=False)
 
-    def _global_commands(self) -> list[Command]:
+    def _global_commands(self) -> list[Command]:  # noqa: C901 - a flat list of command registrations
         instrument_keys = [spec.key for spec in INSTRUMENTS]
         keys_and_all = [*instrument_keys, "all"]
 

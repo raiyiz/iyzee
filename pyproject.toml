@@ -53,7 +53,11 @@ target-version = "py314"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF", "S", "BLE", "T20"]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF", "S", "BLE", "T20", "C901"]
+
+[tool.ruff.lint.mccabe]
+# No function above this branching complexity in src, tests or scripts. Notebooks are exempt.
+max-complexity = 12
 
 # Assert statements are appropriate in tests and examples; production invariants are
 # explicit checks. These files intentionally use print for example/CLI/console output.
@@ -61,7 +65,7 @@ select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF", "S", "BLE", "T20"
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101"]
 # Notebooks show their results with print() and as bare expressions.
-"notebooks/*.py" = ["B018", "T201"]
+"notebooks/*.py" = ["B018", "T201", "C901"]
 "docs/examples/*.py" = ["S101", "T201"]
 "scripts/*.py" = ["T201"]
 "src/iyzee/devices/wavemeter.py" = ["T201"]

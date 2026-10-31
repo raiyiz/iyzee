@@ -247,7 +247,9 @@ def typst_files() -> list[Path]:
     return sorted((DOCS / "chapters").glob("*.typ"))
 
 
-def scan_typst(lookup: dict[str, list[str]]) -> tuple[dict[str, Any], dict[str, str], list[str]]:
+def scan_typst(  # noqa: C901 - one pass over the Typst source, kept together
+    lookup: dict[str, list[str]],
+) -> tuple[dict[str, Any], dict[str, str], list[str]]:
     """Which headings cite which symbols; every label's heading; unresolved names."""
     refs: dict[str, list[dict[str, str]]] = {}
     labels: dict[str, str] = {}
