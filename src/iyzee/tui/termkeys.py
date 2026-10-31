@@ -72,7 +72,7 @@ def _modifier_parameter(modifiers: set[str]) -> int:
     return 1 + sum(_MODIFIER_BITS[m] for m in modifiers)
 
 
-def key_to_bytes(key: str, character: str | None = None) -> bytes | None:
+def key_to_bytes(key: str, character: str | None = None) -> bytes | None:  # noqa: C901 - a flat key table
     """Encode one Textual key event, or return ``None`` if it has no encoding.
 
     ``key`` is Textual's key name (``"ctrl+r"``, ``"up"``, ``"a"``) and

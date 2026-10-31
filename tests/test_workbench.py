@@ -121,13 +121,36 @@ def test_scope_traces_decimate_and_saved_arrays_overlay(demo: Path):
     assert overlay.height > 0
 
 
-def test_charts_render_and_export(demo: Path):
+def test_charts_render_facet_band_bar_and_log_variants_and_export(demo: Path):
     points, _ = _synthetic_sweeps()
+    data = points.with_columns(
+        group=pl.col("run").str.slice(0, 1),
+        low=pl.col("rel_noise_mean_db") - 0.1,
+        high=pl.col("rel_noise_mean_db") + 0.1,
+        x_positive=pl.col("offset_mhz") + 100,
+    )
     for mark in ("line", "points"):
-        figure = field_chart(points, x="offset_mhz", y="rel_noise_mean_db", mark=mark, title="t")
+        figure = field_chart(data, x="offset_mhz", y="rel_noise_mean_db", mark=mark, title="t")
         assert figure_bytes(figure).startswith(b"\x89PNG")
     assert figure_bytes(figure, fmt="svg").lstrip().startswith(b"<?xml")
     assert csv_bytes(points).startswith(b"run,run_id")
+
+    faceted = field_chart(
+        data, x="offset_mhz", y="rel_noise_mean_db", color="run", detail="group",
+        facet="group", band=("low", "high"),
+    )  # fmt: skip
+    titles = [a.get_title(loc="left") for a in faceted.axes if a.get_visible()]
+    assert sorted(titles) == ["group: A", "group: B"]
+    assert len(faceted.legends[0].get_texts()) == 6  # one entry per run
+
+    logged = field_chart(data, x="x_positive", y="rel_noise_mean_db", x_log=True)
+    assert logged.axes[0].get_xscale() == "log"
+    bars = data.group_by("group", "run").agg(pl.col("rel_noise_mean_db").mean())
+    chart = field_chart(bars, x="group", y="rel_noise_mean_db", color="run", mark="bars")
+    assert [t.get_text() for t in chart.axes[0].get_xticklabels()] == ["A", "B"]
+
+    with pytest.raises(ValueError, match="not in the selected table"):
+        field_chart(data, x="nope", y="rel_noise_mean_db")
     with pytest.raises(ValueError, match="no usable rows"):
         field_chart(points.clear(), x="offset_mhz", y="rel_noise_mean_db")
 
