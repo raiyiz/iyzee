@@ -151,7 +151,7 @@ does not read every waveform into memory.
 
 Install the optional notebook dependencies and launch it from the repository root:
 
-#raw("uv sync --group notebooks\nuv run --group notebooks marimo edit notebooks/workbench.py", lang: "sh", block: true)
+#raw("uv sync --group notebooks\nuv run --extra analysis --group notebooks marimo edit notebooks/workbench.py", lang: "sh", block: true)
 
 Use the directory control to select a recording folder (or set `IYZEE_DATA_DIR` before
 launching), then press *Refresh index* after adding or changing files. The browser shows
@@ -200,7 +200,7 @@ sweeps) over the range that all of them cover, so nothing is extrapolated. A gro
 two runs for a spread, and a group of one run shows only its mean. The A minus B difference uses
 Welch's unequal-variance standard error; a point is flagged when the difference exceeds two
 standard errors. That flag is a rough guide to whether a gap is larger than the run-to-run
-scatter, not a p-value, and with fewer than three runs per group it is only indicative.
+scatter, not a p-value, and with fewer than three runs per group it is only indicative. Because every shared-grid point is checked separately, comparing many points also increases the chance of seeing one or more flags by chance; treat these flags as exploratory and confirm a pre-specified hypothesis with a suitable analysis.
 
 For frequency sweeps, plotted offsets use one median reference shared by all marked frequency
 runs; the code does not re-center each run independently, so measured drift remains visible.
@@ -224,11 +224,13 @@ This notebook operates real instruments: it changes the laser setpoint, opens an
 shutter, and reconfigures the MXA. It requires explicit confirmation and the TUI must be
 closed first. It is intentionally separate from the read-only workbench.
 
-The shared helpers in
-#file("notebooks/toolbox.py", label: "toolbox.py")
-and the working-set class in
-#file("notebooks/workset.py", label: "workset.py")
-remain ordinary Python; the data path uses the same
+The reusable analysis library is split by responsibility:
+#file("src/iyzee/workbench/catalog.py", label: "catalog"),
+#file("src/iyzee/workbench/tables.py", label: "analysis tables"),
+#file("src/iyzee/workbench/groups.py", label: "group statistics"),
+#file("src/iyzee/workbench/charts.py", label: "plotting and exports"),
+and #file("src/iyzee/workbench/workset.py", label: "working sets").
+These modules remain ordinary Python; the data path uses the same
 #file("src/iyzee/experiment/io.py", label: "recording loader")
 and
 #file("src/iyzee/analysis.py", label: "analysis summaries")

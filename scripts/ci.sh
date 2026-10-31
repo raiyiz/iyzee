@@ -33,13 +33,18 @@ doc_links() {
 
 notebooks() {
     uv sync --locked --group dev --group notebooks
-    uv run --locked --group notebooks marimo check --strict notebooks/workbench.py notebooks/sweep_scope_analysis.py notebooks/reproduce_frequency_sweep.py
-    uv run --locked --group notebooks pytest tests/test_notebooks.py
+    uv run --locked --group dev --group notebooks marimo check --strict notebooks/workbench.py notebooks/sweep_scope_analysis.py notebooks/reproduce_frequency_sweep.py
+    uv run --locked --group dev --group notebooks pytest tests/test_notebooks.py
+}
+
+test_suite() {
+    uv run --locked --with coverage coverage run --source=src/iyzee -m pytest "$@"
+    uv run --locked --with coverage coverage report --fail-under=78
 }
 
 all() {
     sync
-    uv run --locked pytest
+    test_suite
     uv run --locked ruff check .
     uv run --locked ruff format --check .
     uv run --locked mypy src tests
@@ -82,7 +87,7 @@ update() {
 }
 
 case "${1:-}" in
-    test)      sync; uv run --locked pytest --durations=25 ;;
+    test)      sync; test_suite --durations=25 ;;
     # Real instruments; never part of `all`. Extra arguments go to pytest:
     #   scripts/ci.sh hardware --hardware-actuate -m 'not scope'
     hardware)  sync; shift; uv run --locked pytest tests/hardware --hardware "$@" ;;

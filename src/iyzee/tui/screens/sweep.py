@@ -1,13 +1,8 @@
 """Sweep screen: configure and run a bandwidth or frequency sweep.
 
-This deliberately does *not* call the convenience
-``run_bandwidth_sweep``/``run_frequency_sweep`` wrappers in
-``experiment.procedures`` — those don't take a progress callback. Instead
-it composes the same lower-level pieces they're built from
-(``AnalyzerConfig``, ``prepare_analyzer``, ``ExperimentContext``,
-``run_sequence``) directly, which is exactly what that layer is meant for:
-a new caller with different needs (here, live progress) is a few lines
-against the existing building blocks, not a change to ``experiment/``.
+The shared ``experiment.runner`` owns analyzer setup, whole-run locks,
+per-point checkpoints, and final run status. This screen keeps only the
+Textual-specific progress display, live plot, and abort signal.
 
 Guide: :guide:`sec-pages`
 """
@@ -16,7 +11,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from dataclasses import asdict
 from functools import partial
 from threading import Event
 from time import monotonic
@@ -41,9 +35,7 @@ from ...experiment import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
-    TRACE_SHOT,
     TRACE_SQZ,
-    ExperimentContext,
     RunRecord,
     Step,
     StepResult,
@@ -53,10 +45,9 @@ from ...experiment import (
     build_frequency_sweep,
     create_dirs,
     difference_series,
-    prepare_analyzer,
-    run_sequence,
     save_step_results,
 )
+from ...experiment.runner import run_recorded_sweep
 from ..commands import Command
 from ..plotting import draw_series, prepare_series
 from ..text import one_line
@@ -80,17 +71,9 @@ LIVE_PLOT_INTERVAL_S = 0.1
 _INSTRUMENT_NAMES = {"mxa": "MXA", "shutter": "shutter", "wavemeter": "wavemeter"}
 
 
-class SweepAborted(Exception):
-    """Raised from inside the progress callback to stop a running sweep.
-
-    ``run_sequence`` propagates exceptions raised by its ``on_step``
-    callback immediately (see its docstring), which is what makes a clean
-    "stop after the current step" abort possible without touching
-    ``run_sequence`` itself.
-    """
-
-
 class SweepScreen(Page):
+    _savedir: Path | None
+    _save_path: Path | None
     """Pick a sweep type, configure it, run it, and watch it live.
 
     The form, controls, plot and log together are taller than a small
@@ -336,91 +319,77 @@ class SweepScreen(Page):
         self._ui(self._finish, kind, aborted=False, setup_error=None, died=exc)
 
     def _run_sweep(self, sweep: Sweep, devices: dict[str, Any]) -> None:
-        kind, steps, config = sweep.kind, sweep.steps, sweep.config
-        mx = devices["mxa"]
-        # Hold the lock of every instrument the sweep requires for
-        # the whole run, not just individual calls — a sweep is one logical
-        # operation, and interleaving a console cell's commands partway
-        # through it would be just as broken as interleaving two sweeps.
-        # This is the same lock devices.handles.LockedProxy acquires per call
-        # for console code, and ConnectScreen acquires around connect/
-        # disconnect — each handle's own .lock (see InstrumentHandle.lock),
-        # not a table IyzeeApp used to keep separately.
-        locks = [self.iyzee_app.handles[key].lock for key in sweep.requires]
+        kind = sweep.kind
+        next_live_plot = monotonic()
 
-        with contextlib.ExitStack() as stack:
-            for lock in locks:
-                stack.enter_context(lock)
+        def on_step(
+            index: int,
+            total: int,
+            step: Step,
+            result: StepResult | None,
+            error: BaseException | None,
+        ) -> None:
+            nonlocal next_live_plot
+            display_series = None
+            if result is not None:
+                now = monotonic()
+                if now >= next_live_plot or index + 1 == total:
+                    difference = difference_series(
+                        result.traces.get("squeezing"),
+                        result.traces.get("shot_noise"),
+                        result.label,
+                    )
+                    if difference is not None:
+                        display_series = prepare_series(*difference)
+                    next_live_plot = now + LIVE_PLOT_INTERVAL_S
+            self._ui(self._on_step, index, total, step, result, error, display_series)
 
-            try:
-                prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
-            except Exception as exc:
-                log.exception("sweep: failed to configure analyzer")
-                self._ui(self._finish, kind, aborted=False, setup_error=exc)
-                return
-
-            record = RunRecord(config=asdict(config))
+        def on_record(record: RunRecord) -> None:
             self._record = record
-            ctx = ExperimentContext(
-                mx=mx,
-                run_id=record.run_id,
-                shutter=devices.get("shutter"),
-                wavemeter=devices.get("wavemeter"),
-                config=record.config,
+
+        def on_checkpoint(savedir: Path, path: Path) -> None:
+            # Keep the live screen state in sync so a worker-level failure can
+            # finalize the same archive instead of creating a second one.
+            self._savedir = savedir
+            self._save_path = path
+
+        def on_save_error(exc: Exception) -> None:
+            self._save_warned = True
+            self._ui(
+                self.notify,
+                f"Could not save results: {one_line(exc)}",
+                severity="error",
+                timeout=10,
+                markup=False,
             )
 
-            next_live_plot = monotonic()
-
-            def on_step(index, total, step, result, error) -> None:
-                nonlocal next_live_plot
-                record.on_step(index, total, step, result, error)
-                display_series = None
-                if result is not None:
-                    self._collected.append(result)
-                    # Straight to disk, before anything else: a crash, a
-                    # power cut or a quit part-way through a long run then
-                    # costs at most the step in flight, not the whole run.
-                    self._checkpoint(kind)
-                    now = monotonic()
-                    if now >= next_live_plot or index + 1 == total:
-                        difference = difference_series(
-                            result.traces.get("squeezing"),
-                            result.traces.get("shot_noise"),
-                            result.label,
-                        )
-                        if difference is not None:
-                            display_series = prepare_series(*difference)
-                        next_live_plot = now + LIVE_PLOT_INTERVAL_S
-                self._ui(
-                    self._on_step,
-                    index,
-                    total,
-                    step,
-                    result,
-                    error,
-                    display_series,
-                )
-                if self._abort_event.is_set() or self.iyzee_app.shutdown_requested.is_set():
-                    raise SweepAborted()
-
-            aborted = failed = False
-            try:
-                run_sequence(steps, ctx, on_error="skip", on_step=on_step)
-            except SweepAborted:
-                aborted = True
-            except Exception:  # last-resort net; specific errors are
-                # already handled per-step by run_sequence(on_error="skip") plus
-                # on_step above, so anything reaching here is unexpected.
-                log.exception("sweep: run_sequence raised unexpectedly")
-                failed = True
-
-            # Rewrite the file with how the run ended: until now it says
-            # "running", which is what a run that died would leave behind.
-            record.finish(aborted=aborted, failed=failed)
-            if self._collected:
-                self._checkpoint(kind)
-
-        self._ui(self._finish, kind, aborted=aborted, setup_error=None)
+        outcome = run_recorded_sweep(
+            sweep,
+            mx=devices["mxa"],
+            locks=[self.iyzee_app.handles[key].lock for key in sweep.requires],
+            shutter=devices.get("shutter"),
+            wavemeter=devices.get("wavemeter"),
+            results=self._collected,
+            on_step=on_step,
+            should_abort=lambda: (
+                self._abort_event.is_set() or self.iyzee_app.shutdown_requested.is_set()
+            ),
+            on_record=on_record,
+            on_checkpoint=on_checkpoint,
+            on_save_error=on_save_error,
+        )
+        self._savedir = outcome.savedir or self._savedir
+        self._save_path = outcome.save_path or self._save_path
+        if outcome.setup_error is not None:
+            self._ui(self._finish, kind, aborted=False, setup_error=outcome.setup_error)
+            return
+        self._ui(
+            self._finish,
+            kind,
+            aborted=outcome.aborted,
+            setup_error=None,
+            died=outcome.error,
+        )
 
     def _on_step(
         self,
@@ -515,8 +484,8 @@ class SweepScreen(Page):
     # -- checkpointing ----------------------------------------------------
 
     def _reset_checkpoint(self) -> None:
-        self._savedir: Path | None = None
-        self._save_path: Path | None = None
+        self._savedir = None
+        self._save_path = None
         self._save_warned = False
         self._record = None
 

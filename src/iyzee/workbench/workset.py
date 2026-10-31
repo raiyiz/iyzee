@@ -1,6 +1,6 @@
 """A working set of saved recordings: select once, analyse many ways.
 
-``toolbox`` has the building blocks (catalog, sweep points, scope traces, plots). Using them
+The workbench package has the building blocks (catalog, sweep points, scope traces, plots). Using them
 directly means re-filtering the catalog and re-threading the same frames through every
 cell. A :class:`Workset` does that once::
 
@@ -31,29 +31,20 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
-from toolbox import (
-    PALETTE,
-    SWEEP_KINDS,
-    SWEEP_METRICS,
+
+from .catalog import PALETTE, SWEEP_KINDS, SWEEP_METRICS, describe, pick, scan_catalog, verify
+from .charts import csv_bytes, field_chart, figure_bytes
+from .groups import group_curves, group_difference, group_summary
+from .tables import (
     array_inventory,
     array_overlay,
     best_points,
-    csv_bytes,
     delta_to_reference,
-    describe,
-    field_chart,
-    figure_bytes,
-    group_curves,
-    group_difference,
-    group_summary,
     pair_trace,
-    pick,
-    scan_catalog,
     scope_channels,
     scope_traces,
     scoreboard,
     sweep_points,
-    verify,
 )
 
 ISSUE_SCHEMA = {"run": pl.String, "problem": pl.String}
@@ -179,8 +170,8 @@ class Workset:
         clone._cache = {}
         clone._issues = {}
         clone._colors = self._colors  # a subset keeps its parent's colours
-        keep = set(clone.rows["run_id"].to_list())
-        clone._groups = {run: group for run, group in self._groups.items() if run in keep}
+        run_ids = set(clone.rows["run_id"].to_list())
+        clone._groups = {run: group for run, group in self._groups.items() if run in run_ids}
         return clone
 
     # --- identity -------------------------------------------------------------------

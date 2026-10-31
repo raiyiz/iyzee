@@ -729,10 +729,16 @@ dependencies = [
     { name = "traitlets" },
 ]
 
+[package.optional-dependencies]
+analysis = [
+    { name = "polars" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "ipdb" },
     { name = "mypy" },
+    { name = "polars" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
@@ -740,7 +746,6 @@ dev = [
 ]
 notebooks = [
     { name = "marimo" },
-    { name = "polars" },
 ]
 
 [package.metadata]
@@ -749,6 +754,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "numpy", specifier = ">=2.5.2" },
     { name = "platformdirs", specifier = ">=4.0" },
+    { name = "polars", marker = "extra == 'analysis'", specifier = ">=2.0.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.41" },
     { name = "pyte", specifier = ">=0.8.2" },
     { name = "pyvisa", specifier = ">=1.16.2" },
@@ -760,11 +766,13 @@ requires-dist = [
     { name = "textual-vim-textarea", specifier = "==1.2.0" },
     { name = "traitlets", specifier = ">=5.14" },
 ]
+provides-extras = ["analysis"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "ipdb", specifier = ">=0.13.13" },
     { name = "mypy", specifier = ">=1.18.2" },
+    { name = "polars", specifier = ">=2.0.0" },
     { name = "pre-commit", specifier = ">=4.6.2" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.13.0" },
@@ -772,7 +780,6 @@ dev = [
 ]
 notebooks = [
     { name = "marimo", specifier = ">=0.25.1" },
-    { name = "polars", specifier = ">=2.0.0" },
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 """Run the TUI's frequency sweep without the TUI: a debugging aid, and a scripted measurement.
 
-    uv run --group notebooks marimo edit notebooks/reproduce_frequency_sweep.py
+    uv run --extra analysis --group notebooks marimo edit notebooks/reproduce_frequency_sweep.py
 
 This **drives real instruments**: it moves the laser's lock setpoint, opens and closes the
 shutter and reconfigures the spectrum analyzer. So nothing happens when you open the
@@ -85,19 +85,24 @@ def _(armed, mo):
 
 
 @app.cell
-def _(center, channel, duration_ms, mo, points, run_button, step_khz):
-    from contextlib import ExitStack
-    from dataclasses import asdict
+def _(center, channel, duration_ms, points, step_khz):
+    from iyzee.experiment import build_frequency_sweep
 
-    from iyzee.experiment import (
-        ExperimentContext,
-        RunRecord,
-        build_frequency_sweep,
-        create_dirs,
-        prepare_analyzer,
-        run_sequence,
-        save_step_results,
+    step_thz = step_khz.value * 1e-9
+    point_count = int(points.value)
+    offsets_thz = [(i - (point_count - 1) / 2) * step_thz for i in range(point_count)]
+    sweep = build_frequency_sweep(
+        laser_center_thz=center.value,
+        wavemeter_channel=int(channel.value),
+        offsets_thz=offsets_thz,
+        sweep_duration_ms=int(duration_ms.value),
     )
+    return (sweep,)
+
+
+@app.cell
+def _(mo, run_button, sweep):
+    from iyzee.experiment.runner import run_recorded_sweep
     from iyzee.lab import Lab
 
     mo.stop(
@@ -105,123 +110,55 @@ def _(center, channel, duration_ms, mo, points, run_button, step_khz):
         mo.md("*Nothing has been connected or moved. Tick the box and press the button.*"),
     )
 
-    def reproduce_tui_frequency_sweep(lab: Lab):
-        # Same connected devices and whole-run locks as the TUI.
-        mxa_handle = lab.handles["mxa"]
-        shutter_handle = lab.handles["shutter"]
-        wavemeter = lab.handles["wavemeter"].device
-
-        mx = mxa_handle.device
-        shutter = shutter_handle.device
-
-        if mx is None or shutter is None or wavemeter is None:
-            raise RuntimeError("MXA, shutter or wavemeter is not connected")
-
-        # The offset calculation from SweepScreen._build_frequency_run.
-        step_thz = step_khz.value * 1e-9
-        point_count = int(points.value)
-        offsets_thz = [(i - (point_count - 1) / 2) * step_thz for i in range(point_count)]
-
-        sweep = build_frequency_sweep(
-            laser_center_thz=center.value,
-            wavemeter_channel=int(channel.value),
-            offsets_thz=offsets_thz,
-            sweep_duration_ms=int(duration_ms.value),
-        )
-        steps, config = sweep.steps, sweep.config
-
-        collected = []
-        savedir = None
-        save_path = None
-        save_warned = False
-        failed = False
-
-        with ExitStack() as stack:
-            # Hold both device locks for the entire run.
-            stack.enter_context(mxa_handle.lock)
-            stack.enter_context(shutter_handle.lock)
-
-            # Same analyzer initialization as the TUI.
-            prepare_analyzer(mx, (1, 2), config)
-
-            record = RunRecord(config=asdict(config))
-            ctx = ExperimentContext(
-                mx=mx,
-                run_id=record.run_id,
-                shutter=shutter,
-                wavemeter=wavemeter,
-                config=record.config,
+    def on_step(index, total, step, result, error):
+        if error is not None:
+            print(f"[{index + 1}/{total}] {step.label}: FAILED: {error!r}")
+        else:
+            print(
+                f"[{index + 1}/{total}] {step.label}: OK; "
+                f"measured frequency = {result.meta['measured_frequency_thz']:.9f} THz"
             )
 
-            def checkpoint():
-                nonlocal savedir, save_path, save_warned
-
-                try:
-                    if savedir is None:
-                        savedir = create_dirs()
-
-                    save_path = save_step_results(
-                        list(collected),
-                        savedir,
-                        record.as_metadata(),
-                        name="frequency",
-                        path=save_path,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    # Like the TUI, a save failure must not stop the measurement.
-                    if not save_warned:
-                        print(f"WARNING: could not save sweep: {exc!r}")
-                        save_warned = True
-
-            def on_step(index, total, step, result, error):
-                record.on_step(index, total, step, result, error)
-
-                if error is not None:
-                    print(f"[{index + 1}/{total}] {step.label}: FAILED: {error!r}")
-                    return
-
-                collected.append(result)
-
-                # Save immediately after every successful point.
-                checkpoint()
-
-                print(
-                    f"[{index + 1}/{total}] {step.label}: OK; "
-                    f"measured frequency = {result.meta['measured_frequency_thz']:.9f} THz"
-                )
-
-            try:
-                # Same policy as the TUI: log a failed point and continue.
-                run_sequence(steps, ctx, on_error="skip", on_step=on_step)
-            except Exception:
-                failed = True
-                raise
-            finally:
-                record.finish(failed=failed)
-
-                # Rewrite the final checkpoint with the completed run status.
-                if collected:
-                    checkpoint()
-
-        return record, collected, len(steps), save_path
+    def on_save_error(exc):
+        print(f"WARNING: could not save sweep: {exc!r}")
 
     lab = Lab()
     try:
-        for _key in ("mxa", "shutter", "wavemeter"):  # connecting the shutter connects the PSU
+        for _key in ("mxa", "shutter", "wavemeter"):
             lab.connect(_key)
-        record, collected, total, save_path = reproduce_tui_frequency_sweep(lab)
-    finally:
-        lab.close_all()  # the shutter is closed before the supply is released
+        handles = lab.handles
+        mx = handles["mxa"].device
+        shutter = handles["shutter"].device
+        wavemeter = handles["wavemeter"].device
+        if mx is None or shutter is None or wavemeter is None:
+            raise RuntimeError("MXA, shutter or wavemeter is not connected")
 
-    mo.md(
-        f"""
-        **Run `{record.run_id}`: {record.status}**
+        outcome = run_recorded_sweep(
+            sweep,
+            mx=mx,
+            locks=[handles[key].lock for key in sweep.requires],
+            shutter=shutter,
+            wavemeter=wavemeter,
+            on_step=on_step,
+            on_save_error=on_save_error,
+        )
+        if outcome.setup_error is not None:
+            raise outcome.setup_error
+        if outcome.error is not None:
+            raise outcome.error
+        if outcome.record is None:
+            raise RuntimeError("sweep finished without a run record")
 
-        {len(collected)} of {total} points measured · saved to `{save_path}`
+        report = f"""
+        **Run `{outcome.record.run_id}`: {outcome.record.status}**
+
+        {len(outcome.results)} of {outcome.total} points measured · saved to `{outcome.save_path}`
 
         Open it in `notebooks/workbench.py` (press *Refresh index* there).
         """
-    )
+    finally:
+        lab.close_all()  # the shutter is closed before the supply is released
+    mo.md(report)
     return
 
 

@@ -247,7 +247,72 @@ def typst_files() -> list[Path]:
     return sorted((DOCS / "chapters").glob("*.typ"))
 
 
-def scan_typst(lookup: dict[str, list[str]]) -> tuple[dict[str, Any], dict[str, str], list[str]]:
+def _record_symbol_references(
+    path: Path,
+    chapter: str,
+    heading: str,
+    heading_label: str,
+    number: int,
+    line: str,
+    lookup: dict[str, list[str]],
+    refs: dict[str, list[dict[str, str]]],
+    problems: list[str],
+) -> None:
+    for call in SYM_CALL.finditer(line):
+        for name in QUOTED.findall(call.group(1)):
+            if "/" in name:
+                continue
+            hits = resolve(lookup, name)
+            if len(hits) == 1:
+                refs.setdefault(hits[0], []).append(
+                    {"chapter": chapter, "heading": heading, "label": heading_label}
+                )
+                continue
+            description = (
+                f"unknown symbol {name!r}"
+                if not hits
+                else f"ambiguous symbol {name!r}: {', '.join(hits)}"
+            )
+            problems.append(f"{path.relative_to(ROOT)}:{number}: {description}")
+
+
+def _scan_typst_line(
+    path: Path,
+    chapter: str,
+    number: int,
+    line: str,
+    lookup: dict[str, list[str]],
+    refs: dict[str, list[dict[str, str]]],
+    labels: dict[str, str],
+    problems: list[str],
+    *,
+    heading: str,
+    heading_label: str,
+    in_fence: bool,
+) -> tuple[str, str, bool]:
+    if line.count("```") % 2:
+        return heading, heading_label, not in_fence
+    if in_fence:
+        return heading, heading_label, in_fence
+
+    found = HEADING.match(line)
+    if found:
+        heading = found.group(2).replace("`", "")
+        heading_label = found.group(3) or ""
+        if heading_label:
+            labels[heading_label] = f"{chapter}: {heading}"
+
+    for label in (*PART_ID.findall(line), *STANDALONE_LABEL.findall(line)):
+        labels.setdefault(label, f"{chapter}: {heading}")
+    _record_symbol_references(
+        path, chapter, heading, heading_label, number, line, lookup, refs, problems
+    )
+    return heading, heading_label, in_fence
+
+
+def scan_typst(
+    lookup: dict[str, list[str]],
+) -> tuple[dict[str, Any], dict[str, str], list[str]]:
     """Which headings cite which symbols; every label's heading; unresolved names."""
     refs: dict[str, list[dict[str, str]]] = {}
     labels: dict[str, str] = {}
@@ -256,41 +321,22 @@ def scan_typst(lookup: dict[str, list[str]]) -> tuple[dict[str, Any], dict[str, 
         if path.name in ("code-map.typ", "requirements.typ"):
             continue
         chapter = path.stem
-        heading, heading_label = chapter, ""
-        in_fence = False
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            fences = line.count("```")
-            if fences % 2:  # an odd count opens or closes a raw block (even closes on its own line)
-                in_fence = not in_fence
-                continue
-            if in_fence:
-                continue
-            found = HEADING.match(line)
-            if found:
-                heading = found.group(2).replace("`", "")
-                heading_label = found.group(3) or ""
-                if heading_label:
-                    labels[heading_label] = f"{chapter}: {heading}"
-            for label in (*PART_ID.findall(line), *STANDALONE_LABEL.findall(line)):
-                labels.setdefault(label, f"{chapter}: {heading}")
-            for call in SYM_CALL.finditer(line):
-                for name in QUOTED.findall(call.group(1)):
-                    if "/" in name:  # a #file(...) style path, not a symbol
-                        continue
-                    hits = resolve(lookup, name)
-                    if len(hits) != 1:
-                        problems.append(
-                            f"{path.relative_to(ROOT)}:{number}: "
-                            + (
-                                f"unknown symbol {name!r}"
-                                if not hits
-                                else f"ambiguous symbol {name!r}: {', '.join(hits)}"
-                            )
-                        )
-                        continue
-                    refs.setdefault(hits[0], []).append(
-                        {"chapter": chapter, "heading": heading, "label": heading_label}
-                    )
+        heading, heading_label, in_fence = chapter, "", False
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for number, line in enumerate(lines, 1):
+            heading, heading_label, in_fence = _scan_typst_line(
+                path,
+                chapter,
+                number,
+                line,
+                lookup,
+                refs,
+                labels,
+                problems,
+                heading=heading,
+                heading_label=heading_label,
+                in_fence=in_fence,
+            )
     return refs, labels, problems
 
 

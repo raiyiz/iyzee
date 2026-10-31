@@ -18,9 +18,9 @@ from helpers import FakeHandle, async_test, make_result, notifications, plain, w
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, RichLog, Select, Static
 
+from iyzee.experiment import runner as runner_mod
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
-from iyzee.tui.screens import sweep as sweep_mod
 from iyzee.tui.screens.sweep import (
     FieldError,
     SweepScreen,
@@ -147,9 +147,9 @@ async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
 
 def _sweep_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_run_sequence: Any) -> IyzeeApp:
     """An app wired so pressing Run drives fake_run_sequence instead of hardware."""
-    monkeypatch.setattr(sweep_mod, "create_dirs", lambda: tmp_path)
-    monkeypatch.setattr(sweep_mod, "prepare_analyzer", lambda *a, **k: None)
-    monkeypatch.setattr(sweep_mod, "run_sequence", fake_run_sequence)
+    monkeypatch.setattr(runner_mod, "create_dirs", lambda: tmp_path)
+    monkeypatch.setattr(runner_mod, "prepare_analyzer", lambda *a, **k: None)
+    monkeypatch.setattr(runner_mod, "run_sequence", fake_run_sequence)
     app = app_mod.IyzeeApp()
     app.handles["mxa"] = FakeHandle()
     return app
@@ -198,6 +198,7 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
         await wait_until(pilot, lambda: not app.sweep_running)
         assert str(abort.label) == "Abort"
         assert app.last_run is not None and len(app.last_run.results) == 1
+        assert _saved_run_metadata(tmp_path)["status"] == "aborted"
 
 
 # -- "Capture trace" ---------------------------------------------------------------------
