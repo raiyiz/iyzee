@@ -14,13 +14,10 @@ Guide: :guide:`sec-pages`
 
 from __future__ import annotations
 
-import contextlib
 import logging
-from dataclasses import asdict
-from functools import partial
 from threading import Event
 from time import monotonic
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 from rich.markup import escape
@@ -41,21 +38,15 @@ from ...experiment import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
-    TRACE_SHOT,
     TRACE_SQZ,
-    ExperimentContext,
-    RunRecord,
     Step,
     StepResult,
     Sweep,
+    SweepRunner,
     acquire_trace,
     build_bandwidth_sweep,
     build_frequency_sweep,
-    create_dirs,
     difference_series,
-    prepare_analyzer,
-    run_sequence,
-    save_step_results,
 )
 from ..commands import Command
 from ..plotting import draw_series, prepare_series
@@ -64,7 +55,7 @@ from ..workers import LastRun
 from .page import FieldError, Page, _field, _positive_float, _positive_int
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    pass
 
 log = logging.getLogger("iyzee.tui")
 
@@ -78,16 +69,6 @@ LIVE_PLOT_INTERVAL_S = 0.1
 
 # How each instrument key a sweep ``requires`` is named in "connect the ..." messages.
 _INSTRUMENT_NAMES = {"mxa": "MXA", "shutter": "shutter", "wavemeter": "wavemeter"}
-
-
-class SweepAborted(Exception):
-    """Raised from inside the progress callback to stop a running sweep.
-
-    ``run_sequence`` propagates exceptions raised by its ``on_step``
-    callback immediately (see its docstring), which is what makes a clean
-    "stop after the current step" abort possible without touching
-    ``run_sequence`` itself.
-    """
 
 
 class SweepScreen(Page):
@@ -143,10 +124,8 @@ class SweepScreen(Page):
 
     def on_mount(self) -> None:
         self._abort_event = Event()
-        self._collected: list[StepResult] = []
-        # How the current run is going/ended; saved as the file's run_metadata.
-        self._record: RunRecord | None = None
-        self._reset_checkpoint()
+        self._runner: SweepRunner | None = None  # the current (or last) run
+        self._next_live_plot = 0.0
         self.query_one("#freq-fields").display = False
         plot = self.query_one("#sweep-plot", PlotextPlot)
         plot.plt.title("Squeezing - shot noise")
@@ -260,8 +239,15 @@ class SweepScreen(Page):
         devices = {key: handles[key].device for key in sweep.requires}
 
         self._abort_event = Event()
-        self._collected = []
-        self._reset_checkpoint()
+        self._next_live_plot = monotonic()
+        self._runner = SweepRunner(
+            sweep,
+            devices,
+            [handles[key].lock for key in sweep.requires],
+            on_point=self._on_point,
+            should_abort=self._should_abort,
+            on_save_error=self._report_save_error,
+        )
         log = self.query_one("#sweep-log", RichLog)
         log.clear()
         plot = self.query_one("#sweep-plot", PlotextPlot)
@@ -285,7 +271,7 @@ class SweepScreen(Page):
         self.query_one("#capture-trace", Button).disabled = True
         self.iyzee_app.sweep_running = True
         self.iyzee_app.session_note(f"{kind} sweep running ({len(sweep.steps)} points)")
-        self._run(sweep, devices)
+        self._run(self._runner)
 
     def _build_bandwidth_run(self) -> Sweep:
         start = self._read("rbw-start", _positive_float, "RBW start")
@@ -316,111 +302,51 @@ class SweepScreen(Page):
     # -- the run itself, off the UI thread -----------------------------------
 
     @work(thread=True, exclusive=True, group="sweep", exit_on_error=False)
-    def _run(self, sweep: Sweep, devices: dict[str, Any]) -> None:
+    def _run(self, runner: SweepRunner) -> None:
         # Nothing may leave a worker thread. Textual handles Exception (and cancellation) from a
         # worker but not a KeyboardInterrupt or SystemExit: those unwind the event loop and end
         # the whole app with no message, and a swallowed cancellation leaves the page stuck in
         # "running". Whatever it was, it becomes a failed run that is logged and shown.
+        kind = runner.sweep.kind
         try:
-            self._run_sweep(sweep, devices)
+            outcome = runner.run()
         except BaseException as exc:  # noqa: BLE001
-            self._worker_died(sweep.kind, exc)
+            self._worker_died(kind, exc)
+            return
+        self._ui(self._finish, kind, aborted=outcome.aborted, setup_error=outcome.setup_error)
 
     def _worker_died(self, kind: str, exc: BaseException) -> None:
         log.critical("sweep: the worker thread died with %s", type(exc).__name__, exc_info=exc)
-        if self._record is not None:  # leave "failed" on disk, not "running"
-            with contextlib.suppress(Exception):
-                self._record.finish(aborted=False, failed=True)
-                if self._collected:
-                    self._checkpoint(kind)
+        if self._runner is not None:  # leave "failed" on disk, not "running"
+            self._runner.mark_died()
         self._ui(self._finish, kind, aborted=False, setup_error=None, died=exc)
 
-    def _run_sweep(self, sweep: Sweep, devices: dict[str, Any]) -> None:
-        kind, steps, config = sweep.kind, sweep.steps, sweep.config
-        mx = devices["mxa"]
-        # Hold the lock of every instrument the sweep requires for
-        # the whole run, not just individual calls — a sweep is one logical
-        # operation, and interleaving a console cell's commands partway
-        # through it would be just as broken as interleaving two sweeps.
-        # This is the same lock devices.handles.LockedProxy acquires per call
-        # for console code, and ConnectScreen acquires around connect/
-        # disconnect — each handle's own .lock (see InstrumentHandle.lock),
-        # not a table IyzeeApp used to keep separately.
-        locks = [self.iyzee_app.handles[key].lock for key in sweep.requires]
+    def _should_abort(self) -> bool:
+        return self._abort_event.is_set() or self.iyzee_app.shutdown_requested.is_set()
 
-        with contextlib.ExitStack() as stack:
-            for lock in locks:
-                stack.enter_context(lock)
+    def _report_save_error(self, exc: Exception) -> None:
+        """A failed save, reported once from the worker thread (the run itself carries on)."""
+        self._ui(
+            self.notify,
+            f"Could not save results: {one_line(exc)}",
+            severity="error",
+            timeout=10,
+            markup=False,
+        )
 
-            try:
-                prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), config)
-            except Exception as exc:
-                log.exception("sweep: failed to configure analyzer")
-                self._ui(self._finish, kind, aborted=False, setup_error=exc)
-                return
-
-            record = RunRecord(config=asdict(config))
-            self._record = record
-            ctx = ExperimentContext(
-                mx=mx,
-                run_id=record.run_id,
-                shutter=devices.get("shutter"),
-                wavemeter=devices.get("wavemeter"),
-                config=record.config,
-            )
-
-            next_live_plot = monotonic()
-
-            def on_step(index, total, step, result, error) -> None:
-                nonlocal next_live_plot
-                record.on_step(index, total, step, result, error)
-                display_series = None
-                if result is not None:
-                    self._collected.append(result)
-                    # Straight to disk, before anything else: a crash, a
-                    # power cut or a quit part-way through a long run then
-                    # costs at most the step in flight, not the whole run.
-                    self._checkpoint(kind)
-                    now = monotonic()
-                    if now >= next_live_plot or index + 1 == total:
-                        difference = difference_series(
-                            result.traces.get("squeezing"),
-                            result.traces.get("shot_noise"),
-                            result.label,
-                        )
-                        if difference is not None:
-                            display_series = prepare_series(*difference)
-                        next_live_plot = now + LIVE_PLOT_INTERVAL_S
-                self._ui(
-                    self._on_step,
-                    index,
-                    total,
-                    step,
-                    result,
-                    error,
-                    display_series,
+    def _on_point(self, index, total, step, result, error) -> None:
+        """Per point, from the worker thread, after it has been recorded and saved."""
+        display_series = None
+        if result is not None:
+            now = monotonic()
+            if now >= self._next_live_plot or index + 1 == total:
+                difference = difference_series(
+                    result.traces.get("squeezing"), result.traces.get("shot_noise"), result.label
                 )
-                if self._abort_event.is_set() or self.iyzee_app.shutdown_requested.is_set():
-                    raise SweepAborted()
-
-            aborted = failed = False
-            try:
-                run_sequence(steps, ctx, on_error="skip", on_step=on_step)
-            except SweepAborted:
-                aborted = True
-            except Exception:  # last-resort net; specific errors are
-                # already handled per-step by run_sequence(on_error="skip") plus
-                # on_step above, so anything reaching here is unexpected.
-                log.exception("sweep: run_sequence raised unexpectedly")
-                failed = True
-
-            # Rewrite the file with how the run ended: until now it says
-            # "running", which is what a run that died would leave behind.
-            record.finish(aborted=aborted, failed=failed)
-            if self._collected:
-                self._checkpoint(kind)
-
-        self._ui(self._finish, kind, aborted=aborted, setup_error=None)
+                if difference is not None:
+                    display_series = prepare_series(*difference)
+                self._next_live_plot = now + LIVE_PLOT_INTERVAL_S
+        self._ui(self._on_step, index, total, step, result, error, display_series)
 
     def _on_step(
         self,
@@ -512,51 +438,6 @@ class SweepScreen(Page):
         )
         log.write(f"Captured {len(power)} point(s).")
 
-    # -- checkpointing ----------------------------------------------------
-
-    def _reset_checkpoint(self) -> None:
-        self._savedir: Path | None = None
-        self._save_path: Path | None = None
-        self._save_warned = False
-        self._record = None
-
-    def _checkpoint(self, kind: str, *, on_ui_thread: bool = False) -> None:
-        """Write everything collected so far to disk.
-
-        Called after every recorded point, from the worker thread. The same
-        file pair is overwritten each time (atomically — see
-        ``save_step_results``), so a run leaves exactly one archive, which
-        is complete when the run ends and merely shorter if it doesn't. A
-        failing save (disk full, permissions) must never abort the
-        measurement itself: it is logged, and reported once rather than
-        once per point.
-
-        ``on_ui_thread`` is for the one call made from ``_finish``:
-        ``call_from_thread`` raises if used from the UI thread itself, so
-        that path has to notify directly.
-        """
-        try:
-            if self._savedir is None:
-                self._savedir = create_dirs()
-            self._save_path = save_step_results(
-                list(self._collected),
-                self._savedir,
-                self._record.as_metadata() if self._record is not None else None,
-                name=kind,
-                path=self._save_path,
-            )
-        except Exception as exc:
-            log.exception("sweep: could not save results")
-            if not self._save_warned:
-                self._save_warned = True
-                notify = self.notify if on_ui_thread else partial(self._ui, self.notify)
-                notify(
-                    f"Could not save results: {one_line(exc)}",
-                    severity="error",
-                    timeout=10,
-                    markup=False,
-                )
-
     def _finish(
         self,
         kind: str,
@@ -591,25 +472,34 @@ class SweepScreen(Page):
                 f"Sweep stopped unexpectedly: {reason}", severity="error", timeout=15, markup=False
             )
 
-        if not self._collected:
+        runner = self._runner
+        if runner is None or not runner.collected:
             log.write("[yellow]No points recorded.[/yellow]")
             return
 
-        if self._save_path is None:
-            # Every per-point save failed; one last attempt now that the
-            # run is over (this is the UI thread, which is fine for one write).
-            self._checkpoint(kind, on_ui_thread=True)
-        path = self._save_path
-        self.iyzee_app.last_run = LastRun(kind=kind, results=list(self._collected), path=path)
+        if runner.save_path is None:
+            # Every per-point save failed; one last attempt now that the run is over (this is
+            # the UI thread, which is fine for one write; a failure is reported directly).
+            runner.checkpoint(
+                on_error=lambda exc: self.notify(
+                    f"Could not save results: {one_line(exc)}",
+                    severity="error",
+                    timeout=10,
+                    markup=False,
+                )
+            )
+        path = runner.save_path
+        collected = runner.collected
+        self.iyzee_app.last_run = LastRun(kind=kind, results=list(collected), path=path)
         status = "aborted" if aborted else "stopped early" if died is not None else "finished"
         if path is None:
             log.write(
-                f"[red]Sweep {status}: {len(self._collected)} point(s) recorded but "
+                f"[red]Sweep {status}: {len(collected)} point(s) recorded but "
                 "could not be saved — they are available as `results` in the console.[/red]"
             )
             return
-        log.write(f"Sweep {status}: {len(self._collected)} point(s) saved to {escape(str(path))}")
+        log.write(f"Sweep {status}: {len(collected)} point(s) saved to {escape(str(path))}")
         self.notify(
-            f"Saved {len(self._collected)} point(s) to {path.parent.name}/{path.name}",
+            f"Saved {len(collected)} point(s) to {path.parent.name}/{path.name}",
             markup=False,
         )

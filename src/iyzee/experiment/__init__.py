@@ -51,6 +51,7 @@ from .procedures import (
     run_frequency_sweep,
     run_sweep,
 )
+from .runner import SweepAborted, SweepOutcome, SweepRunner
 
 __all__ = [
     "DEFAULT_SWEEP_DURATION_MS",
@@ -69,6 +70,9 @@ __all__ = [
     "StepFailure",
     "StepResult",
     "Sweep",
+    "SweepAborted",
+    "SweepOutcome",
+    "SweepRunner",
     "SweepStep",
     "acquire_pair",
     "acquire_trace",
