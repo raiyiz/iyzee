@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pytest
 from helpers import async_test
 from textual.app import App
 from textual.widgets import Label
@@ -10,6 +12,7 @@ from textual_plotext import PlotextPlot
 from iyzee.tui.plotting import (
     draw_series,
     figure_series,
+    prepare_series,
 )
 
 
@@ -71,3 +74,21 @@ def test_figure_series_extracts_lines_and_axis_labels() -> None:
 
     assert lines == [([0, 1], [2, 3], "a")]
     assert labels == {"xlabel": "x", "ylabel": "y"}
+
+
+def test_prepare_series_keeps_short_series_and_thins_long_ones_without_losing_extrema() -> None:
+    x = np.arange(10_000.0)
+    y = np.sin(x / 50)
+    y[7_321] = 9.0  # a narrow spike
+    y[2_468] = -9.0
+    short = prepare_series(x[:5], y[:5], "s")
+    assert short[0] == x[:5].tolist() and short[2] == "s"  # untouched below the limit
+
+    thin_x, thin_y, label = prepare_series(x, y, "long", max_points=400)
+    assert len(thin_x) == len(thin_y) <= 400 and label == "long"
+    assert max(thin_y) == 9.0 and min(thin_y) == -9.0  # each bucket keeps its extrema
+    assert thin_x == sorted(thin_x)  # and the order is preserved
+
+    assert prepare_series([], [], "none") == ([], [], "none")
+    with pytest.raises(ValueError, match="at least 2"):
+        prepare_series(x, y, max_points=1)
