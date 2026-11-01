@@ -52,6 +52,13 @@
   needs a real terminal to verify.
 - **`/` search + `n`/`N`** on the Log and Results pages.
 
+## Status
+
+All of "Build now" is done except the deferred items below: workbench package, `field_chart` split,
+shared `SweepRunner`, statistics docs, `iyz-demo`, restored tests, complexity gate, coverage floor.
+Verified by: `ruff`, `mypy src tests`, doc-link check, byte-identical chart output before/after the
+split, and the test suite (see the final report for the run).
+
 ## 3. Order of work and acceptance
 
 | # | Step | Done when |
