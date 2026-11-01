@@ -1357,6 +1357,8 @@ question it answers.
   [#source("src/iyzee/experiment/core.py", [experiment/core.py])], [Step protocol, run context, step results, failure recording, and sequencing],
   [#source("src/iyzee/experiment/procedures.py", [experiment/procedures.py])], [Reusable analyzer configurations, steps, and sweep builders],
   [#source("src/iyzee/experiment/io.py", [experiment/io.py])], [Recording formats, atomic persistence, figures, and numeric helpers],
+  [#source("src/iyzee/experiment/runner.py", [experiment/runner.py])], [One sweep run end to end without a UI: whole-run locks, analyzer setup, a save after every point, the final status; shared by the Sweep page and the reproduce notebook],
+  [#source("src/iyzee/workbench/__init__.py", [workbench/])], [The analysis library behind the workbench notebook: catalog and selection, derived tables, group statistics, charts, saved working sets, and demo data (needs polars)],
   [#source("src/iyzee/scope_workflows.py", [scope_workflows.py])], [Reusable scope read/apply/acquire/save operations],
   [#source("src/iyzee/tui/app.py", [tui/app.py])], [Application shell, page switching, shared state, commands, and shutdown],
   [#source("src/iyzee/tui/screens/page.py", [tui/screens/page.py])], [Common page mechanics, validation, readiness, and worker-to-UI handoff],

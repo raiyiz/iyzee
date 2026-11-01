@@ -79,6 +79,7 @@ ignore_missing_imports = true
 
 [dependency-groups]
 dev = [
+    "coverage>=7.6",
     "ipdb>=0.13.13",
     "mypy>=1.18.2",
     "polars>=2.0.0",
@@ -91,3 +92,12 @@ notebooks = [
     "marimo>=0.25.1",
     "polars>=2.0.0",
 ]
+
+# Line and branch coverage of src, with a floor so it cannot drift down unnoticed.
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+skip_empty = true
