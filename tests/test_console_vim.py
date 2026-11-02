@@ -8,8 +8,10 @@ commands failed while the console was current. One app per test, because startin
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
+import pytest
 from helpers import async_test, wait_until
 from textual.pilot import Pilot
 from textual.widgets import ContentSwitcher
@@ -83,7 +85,9 @@ async def test_the_prompt_edits_like_vim() -> None:
 
 
 @async_test
-async def test_escape_and_colon_hand_the_keyboard_back_and_forth() -> None:
+async def test_escape_and_colon_hand_the_keyboard_back_and_forth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     app = IyzeeApp()
     async with app.run_test(size=(110, 34)) as pilot:
         page = lambda: app.query_one(ContentSwitcher).current  # noqa: E731
@@ -121,6 +125,17 @@ async def test_escape_and_colon_hand_the_keyboard_back_and_forth() -> None:
         await pilot.press(*"clear", "enter")  # a console command; the bar hands the keyboard back
         await wait_until(pilot, lambda: not bar.is_open)
         assert isinstance(app.focused, TerminalView)
+        editor = (
+            tmp_path / "editor"
+        )  # `:edit` hands the prompt to $EDITOR and takes the result back
+        editor.write_text("#!/bin/sh\necho 'x = 41 + 1' > \"$1\"\n")
+        editor.chmod(0o755)
+        monkeypatch.setenv("EDITOR", str(editor))
+        monkeypatch.delenv("VISUAL", raising=False)
+        await pilot.press("colon")
+        await wait_until(pilot, lambda: bar.is_open)
+        await pilot.press(*"edit", "enter")
+        await wait_until(pilot, lambda: prompt_text(app) == "x = 41 + 1")
         await pilot.press("colon")
         await wait_until(pilot, lambda: bar.is_open)
         await pilot.press(*"power", "enter")
@@ -132,6 +147,7 @@ async def test_escape_and_colon_hand_the_keyboard_back_and_forth() -> None:
         shell = session(app)
         await pilot.press("i")  # the prompt was left in normal mode
         await mode(pilot, app, "insert")
+        await pilot.press("ctrl+u")  # and still holds what `:edit` put there
         shell.send(b"import time; [time.sleep(0.05) for _ in range(600)]\r")
         await wait_until(pilot, lambda: shell.executing)
         await pilot.press("escape")

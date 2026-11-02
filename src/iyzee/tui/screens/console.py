@@ -17,13 +17,14 @@ import re
 from typing import TYPE_CHECKING, Any, cast
 
 from IPython.core.displaypub import DisplayPublisher
-from textual.app import ComposeResult
+from textual.app import ComposeResult, SuspendNotSupported
 from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.widgets import Static
 from textual_plotext import PlotextPlot
 
 from ..commands import Command, CommandError
+from ..external_editor import edit_text
 from ..ipython import AppState
 from ..ipython_session import IPythonSession
 from ..plotting import draw_series, figure_series
@@ -71,7 +72,17 @@ class ConsoleScreen(Vertical):
                 raise CommandError(":clear takes no arguments")
             self.console.session.send(b"\x0c")  # Ctrl+L: IPython's own clear-screen
 
-        return [Command("clear", clear, "Clear the console screen")]
+        def edit(args: list[str]) -> None:
+            if args:
+                raise CommandError(":edit takes no arguments")
+            if self.console.session.executing:
+                raise CommandError("a cell is running; there is no prompt to edit")
+            self.console.edit_prompt()
+
+        return [
+            Command("clear", clear, "Clear the console screen"),
+            Command("edit", edit, "Edit the prompt in $EDITOR (real Vim)", aliases=("e",)),
+        ]
 
     def on_show(self) -> None:
         # Screen.AUTO_FOCUS (what used to put focus on the input every time
@@ -168,6 +179,19 @@ class IyzeeConsole(Vertical):
     def _on_output(self, text: str) -> None:
         if self._view is not None:
             self._view.feed(text)
+
+    def edit_prompt(self) -> None:
+        """Open the prompt's text in ``$EDITOR`` on the real terminal and put the result back."""
+        text = self.session.prompt_text()
+        try:
+            with self.app.suspend():  # hand the real terminal to the editor
+                edited = edit_text(text)
+        except SuspendNotSupported:  # a headless driver: run it without handing over the screen
+            edited = edit_text(text)
+        if edited is None:
+            self.app.notify("The editor failed; the prompt is unchanged.", severity="warning")
+        else:
+            self.session.set_prompt_text(edited)
 
     def on_terminal_view_leave_requested(self, event: TerminalView.LeaveRequested) -> None:
         event.stop()
