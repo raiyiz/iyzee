@@ -53,6 +53,7 @@ from IPython.core.interactiveshell import InteractiveShell
 from IPython.terminal.interactiveshell import TerminalInteractiveShell
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.data_structures import Size
+from prompt_toolkit.document import Document
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.output.vt100 import Vt100_Output
@@ -406,6 +407,26 @@ class IPythonSession:
             return
         with contextlib.suppress(RuntimeError):  # the loop is closed: the app is going away
             loop.call_soon_threadsafe(callback, text)
+
+    def prompt_text(self) -> str:
+        """What is typed at the prompt right now."""
+        prompt = self.shell.pt_app
+        return prompt.default_buffer.text if prompt is not None else ""
+
+    def set_prompt_text(self, text: str) -> None:
+        """Replace what is typed at the prompt (cursor at the end), from any thread."""
+        prompt = self.shell.pt_app
+        if prompt is None:
+            return
+
+        def apply() -> None:
+            prompt.default_buffer.set_document(Document(text, len(text)), bypass_readonly=True)
+
+        loop = prompt.app.loop
+        if loop is not None:
+            loop.call_soon_threadsafe(apply)
+        else:
+            apply()
 
     @property
     def vi_mode(self) -> str | None:
