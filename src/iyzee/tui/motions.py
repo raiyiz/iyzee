@@ -1,4 +1,4 @@
-"""Vim motions (``j k gg G Ctrl+D Ctrl+U``) for whatever widget has the keyboard.
+"""Vim motions (``j k gg G Ctrl+D Ctrl+U``, ``/`` ``n`` ``N``) for whatever widget has the keyboard.
 
 The app binds these keys once; this module decides what they mean for the focused widget: move
 the cursor in a table, list or dropdown, scroll a log or any scrollable widget, or report that the
@@ -8,8 +8,10 @@ did). No Textual app is needed to use it, only a widget.
 
 from __future__ import annotations
 
+import re
+
 from textual.widget import Widget
-from textual.widgets import DataTable, ListView, OptionList
+from textual.widgets import DataTable, Label, ListItem, ListView, OptionList, RichLog
 
 MOTIONS = ("down", "up", "top", "bottom", "half_down", "half_up")
 
@@ -90,3 +92,54 @@ def _scroll(widget: Widget, motion: str) -> bool:
         half = max(1, target.scrollable_content_region.height // 2)
         target.scroll_relative(y=half if motion == "half_down" else -half, animate=False)
     return True
+
+
+def texts(widget: Widget) -> list[str]:
+    """The searchable text of each row or line of ``widget`` (empty if it has none)."""
+    if isinstance(widget, DataTable):
+        return [
+            " ".join(str(cell) for cell in widget.get_row_at(i)) for i in range(widget.row_count)
+        ]
+    if isinstance(widget, ListView):
+        return [
+            " ".join(str(label.visual) for label in item.query(Label))
+            for item in widget.children
+            if isinstance(item, ListItem)
+        ]
+    if isinstance(widget, OptionList):
+        return [str(widget.get_option_at_index(i).prompt) for i in range(widget.option_count)]
+    if isinstance(widget, RichLog):
+        return [line.text for line in widget.lines]
+    return []
+
+
+def _here(widget: Widget) -> int:
+    if isinstance(widget, DataTable):
+        return widget.cursor_row
+    if isinstance(widget, ListView):
+        return widget.index or 0
+    if isinstance(widget, OptionList):
+        return widget.highlighted or 0
+    return int(widget.scroll_y)
+
+
+def search(widget: Widget | None, pattern: str, step: int = 1) -> bool:
+    """``/pattern`` (and ``n`` with ``step=1``, ``N`` with ``-1``): go to the next matching row.
+
+    The pattern is a regular expression (a literal if it is not a valid one), case-insensitive
+    unless it contains a capital, and the search wraps round. The row you are on is tried last.
+    """
+    rows = texts(widget) if widget is not None else []
+    if widget is None or not rows or not pattern:
+        return False
+    flags = re.IGNORECASE if pattern == pattern.lower() else 0
+    try:
+        regex = re.compile(pattern, flags)
+    except re.error:
+        regex = re.compile(re.escape(pattern), flags)
+    here = _here(widget)
+    for offset in range(1, len(rows) + 1):
+        index = (here + step * offset) % len(rows)
+        if regex.search(rows[index]):
+            return go_to(widget, index + 1)
+    return False
