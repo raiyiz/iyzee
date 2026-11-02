@@ -18,7 +18,7 @@ from textual.widgets import (
 
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.command_bar import CommandBar
-from iyzee.tui.motions import MOTIONS, move
+from iyzee.tui.motions import MOTIONS, move, search, texts
 
 
 @async_test
@@ -31,6 +31,16 @@ async def test_motions_and_counts_in_the_app_and_digits_still_type() -> None:
         await pilot.pause()
         assert table.row_count >= 4
         last = table.row_count - 1
+
+        # / searches the focused table (case-insensitive unless the pattern has a capital).
+        psu = next(i for i, row in enumerate(texts(table)) if "PSU" in row)
+        await pilot.press("slash", *"psu", "enter")
+        assert table.cursor_row == psu and app.focused is table
+        await pilot.press("n")  # the only match: wraps back to it
+        assert table.cursor_row == psu
+        await pilot.press("slash", *"zzzz", "enter")
+        assert table.cursor_row == psu  # no match: stay put (and say so)
+        table.move_cursor(row=0)
 
         # j/k move the table's cursor, not the focus; G / gg / Ctrl+D / Ctrl+U jump.
         await pilot.press("j", "j")
@@ -150,6 +160,15 @@ async def test_move_drives_lists_and_dropdowns_and_declines_buttons() -> None:
         options.highlighted = 0
         assert move(options, "down") and options.highlighted == 1
         assert move(options, "bottom") and options.highlighted == 2
+
+        listing.index = 0  # search: regex, wraps round, n / N step forward and back
+        assert search(listing, "[24]") and listing.index == 2
+        assert search(listing, "[24]") and listing.index == 4
+        assert search(listing, "[24]") and listing.index == 2  # wrapped
+        assert search(listing, "[24]", step=-1) and listing.index == 4
+        assert not search(listing, "x") and not search(listing, "")
+        assert not search(listing, "(")  # an invalid regex is taken literally: no match, no error
+        assert not search(None, "2") and not search(button, "2")
 
         assert not move(button, "down") and not move(button, "up")  # the app moves focus instead
         assert not move(None, "down")

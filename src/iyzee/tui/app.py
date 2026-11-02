@@ -18,6 +18,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.markup import escape
+from textual.widget import Widget
 from textual.widgets import ContentSwitcher, Footer, Header, Static
 
 from ..devices.handles import InstrumentHandle
@@ -31,7 +32,7 @@ from .ipython import default_history_file
 from .ipython_session import IPythonSession
 from .logging_support import LogEntry
 from .logging_support import install as install_logging
-from .motions import go_to, move
+from .motions import go_to, move, search
 from .prefs import Prefs, default_prefs_file
 from .screens.connect import ConnectScreen
 from .screens.console import ConsoleScreen
@@ -210,6 +211,9 @@ class IyzeeApp(App):
         Binding("j", "move('down')", "Down", show=False),
         Binding("k", "move('up')", "Up", show=False),
         Binding("g", "g_prefix", "Top (gg)", show=False),
+        Binding("slash", "search_start", "Search", show=False),
+        Binding("n", "search_next(1)", "Next match", show=False),
+        Binding("N", "search_next(-1)", "Previous match", show=False),
         *(Binding(str(digit), f"count_digit({digit})", "Count", show=False) for digit in range(10)),
         Binding("G", "move('bottom')", "Bottom", show=False),
         Binding("ctrl+d", "move('half_down')", "Half page down", show=False),
@@ -248,6 +252,7 @@ class IyzeeApp(App):
         self.prefs = Prefs(Path(prefs_file) if prefs_file else None)
         self._quit_armed_until = 0.0  # monotonic deadline for the second "q"
         self._g_armed_until = 0.0  # monotonic deadline for the second "g" of "gg"
+        self._search = ""  # the last /pattern, for n and N
         self._count = 0  # a typed count (``5j``) and the deadline after which it is forgotten
         self._count_until = 0.0
         # Installed first, before anything else in this constructor can
@@ -606,6 +611,22 @@ class IyzeeApp(App):
             timeout=self.QUIT_CONFIRM_S,
             markup=False,
         )
+
+    def action_search_start(self) -> None:
+        """``/``: ask for a pattern, then go to the next matching row or line of the focused widget."""
+        self.query_one(CommandBar).open(prefix="/")
+
+    def action_search_next(self, step: int) -> None:
+        """``n`` / ``N``: the next / previous match of the last search."""
+        if self._search:
+            self.search(self._search, step)
+        else:
+            self.notify("No search yet: press / and type a pattern.", markup=False)
+
+    def search(self, pattern: str, step: int = 1, widget: Widget | None = None) -> None:
+        self._search = pattern
+        if not search(widget or self.focused, pattern, step):
+            self.notify(f"Pattern not found: {pattern}", severity="warning", markup=False)
 
     COUNT_WINDOW_S = 1.5
 
