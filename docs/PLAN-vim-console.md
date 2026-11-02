@@ -163,15 +163,18 @@ Existing tests were grepped for the old banner text, `F1-F4` wording and `j/k = 
 
 Ordered by how much it would change day-to-day flow. None of it is started unless marked.
 
-### 7.1 Check what only a real terminal can show (do first, ~30 min, no code)
+### 7.1 Check what only a real terminal can show — done in a pty, see `scripts/pty_check.py`
+
+A pseudo-terminal run (real Textual driver and real escape bytes, screen read back with pyte) passes 10/10: start-up, Escape to normal mode in ~145 ms, `Esc d d` not an Alt chord, the OSC 52 clipboard sequence with the yanked text, leave/return, `:edit` with the real suspend/resume, `:` and `:qq`. Still worth a glance in *your* terminal and tmux: how the cursor looks per mode, and whether tmux forwards OSC 52.
+
 - [ ] Cursor look per mode (block / bold underline / reverse underline / dim), in your terminal and in tmux.
 - [ ] OSC 52: `yw` in the console, paste in another app. Many terminals/tmux need clipboard-write enabled.
 - [ ] `Esc d d`, `Esc b`, `.` and `gg` by hand at your normal typing speed.
 - [ ] Whether you want the Esc grace period (see [§8](#8-open-decisions)).
 
 ### 7.2 Highest value next
-- [ ] **Real Vim for big edits** (`:edit`, and a normal-mode key). Cleanest design: patch `Buffer.open_in_editor` to run `$EDITOR` on a temp `.py` file inside `app.suspend()` (called from the shell thread via `app.call_from_thread`), put the result back in the buffer, fall back to a plain subprocess when the driver cannot suspend. IPython's built-in `F2` / `Ctrl-X Ctrl-E` do not fit (F2 is a page key; the editor would write to Textual's real TTY; the emacs chord is probably off since `emacs_bindings_in_vi_insert_mode=False`). Needs a real terminal to verify.
-- [ ] **`/` search and `n` / `N`** in the Log and Results pages (and `:` filters), the most-missed Vim motion outside the prompt.
+- [x] **Real Vim for big edits** — `:edit` / `:e` (built; a normal-mode key was not added). Original design notes:  Cleanest design: patch `Buffer.open_in_editor` to run `$EDITOR` on a temp `.py` file inside `app.suspend()` (called from the shell thread via `app.call_from_thread`), put the result back in the buffer, fall back to a plain subprocess when the driver cannot suspend. IPython's built-in `F2` / `Ctrl-X Ctrl-E` do not fit (F2 is a page key; the editor would write to Textual's real TTY; the emacs chord is probably off since `emacs_bindings_in_vi_insert_mode=False`). Needs a real terminal to verify.
+- [x] **`/` search and `n` / `N`** on any focused table, list, dropdown or log (built).
 - [ ] **Per-page `:` commands** for the pages that still lack them (the registry and `Page.commands()` are there).
 - [ ] **`jk` / `jj` as Escape** (optional preference): an eager binding in `vi_keys.py`.
 - [ ] **Mode and pending keys in the status line** (`-- INSERT --`, `3d`), using `ViExtras.mode` and `key_processor.arg/key_buffer`.

@@ -46,11 +46,11 @@
 - Type-checking the notebooks (they may stay messy).
 - Rewriting `workbench.py` cell by cell: it only changes imports, so it keeps working as it is.
 
-### Deferred (designed, not built here)
-- **Real-terminal check** of the Vim console (cursor look, OSC 52, tmux): needs your terminal.
-- **`:edit` real Vim** for big edits: patch `Buffer.open_in_editor` inside `app.suspend()`;
-  needs a real terminal to verify.
-- **`/` search + `n`/`N`** on the Log and Results pages.
+### Built afterwards (previously deferred)
+- **Real-terminal check** of the Vim console, in a pseudo-terminal (`scripts/pty_check.py`, 10/10).
+  Cursor look and tmux/OSC 52 forwarding still need a glance in your own terminal.
+- **`:edit`** real Vim for big edits (suspends the app, runs `$VISUAL`/`$EDITOR`, takes the text back).
+- **`/` search + `n`/`N`** on any focused table, list, dropdown or log.
 
 ## Status
 
