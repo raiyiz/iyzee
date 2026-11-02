@@ -8,9 +8,7 @@ The client is used directly from scripts and the console.
 from __future__ import annotations
 
 import logging
-import time
 
-import numpy as np
 import requests
 
 from ..config import IP, address
@@ -109,93 +107,8 @@ class Wavemeter:
         log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
 
 
-def track_frequency(total_time, time_step, save_path, channel=DEFAULT_CHANNEL, reference_f=0):
-    """Live-plot one channel for `total_time` s, then save the plot and a CSV to `save_path`.
-
-    A failed read skips that sample (logged with the raw error) instead of
-    ending a long run and losing the data collected so far.
-    """
-    # Plotting and the CSV export are only needed here. Imported lazily because
-    # this module is also imported for its HTTP client by the TUI, where
-    # pandas alone was a fifth of the startup time.
-    import matplotlib.pyplot as plt
-    import pandas as pd
-
-    # Initialize numpy arrays for time and frequency data
-    times = np.array([])
-    track_freq = np.array([])
-
-    # Turn on interactive mode for live plotting
-    plt.ion()
-    _fig, ax = plt.subplots(figsize=(4.5, 2.5))
-
-    (_line,) = ax.plot([], [], "b-", label="Laser Frequency (THz)")
-    ax.fill_between([], [], [], color="blue", alpha=0.3)
-
-    wavemeter = Wavemeter()
-    start_time = time.time()
-
-    # Function to update the plot with new data
-    def update_plot(ls_frequency: float) -> None:
-        nonlocal times, track_freq
-
-        # Calculate the elapsed time since the start of data collection
-        elapsed_time = time.time() - start_time
-
-        # Append new data to numpy arrays
-        times = np.append(times, elapsed_time)
-        track_freq = np.append(track_freq, ls_frequency)
-
-        ax.clear()
-        ax.plot(times, track_freq, "b-", label="Laser Frequency (THz)")
-        ax.fill_between(times, track_freq, color="blue", alpha=0.3)
-
-        ax.relim()  # Recalculate limits
-        ax.autoscale_view()  # Rescale the plot
-
-        ax.text(
-            times[-1],
-            track_freq[-1],
-            f"{track_freq[-1]} THz",
-            fontsize=12,
-            ha="right",
-            va="bottom",
-            color="red",
-        )
-
-        ax.set_title(f"Live Plot of Laser Frequency CH{channel}")
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel("Frequency (THz)")
-        ax.legend(loc="upper left")
-        plt.pause(0.01)
-
-    while time.time() - start_time <= total_time:
-        try:
-            ls_frequency = wavemeter.read_frequency(channel) - reference_f
-        except (requests.RequestException, OSError, ValueError) as exc:
-            log.warning("[WS-7] ch%s: sample skipped: %r", channel, exc)
-        else:
-            update_plot(ls_frequency)
-        time.sleep(time_step)
-
-    plt.savefig(save_path + "/laser_frequency_plot.pdf", bbox_inches="tight", dpi=1500)
-    plt.savefig(save_path + "/laser_frequency_plot.svg", bbox_inches="tight", dpi=1500)
-
-    # Save data to CSV file using pandas
-    data = pd.DataFrame({"tracking_time_s": times, "laser_frequency_thz": track_freq})
-    data.to_csv(save_path + "/laser_frequency_readout.csv", index=False)
-
-    print(f"Laser Frequency data saved to {save_path}.")
-    print("Mean Frequency (THz):", np.mean(track_freq))
-    print("Sigma Frequency (THz):", np.std(track_freq))
-    plt.ioff()
-    plt.show()
-
-    return times, track_freq
-
-
 def monitoring_frequencies(channels):
-    from tabulate import tabulate  # lazy: see track_frequency
+    from tabulate import tabulate  # lazy: only this printout needs it
 
     channels = list(channels)
     header = ["Transition"] + ["Frequencies (THz)"] + [f"Detuning (ch{c}) / GHz" for c in channels]
