@@ -802,13 +802,17 @@ def _(frame_map, mo, pl, source):
             "_The selected table is empty: add matching recordings to the working set._"
         )
     else:
-        _x_default = next(
-            (
-                c
-                for c in ("offset_mhz", "rbw_khz", "time", "sample", "channel", "best_db")
-                if c in _columns
-            ),
-            _columns[0],
+        _x_default = (
+            "point"
+            if source.value == "All sweep data points" and "point" in _columns
+            else next(
+                (
+                    c
+                    for c in ("offset_mhz", "rbw_khz", "time", "sample", "channel", "best_db")
+                    if c in _columns
+                ),
+                _columns[0],
+            )
         )
         _y_default = next(
             (c for c in ("rel_noise_mean_db", "value", "rms", "best_db") if c in _numeric),
@@ -824,7 +828,11 @@ def _(frame_map, mo, pl, source):
             else "(none)"
         )
         _facet_default = (
-            "sweep_point" if source.value == "Paired raw traces across runs" else "(none)"
+            "sweep_point"
+            if source.value == "Paired raw traces across runs"
+            else "kind"
+            if source.value == "All sweep data points"
+            else "(none)"
         )
         x_field = mo.ui.dropdown(options=_columns, value=_x_default, label="X axis")
         y_field = mo.ui.dropdown(options=_numeric, value=_y_default, label="Y axis")
