@@ -262,6 +262,7 @@ class Workset:
         instrument and start time are repeated so the result is directly filterable and
         groupable as a single Polars table.
         """
+
         def build() -> pl.DataFrame:
             metadata = self.rows.select(
                 "run_id",
