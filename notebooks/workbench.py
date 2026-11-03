@@ -691,6 +691,7 @@ def _(mo, pl, point_options, trace_points, ws):
             detail="signal",
             facet="sweep_point",
             faint_detail="shot noise",
+            sharey=True,
             title="Squeezing measurement with shot-noise reference",
         )
     return raw_frame, raw_view
