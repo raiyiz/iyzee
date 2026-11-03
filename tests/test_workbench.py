@@ -209,15 +209,25 @@ def test_charts_render_facet_band_bar_and_log_variants_and_export(demo: Path):
             "signal": ["squeezing", "squeezing", "shot noise", "shot noise"] * 4,
             "sample": [0, 1, 0, 1] * 4,
             "value": [
-                -40.0, -39.0, -42.0, -41.0,
-                -45.0, -44.0, -47.0, -46.0,
-                -90.0, -85.0, -95.0, -91.0,
-                -80.0, -75.0, -83.0, -78.0,
+                -40.0,
+                -39.0,
+                -42.0,
+                -41.0,
+                -45.0,
+                -44.0,
+                -47.0,
+                -46.0,
+                -90.0,
+                -85.0,
+                -95.0,
+                -91.0,
+                -80.0,
+                -75.0,
+                -83.0,
+                -78.0,
             ],
         }
-    ).with_columns(
-        pl.concat_str(["run", "sweep_point"], separator=" · ").alias("run_point")
-    )
+    ).with_columns(pl.concat_str(["run", "sweep_point"], separator=" · ").alias("run_point"))
     selected_figure = field_chart(
         selected_points,
         x="sample",
