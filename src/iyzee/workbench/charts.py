@@ -76,6 +76,7 @@ def field_chart(
     y_log: bool = False,
     band: tuple[str, str] | None = None,
     faint_detail: str | None = None,
+    sharey: bool = False,
 ) -> Any:
     """Build a reusable Matplotlib figure from any tidy Polars table.
 
@@ -121,7 +122,7 @@ def field_chart(
     ncols = min(len(panels), 3)
     nrows = math.ceil(len(panels) / ncols)
     figure = Figure(figsize=(6.2 * ncols + 3.2, 4.2 * nrows + 0.6), layout="constrained")
-    axes = figure.subplots(nrows, ncols, squeeze=False, sharex=True, sharey=True)
+    axes = figure.subplots(nrows, ncols, squeeze=False, sharex=True, sharey=sharey)
 
     handles: dict[str, Any] = {}
     for slot, panel in zip(axes.flat, panels, strict=False):
