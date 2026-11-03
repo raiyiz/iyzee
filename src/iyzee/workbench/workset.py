@@ -575,6 +575,7 @@ class Workset:
         palette: Mapping[str, str] | None = None,
         band: tuple[str, str] | None = None,
         faint_detail: str | None = None,
+        sharey: bool = False,
     ) -> Any:
         """:func:`toolbox.field_chart` with this set's run colours (``palette`` overrides them)."""
         return field_chart(
@@ -591,6 +592,7 @@ class Workset:
             y_log=y_log,
             band=band,
             faint_detail=faint_detail,
+            sharey=sharey,
         )
 
     def quick_plots(
