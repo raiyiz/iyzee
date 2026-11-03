@@ -187,6 +187,7 @@ def test_charts_render_facet_band_bar_and_log_variants_and_export(demo: Path):
         detail="signal",
         facet="sweep_point",
         faint_detail="shot noise",
+        sharey=True,
     )
     selected_axes = [axis for axis in selected_figure.axes if axis.get_visible()]
     assert len(selected_axes) == 2
