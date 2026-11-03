@@ -255,6 +255,32 @@ class Workset:
         return self._once("points", build)
 
     @property
+    def dataset(self) -> pl.DataFrame:
+        """All selected sweep points, joined to the metadata of their recording.
+
+        One row remains one measured sweep point; recording-level fields such as status,
+        instrument and start time are repeated so the result is directly filterable and
+        groupable as a single Polars table.
+        """
+        def build() -> pl.DataFrame:
+            metadata = self.rows.select(
+                "run_id",
+                "ref",
+                "name",
+                "started",
+                "status",
+                "items",
+                "instrument",
+                "warnings",
+                "size_kib",
+                "digest",
+                "path",
+            )
+            return self.points.join(metadata, on="run_id", how="left", validate="m:1")
+
+        return self._once("dataset", build)
+
+    @property
     def channel_stats(self) -> pl.DataFrame:
         """Per-channel statistics stored with each selected scope acquisition."""
         return self._once("channel_stats", lambda: scope_channels(self.scopes))
@@ -644,6 +670,7 @@ class Workset:
         """Named tables for pickers and exports (computed on first use)."""
         return {
             "Run scoreboard": self.scoreboard(),
+            "All sweep data points": self.dataset,
             "Frequency sweep points": self.points.filter(pl.col("kind") == "frequency"),
             "Bandwidth sweep points": self.points.filter(pl.col("kind") == "bandwidth"),
             "Scope channel statistics": self.channel_stats,
