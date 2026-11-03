@@ -121,7 +121,7 @@ def field_chart(
     ncols = min(len(panels), 3)
     nrows = math.ceil(len(panels) / ncols)
     figure = Figure(figsize=(6.2 * ncols + 3.2, 4.2 * nrows + 0.6), layout="constrained")
-    axes = figure.subplots(nrows, ncols, squeeze=False, sharex=True)
+    axes = figure.subplots(nrows, ncols, squeeze=False, sharex=True, sharey=True)
 
     handles: dict[str, Any] = {}
     for slot, panel in zip(axes.flat, panels, strict=False):
