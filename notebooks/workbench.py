@@ -643,11 +643,11 @@ def _(mo, pl, ws):
                 return f"Point {point} · {float(rbw):g} kHz RBW"
         return f"Point {point}"
 
-    _options = {_point_label(point): point for point in _indices}
-    point_labels = {point: label for label, point in _options.items()}
+    point_options = {_point_label(point): point for point in _indices}
+    _labels = list(point_options)
     trace_points = mo.ui.multiselect(
-        options=_options,
-        value=_indices[:1],
+        options=_labels,
+        value=_labels[:1],
         label="Sweep point(s)",
     )
     _inventory = ws.array_inventory()
@@ -656,20 +656,19 @@ def _(mo, pl, ws):
         if not _inventory.is_empty()
         else mo.md("_No arrays to list._")
     )
-    return array_inventory_view, point_labels, trace_points
+    return array_inventory_view, point_options, trace_points
 
 
 @app.cell
-def _(mo, pl, point_labels, trace_points, ws):
+def _(mo, pl, point_options, trace_points, ws):
     _frames = []
-    for point in trace_points.value:
-        if point not in point_labels:
-            continue
+    for label in trace_points.value:
+        point = point_options[label]
         _frame = ws.point_traces(int(point)).filter(
             pl.col("signal").is_in(["squeezing", "shot noise"])
         )
         if not _frame.is_empty():
-            _frames.append(_frame.with_columns(pl.lit(point_labels[point]).alias("sweep_point")))
+            _frames.append(_frame.with_columns(pl.lit(label).alias("sweep_point")))
 
     raw_frame = (
         pl.concat(_frames)
