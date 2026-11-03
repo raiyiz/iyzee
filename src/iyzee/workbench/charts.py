@@ -75,6 +75,7 @@ def field_chart(
     x_log: bool = False,
     y_log: bool = False,
     band: tuple[str, str] | None = None,
+    faint_detail: str | None = None,
 ) -> Any:
     """Build a reusable Matplotlib figure from any tidy Polars table.
 
@@ -87,6 +88,8 @@ def field_chart(
     * ``mark`` is ``"line"``, ``"points"`` or ``"bars"`` (grouped side by side per x value).
     * ``band=("low_col", "high_col")`` shades between two columns behind each line (a
       spread or uncertainty band around a mean).
+    * ``faint_detail`` draws that detail category thinner, translucent and behind others, useful
+      for a reference trace paired with a measurement.
 
     The figure is not registered with pyplot, so repeated calls do not accumulate; save it
     with :func:`figure_bytes` or ``figure.savefig``.
@@ -103,6 +106,7 @@ def field_chart(
         groups=groups,
         color=color,
         detail=detail,
+        faint_detail=faint_detail,
         facet=facet,
         mark=mark,
         band=band,
@@ -152,6 +156,7 @@ class _Spec:
     groups: list[str]
     color: str | None
     detail: str | None
+    faint_detail: str | None
     facet: str | None
     mark: str
     band: tuple[str, str] | None
@@ -211,8 +216,18 @@ def _draw_panel(slot: Any, part: pl.DataFrame, spec: _Spec, handles: dict[str, A
         elif spec.mark == "bars":
             artist = _draw_bars(slot, spec, xs, ys, position, len(buckets), hue, label)
         else:
-            dashes = spec.styles.get(named.get(spec.detail) if spec.detail else None, "-")
-            artist = _draw_line(slot, spec, records, xs, ys, hue, label, dashes)
+            faint = (
+                spec.faint_detail is not None
+                and named.get(spec.detail) == spec.faint_detail
+            )
+            dashes = (
+                "--"
+                if faint
+                else "-"
+                if spec.faint_detail is not None
+                else spec.styles.get(named.get(spec.detail) if spec.detail else None, "-")
+            )
+            artist = _draw_line(slot, spec, records, xs, ys, hue, label, dashes, faint)
         if label and label not in handles:
             handles[label] = artist
     if spec.mark == "bars":
@@ -244,6 +259,7 @@ def _draw_line(
     hue: str | None,
     label: str | None,
     dashes: str,
+    faint: bool = False,
 ) -> Any:
     """One line, with its shaded band behind it when the figure has one."""
     if spec.band:
@@ -263,9 +279,11 @@ def _draw_line(
         ys,
         marker="o" if len(xs) <= 80 else None,
         markersize=3.5,
-        linewidth=1.5,
+        linewidth=1.0 if faint else 1.5,
         linestyle=dashes,
         color=hue,
+        alpha=0.32 if faint else None,
+        zorder=1 if faint else 2,
         label=label,
     )
     return artist

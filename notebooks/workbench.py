@@ -626,79 +626,73 @@ def _(chosen_channels, mo, quick_metric, split_channels, trace_budget, ws):
 
 
 @app.cell
-def _(mo, ws):
-    _longest = int(ws.sweeps["items"].max() or 1) if not ws.sweeps.is_empty() else 1
-    point_index = mo.ui.number(
-        start=0, stop=max(_longest - 1, 0), step=1, value=0, label="Sweep point"
+def _(mo, pl, ws):
+    _points = ws.points
+    _indices = sorted(_points["point"].unique().to_list()) if not _points.is_empty() else []
+
+    def _point_label(point):
+        part = _points.filter(pl.col("point") == point)
+        kinds = set(part["kind"].drop_nulls().to_list())
+        if kinds == {"frequency"}:
+            offset = part["offset_mhz"].drop_nulls().median()
+            if offset is not None:
+                return f"Point {point} · {float(offset):+.2f} MHz offset"
+        elif kinds == {"bandwidth"}:
+            rbw = part["rbw_khz"].drop_nulls().median()
+            if rbw is not None:
+                return f"Point {point} · {float(rbw):g} kHz RBW"
+        return f"Point {point}"
+
+    _options = {_point_label(point): point for point in _indices}
+    point_labels = {point: label for label, point in _options.items()}
+    trace_points = mo.ui.multiselect(
+        options=_options,
+        value=_indices[:1],
+        label="Sweep point(s)",
     )
-    return (point_index,)
-
-
-@app.cell
-def _(mo, pl, point_index, ws):
-    _frame = ws.point_traces(int(point_index.value))
-    if _frame.is_empty():
-        point_view = mo.md("_No sweeps with this point in the working set._")
-    else:
-        _relative = _frame.filter(pl.col("signal") == "relative noise")
-        _levels = _frame.filter(pl.col("signal") != "relative noise")
-        point_view = mo.vstack(
-            [
-                mo.md(
-                    f"Raw traces of point {int(point_index.value)} in every sweep: relative noise "
-                    "(squeezing minus shot noise), then both levels per run."
-                ),
-                ws.plot(
-                    _relative,
-                    x="sample",
-                    y="value",
-                    title=f"Relative noise · point {int(point_index.value)}",
-                ),
-                ws.plot(
-                    _levels,
-                    x="sample",
-                    y="value",
-                    color="signal",
-                    facet="run",
-                    title=f"Squeezing vs shot noise · point {int(point_index.value)}",
-                ),
-            ]
-        )
-    point_frame = _frame
-    return point_frame, point_view
-
-
-@app.cell
-def _(mo, ws):
     _inventory = ws.array_inventory()
-    _names = ws.array_names
-    array_name = mo.ui.dropdown(
-        options=_names or ["(none)"],
-        value="trace_squeezing"
-        if "trace_squeezing" in _names
-        else (_names[0] if _names else "(none)"),
-        label="Saved array",
-    )
-    array_row = mo.ui.number(start=0, stop=10_000, step=1, value=0, label="Row (2-D arrays)")
     array_inventory_view = (
         mo.ui.table(_inventory.drop("run_id"), selection=None, page_size=10)
         if not _inventory.is_empty()
         else mo.md("_No arrays to list._")
     )
-    return array_inventory_view, array_name, array_row
+    return array_inventory_view, point_labels, trace_points
 
 
 @app.cell
-def _(array_name, array_row, mo, ws):
-    raw_frame = ws.array(array_name.value, int(array_row.value))
+def _(mo, pl, point_labels, trace_points, ws):
+    _frames = []
+    for point in trace_points.value:
+        if point not in point_labels:
+            continue
+        _frame = ws.point_traces(int(point)).filter(
+            pl.col("signal").is_in(["squeezing", "shot noise"])
+        )
+        if not _frame.is_empty():
+            _frames.append(_frame.with_columns(pl.lit(point_labels[point]).alias("sweep_point")))
+
+    raw_frame = (
+        pl.concat(_frames)
+        if _frames
+        else ws.point_traces(0).clear().with_columns(
+            pl.lit("", dtype=pl.String).alias("sweep_point")
+        )
+    )
     if raw_frame.is_empty():
-        raw_view = mo.md("_No run in the working set has this array (or this row)._")
+        raw_view = mo.md(
+            "_Select one or more sweep points. Each selected point will show its measured "
+            "squeezing trace with the matching shot-noise reference._"
+        )
     else:
         raw_view = ws.plot(
             raw_frame,
             x="sample",
             y="value",
-            title=f"{array_name.value} · row {int(array_row.value)}",
+            color="run",
+            detail="signal",
+            facet="sweep_point",
+            faint_detail="shot noise",
+            title="Squeezing measurement with shot-noise reference",
         )
     return raw_frame, raw_view
 
@@ -761,11 +755,10 @@ def _(delta_kind, delta_metric, delta_reference, mo, ws):
 
 
 @app.cell
-def _(mo, pl, point_frame, raw_frame, ws):
+def _(mo, raw_frame, ws):
     frame_map = {
         **ws.tables(),
-        "Raw array across runs": raw_frame,
-        "Point traces (squeezing / shot noise)": point_frame,
+        "Paired raw traces across runs": raw_frame,
     }
     source = mo.ui.dropdown(
         options=list(frame_map),
@@ -806,8 +799,14 @@ def _(frame_map, mo, pl, source):
         )
         _group = ["(none)", *_text]
         _color_default = "run" if "run" in _text else "(none)"
-        _detail_default = "channel" if source.value == "Scope waveform samples" else "(none)"
-        _facet_default = "(none)"
+        _detail_default = (
+            "signal"
+            if source.value == "Paired raw traces across runs"
+            else "channel"
+            if source.value == "Scope waveform samples"
+            else "(none)"
+        )
+        _facet_default = "sweep_point" if source.value == "Paired raw traces across runs" else "(none)"
         x_field = mo.ui.dropdown(options=_columns, value=_x_default, label="X axis")
         y_field = mo.ui.dropdown(options=_numeric, value=_y_default, label="Y axis")
         color_field = mo.ui.dropdown(options=_group, value=_color_default, label="Colour by")
@@ -876,6 +875,9 @@ def _(
                 mark=mark_type.value,
                 x_log=x_log.value,
                 y_log=y_log.value,
+                faint_detail=(
+                    "shot noise" if source.value == "Paired raw traces across runs" else None
+                ),
                 title=f"{source.value} · {y_field.value} vs {x_field.value}",
             )
         except ValueError as exc:
@@ -1169,8 +1171,7 @@ def _(mo):
 @app.cell
 def _(
     array_inventory_view,
-    array_name,
-    array_row,
+    trace_points,
     auto_by,
     clear_groups,
     delta_kind,
@@ -1189,8 +1190,6 @@ def _(
     mo,
     plot_controls,
     plot_view,
-    point_index,
-    point_view,
     raw_view,
     recipes_view,
     source,
@@ -1207,12 +1206,14 @@ def _(
             mo.accordion(
                 {
                     "Custom plot builder": mo.vstack([source, plot_controls, plot_view]),
-                    "Point inspector · squeezing vs shot noise": mo.vstack(
-                        [point_index, point_view]
-                    ),
-                    "Raw arrays across runs": mo.vstack(
+                    "Paired raw traces across runs": mo.vstack(
                         [
-                            mo.hstack([array_name, array_row], justify="start"),
+                            mo.md(
+                                "Select one or more sweep points. Each measurement is paired "
+                                "with its shot-noise reference; the reference keeps the run colour "
+                                "but is drawn thinner, fainter and behind the measured trace."
+                            ),
+                            trace_points,
                             raw_view,
                             mo.md("#### Arrays in each file"),
                             array_inventory_view,
