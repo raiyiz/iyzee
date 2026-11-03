@@ -73,6 +73,38 @@ def test_the_catalog_selects_runs_and_a_workset_scores_them(demo: Path):
         workset.delta("#03", kind="frequency")  # #03 is a scope recording
 
 
+def test_workset_dataset_joins_each_sweep_point_to_recording_metadata(demo: Path):
+    workset = Workset.from_catalog(scan_catalog(demo))
+    dataset = workset.dataset
+
+    assert dataset.height == workset.points.height > 0
+    assert {
+        "ref",
+        "name",
+        "started",
+        "status",
+        "instrument",
+        "warnings",
+        "kind",
+        "point",
+        "requested",
+        "rel_noise_mean_db",
+        "squeezing_dbm",
+        "shot_noise_dbm",
+    } <= set(dataset.columns)
+    assert set(dataset["kind"]) == {"frequency", "bandwidth"}
+
+    for row in dataset.select("run_id", "status", "ref").unique().iter_rows(named=True):
+        recording = workset.rows.filter(pl.col("run_id") == row["run_id"]).row(
+            0, named=True
+        )
+        assert row["status"] == recording["status"]
+        assert row["ref"] == recording["ref"]
+
+    assert workset.tables()["All sweep data points"].equals(dataset)
+
+
+
 def test_group_statistics_recover_a_known_gap_and_flag_only_real_ones():
     points, groups = _synthetic_sweeps()
     curves = group_curves(points, groups)
