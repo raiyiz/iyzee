@@ -563,6 +563,14 @@ def _(mo, pl, ws):
             mo.ui.table(_board, selection=None, page_size=10)
             if not _board.is_empty()
             else mo.md("_No sweeps in the working set._"),
+            mo.md(
+                "#### All sweep data points · one row per measured point\n"
+                "This table combines frequency and bandwidth sweeps and repeats the recording "
+                "metadata on each point, so it can be filtered, grouped and plotted directly."
+            ),
+            mo.ui.table(ws.dataset, selection=None, page_size=12)
+            if not ws.dataset.is_empty()
+            else mo.md("_No sweep points in the working set._"),
             mo.md("#### Scope channel statistics"),
             mo.ui.table(ws.channel_stats, selection=None, page_size=10)
             if not ws.channel_stats.is_empty()
@@ -766,8 +774,13 @@ def _(mo, raw_frame, ws):
     }
     source = mo.ui.dropdown(
         options=list(frame_map),
-        value=next(
-            (name for name, frame in frame_map.items() if not frame.is_empty()), "Run scoreboard"
+        value=(
+            "All sweep data points"
+            if not frame_map["All sweep data points"].is_empty()
+            else next(
+                (name for name, frame in frame_map.items() if not frame.is_empty()),
+                "Run scoreboard",
+            )
         ),
         label="Data to plot",
     )
