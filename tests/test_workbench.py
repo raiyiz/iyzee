@@ -145,6 +145,31 @@ def test_charts_render_facet_band_bar_and_log_variants_and_export(demo: Path):
 
     logged = field_chart(data, x="x_positive", y="rel_noise_mean_db", x_log=True)
     assert logged.axes[0].get_xscale() == "log"
+    paired = pl.DataFrame(
+        {
+            "run": ["run 1"] * 4,
+            "signal": ["squeezing", "squeezing", "shot noise", "shot noise"],
+            "sample": [0, 1, 0, 1],
+            "value": [-40.0, -39.0, -42.0, -41.0],
+        }
+    )
+    paired_figure = field_chart(
+        paired,
+        x="sample",
+        y="value",
+        color="run",
+        detail="signal",
+        faint_detail="shot noise",
+    )
+    lines = {line.get_label(): line for line in paired_figure.axes[0].lines}
+    measured, reference = lines["run 1 · squeezing"], lines["run 1 · shot noise"]
+    assert measured.get_color() == reference.get_color()
+    assert measured.get_linestyle() == "-"
+    assert reference.get_linestyle() == "--"
+    assert reference.get_alpha() == pytest.approx(0.32)
+    assert reference.get_linewidth() < measured.get_linewidth()
+    assert reference.get_zorder() < measured.get_zorder()
+
     bars = data.group_by("group", "run").agg(pl.col("rel_noise_mean_db").mean())
     chart = field_chart(bars, x="group", y="rel_noise_mean_db", color="run", mark="bars")
     assert [t.get_text() for t in chart.axes[0].get_xticklabels()] == ["A", "B"]
