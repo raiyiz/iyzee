@@ -172,12 +172,19 @@ def test_charts_render_facet_band_bar_and_log_variants_and_export(demo: Path):
 
     selected_points = pl.DataFrame(
         {
-            "sweep_point": ["point A"] * 4 + ["point B"] * 4,
-            "run": ["run 1"] * 8,
-            "signal": ["squeezing", "squeezing", "shot noise", "shot noise"] * 2,
-            "sample": [0, 1, 0, 1, 2, 5, 2, 5],
-            "value": [-40.0, -39.0, -42.0, -41.0, -90.0, -85.0, -95.0, -91.0],
+            "sweep_point": ["point A"] * 8 + ["point B"] * 8,
+            "run": ["run 1"] * 4 + ["run 2"] * 4 + ["run 1"] * 4 + ["run 2"] * 4,
+            "signal": ["squeezing", "squeezing", "shot noise", "shot noise"] * 4,
+            "sample": [0, 1, 0, 1] * 4,
+            "value": [
+                -40.0, -39.0, -42.0, -41.0,
+                -45.0, -44.0, -47.0, -46.0,
+                -90.0, -85.0, -95.0, -91.0,
+                -80.0, -75.0, -83.0, -78.0,
+            ],
         }
+    ).with_columns(
+        pl.concat_str(["run", "sweep_point"], separator=" · ").alias("run_point")
     )
     selected_figure = field_chart(
         selected_points,
@@ -185,24 +192,27 @@ def test_charts_render_facet_band_bar_and_log_variants_and_export(demo: Path):
         y="value",
         color="run",
         detail="signal",
-        facet="sweep_point",
+        facet="run_point",
         faint_detail="shot noise",
         sharey=True,
     )
     selected_axes = [axis for axis in selected_figure.axes if axis.get_visible()]
-    assert len(selected_axes) == 2
+    assert len(selected_axes) == 4
     assert all(len(axis.lines) == 2 for axis in selected_axes)
     for axis in selected_axes:
-        assert set(line.get_label() for line in axis.lines) == {
-            "run 1 · squeezing",
-            "run 1 · shot noise",
-        }
-    first, second = selected_axes
+        facet_label = axis.get_title(loc="left").split(": ", 1)[1]
+        run = facet_label.split(" · ", 1)[0]
+        assert {line.get_label().split(" · ")[0] for line in axis.lines} == {run}
+        measured, reference = axis.lines
+        assert measured.get_color() == reference.get_color()
+        assert measured.get_linestyle() == "-"
+        assert reference.get_linestyle() == "--"
+    first, second = selected_axes[:2]
     assert first.get_shared_x_axes().joined(first, second)
     assert first.get_shared_y_axes().joined(first, second)
-    assert first.get_xlim() == second.get_xlim()
-    assert first.get_ylim() == second.get_ylim()
-    assert first.get_xlim()[0] <= 0 and first.get_xlim()[1] >= 5
+    assert all(axis.get_xlim() == first.get_xlim() for axis in selected_axes)
+    assert all(axis.get_ylim() == first.get_ylim() for axis in selected_axes)
+    assert first.get_xlim()[0] <= 0 and first.get_xlim()[1] >= 1
     assert first.get_ylim()[0] <= -95 and first.get_ylim()[1] >= -39
 
     bars = data.group_by("group", "run").agg(pl.col("rel_noise_mean_db").mean())
