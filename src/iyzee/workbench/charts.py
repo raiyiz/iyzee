@@ -216,7 +216,11 @@ def _draw_panel(slot: Any, part: pl.DataFrame, spec: _Spec, handles: dict[str, A
         elif spec.mark == "bars":
             artist = _draw_bars(slot, spec, xs, ys, position, len(buckets), hue, label)
         else:
-            faint = spec.faint_detail is not None and named.get(spec.detail) == spec.faint_detail
+            faint = (
+                spec.faint_detail is not None
+                and spec.detail is not None
+                and named.get(spec.detail) == spec.faint_detail
+            )
             dashes = (
                 "--"
                 if faint
