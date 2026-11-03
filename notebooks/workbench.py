@@ -674,9 +674,9 @@ def _(mo, pl, point_labels, trace_points, ws):
     raw_frame = (
         pl.concat(_frames)
         if _frames
-        else ws.point_traces(0).clear().with_columns(
-            pl.lit("", dtype=pl.String).alias("sweep_point")
-        )
+        else ws.point_traces(0)
+        .clear()
+        .with_columns(pl.lit("", dtype=pl.String).alias("sweep_point"))
     )
     if raw_frame.is_empty():
         raw_view = mo.md(
@@ -806,7 +806,9 @@ def _(frame_map, mo, pl, source):
             if source.value == "Scope waveform samples"
             else "(none)"
         )
-        _facet_default = "sweep_point" if source.value == "Paired raw traces across runs" else "(none)"
+        _facet_default = (
+            "sweep_point" if source.value == "Paired raw traces across runs" else "(none)"
+        )
         x_field = mo.ui.dropdown(options=_columns, value=_x_default, label="X axis")
         y_field = mo.ui.dropdown(options=_numeric, value=_y_default, label="Y axis")
         color_field = mo.ui.dropdown(options=_group, value=_color_default, label="Colour by")
