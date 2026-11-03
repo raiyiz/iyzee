@@ -165,6 +165,14 @@ buttons). Filters never change the working set, so a set can mix kinds and dates
 survives re-indexing. The set is shown in the sidebar and at the top of each section, with one
 plot colour per run, so it is always clear which files an analysis is using.
 
+For dataframe work, `ws.dataset` loads one row per point across all selected frequency
+and bandwidth sweeps. It includes the measured setpoint, relative-noise and trace-level values,
+plus the recording's reference, type, status, instrument, start time and other index fields.
+Recording metadata is repeated on each point, so you can filter or group measurements by it
+without manually joining the catalog. In the *Data to plot* picker this is available as
+*All sweep data points*. Scope channel statistics and waveform samples remain separate tables
+because their rows represent different physical quantities.
+
 The recording table is built for scanning many files: the `in set` and `ref` columns stay
 pinned while you scroll sideways, hovering a `ref` shows the recording's facts (instrument,
 status, item count, checksum, path), and a date range, *Only the working set* and the type,
