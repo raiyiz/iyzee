@@ -170,6 +170,40 @@ def test_charts_render_facet_band_bar_and_log_variants_and_export(demo: Path):
     assert reference.get_linewidth() < measured.get_linewidth()
     assert reference.get_zorder() < measured.get_zorder()
 
+    selected_points = pl.DataFrame(
+        {
+            "sweep_point": ["point A"] * 4 + ["point B"] * 4,
+            "run": ["run 1"] * 8,
+            "signal": ["squeezing", "squeezing", "shot noise", "shot noise"] * 2,
+            "sample": [0, 1, 0, 1, 2, 5, 2, 5],
+            "value": [-40.0, -39.0, -42.0, -41.0, -90.0, -85.0, -95.0, -91.0],
+        }
+    )
+    selected_figure = field_chart(
+        selected_points,
+        x="sample",
+        y="value",
+        color="run",
+        detail="signal",
+        facet="sweep_point",
+        faint_detail="shot noise",
+    )
+    selected_axes = [axis for axis in selected_figure.axes if axis.get_visible()]
+    assert len(selected_axes) == 2
+    assert all(len(axis.lines) == 2 for axis in selected_axes)
+    for axis in selected_axes:
+        assert set(line.get_label() for line in axis.lines) == {
+            "run 1 · squeezing",
+            "run 1 · shot noise",
+        }
+    first, second = selected_axes
+    assert first.get_shared_x_axes().joined(first, second)
+    assert first.get_shared_y_axes().joined(first, second)
+    assert first.get_xlim() == second.get_xlim()
+    assert first.get_ylim() == second.get_ylim()
+    assert first.get_xlim()[0] <= 0 and first.get_xlim()[1] >= 5
+    assert first.get_ylim()[0] <= -95 and first.get_ylim()[1] >= -39
+
     bars = data.group_by("group", "run").agg(pl.col("rel_noise_mean_db").mean())
     chart = field_chart(bars, x="group", y="rel_noise_mean_db", color="run", mark="bars")
     assert [t.get_text() for t in chart.axes[0].get_xticklabels()] == ["A", "B"]
