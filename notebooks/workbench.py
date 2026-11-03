@@ -677,6 +677,10 @@ def _(mo, pl, point_options, trace_points, ws):
         .clear()
         .with_columns(pl.lit("", dtype=pl.String).alias("sweep_point"))
     )
+    if not raw_frame.is_empty():
+        raw_frame = raw_frame.with_columns(
+            pl.concat_str(["run", "sweep_point"], separator=" · ").alias("run_point")
+        )
     if raw_frame.is_empty():
         raw_view = mo.md(
             "_Select one or more sweep points. Each selected point will show its measured "
@@ -689,7 +693,7 @@ def _(mo, pl, point_options, trace_points, ws):
             y="value",
             color="run",
             detail="signal",
-            facet="sweep_point",
+            facet="run_point",
             faint_detail="shot noise",
             sharey=True,
             title="Squeezing measurement with shot-noise reference",
