@@ -776,9 +776,7 @@ def _(frame_map, mo, pl, source, ws):
         )
         _group = ["(none)", *_text]
         _color_default = "run" if "run" in _text else "(none)"
-        _detail_default = (
-            "channel" if source.value == "Scope waveform samples" else "(none)"
-        )
+        _detail_default = "channel" if source.value == "Scope waveform samples" else "(none)"
         _facet_default = (
             "kind"
             if source.value == "All sweep data points"
