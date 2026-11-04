@@ -282,6 +282,71 @@ class Workset:
         return self._once("dataset", build)
 
     @property
+    def sweep_samples(self) -> pl.DataFrame:
+        """Full-resolution sample values for every sweep point in the selected recordings.
+
+        One row is one sample of one point. NPZ recordings are read through the shared cache;
+        point and recording metadata are joined on so the result is directly analysable.
+        """
+        def build() -> pl.DataFrame:
+            parts = []
+            issues = []
+            point_rows = self.points.select("run_id", "point")
+            for row in self.sweeps.iter_rows(named=True):
+                selected = point_rows.filter(pl.col("run_id") == row["run_id"])
+                try:
+                    for point in selected["point"].to_list():
+                        trace = pair_trace(row, int(point))
+                        if not trace.is_empty():
+                            parts.append(
+                                trace.with_columns(
+                                    pl.lit(row["label"]).alias("run"),
+                                    pl.lit(row["run_id"]).alias("run_id"),
+                                    pl.lit(row["synthetic"]).alias("synthetic"),
+                                    pl.lit(row["kind"]).alias("kind"),
+                                    pl.lit(point, dtype=pl.Int64).alias("point"),
+                                )
+                            )
+                except Exception as exc:  # noqa: BLE001 - isolate a damaged recording
+                    issues.append({"run": row["label"], "problem": f"could not read traces: {exc}"})
+            self._issues["sweep_samples"] = issues
+            schema = {
+                "sample": pl.Int64,
+                "squeezing_dbm": pl.Float64,
+                "shot_noise_dbm": pl.Float64,
+                "rel_noise_db": pl.Float64,
+                "run": pl.String,
+                "run_id": pl.String,
+                "synthetic": pl.Boolean,
+                "kind": pl.String,
+                "point": pl.Int64,
+            }
+            frame = pl.concat(parts) if parts else pl.DataFrame(schema=schema)
+            metadata = self.dataset.select(
+                "run_id",
+                "point",
+                "ref",
+                "name",
+                "started",
+                "status",
+                "items",
+                "instrument",
+                "warnings",
+                "size_kib",
+                "digest",
+                "path",
+                "point_label",
+                "requested",
+                "measured_thz",
+                "x_thz",
+                "offset_mhz",
+                "rbw_khz",
+            )
+            return frame.join(metadata, on=["run_id", "point"], how="left", validate="m:1")
+
+        return self._once("sweep_samples", build)
+
+    @property
     def channel_stats(self) -> pl.DataFrame:
         """Per-channel statistics stored with each selected scope acquisition."""
         return self._once("channel_stats", lambda: scope_channels(self.scopes))
