@@ -771,6 +771,7 @@ def _(mo, raw_frame, ws):
     frame_map = {
         **ws.tables(),
         "Paired raw traces across runs": raw_frame,
+        "Sweep sample values": None,
     }
     source = mo.ui.dropdown(
         options=list(frame_map),
@@ -778,7 +779,7 @@ def _(mo, raw_frame, ws):
             "All sweep data points"
             if not frame_map["All sweep data points"].is_empty()
             else next(
-                (name for name, frame in frame_map.items() if not frame.is_empty()),
+                (name for name, frame in frame_map.items() if frame is not None and not frame.is_empty()),
                 "Run scoreboard",
             )
         ),
@@ -788,8 +789,12 @@ def _(mo, raw_frame, ws):
 
 
 @app.cell
-def _(frame_map, mo, pl, source):
-    plot_frame = frame_map[source.value]
+def _(frame_map, mo, pl, source, ws):
+    plot_frame = (
+        ws.sweep_samples
+        if source.value == "Sweep sample values"
+        else frame_map[source.value]
+    )
     _numeric = [c for c, d in plot_frame.schema.items() if d.is_numeric()]
     _text = [
         c for c, d in plot_frame.schema.items() if d == pl.String and c not in {"run_id", "path"}
@@ -803,7 +808,9 @@ def _(frame_map, mo, pl, source):
         )
     else:
         _x_default = (
-            "point"
+            "sample"
+            if source.value == "Sweep sample values" and "sample" in _columns
+            else "point"
             if source.value == "All sweep data points" and "point" in _columns
             else next(
                 (
@@ -815,7 +822,15 @@ def _(frame_map, mo, pl, source):
             )
         )
         _y_default = next(
-            (c for c in ("rel_noise_mean_db", "value", "rms", "best_db") if c in _numeric),
+            (
+                c
+                for c in (
+                    ("squeezing_dbm", "rel_noise_mean_db", "value", "rms", "best_db")
+                    if source.value == "Sweep sample values"
+                    else ("rel_noise_mean_db", "value", "rms", "best_db")
+                )
+                if c in _numeric
+            ),
             _numeric[0],
         )
         _group = ["(none)", *_text]
@@ -832,6 +847,8 @@ def _(frame_map, mo, pl, source):
             if source.value == "Paired raw traces across runs"
             else "kind"
             if source.value == "All sweep data points"
+            else "point"
+            if source.value == "Sweep sample values"
             else "(none)"
         )
         x_field = mo.ui.dropdown(options=_columns, value=_x_default, label="X axis")
@@ -914,6 +931,13 @@ def _(
             plot_view = mo.vstack(
                 [
                     custom_figure,
+                    mo.accordion(
+                        {
+                            "Selected dataframe": mo.ui.table(
+                                plot_frame, selection=None, page_size=12
+                            )
+                        }
+                    ),
                     mo.hstack(
                         [
                             mo.download(
