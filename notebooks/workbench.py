@@ -779,7 +779,11 @@ def _(mo, raw_frame, ws):
             "All sweep data points"
             if not frame_map["All sweep data points"].is_empty()
             else next(
-                (name for name, frame in frame_map.items() if frame is not None and not frame.is_empty()),
+                (
+                    name
+                    for name, frame in frame_map.items()
+                    if frame is not None and not frame.is_empty()
+                ),
                 "Run scoreboard",
             )
         ),
