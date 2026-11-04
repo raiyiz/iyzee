@@ -298,8 +298,15 @@ class Workset:
                 try:
                     for point in selected["point"].to_list():
                         trace = pair_trace(row, int(point))
-                        if not trace.is_empty():
-                            parts.append(
+                        if trace.is_empty():
+                            issues.append(
+                                {
+                                    "run": row["label"],
+                                    "problem": f"no raw trace samples for point {point}",
+                                }
+                            )
+                            continue
+                        parts.append(
                                 trace.with_columns(
                                     pl.lit(row["label"]).alias("run"),
                                     pl.lit(row["run_id"]).alias("run_id"),
