@@ -177,7 +177,9 @@ separate `squeezing_dbm`, `shot_noise_dbm` and `rel_noise_db` columns plus the j
 point and recording metadata. It is cached for the working set and loaded only when requested.
 The *Sweep sample values* option in the plotter loads this table on demand and exposes a
 dataframe preview. Scope channel statistics and waveform samples remain separate tables
-because their rows represent different physical quantities.
+because their rows represent different physical quantities. The default *Scope waveform samples*
+table is decimated for plotting; call `ws.traces(budget=None)` (or choose *Full-resolution scope
+samples* in the plotter) to load every stored scope sample without thinning.
 
 The recording table is built for scanning many files: the `in set` and `ref` columns stay
 pinned while you scroll sideways, hovering a `ref` shows the recording's facts (instrument,
