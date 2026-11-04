@@ -366,8 +366,10 @@ class Workset:
         points = self.points if kind is None else self.points.filter(pl.col("kind") == kind)
         return best_points(points, metric)
 
-    def traces(self, channels: Sequence[str] | None = None, budget: int = 1600) -> pl.DataFrame:
-        """Scope waveforms for ``channels`` (default: all), thinned to ``budget`` per trace."""
+    def traces(
+        self, channels: Sequence[str] | None = None, budget: int | None = 1600
+    ) -> pl.DataFrame:
+        """Scope waveforms for selected channels; budget=None keeps all samples."""
         wanted = tuple(self.channels if channels is None else channels)
 
         def build() -> pl.DataFrame:
