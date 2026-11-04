@@ -157,7 +157,10 @@ def test_scope_traces_decimate_and_saved_arrays_overlay(demo: Path):
     channels = channels_in(scopes)
     assert channels == ["C1", "C2", "C3"]
     traces = scope_traces(scopes, channels[:1])
+    full_traces = Workset.from_catalog(scopes).traces(channels[:1], budget=None)
     assert set(traces["channel"]) == {"C1"} and traces.height > 0
+    assert full_traces.height == scopes.height * 10_000
+    assert full_traces.height > traces.height
 
     t = np.linspace(0, 1, 20_000)
     y = np.sin(40 * t)
