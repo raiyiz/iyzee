@@ -795,9 +795,7 @@ def _(mo, raw_frame, ws):
 @app.cell
 def _(frame_map, mo, pl, source, ws):
     plot_frame = (
-        ws.sweep_samples
-        if source.value == "Sweep sample values"
-        else frame_map[source.value]
+        ws.sweep_samples if source.value == "Sweep sample values" else frame_map[source.value]
     )
     _numeric = [c for c, d in plot_frame.schema.items() if d.is_numeric()]
     _text = [
