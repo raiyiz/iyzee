@@ -280,12 +280,12 @@ def scope_channels(rows: pl.DataFrame) -> pl.DataFrame:
 
 
 def decimate(
-    time: np.ndarray, values: np.ndarray, budget: int = 1600
+    time: np.ndarray, values: np.ndarray, budget: int | None = 1600
 ) -> tuple[np.ndarray, np.ndarray]:
     """Reduce plot size while keeping both extrema in every bucket."""
     count = min(len(time), len(values))
     time, values = time[:count], values[:count]
-    if budget < 4 or len(values) <= budget:
+    if budget is None or budget < 4 or len(values) <= budget:
         return time, values
     edges = np.linspace(0, len(values), budget // 2 + 1, dtype=int)
     keep = []
@@ -313,10 +313,10 @@ def _cached_scope_traces(path: str, mtime_ns: int, size: int) -> tuple[Any, ...]
 def scope_traces(
     rows: pl.DataFrame,
     channels: Sequence[str],
-    budget: int = 1600,
+    budget: int | None = 1600,
     issues: list[dict[str, str]] | None = None,
 ) -> pl.DataFrame:
-    """Long waveform table for selected channels, lightly decimated for responsive plotting."""
+    """Long waveform table; budget=None keeps every stored sample."""
     output: list[dict[str, Any]] = []
     for row in rows.filter(pl.col("kind") == "scope").iter_rows(named=True):
         try:
