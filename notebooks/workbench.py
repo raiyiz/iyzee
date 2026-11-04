@@ -634,79 +634,14 @@ def _(chosen_channels, mo, quick_metric, split_channels, trace_budget, ws):
 
 
 @app.cell
-def _(mo, pl, ws):
-    _points = ws.points
-    _indices = sorted(_points["point"].unique().to_list()) if not _points.is_empty() else []
-
-    def _point_label(point):
-        part = _points.filter(pl.col("point") == point)
-        kinds = set(part["kind"].drop_nulls().to_list())
-        if kinds == {"frequency"}:
-            offset = part["offset_mhz"].drop_nulls().median()
-            if offset is not None:
-                return f"Point {point} · {float(offset):+.2f} MHz offset"
-        elif kinds == {"bandwidth"}:
-            rbw = part["rbw_khz"].drop_nulls().median()
-            if rbw is not None:
-                return f"Point {point} · {float(rbw):g} kHz RBW"
-        return f"Point {point}"
-
-    point_options = {_point_label(point): point for point in _indices}
-    _labels = list(point_options)
-    trace_points = mo.ui.multiselect(
-        options=_labels,
-        value=_labels[:1],
-        label="Sweep point(s)",
-    )
+def _(mo, ws):
     _inventory = ws.array_inventory()
     array_inventory_view = (
         mo.ui.table(_inventory.drop("run_id"), selection=None, page_size=10)
         if not _inventory.is_empty()
         else mo.md("_No arrays to list._")
     )
-    return array_inventory_view, point_options, trace_points
-
-
-@app.cell
-def _(mo, pl, point_options, trace_points, ws):
-    _frames = []
-    for label in trace_points.value:
-        point = point_options[label]
-        _frame = ws.point_traces(int(point)).filter(
-            pl.col("signal").is_in(["squeezing", "shot noise"])
-        )
-        if not _frame.is_empty():
-            _frames.append(_frame.with_columns(pl.lit(label).alias("sweep_point")))
-
-    raw_frame = (
-        pl.concat(_frames)
-        if _frames
-        else ws.point_traces(0)
-        .clear()
-        .with_columns(pl.lit("", dtype=pl.String).alias("sweep_point"))
-    )
-    if not raw_frame.is_empty():
-        raw_frame = raw_frame.with_columns(
-            pl.concat_str(["run", "sweep_point"], separator=" · ").alias("run_point")
-        )
-    if raw_frame.is_empty():
-        raw_view = mo.md(
-            "_Select one or more sweep points. Each selected point will show its measured "
-            "squeezing trace with the matching shot-noise reference._"
-        )
-    else:
-        raw_view = ws.plot(
-            raw_frame,
-            x="sample",
-            y="value",
-            color="run",
-            detail="signal",
-            facet="run_point",
-            faint_detail="shot noise",
-            sharey=True,
-            title="Squeezing measurement with shot-noise reference",
-        )
-    return raw_frame, raw_view
+    return (array_inventory_view,)
 
 
 @app.cell
@@ -767,10 +702,9 @@ def _(delta_kind, delta_metric, delta_reference, mo, ws):
 
 
 @app.cell
-def _(mo, raw_frame, ws):
+def _(mo, ws):
     frame_map = {
         **ws.tables(),
-        "Paired raw traces across runs": raw_frame,
         "Sweep sample values": None,
         "Full-resolution scope samples": None,
     }
@@ -843,16 +777,10 @@ def _(frame_map, mo, pl, source, ws):
         _group = ["(none)", *_text]
         _color_default = "run" if "run" in _text else "(none)"
         _detail_default = (
-            "signal"
-            if source.value == "Paired raw traces across runs"
-            else "channel"
-            if source.value == "Scope waveform samples"
-            else "(none)"
+            "channel" if source.value == "Scope waveform samples" else "(none)"
         )
         _facet_default = (
-            "sweep_point"
-            if source.value == "Paired raw traces across runs"
-            else "kind"
+            "kind"
             if source.value == "All sweep data points"
             else "point_label"
             if source.value == "Sweep sample values"
@@ -926,9 +854,6 @@ def _(
                 mark=mark_type.value,
                 x_log=x_log.value,
                 y_log=y_log.value,
-                faint_detail=(
-                    "shot noise" if source.value == "Paired raw traces across runs" else None
-                ),
                 title=f"{source.value} · {y_field.value} vs {x_field.value}",
             )
         except ValueError as exc:
@@ -1207,7 +1132,7 @@ def _(mo):
     ws.scoreboard()                 # best point, mean, count below shot noise
     ws.delta("#02")                 # every run minus run #02 on the shared x range
     ws.traces(["C1"], budget=2000)  # scope waveforms
-    ws.point_traces(3)              # raw squeezing / shot-noise traces of point 3
+    ws.sweep_samples              # full-resolution NPZ samples with point metadata
     ws.array("trace_squeezing", 3)  # any saved array, overlaid across runs
 
     g = ws.with_groups({"#02": "base", "#05": "pumped", "#07": "pumped"})
@@ -1229,7 +1154,6 @@ def _(mo):
 @app.cell
 def _(
     array_inventory_view,
-    trace_points,
     auto_by,
     clear_groups,
     delta_kind,
@@ -1248,7 +1172,6 @@ def _(
     mo,
     plot_controls,
     plot_view,
-    raw_view,
     recipes_view,
     source,
     verification,
@@ -1264,19 +1187,7 @@ def _(
             mo.accordion(
                 {
                     "Custom plot builder": mo.vstack([source, plot_controls, plot_view]),
-                    "Paired raw traces across runs": mo.vstack(
-                        [
-                            mo.md(
-                                "Select one or more sweep points. Each measurement is paired "
-                                "with its shot-noise reference; the reference keeps the run colour "
-                                "but is drawn thinner, fainter and behind the measured trace."
-                            ),
-                            trace_points,
-                            raw_view,
-                            mo.md("#### Arrays in each file"),
-                            array_inventory_view,
-                        ]
-                    ),
+                    "Arrays in each file": array_inventory_view,
                     "Groups and statistics (mean ± spread, A vs B)": mo.vstack(
                         [
                             mo.md(

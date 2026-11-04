@@ -48,15 +48,6 @@ from iyzee.workbench.tables import (
 )
 
 ISSUE_SCHEMA = {"run": pl.String, "problem": pl.String}
-POINT_TRACE_SCHEMA = {
-    "run": pl.String,
-    "run_id": pl.String,
-    "synthetic": pl.Boolean,
-    "point": pl.Int64,
-    "sample": pl.Int64,
-    "signal": pl.String,
-    "value": pl.Float64,
-}
 
 
 class Workset:
@@ -386,46 +377,6 @@ class Workset:
             return frame
 
         return self._once(("traces", wanted, budget), build)
-
-    def point_traces(self, point: int = 0) -> pl.DataFrame:
-        """Raw squeezing and shot-noise traces of sweep point ``point`` for every sweep.
-
-        Long table: ``signal`` is ``squeezing``, ``shot noise`` (both dBm) or
-        ``relative noise`` (dB). Sweeps with no such point are noted in :attr:`issues`.
-        """
-
-        def build() -> pl.DataFrame:
-            parts = []
-            issues = []
-            for row in self.sweeps.iter_rows(named=True):
-                try:
-                    wide = pair_trace(row, point)
-                except Exception as exc:  # noqa: BLE001 - isolate a damaged archive
-                    issues.append({"run": row["label"], "problem": f"point {point}: {exc}"})
-                    continue
-                if wide.is_empty():
-                    issues.append({"run": row["label"], "problem": f"has no point {point}"})
-                    continue
-                for column, signal in (
-                    ("squeezing_dbm", "squeezing"),
-                    ("shot_noise_dbm", "shot noise"),
-                    ("rel_noise_db", "relative noise"),
-                ):
-                    parts.append(
-                        wide.select(
-                            pl.lit(row["label"]).alias("run"),
-                            pl.lit(row["run_id"]).alias("run_id"),
-                            pl.lit(row["synthetic"]).alias("synthetic"),
-                            pl.lit(point, dtype=pl.Int64).alias("point"),
-                            pl.col("sample"),
-                            pl.lit(signal).alias("signal"),
-                            pl.col(column).alias("value"),
-                        )
-                    )
-            self._issues["point_traces"] = issues
-            return pl.concat(parts) if parts else pl.DataFrame(schema=POINT_TRACE_SCHEMA)
-
-        return self._once(("point_traces", point), build)
 
     def array_inventory(self) -> pl.DataFrame:
         """Name, shape and dtype of every saved array in every selected run."""
