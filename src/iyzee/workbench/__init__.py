@@ -48,7 +48,6 @@ from iyzee.workbench.tables import (
 )
 from iyzee.workbench.workset import (
     ISSUE_SCHEMA,
-    POINT_TRACE_SCHEMA,
     SavedSet,
     Workset,
     WorksetStore,
@@ -62,7 +61,6 @@ __all__ = [
     "KINDS",
     "LINESTYLES",
     "PALETTE",
-    "POINT_TRACE_SCHEMA",
     "SCOPE_METRICS",
     "SWEEP_KINDS",
     "SWEEP_METRICS",
