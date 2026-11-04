@@ -307,14 +307,14 @@ class Workset:
                             )
                             continue
                         parts.append(
-                                trace.with_columns(
-                                    pl.lit(row["label"]).alias("run"),
-                                    pl.lit(row["run_id"]).alias("run_id"),
-                                    pl.lit(row["synthetic"]).alias("synthetic"),
-                                    pl.lit(row["kind"]).alias("kind"),
-                                    pl.lit(point, dtype=pl.Int64).alias("point"),
-                                )
+                            trace.with_columns(
+                                pl.lit(row["label"]).alias("run"),
+                                pl.lit(row["run_id"]).alias("run_id"),
+                                pl.lit(row["synthetic"]).alias("synthetic"),
+                                pl.lit(row["kind"]).alias("kind"),
+                                pl.lit(point, dtype=pl.Int64).alias("point"),
                             )
+                        )
                 except Exception as exc:  # noqa: BLE001 - isolate a damaged recording
                     issues.append({"run": row["label"], "problem": f"could not read traces: {exc}"})
             self._issues["sweep_samples"] = issues
