@@ -170,7 +170,13 @@ and bandwidth sweeps. It includes the measured setpoint, relative-noise and trac
 plus the recording's reference, type, status, instrument, start time and other index fields.
 Recording metadata is repeated on each point, so you can filter or group measurements by it
 without manually joining the catalog. In the *Data to plot* picker this is available as
-*All sweep data points*. Scope channel statistics and waveform samples remain separate tables
+*All sweep data points*. This is the point-level, reduced dataset; it does not replace the
+sample arrays. When full-resolution trace values are needed, `ws.sweep_samples` reads the
+selected sweep recordings' NPZ arrays and returns one row per sample per sweep point, with
+separate `squeezing_dbm`, `shot_noise_dbm` and `rel_noise_db` columns plus the joined
+point and recording metadata. It is cached for the working set and loaded only when requested.
+The *Sweep sample values* option in the plotter loads this table on demand and exposes a
+dataframe preview. Scope channel statistics and waveform samples remain separate tables
 because their rows represent different physical quantities.
 
 The recording table is built for scanning many files: the `in set` and `ref` columns stay
