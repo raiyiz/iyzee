@@ -288,6 +288,7 @@ class Workset:
         One row is one sample of one point. NPZ recordings are read through the shared cache;
         point and recording metadata are joined on so the result is directly analysable.
         """
+
         def build() -> pl.DataFrame:
             parts = []
             issues = []
