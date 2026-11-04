@@ -114,9 +114,9 @@ def test_workset_sweep_samples_load_npz_values_and_join_point_metadata(demo: Pat
     ).sort("sample")
 
     assert samples.height == expected.height > 0
-    assert samples.select(
-        "sample", "squeezing_dbm", "shot_noise_dbm", "rel_noise_db"
-    ).equals(expected)
+    assert samples.select("sample", "squeezing_dbm", "shot_noise_dbm", "rel_noise_db").equals(
+        expected
+    )
     assert samples["ref"].unique().to_list() == [recording["ref"]]
     assert samples["status"].unique().to_list() == [recording["status"]]
     assert samples["kind"].unique().to_list() == ["frequency"]
