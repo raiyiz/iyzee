@@ -21,6 +21,7 @@ from iyzee.workbench import (  # noqa: E402
     figure_bytes,
     group_curves,
     group_difference,
+    pair_trace,
     pick,
     scan_catalog,
     scope_traces,
@@ -100,6 +101,26 @@ def test_workset_dataset_joins_each_sweep_point_to_recording_metadata(demo: Path
         assert row["ref"] == recording["ref"]
 
     assert workset.tables()["All sweep data points"].equals(dataset)
+
+
+def test_workset_sweep_samples_load_npz_values_and_join_point_metadata(demo: Path):
+    workset = Workset.from_catalog(scan_catalog(demo), kind="frequency")
+    recording = workset.sweeps.row(0, named=True)
+    point = int(workset.points.filter(pl.col("run_id") == recording["run_id"])["point"][0])
+
+    expected = pair_trace(recording, point)
+    samples = workset.sweep_samples.filter(
+        (pl.col("run_id") == recording["run_id"]) & (pl.col("point") == point)
+    ).sort("sample")
+
+    assert samples.height == expected.height > 0
+    assert samples.select(
+        "sample", "squeezing_dbm", "shot_noise_dbm", "rel_noise_db"
+    ).equals(expected)
+    assert samples["ref"].unique().to_list() == [recording["ref"]]
+    assert samples["status"].unique().to_list() == [recording["status"]]
+    assert samples["kind"].unique().to_list() == ["frequency"]
+    assert samples["point_label"].n_unique() == 1
 
 
 def test_group_statistics_recover_a_known_gap_and_flag_only_real_ones():
