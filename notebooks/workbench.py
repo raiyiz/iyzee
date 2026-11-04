@@ -849,7 +849,7 @@ def _(frame_map, mo, pl, source, ws):
             if source.value == "Paired raw traces across runs"
             else "kind"
             if source.value == "All sweep data points"
-            else "point"
+            else "point_label"
             if source.value == "Sweep sample values"
             else "(none)"
         )
