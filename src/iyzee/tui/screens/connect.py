@@ -14,6 +14,7 @@ import time
 
 from rich.markup import escape
 from textual import work
+from textual.binding import Binding
 from textual.app import ComposeResult
 from textual.widgets import DataTable, Static
 
@@ -30,6 +31,10 @@ DETAIL_COL = "detail"
 
 class ConnectScreen(Page):
     """Table of instruments with live connect/disconnect status."""
+
+    # Keep the double-c shortcut local to this page: elsewhere, ``c`` is
+    # navigation or editable input, so a global sequence would steal keys.
+    BINDINGS = [Binding("c,c", "connect_all", "Connect all")]
 
     def compose(self) -> ComposeResult:
         yield Static("Instruments", classes="panel-title")
@@ -127,6 +132,19 @@ class ConnectScreen(Page):
         if spec is None:
             raise CommandError(f"unknown instrument {key!r}")
         return spec
+
+    def action_connect_all(self) -> None:
+        """Start connecting every instrument that is not connected or busy."""
+        pending = [
+            spec
+            for spec in INSTRUMENTS
+            if spec.key not in self.iyzee_app.handles and spec.key not in self._busy
+        ]
+        if not pending:
+            self.notify("All instruments are connected or already connecting.", markup=False)
+            return
+        for spec in pending:
+            self.request_connect(spec.key)
 
     def request_connect(self, key: str) -> str:
         """Connect ``key`` as if Enter were pressed on its row (used by ``:connect``)."""
