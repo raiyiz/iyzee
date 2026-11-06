@@ -12,7 +12,7 @@ from helpers import (
     plain,
     wait_until,
 )
-from textual.widgets import ContentSwitcher, Static
+from textual.widgets import ContentSwitcher, Input, Select, Static
 
 from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.ipython import LabProxy
@@ -172,3 +172,24 @@ async def test_a_lost_link_is_reported_once_released_and_reconnectable(
         assert app.handles["mxa"] is fresh
         assert "mxa" not in app.lost_links
         assert table.get_cell("mxa", DETAIL_COL) == "back"
+
+
+@async_test
+async def test_sweep_defaults_to_frequency_with_10_mhz_steps_and_500ms_duration() -> None:
+    async with IyzeeApp().run_test() as pilot:
+        await pilot.press("s")
+        sweep = pilot.app.query_one(SweepScreen)
+
+        assert sweep.query_one("#sweep-type", Select).value == "frequency"
+        assert sweep.query_one("#freq-fields").display
+        assert not sweep.query_one("#bw-fields").display
+        assert sweep.query_one("#sweep-duration", Input).value == "500"
+        assert sweep.query_one("#freq-offset-mhz", Input).value == "10"
+
+        configured = sweep._build_frequency_run()
+        assert configured.config.sweep_duration_ms == 500
+        frequencies = [step.x_value for step in configured.steps]
+        assert [
+            right - left for left, right in zip(frequencies, frequencies[1:])
+        ] == pytest.approx([10e-6] * (len(frequencies) - 1))
+
