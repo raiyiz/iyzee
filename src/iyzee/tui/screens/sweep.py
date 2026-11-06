@@ -35,7 +35,6 @@ from textual.widgets import (
 from textual_plotext import PlotextPlot
 
 from ...experiment import (
-    DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
     TRACE_SQZ,
@@ -92,7 +91,7 @@ class SweepScreen(Page):
                     "Sweep type",
                     Select(
                         [("Bandwidth sweep", "bandwidth"), ("Frequency sweep", "frequency")],
-                        value="bandwidth",
+                        value="frequency",
                         allow_blank=False,
                         id="sweep-type",
                     ),
@@ -100,7 +99,7 @@ class SweepScreen(Page):
                 )
                 yield _field(
                     "Sweep duration (ms)",
-                    Input(value=str(DEFAULT_SWEEP_DURATION_MS), id="sweep-duration"),
+                    Input(value="500", id="sweep-duration"),
                 )
             with Grid(id="bw-fields", classes="field-grid"):
                 yield _field("RBW start (Hz)", Input(value="20000", id="rbw-start"))
@@ -111,8 +110,8 @@ class SweepScreen(Page):
                 yield _field("Wavemeter channel", Input(value="4", id="freq-channel"))
                 yield _field("Points", Input(value="5", id="freq-points"))
                 yield _field(
-                    "Offset step (kHz)",
-                    Input(value=f"{FREQUENCY_STEP_THZ * 1e9:g}", id="freq-offset-khz"),
+                    "Offset step (MHz)",
+                    Input(value=f"{FREQUENCY_STEP_THZ * 1e6:g}", id="freq-offset-mhz"),
                 )
         with Grid(id="sweep-controls"):
             yield Button("Run sweep", id="run-sweep", variant="success")
@@ -126,7 +125,9 @@ class SweepScreen(Page):
         self._abort_event = Event()
         self._runner: SweepRunner | None = None  # the current (or last) run
         self._next_live_plot = 0.0
-        self.query_one("#freq-fields").display = False
+        is_frequency = self.query_one("#sweep-type", Select).value == "frequency"
+        self.query_one("#bw-fields").display = not is_frequency
+        self.query_one("#freq-fields").display = is_frequency
         plot = self.query_one("#sweep-plot", PlotextPlot)
         plot.plt.title("Squeezing - shot noise")
         plot.plt.xlabel("Trace point")
@@ -286,8 +287,8 @@ class SweepScreen(Page):
         center = self._read("freq-center", _positive_float, "Laser center")
         channel = self._read("freq-channel", _positive_int, "Wavemeter channel")
         points = self._read("freq-points", _positive_int, "Points", maximum=MAX_POINTS)
-        step_khz = self._read("freq-offset-khz", _positive_float, "Offset step")
-        step_thz = step_khz * 1e-9
+        step_mhz = self._read("freq-offset-mhz", _positive_float, "Offset step")
+        step_thz = step_mhz * 1e-6
         offsets = [(i - (points - 1) / 2) * step_thz for i in range(points)]
         return build_frequency_sweep(
             laser_center_thz=center,
