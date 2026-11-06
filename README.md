@@ -37,7 +37,7 @@ The TUI is the way to run interactive measurements:
 └─────────┴──────────────────────────────────────────────┘
 ~~~
 
-Navigate with the letter keys (<code>c s o p r t i l</code>) or the navigation rail. <code>F1</code>–<code>F4</code> provide quick access to Connect, Sweep, Results, and Console.
+Navigate with the letter keys (<code>c s o p r t i l</code>) or the navigation rail. <code>F1</code>–<code>F4</code> provide quick access to Connect, Sweep, Results, and Console. On the Connect page, press <code>cc</code> to start connecting all devices that are not already connected or connecting.
 
 ### Use it as a library
 
