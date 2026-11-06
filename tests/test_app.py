@@ -90,6 +90,17 @@ async def test_page_navigation_and_footer_contracts() -> None:
 
 
 @async_test
+async def test_double_c_connects_all_on_connect_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    handle = FakeHandle()
+    app = connect_app(monkeypatch, handle, key="mxa")
+    async with app.run_test() as pilot:
+        table = app.query_one(ConnectScreen).query_one("#instrument-table")
+        await pilot.press("c", "c")
+        await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")
+        assert handle.connect_calls == 1
+
+
+@async_test
 async def test_nav_rail_and_sweep_banner_update_the_moment_a_connect_finishes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
