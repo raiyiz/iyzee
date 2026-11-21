@@ -140,7 +140,6 @@ def acquire_trace(
             else mx.single_sweep_wait(timeout_sec=timeout_sec)
         )
         if not completed:
-            _abort_mxa(mx)
             wait = 30.0 if timeout_sec is None else timeout_sec
             raise AcquisitionTimeoutError(
                 f"MXA trace {trace_num} did not finish within {wait:.1f} s"
@@ -206,7 +205,10 @@ def acquire_pair(
     try:
         if shutter is not None:
             stage("Opening shutter for squeezing trace")
-            shutter.open()
+            try:
+                shutter.open()
+            except Exception as exc:
+                raise FatalSweepError(f"could not open shutter for squeezing trace: {exc}") from exc
         squeezing = acquire(TRACE_SQZ)
     except BaseException:
         if shutter is not None:
@@ -344,14 +346,25 @@ class FrequencyStep(SweepStep):
 
         wavemeter = ctx.wavemeter
         ctx.report_stage(f"{self.label}: setting PID setpoint to {self.frequency_thz:.9f} THz")
-        wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
+        try:
+            wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
+        except Exception as exc:
+            raise FatalSweepError(
+                f"could not set wavemeter channel {self.wavemeter_channel} to "
+                f"{self.frequency_thz:.9f} THz: {exc}"
+            ) from exc
         if self.relax_time_s:
             ctx.report_stage(f"{self.label}: allowing {self.relax_time_s:g} s for laser settling")
             time.sleep(self.relax_time_s)
         ctx.report_stage(f"{self.label}: reading wavemeter channel {self.wavemeter_channel}")
-        measured = wavemeter.read_frequency(self.wavemeter_channel)
+        try:
+            measured = wavemeter.read_frequency(self.wavemeter_channel)
+        except Exception as exc:
+            raise FatalSweepError(
+                f"could not read wavemeter channel {self.wavemeter_channel}: {exc}"
+            ) from exc
         if not math.isfinite(measured) or measured <= 0:
-            raise ValueError(f"wavemeter returned an invalid frequency: {measured!r}")
+            raise FatalSweepError(f"wavemeter returned an invalid frequency: {measured!r}")
         error_mhz = (measured - self.frequency_thz) * 1e6
         log.info(
             "%s: measured %.9f THz (setpoint error %+.3f MHz)",
