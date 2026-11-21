@@ -58,6 +58,16 @@ class ExperimentContext:
     shutter: Any | None = None
     config: dict[str, Any] = field(default_factory=dict)
     wavemeter: Any = None
+    on_stage: Callable[[str], None] | None = None
+
+    def report_stage(self, message: str) -> None:
+        """Log the current hardware stage and notify an optional live observer."""
+        log.info("run %s: %s", self.run_id, message)
+        if self.on_stage is not None:
+            try:
+                self.on_stage(message)
+            except Exception:
+                log.exception("run %s: stage callback failed", self.run_id)
 
 
 class Step(Protocol):

@@ -23,7 +23,14 @@ from typing import Any
 
 from .core import ExperimentContext, RunRecord, Step, StepResult, run_sequence
 from .io import create_dirs, save_step_results
-from .procedures import TRACE_SHOT, TRACE_SQZ, Sweep, prepare_analyzer
+from .procedures import (
+    TRACE_SHOT,
+    TRACE_SQZ,
+    FatalSweepError,
+    Sweep,
+    acquisition_timeout_s,
+    prepare_analyzer,
+)
 
 log = logging.getLogger("iyzee.experiment")
 
@@ -32,6 +39,10 @@ PointCallback = Callable[[int, int, Step, StepResult | None, BaseException | Non
 
 class SweepAborted(Exception):
     """Raised from the per-point hook to stop a run cleanly after the current point."""
+
+
+class SweepFailed(Exception):
+    """Stop after an unrecoverable instrument error rather than repeating it at each point."""
 
 
 @dataclass
@@ -56,6 +67,7 @@ class SweepRunner:
         locks: Sequence[AbstractContextManager[Any]] = (),
         *,
         on_point: PointCallback | None = None,
+        on_stage: Callable[[str], None] | None = None,
         should_abort: Callable[[], bool] = lambda: False,
         on_save_error: Callable[[Exception], None] | None = None,
         trace_slots: tuple[int, int] = (TRACE_SQZ, TRACE_SHOT),
@@ -64,6 +76,7 @@ class SweepRunner:
         self.devices = devices
         self.locks = locks
         self.on_point = on_point
+        self.on_stage = on_stage
         self.should_abort = should_abort
         self.on_save_error = on_save_error
         self.trace_slots = trace_slots
@@ -80,24 +93,31 @@ class SweepRunner:
             for lock in self.locks:  # one logical operation: nothing may interleave with it
                 stack.enter_context(lock)
             try:
+                timeout_s = acquisition_timeout_s(sweep.config)
                 prepare_analyzer(self.devices["mxa"], self.trace_slots, sweep.config)
             except Exception as exc:
                 log.exception("sweep: failed to configure analyzer")
                 return SweepOutcome(record=None, setup_error=exc)
 
-            record = self.record = RunRecord(config=asdict(sweep.config))
+            config = asdict(sweep.config)
+            config["acquisition_timeout_s"] = timeout_s
+            record = self.record = RunRecord(config=config)
             ctx = ExperimentContext(
                 mx=self.devices["mxa"],
                 run_id=record.run_id,
                 shutter=self.devices.get("shutter"),
                 wavemeter=self.devices.get("wavemeter"),
                 config=record.config,
+                on_stage=self.on_stage,
             )
             aborted = failed = False
             try:
                 run_sequence(sweep.steps, ctx, on_error="skip", on_step=self._on_step)
             except SweepAborted:
                 aborted = True
+            except SweepFailed as exc:
+                log.error("sweep: stopped after an unrecoverable step failure: %s", exc)
+                failed = True
             except Exception:  # per-step errors are handled by on_error="skip"; this is a net
                 log.exception("sweep: run_sequence raised unexpectedly")
                 failed = True
@@ -108,7 +128,8 @@ class SweepRunner:
         """Rewrite the file with how the run ended (until now it says "running")."""
         if self.record is not None:
             self.record.finish(aborted=aborted, failed=failed)
-        if self.collected:
+        if self.record is not None:
+            # Keep a failed first point visible on disk instead of leaving no trace of the run.
             self.checkpoint()
 
     def mark_died(self) -> None:
@@ -155,5 +176,8 @@ class SweepRunner:
             self.checkpoint()
         if self.on_point is not None:
             self.on_point(index, total, step, result, error)
+        if isinstance(error, FatalSweepError):
+            label = getattr(step, "label", f"step[{index}]")
+            raise SweepFailed(f"{label}: {error}") from error
         if self.should_abort():
             raise SweepAborted
