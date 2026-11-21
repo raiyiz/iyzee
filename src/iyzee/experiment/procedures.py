@@ -101,6 +101,12 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
     config = config or AnalyzerConfig()
     validate_analyzer_config(config)
 
+    # Stop any acquisition left behind by a previous operation before changing settings.
+    mx.set_continuous_sweep(False)
+    mx.abort_sweep()
+    for trace in traces:
+        mx.set_trace_update(trace, False)
+
     mx.set_center_freq(config.center_hz)
     mx.set_span(config.span_hz)
     mx.set_rbw(config.res_bw_hz)
@@ -114,6 +120,9 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
     for trace in traces:
         mx.set_trace_display(trace, True)
         mx.set_trace_mode(trace, "AVER")
+    # Leave the analyzer idle so no trace accumulates while the laser or shutter changes.
+    for trace in traces:
+        mx.set_trace_update(trace, False)
 
     return mx
 
@@ -126,12 +135,27 @@ def _abort_mxa(mx) -> None:
         log.exception("MXA did not accept ABOR after a failed acquisition")
 
 
-def acquire_trace(mx, trace_num: int, *, timeout_sec: float | None = None) -> list[float]:
-    """Acquire a complete trace and fail instead of returning stale data."""
+def acquire_trace(
+    mx,
+    trace_num: int,
+    *,
+    timeout_sec: float | None = None,
+    inactive_traces: Sequence[int] = (),
+) -> list[float]:
+    """Acquire one fresh averaged trace without updating other traces in the process."""
+    if trace_num in inactive_traces:
+        raise ValueError(f"trace {trace_num} cannot also be listed as inactive")
     trace_enabled = False
     successful = False
     started = time.monotonic()
     try:
+        mx.set_continuous_sweep(False)
+        # Trace averaging is per trace. Isolate this acquisition and reselect AVER to reset
+        # the target trace's accumulator before collecting a new optical state.
+        for other_trace in inactive_traces:
+            mx.set_trace_update(other_trace, False)
+        mx.set_trace_update(trace_num, False)
+        mx.set_trace_mode(trace_num, "AVER")
         mx.set_trace_update(trace_num, True)
         trace_enabled = True
         completed = (
@@ -150,6 +174,14 @@ def acquire_trace(mx, trace_num: int, *, timeout_sec: float | None = None) -> li
             raise FatalSweepError(f"MXA trace {trace_num} returned no samples")
         if not all(math.isfinite(value) for value in values):
             raise FatalSweepError(f"MXA trace {trace_num} contains non-finite samples")
+        get_sweep_points = getattr(mx, "get_sweep_points", None)
+        if get_sweep_points is not None:
+            expected_points = get_sweep_points()
+            if expected_points > 0 and len(values) != expected_points:
+                raise FatalSweepError(
+                    f"MXA trace {trace_num} returned {len(values)} samples, "
+                    f"expected {expected_points}"
+                )
         successful = True
         log.info(
             "MXA trace %s: acquired %d samples in %.2f s",
@@ -186,10 +218,19 @@ def _report_stage(on_stage: Callable[[str], None] | None, message: str) -> None:
             log.exception("sweep stage callback failed")
 
 
-def _acquire_trace_with_timeout(mx, trace_num: int, timeout_sec: float | None) -> list[float]:
-    if timeout_sec is None:
-        return acquire_trace(mx, trace_num)
-    return acquire_trace(mx, trace_num, timeout_sec=timeout_sec)
+def _acquire_trace_with_timeout(
+    mx,
+    trace_num: int,
+    timeout_sec: float | None,
+    *,
+    inactive_traces: Sequence[int] = (),
+) -> list[float]:
+    return acquire_trace(
+        mx,
+        trace_num,
+        timeout_sec=timeout_sec,
+        inactive_traces=inactive_traces,
+    )
 
 
 def _close_shutter(shutter: Any, on_stage: Callable[[str], None] | None) -> None:
@@ -212,7 +253,9 @@ def _acquire_squeezing_trace(
     on_stage: Callable[[str], None] | None,
 ) -> list[float]:
     if shutter is None:
-        return _acquire_trace_with_timeout(mx, TRACE_SQZ, timeout_sec)
+        return _acquire_trace_with_timeout(
+            mx, TRACE_SQZ, timeout_sec, inactive_traces=(TRACE_SHOT,)
+        )
 
     _report_stage(on_stage, "Opening shutter for squeezing trace")
     try:
@@ -225,7 +268,9 @@ def _acquire_squeezing_trace(
         raise FatalSweepError(f"could not open shutter for squeezing trace: {exc}") from exc
 
     try:
-        squeezing = _acquire_trace_with_timeout(mx, TRACE_SQZ, timeout_sec)
+        squeezing = _acquire_trace_with_timeout(
+            mx, TRACE_SQZ, timeout_sec, inactive_traces=(TRACE_SHOT,)
+        )
     except BaseException:
         try:
             _close_shutter(shutter, on_stage)
@@ -247,10 +292,14 @@ def acquire_pair(
     """Acquire complete squeezing and shot-noise traces, closing the shutter between them."""
     deadline = f"; maximum wait {timeout_sec:.0f} s" if timeout_sec is not None else ""
     _report_stage(on_stage, f"Acquiring squeezing trace (Trace 1){deadline}")
-    squeezing = _acquire_squeezing_trace(mx, shutter, timeout_sec=timeout_sec, on_stage=on_stage)
+    squeezing = _acquire_squeezing_trace(
+        mx, shutter, timeout_sec=timeout_sec, on_stage=on_stage
+    )
 
     _report_stage(on_stage, f"Acquiring shot-noise reference (Trace 2){deadline}")
-    shot_noise = _acquire_trace_with_timeout(mx, TRACE_SHOT, timeout_sec)
+    shot_noise = _acquire_trace_with_timeout(
+        mx, TRACE_SHOT, timeout_sec, inactive_traces=(TRACE_SQZ,)
+    )
     if len(squeezing) != len(shot_noise):
         raise FatalSweepError(
             f"MXA trace lengths differ: squeezing has {len(squeezing)} samples, "

@@ -43,7 +43,7 @@ class FakeMXA:
         self.vbw_values.append((vbw_hz, auto))
 
 
-def fake_acquire_trace(mx, trace_num):
+def fake_acquire_trace(mx, trace_num, **kwargs):
     mx.trace_calls.append(trace_num)
     return [trace_num]
 
@@ -91,9 +91,17 @@ class _AcquisitionMXA:
         self.completed = completed
         self.values = list(values)
         self.trace_updates = []
+        self.trace_modes = []
+        self.continuous = []
         self.timeouts = []
         self.reads = []
         self.aborts = 0
+
+    def set_continuous_sweep(self, state):
+        self.continuous.append(state)
+
+    def set_trace_mode(self, trace_num, mode):
+        self.trace_modes.append((trace_num, mode))
 
     def set_trace_update(self, trace_num, state):
         self.trace_updates.append((trace_num, state))
@@ -106,6 +114,9 @@ class _AcquisitionMXA:
         self.reads.append((trace_num, binary))
         return self.values
 
+    def get_sweep_points(self):
+        return 3
+
     def abort_sweep(self):
         self.aborts += 1
 
@@ -114,7 +125,8 @@ def test_trace_acquisition_rejects_timeout_and_invalid_data():
     stalled = _AcquisitionMXA(completed=False)
     with pytest.raises(AcquisitionTimeoutError, match=r"trace 1 did not finish within 12\.5 s"):
         acquire_trace(stalled, 1, timeout_sec=12.5)
-    assert stalled.trace_updates == [(1, True), (1, False)]
+    assert stalled.trace_updates == [(1, False), (1, True), (1, False)]
+    assert stalled.trace_modes == [(1, "AVER")]
     assert stalled.timeouts == [12.5]
     assert stalled.reads == []
     assert stalled.aborts == 1
@@ -122,7 +134,8 @@ def test_trace_acquisition_rejects_timeout_and_invalid_data():
     acquired = _AcquisitionMXA()
     assert acquire_trace(acquired, 2, timeout_sec=20.0) == [1.0, 2.0, 3.0]
     assert acquired.reads == [(2, True)]  # use binary transfer; no long ASCII response
-    assert acquired.trace_updates == [(2, True), (2, False)]
+    assert acquired.trace_updates == [(2, False), (2, True), (2, False)]
+    assert acquired.trace_modes == [(2, "AVER")]
     assert acquired.aborts == 0
 
     invalid = _AcquisitionMXA(values=(1.0, float("nan")))
@@ -130,6 +143,31 @@ def test_trace_acquisition_rejects_timeout_and_invalid_data():
         acquire_trace(invalid, 1, timeout_sec=20.0)
     assert invalid.trace_updates[-1] == (1, False)
     assert invalid.aborts == 1
+
+    short = _AcquisitionMXA(values=(1.0, 2.0))
+    with pytest.raises(FatalSweepError, match="expected 3"):
+        acquire_trace(short, 1, timeout_sec=20.0)
+    assert short.aborts == 1
+
+
+def test_pair_resets_each_average_and_keeps_trace_updates_exclusive():
+    mx = _AcquisitionMXA()
+    shutter = FakeShutterControl()
+    traces = acquire_pair(mx, shutter, timeout_sec=20.0)
+
+    assert traces == {"squeezing": [1.0, 2.0, 3.0], "shot_noise": [1.0, 2.0, 3.0]}
+    assert mx.trace_modes == [(1, "AVER"), (2, "AVER")]
+    assert mx.trace_updates == [
+        (2, False),
+        (1, False),
+        (1, True),
+        (1, False),
+        (1, False),
+        (2, False),
+        (2, True),
+        (2, False),
+    ]
+    assert shutter.events == ["open", "close"]
 
 
 def test_frequency_timeout_and_duration_estimates_follow_averaging_work():
@@ -221,7 +259,7 @@ def test_each_step_drives_the_caller_owned_devices_in_order(monkeypatch):
     )
     monkeypatch.setattr(
         "iyzee.experiment.procedures.acquire_trace",
-        lambda mx, trace_num: events.append(("acquire", trace_num)) or [trace_num],
+        lambda mx, trace_num, **kwargs: events.append(("acquire", trace_num)) or [trace_num],
     )
     shutter = FakeShutterControl()
     ctx = ExperimentContext(
