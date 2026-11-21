@@ -12,7 +12,7 @@ from helpers import (
     plain,
     wait_until,
 )
-from textual.widgets import ContentSwitcher, Static
+from textual.widgets import ContentSwitcher, Select, Static
 
 from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.ipython import LabProxy
@@ -103,7 +103,14 @@ async def test_nav_rail_and_sweep_banner_update_the_moment_a_connect_finishes(
         await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")
         await pilot.pause()
         assert "● Fk" in plain(nav), plain(nav)  # no page switch in between
-        assert not app.query_one("#sweep-status", Static).display
+
+        # Frequency is now the initial sweep kind and requires both the MXA and
+        # the laser/shutter connections, so connecting only the MXA keeps the banner.
+        status = app.query_one("#sweep-status", Static)
+        assert status.display
+        app.query_one(SweepScreen).query_one("#sweep-type", Select).value = "bandwidth"
+        await pilot.pause()
+        assert not status.display
 
 
 @async_test

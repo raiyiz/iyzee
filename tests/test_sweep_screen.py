@@ -164,6 +164,9 @@ async def _press_run_and_wait(app: IyzeeApp) -> None:
     async with app.run_test() as pilot:
         await pilot.press("s")
         await pilot.pause()
+        # This runner test doesn't require the extra laser and shutter devices.
+        pilot.app.query_one(SweepScreen).query_one("#sweep-type", Select).value = "bandwidth"
+        await pilot.pause()
         await pilot.click("#run-sweep")
         await wait_until(pilot, lambda: app.last_run is not None)
 
@@ -186,6 +189,8 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
     app = _sweep_app(monkeypatch, tmp_path, fake_run_sequence)
     async with app.run_test() as pilot:
         await pilot.press("s")
+        await pilot.pause()
+        pilot.app.query_one(SweepScreen).query_one("#sweep-type", Select).value = "bandwidth"
         await pilot.pause()
         await pilot.click("#run-sweep")
         await wait_until(pilot, started.is_set)
@@ -218,8 +223,17 @@ class _FakeMxaForCapture:
         self._freq = freq
         self.trace_updates: list[tuple[int, bool]] = []
 
+    def set_continuous_sweep(self, state: bool) -> None:
+        pass
+
+    def set_trace_mode(self, trace_num: int, mode: str) -> None:
+        pass
+
     def set_trace_update(self, trace_num: int, state: bool) -> None:
         self.trace_updates.append((trace_num, state))
+
+    def abort_sweep(self) -> None:
+        pass
 
     def single_sweep_wait(self) -> bool:
         return True
@@ -240,7 +254,7 @@ async def test_capture_trace_plots_power_vs_frequency() -> None:
         screen = await _open_sweep_screen(pilot)
         screen._start_capture()
         await wait_until(pilot, lambda: not screen.query_one("#capture-trace").disabled)
-        assert fake_mxa.trace_updates == [(1, True), (1, False)]
+        assert fake_mxa.trace_updates == [(1, False), (1, True), (1, False)]
         log = " ".join(
             str(seg) for line in screen.query_one("#sweep-log", RichLog).lines for seg in line
         )

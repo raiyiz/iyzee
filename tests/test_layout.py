@@ -30,7 +30,7 @@ CONTROLS = {
         "#freq-center",
         "#freq-channel",
         "#freq-points",
-        "#freq-offset-khz",
+        "#freq-offset-mhz",
     ],
 }
 ALWAYS = ["#run-sweep", "#abort-sweep", "#capture-trace", "#sweep-progress"]
@@ -109,6 +109,7 @@ async def test_pages_scroll_instead_of_clipping_and_the_layout_reflows_with_the_
         ):
             await _resize(pilot, size)
             await _show(pilot, "sweep")
+            app.query_one("#sweep-type", Select).value = "bandwidth"
             await pilot.pause()
             fields = [app.query_one(f"#{i}").region for i in ("rbw-start", "rbw-stop", "rbw-steps")]
             assert sum(1 for f in fields if f.y == fields[0].y) == fields_per_row
