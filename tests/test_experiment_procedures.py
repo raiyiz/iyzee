@@ -7,6 +7,11 @@ from iyzee.experiment.core import ExperimentContext
 from iyzee.experiment.procedures import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
+    AcquisitionTimeoutError,
+    FatalSweepError,
+    acquire_trace,
+    acquisition_timeout_s,
+    estimate_sweep_duration_s,
     SWEEP_KINDS,
     AnalyzerConfig,
     BandwidthStep,
@@ -81,6 +86,61 @@ def _wavemeter(events, frequency=377.1):
     )
 
 
+class _AcquisitionMXA:
+    def __init__(self, *, completed=True, values=(1.0, 2.0, 3.0)):
+        self.completed = completed
+        self.values = list(values)
+        self.trace_updates = []
+        self.timeouts = []
+        self.reads = []
+        self.aborts = 0
+
+    def set_trace_update(self, trace_num, state):
+        self.trace_updates.append((trace_num, state))
+
+    def single_sweep_wait(self, timeout_sec=30.0):
+        self.timeouts.append(timeout_sec)
+        return self.completed
+
+    def get_trace_data(self, trace_num=1, binary=True):
+        self.reads.append((trace_num, binary))
+        return self.values
+
+    def abort_sweep(self):
+        self.aborts += 1
+
+
+def test_trace_acquisition_rejects_timeout_and_invalid_data():
+    stalled = _AcquisitionMXA(completed=False)
+    with pytest.raises(AcquisitionTimeoutError, match="trace 1 did not finish within 12.5 s"):
+        acquire_trace(stalled, 1, timeout_sec=12.5)
+    assert stalled.trace_updates == [(1, True), (1, False)]
+    assert stalled.timeouts == [12.5]
+    assert stalled.reads == []
+    assert stalled.aborts == 1
+
+    acquired = _AcquisitionMXA()
+    assert acquire_trace(acquired, 2, timeout_sec=20.0) == [1.0, 2.0, 3.0]
+    assert acquired.reads == [(2, True)]  # use binary transfer; no long ASCII response
+    assert acquired.trace_updates == [(2, True), (2, False)]
+    assert acquired.aborts == 0
+
+    invalid = _AcquisitionMXA(values=(1.0, float("nan")))
+    with pytest.raises(FatalSweepError, match="non-finite"):
+        acquire_trace(invalid, 1, timeout_sec=20.0)
+    assert invalid.trace_updates[-1] == (1, False)
+    assert invalid.aborts == 1
+
+
+def test_frequency_timeout_and_duration_estimates_follow_averaging_work():
+    config = frequency_sweep_config(sweep_duration_ms=500)
+    assert acquisition_timeout_s(config) == pytest.approx(155.0)
+
+    sweep = build_frequency_sweep(offsets_thz=[0.0, 1e-6], sweep_duration_ms=500)
+    # Two traces per point, 150 averages per trace, plus 0.5 s laser settling per point.
+    assert estimate_sweep_duration_s(sweep) == pytest.approx(301.0)
+
+
 # -- builders and defaults ----------------------------------------------------------------------
 
 
@@ -110,9 +170,9 @@ def test_sweep_builders_and_their_steps_declare_what_they_need():
     assert sweep.config.avg_count == 150
     assert build_frequency_sweep(offsets_thz=[0.0], relax_time_s=2.0).steps[0].relax_time_s == 2.0
 
-    assert DEFAULT_SWEEP_DURATION_MS == 10  # everywhere, and overridable
+    assert DEFAULT_SWEEP_DURATION_MS == 500  # everywhere, and overridable
     for config in (AnalyzerConfig(), bandwidth_sweep_config(), frequency_sweep_config()):
-        assert config.sweep_duration_ms == 10
+        assert config.sweep_duration_ms == 500
     assert build_bandwidth_sweep(sweep_duration_ms=25).config.sweep_duration_ms == 25
     assert build_frequency_sweep(sweep_duration_ms=25).config.sweep_duration_ms == 25
     for config_for in (bandwidth_sweep_config, frequency_sweep_config):

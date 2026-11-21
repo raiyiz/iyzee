@@ -13,7 +13,7 @@ import pytest
 from iyzee.experiment import StepResult
 from iyzee.experiment import runner as runner_mod
 from iyzee.experiment.core import step_label
-from iyzee.experiment.procedures import AnalyzerConfig, Sweep
+from iyzee.experiment.procedures import AnalyzerConfig, FatalSweepError, Sweep
 from iyzee.experiment.runner import SweepRunner
 
 
@@ -32,6 +32,17 @@ class _Point:
 
 def _sweep(*steps: Any) -> Sweep:
     return Sweep(kind="bandwidth", steps=list(steps), config=AnalyzerConfig())
+
+
+class _FatalPoint:
+    label = "fatal acquisition"
+
+    def __init__(self, attempted: list[str]) -> None:
+        self.attempted = attempted
+
+    def run(self, ctx: Any) -> StepResult:
+        self.attempted.append(self.label)
+        raise FatalSweepError("MXA returned an incomplete trace")
 
 
 @pytest.fixture
@@ -68,6 +79,22 @@ def test_a_run_holds_the_locks_saves_after_each_point_and_records_its_end(lab_di
     assert outcome.record is not None and outcome.record.status == "completed_with_errors"
     assert outcome.save_path is not None and outcome.save_path.exists()
     assert _saved_status(lab_dir) == "completed_with_errors"  # rewritten at the end
+
+
+def test_unrecoverable_acquisition_failure_stops_and_is_saved_as_failed(lab_dir: Path):
+    attempted: list[str] = []
+    outcome = SweepRunner(
+        _sweep(_FatalPoint(attempted), _Point("must not run")),
+        {"mxa": object()},
+    ).run()
+
+    assert attempted == ["fatal acquisition"]
+    assert outcome.failed and not outcome.aborted
+    assert outcome.record is not None and outcome.record.status == "failed"
+    assert outcome.save_path is not None and outcome.save_path.exists()
+    saved = json.loads(outcome.save_path.with_suffix(".json").read_text())
+    assert saved["run_metadata"]["status"] == "failed"
+    assert saved["run_metadata"]["failed_steps"][0]["error_type"] == "FatalSweepError"
 
 
 def test_aborting_a_failed_setup_a_failing_save_and_a_dead_worker_all_end_cleanly(

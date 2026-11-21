@@ -44,13 +44,16 @@ async def test_the_form_defaults_validation_and_missing_instruments() -> None:
     async def _form_defaults_build_the_documented_runs_():
         async with IyzeeApp().run_test() as pilot:
             screen = await _open_sweep_screen(pilot)
+            assert screen.query_one("#sweep-type", Select).value == "frequency"
+            assert screen.query_one("#freq-offset-mhz", Input).value == "10"
+            assert screen.query_one("#sweep-duration", Input).value == "500"
             bandwidth = screen._build_bandwidth_run()
             assert len(bandwidth.steps) == 19
             assert bandwidth.config.res_bw_hz == pytest.approx(20000.0)
             frequency = screen._build_frequency_run()
             assert len(frequency.steps) == 5
-            # The defaults the issue asked for: 10 ms sweeps, 10 MHz between laser points.
-            assert bandwidth.config.sweep_duration_ms == frequency.config.sweep_duration_ms == 10
+            # Defaults: 500 ms analyzer sweeps and 10 MHz between laser points.
+            assert bandwidth.config.sweep_duration_ms == frequency.config.sweep_duration_ms == 500
             gaps = [b.x_value - a.x_value for a, b in itertools.pairwise(frequency.steps)]
             assert all(gap == pytest.approx(10e-6) for gap in gaps)  # 10 MHz, in THz
 
@@ -111,6 +114,8 @@ async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
     app = IyzeeApp()
     async with app.run_test() as pilot:
         screen = await _open_sweep_screen(pilot)
+        screen.query_one("#sweep-type", Select).value = "bandwidth"
+        await pilot.pause()
         banner = screen.query_one("#sweep-status", Static)
         assert banner.display
         assert "MXA" in plain(banner) and "F1" in plain(banner)
