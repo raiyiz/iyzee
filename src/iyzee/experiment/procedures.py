@@ -11,9 +11,11 @@ runs any of them. A new axis is one subclass, those three functions and an entry
 
 from __future__ import annotations
 
+import logging
+import math
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar, TypedDict, Unpack
 
@@ -30,6 +32,20 @@ DEFAULT_SWEEP_DURATION_MS = 10
 #: Default spacing of a frequency scan: 10 MHz, in THz (the unit the laser is set in).
 FREQUENCY_STEP_THZ = 10e-6
 
+MIN_ACQUISITION_TIMEOUT_S = 10.0
+ACQUISITION_TIMEOUT_FACTOR = 2.0
+ACQUISITION_TIMEOUT_MARGIN_S = 5.0
+
+log = logging.getLogger("iyzee.experiment")
+
+
+class FatalSweepError(RuntimeError):
+    """An instrument acquisition failed; continuing could save stale or invalid data."""
+
+
+class AcquisitionTimeoutError(FatalSweepError):
+    """The analyzer did not finish the requested averaged trace before its deadline."""
+
 
 @dataclass(slots=True)
 class AnalyzerConfig:
@@ -44,9 +60,44 @@ class AnalyzerConfig:
     trig_source: str = "IMM"
 
 
+def validate_analyzer_config(config: AnalyzerConfig) -> None:
+    """Validate settings before partially reconfiguring the analyzer."""
+    if not math.isfinite(config.center_hz) or config.center_hz <= 0:
+        raise ValueError(f"center frequency must be finite and positive, got {config.center_hz!r}")
+    if not math.isfinite(config.span_hz) or config.span_hz < 0:
+        raise ValueError(f"span must be finite and non-negative, got {config.span_hz!r}")
+    if (
+        not isinstance(config.avg_count, int)
+        or isinstance(config.avg_count, bool)
+        or config.avg_count < 1
+    ):
+        raise ValueError(f"average count must be a positive integer, got {config.avg_count!r}")
+    if (
+        not isinstance(config.sweep_duration_ms, int)
+        or isinstance(config.sweep_duration_ms, bool)
+        or config.sweep_duration_ms < 1
+    ):
+        raise ValueError(
+            f"sweep duration must be a positive integer in ms, got {config.sweep_duration_ms!r}"
+        )
+    if not math.isfinite(config.res_bw_hz) or config.res_bw_hz <= 0:
+        raise ValueError(f"resolution bandwidth must be finite and positive, got {config.res_bw_hz!r}")
+
+
+def acquisition_timeout_s(config: AnalyzerConfig) -> float:
+    """Bound one averaged acquisition by its expected work, plus a safety margin."""
+    validate_analyzer_config(config)
+    expected_s = config.sweep_duration_ms / 1000 * config.avg_count
+    return max(
+        MIN_ACQUISITION_TIMEOUT_S,
+        expected_s * ACQUISITION_TIMEOUT_FACTOR + ACQUISITION_TIMEOUT_MARGIN_S,
+    )
+
+
 def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = None) -> KeysightMXA:
     """Configure an already-owned MXA for a measurement procedure."""
     config = config or AnalyzerConfig()
+    validate_analyzer_config(config)
 
     mx.set_center_freq(config.center_hz)
     mx.set_span(config.span_hz)
@@ -65,31 +116,128 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
     return mx
 
 
-def acquire_trace(mx, trace_num):
-    """Acquire one trace and return its data."""
-    mx.set_trace_update(trace_num, True)
+def _abort_mxa(mx) -> None:
+    """Best-effort stop after a failed acquisition, preserving the original failure."""
     try:
-        mx.single_sweep_wait()
-        return mx.get_trace_data(trace_num=trace_num, binary=False)
+        mx.abort_sweep()
+    except Exception:
+        log.exception("MXA did not accept ABOR after a failed acquisition")
+
+
+def acquire_trace(
+    mx, trace_num: int, *, timeout_sec: float | None = None
+) -> list[float]:
+    """Acquire a complete trace and fail instead of returning stale data."""
+    trace_enabled = False
+    successful = False
+    started = time.monotonic()
+    try:
+        mx.set_trace_update(trace_num, True)
+        trace_enabled = True
+        completed = (
+            mx.single_sweep_wait()
+            if timeout_sec is None
+            else mx.single_sweep_wait(timeout_sec=timeout_sec)
+        )
+        if not completed:
+            _abort_mxa(mx)
+            wait = 30.0 if timeout_sec is None else timeout_sec
+            raise AcquisitionTimeoutError(
+                f"MXA trace {trace_num} did not finish within {wait:.1f} s"
+            )
+
+        values = [float(value) for value in mx.get_trace_data(trace_num=trace_num, binary=True)]
+        if not values:
+            raise FatalSweepError(f"MXA trace {trace_num} returned no samples")
+        if not all(math.isfinite(value) for value in values):
+            raise FatalSweepError(f"MXA trace {trace_num} contains non-finite samples")
+        successful = True
+        log.info(
+            "MXA trace %s: acquired %d samples in %.2f s",
+            trace_num,
+            len(values),
+            time.monotonic() - started,
+        )
+        return values
+    except FatalSweepError:
+        _abort_mxa(mx)
+        raise
+    except Exception as exc:
+        _abort_mxa(mx)
+        raise FatalSweepError(f"MXA trace {trace_num} acquisition failed: {exc}") from exc
     finally:
-        mx.set_trace_update(trace_num, False)
+        if trace_enabled:
+            try:
+                mx.set_trace_update(trace_num, False)
+            except Exception as exc:
+                if successful:
+                    raise FatalSweepError(
+                        f"MXA trace {trace_num} was acquired, but trace updates could not be disabled: {exc}"
+                    ) from exc
+                log.exception("could not disable MXA trace %s updates during error cleanup", trace_num)
 
 
-def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
+def acquire_pair(
+    mx: Any,
+    shutter: Any | None = None,
+    *,
+    timeout_sec: float | None = None,
+    on_stage: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     """Acquire the squeezing and shot-noise traces, in that order.
 
     A ``shutter`` is open only around the squeezing acquisition and is closed again (in a
     ``finally``) before the shot-noise reference, which must not include the squeezed-light
     path. Without one both traces are taken as the setup stands.
     """
+    def stage(message: str) -> None:
+        if on_stage is not None:
+            try:
+                on_stage(message)
+            except Exception:
+                log.exception("sweep stage callback failed")
+
+    def acquire(trace_num: int) -> list[float]:
+        if timeout_sec is None:
+            return acquire_trace(mx, trace_num)
+        return acquire_trace(mx, trace_num, timeout_sec=timeout_sec)
+
+    stage("Acquiring squeezing trace (Trace 1)")
     try:
         if shutter is not None:
+            stage("Opening shutter for squeezing trace")
             shutter.open()
-        squeezing = acquire_trace(mx, TRACE_SQZ)
-    finally:
+        squeezing = acquire(TRACE_SQZ)
+    except BaseException:
         if shutter is not None:
-            shutter.close()
-    return {"squeezing": squeezing, "shot_noise": acquire_trace(mx, TRACE_SHOT)}
+            try:
+                stage("Closing shutter after failed squeezing trace")
+                shutter.close()
+            except Exception:
+                log.exception("could not close shutter while handling a failed squeezing trace")
+        raise
+    else:
+        if shutter is not None:
+            stage("Closing shutter before shot-noise reference")
+            try:
+                shutter.close()
+            except Exception as exc:
+                try:
+                    shutter.close()
+                except Exception:
+                    log.exception("shutter close retry also failed")
+                raise FatalSweepError(
+                    f"could not close shutter before shot-noise acquisition: {exc}"
+                ) from exc
+
+    stage("Acquiring shot-noise reference (Trace 2)")
+    shot_noise = acquire(TRACE_SHOT)
+    if len(squeezing) != len(shot_noise):
+        raise FatalSweepError(
+            f"MXA trace lengths differ: squeezing has {len(squeezing)} samples, "
+            f"shot noise has {len(shot_noise)}"
+        )
+    return {"squeezing": squeezing, "shot_noise": shot_noise}
 
 
 #: Seconds the laser gets to settle on a new PID setpoint before it is read.
@@ -134,8 +282,14 @@ class SweepStep:
                 f"{type(self).__name__} requires ctx.{', ctx.'.join(missing)} to be set"
             )
         uses_shutter = "shutter" in self.requires
+        ctx.report_stage(f"{self.label}: applying point settings")
         meta = self.apply(ctx)
-        traces = acquire_pair(ctx.mx, ctx.shutter if uses_shutter else None)
+        traces = acquire_pair(
+            ctx.mx,
+            ctx.shutter if uses_shutter else None,
+            timeout_sec=ctx.config.get("acquisition_timeout_s"),
+            on_stage=lambda message: ctx.report_stage(f"{self.label}: {message}"),
+        )
         return StepResult(self.label, self.x_value, self.x_unit, traces, meta)
 
 
@@ -181,13 +335,35 @@ class FrequencyStep(SweepStep):
     requires: ClassVar[tuple[str, ...]] = ("mxa", "shutter", "wavemeter")
 
     def apply(self, ctx: ExperimentContext) -> dict[str, Any]:
+        if not math.isfinite(self.frequency_thz) or self.frequency_thz <= 0:
+            raise ValueError(f"laser frequency must be finite and positive, got {self.frequency_thz!r}")
+        if not math.isfinite(self.relax_time_s) or self.relax_time_s < 0:
+            raise ValueError(
+                f"laser settling time must be finite and non-negative, got {self.relax_time_s!r}"
+            )
+
         wavemeter = ctx.wavemeter
+        ctx.report_stage(f"{self.label}: setting PID setpoint to {self.frequency_thz:.9f} THz")
         wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
-        time.sleep(self.relax_time_s)
+        if self.relax_time_s:
+            ctx.report_stage(f"{self.label}: allowing {self.relax_time_s:g} s for laser settling")
+            time.sleep(self.relax_time_s)
+        ctx.report_stage(f"{self.label}: reading wavemeter channel {self.wavemeter_channel}")
+        measured = wavemeter.read_frequency(self.wavemeter_channel)
+        if not math.isfinite(measured) or measured <= 0:
+            raise ValueError(f"wavemeter returned an invalid frequency: {measured!r}")
+        error_mhz = (measured - self.frequency_thz) * 1e6
+        log.info(
+            "%s: measured %.9f THz (setpoint error %+.3f MHz)",
+            self.label,
+            measured,
+            error_mhz,
+        )
         return {
             "wavemeter_channel": self.wavemeter_channel,
             "relax_time_s": self.relax_time_s,
-            "measured_frequency_thz": wavemeter.read_frequency(self.wavemeter_channel),
+            "measured_frequency_thz": measured,
+            "setpoint_error_mhz": error_mhz,
         }
 
 
@@ -286,11 +462,13 @@ def run_sweep(
 ) -> list[StepResult]:
     """Configure the caller-owned MXA, build one run context, and run ``sweep``."""
     prepare_analyzer(mx, (TRACE_SQZ, TRACE_SHOT), sweep.config)
+    run_config = asdict(sweep.config)
+    run_config["acquisition_timeout_s"] = acquisition_timeout_s(sweep.config)
     ctx = ExperimentContext(
         mx=mx,
         run_id=uuid.uuid4().hex[:8],
         shutter=shutter,
-        config=asdict(sweep.config),
+        config=run_config,
         wavemeter=wavemeter,
     )
     return run_sequence(sweep.steps, ctx, on_error=on_error)
