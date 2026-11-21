@@ -135,6 +135,23 @@ def _abort_mxa(mx) -> None:
         log.exception("MXA did not accept ABOR after a failed acquisition")
 
 
+def _read_valid_trace(mx, trace_num: int) -> list[float]:
+    """Read a completed MXA trace and reject truncated or invalid data."""
+    values = [float(value) for value in mx.get_trace_data(trace_num=trace_num, binary=True)]
+    if not values:
+        raise FatalSweepError(f"MXA trace {trace_num} returned no samples")
+    if not all(math.isfinite(value) for value in values):
+        raise FatalSweepError(f"MXA trace {trace_num} contains non-finite samples")
+    get_sweep_points = getattr(mx, "get_sweep_points", None)
+    if get_sweep_points is not None:
+        expected_points = get_sweep_points()
+        if expected_points > 0 and len(values) != expected_points:
+            raise FatalSweepError(
+                f"MXA trace {trace_num} returned {len(values)} samples, expected {expected_points}"
+            )
+    return values
+
+
 def acquire_trace(
     mx,
     trace_num: int,
@@ -169,19 +186,7 @@ def acquire_trace(
                 f"MXA trace {trace_num} did not finish within {wait:.1f} s"
             )
 
-        values = [float(value) for value in mx.get_trace_data(trace_num=trace_num, binary=True)]
-        if not values:
-            raise FatalSweepError(f"MXA trace {trace_num} returned no samples")
-        if not all(math.isfinite(value) for value in values):
-            raise FatalSweepError(f"MXA trace {trace_num} contains non-finite samples")
-        get_sweep_points = getattr(mx, "get_sweep_points", None)
-        if get_sweep_points is not None:
-            expected_points = get_sweep_points()
-            if expected_points > 0 and len(values) != expected_points:
-                raise FatalSweepError(
-                    f"MXA trace {trace_num} returned {len(values)} samples, "
-                    f"expected {expected_points}"
-                )
+        values = _read_valid_trace(mx, trace_num)
         successful = True
         log.info(
             "MXA trace %s: acquired %d samples in %.2f s",

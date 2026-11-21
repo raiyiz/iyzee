@@ -15,6 +15,7 @@ from iyzee.experiment.procedures import (
     FrequencyStep,
     Sweep,
     SweepStep,
+    acquire_pair,
     acquire_trace,
     acquisition_timeout_s,
     bandwidth_sweep_config,
