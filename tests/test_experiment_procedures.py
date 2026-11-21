@@ -35,6 +35,13 @@ class FakeMXA:
         self.rbw_values = []
         self.vbw_values = []
         self.trace_calls = []
+        self.trace_updates = []
+
+    def set_continuous_sweep(self, state):
+        pass
+
+    def set_trace_update(self, trace_num, state):
+        self.trace_updates.append((trace_num, state))
 
     def set_rbw(self, rbw_hz):
         self.rbw_values.append(rbw_hz)
@@ -158,6 +165,8 @@ def test_pair_resets_each_average_and_keeps_trace_updates_exclusive():
     assert traces == {"squeezing": [1.0, 2.0, 3.0], "shot_noise": [1.0, 2.0, 3.0]}
     assert mx.trace_modes == [(1, "AVER"), (2, "AVER")]
     assert mx.trace_updates == [
+        (1, False),
+        (2, False),
         (2, False),
         (1, False),
         (1, True),

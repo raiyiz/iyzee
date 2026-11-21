@@ -289,7 +289,17 @@ def acquire_pair(
     timeout_sec: float | None = None,
     on_stage: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Acquire complete squeezing and shot-noise traces, closing the shutter between them."""
+    """Acquire isolated squeezing and shot-noise traces, closing the shutter between them."""
+    # Do this before opening the shutter as well: no background trace should see the
+    # shutter transition or contribute to a trace belonging to the next optical state.
+    try:
+        mx.set_continuous_sweep(False)
+        mx.set_trace_update(TRACE_SQZ, False)
+        mx.set_trace_update(TRACE_SHOT, False)
+    except Exception as exc:
+        _abort_mxa(mx)
+        raise FatalSweepError(f"could not isolate MXA traces before acquisition: {exc}") from exc
+
     deadline = f"; maximum wait {timeout_sec:.0f} s" if timeout_sec is not None else ""
     _report_stage(on_stage, f"Acquiring squeezing trace (Trace 1){deadline}")
     squeezing = _acquire_squeezing_trace(
