@@ -47,6 +47,7 @@ from ...experiment import (
     acquire_trace,
     build_bandwidth_sweep,
     build_frequency_sweep,
+    acquisition_timeout_s,
     difference_series,
 )
 from ..commands import Command
@@ -271,8 +272,9 @@ class SweepScreen(Page):
             "(excludes communication and save overhead).[/dim]"
         )
         log.write(
-            f"[dim]Each trace timeout: {sweep.config.sweep_duration_ms / 1000:g} s × "
-            f"{sweep.config.avg_count} averages, with safety margin.[/dim]"
+            f"[dim]Per-trace timeout: {acquisition_timeout_s(sweep.config):.0f} s "
+            f"({sweep.config.sweep_duration_ms / 1000:g} s × "
+            f"{sweep.config.avg_count} averages plus margin).[/dim]"
         )
         plot = self.query_one("#sweep-plot", PlotextPlot)
         # #sweep-plot is shared with "Capture trace" (a raw power-vs-

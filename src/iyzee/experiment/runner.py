@@ -94,7 +94,9 @@ class SweepRunner:
                 stack.enter_context(lock)
             try:
                 timeout_s = acquisition_timeout_s(sweep.config)
+                self._report_stage("Configuring MXA for sweep")
                 prepare_analyzer(self.devices["mxa"], self.trace_slots, sweep.config)
+                self._report_stage("MXA configured; starting sweep points")
             except Exception as exc:
                 log.exception("sweep: failed to configure analyzer")
                 return SweepOutcome(record=None, setup_error=exc)
@@ -108,7 +110,7 @@ class SweepRunner:
                 shutter=self.devices.get("shutter"),
                 wavemeter=self.devices.get("wavemeter"),
                 config=record.config,
-                on_stage=self.on_stage,
+                on_stage=self._report_stage,
             )
             aborted = failed = False
             try:
@@ -123,6 +125,13 @@ class SweepRunner:
                 failed = True
             self.finish(aborted=aborted, failed=failed)
         return SweepOutcome(record, self.collected, self.save_path, aborted, failed)
+
+    def _report_stage(self, message: str) -> None:
+        if self.on_stage is not None:
+            try:
+                self.on_stage(message)
+            except Exception:
+                log.exception("sweep: stage callback failed")
 
     def finish(self, *, aborted: bool = False, failed: bool = False) -> None:
         """Rewrite the file with how the run ended (until now it says "running")."""
@@ -173,6 +182,7 @@ class SweepRunner:
         self.record.on_step(index, total, step, result, error)
         if result is not None:
             self.collected.append(result)
+            self._report_stage(f"{step_label(step, index)}: saving checkpoint")
             self.checkpoint()
         if self.on_point is not None:
             self.on_point(index, total, step, result, error)

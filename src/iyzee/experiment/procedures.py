@@ -201,7 +201,10 @@ def acquire_pair(
             return acquire_trace(mx, trace_num)
         return acquire_trace(mx, trace_num, timeout_sec=timeout_sec)
 
-    stage("Acquiring squeezing trace (Trace 1)")
+    stage(
+        "Acquiring squeezing trace (Trace 1)"
+        + (f"; maximum wait {timeout_sec:.0f} s" if timeout_sec is not None else "")
+    )
     try:
         if shutter is not None:
             stage("Opening shutter for squeezing trace")
@@ -210,7 +213,7 @@ def acquire_pair(
             except Exception as exc:
                 raise FatalSweepError(f"could not open shutter for squeezing trace: {exc}") from exc
         squeezing = acquire(TRACE_SQZ)
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - always attempt to close the optical path on failure
         if shutter is not None:
             try:
                 stage("Closing shutter after failed squeezing trace")
@@ -232,7 +235,10 @@ def acquire_pair(
                     f"could not close shutter before shot-noise acquisition: {exc}"
                 ) from exc
 
-    stage("Acquiring shot-noise reference (Trace 2)")
+    stage(
+        "Acquiring shot-noise reference (Trace 2)"
+        + (f"; maximum wait {timeout_sec:.0f} s" if timeout_sec is not None else "")
+    )
     shot_noise = acquire(TRACE_SHOT)
     if len(squeezing) != len(shot_noise):
         raise FatalSweepError(
