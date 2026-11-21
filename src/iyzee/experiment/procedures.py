@@ -81,7 +81,9 @@ def validate_analyzer_config(config: AnalyzerConfig) -> None:
             f"sweep duration must be a positive integer in ms, got {config.sweep_duration_ms!r}"
         )
     if not math.isfinite(config.res_bw_hz) or config.res_bw_hz <= 0:
-        raise ValueError(f"resolution bandwidth must be finite and positive, got {config.res_bw_hz!r}")
+        raise ValueError(
+            f"resolution bandwidth must be finite and positive, got {config.res_bw_hz!r}"
+        )
 
 
 def acquisition_timeout_s(config: AnalyzerConfig) -> float:
@@ -124,9 +126,7 @@ def _abort_mxa(mx) -> None:
         log.exception("MXA did not accept ABOR after a failed acquisition")
 
 
-def acquire_trace(
-    mx, trace_num: int, *, timeout_sec: float | None = None
-) -> list[float]:
+def acquire_trace(mx, trace_num: int, *, timeout_sec: float | None = None) -> list[float]:
     """Acquire a complete trace and fail instead of returning stale data."""
     trace_enabled = False
     successful = False
@@ -173,7 +173,9 @@ def acquire_trace(
                     raise FatalSweepError(
                         f"MXA trace {trace_num} was acquired, but trace updates could not be disabled: {exc}"
                     ) from exc
-                log.exception("could not disable MXA trace %s updates during error cleanup", trace_num)
+                log.exception(
+                    "could not disable MXA trace %s updates during error cleanup", trace_num
+                )
 
 
 def _report_stage(on_stage: Callable[[str], None] | None, message: str) -> None:
@@ -190,9 +192,7 @@ def _acquire_trace_with_timeout(mx, trace_num: int, timeout_sec: float | None) -
     return acquire_trace(mx, trace_num, timeout_sec=timeout_sec)
 
 
-def _close_shutter(
-    shutter: Any, on_stage: Callable[[str], None] | None
-) -> None:
+def _close_shutter(shutter: Any, on_stage: Callable[[str], None] | None) -> None:
     _report_stage(on_stage, "Closing shutter")
     try:
         shutter.close()
@@ -247,9 +247,7 @@ def acquire_pair(
     """Acquire complete squeezing and shot-noise traces, closing the shutter between them."""
     deadline = f"; maximum wait {timeout_sec:.0f} s" if timeout_sec is not None else ""
     _report_stage(on_stage, f"Acquiring squeezing trace (Trace 1){deadline}")
-    squeezing = _acquire_squeezing_trace(
-        mx, shutter, timeout_sec=timeout_sec, on_stage=on_stage
-    )
+    squeezing = _acquire_squeezing_trace(mx, shutter, timeout_sec=timeout_sec, on_stage=on_stage)
 
     _report_stage(on_stage, f"Acquiring shot-noise reference (Trace 2){deadline}")
     shot_noise = _acquire_trace_with_timeout(mx, TRACE_SHOT, timeout_sec)
@@ -357,7 +355,9 @@ class FrequencyStep(SweepStep):
 
     def apply(self, ctx: ExperimentContext) -> dict[str, Any]:
         if not math.isfinite(self.frequency_thz) or self.frequency_thz <= 0:
-            raise ValueError(f"laser frequency must be finite and positive, got {self.frequency_thz!r}")
+            raise ValueError(
+                f"laser frequency must be finite and positive, got {self.frequency_thz!r}"
+            )
         if not math.isfinite(self.relax_time_s) or self.relax_time_s < 0:
             raise ValueError(
                 f"laser settling time must be finite and non-negative, got {self.relax_time_s!r}"
@@ -428,9 +428,7 @@ def estimate_sweep_duration_s(sweep: Sweep) -> float:
     """Estimate instrument acquisition and laser-settling time, excluding overhead."""
     validate_analyzer_config(sweep.config)
     one_trace_s = sweep.config.sweep_duration_ms / 1000 * sweep.config.avg_count
-    settle_s = sum(
-        step.relax_time_s for step in sweep.steps if isinstance(step, FrequencyStep)
-    )
+    settle_s = sum(step.relax_time_s for step in sweep.steps if isinstance(step, FrequencyStep))
     return len(sweep.steps) * 2 * one_trace_s + settle_s
 
 
