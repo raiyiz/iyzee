@@ -38,6 +38,7 @@ from ...experiment import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
+    estimate_sweep_duration_s,
     TRACE_SQZ,
     Step,
     StepResult,
@@ -71,6 +72,17 @@ LIVE_PLOT_INTERVAL_S = 0.1
 _INSTRUMENT_NAMES = {"mxa": "MXA", "shutter": "shutter", "wavemeter": "wavemeter"}
 
 
+def _format_duration(seconds: float) -> str:
+    total = max(0, round(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours} h {minutes:02d} min"
+    if minutes:
+        return f"{minutes} min {seconds:02d} s"
+    return f"{seconds} s"
+
+
 class SweepScreen(Page):
     """Pick a sweep type, configure it, run it, and watch it live.
 
@@ -92,7 +104,7 @@ class SweepScreen(Page):
                     "Sweep type",
                     Select(
                         [("Bandwidth sweep", "bandwidth"), ("Frequency sweep", "frequency")],
-                        value="bandwidth",
+                        value="frequency",
                         allow_blank=False,
                         id="sweep-type",
                     ),
@@ -111,8 +123,8 @@ class SweepScreen(Page):
                 yield _field("Wavemeter channel", Input(value="4", id="freq-channel"))
                 yield _field("Points", Input(value="5", id="freq-points"))
                 yield _field(
-                    "Offset step (kHz)",
-                    Input(value=f"{FREQUENCY_STEP_THZ * 1e9:g}", id="freq-offset-khz"),
+                    "Offset step (MHz)",
+                    Input(value=f"{FREQUENCY_STEP_THZ * 1e6:g}", id="freq-offset-mhz"),
                 )
         with Grid(id="sweep-controls"):
             yield Button("Run sweep", id="run-sweep", variant="success")
@@ -126,7 +138,9 @@ class SweepScreen(Page):
         self._abort_event = Event()
         self._runner: SweepRunner | None = None  # the current (or last) run
         self._next_live_plot = 0.0
-        self.query_one("#freq-fields").display = False
+        kind = self.query_one("#sweep-type", Select).value
+        self.query_one("#bw-fields").display = kind == "bandwidth"
+        self.query_one("#freq-fields").display = kind == "frequency"
         plot = self.query_one("#sweep-plot", PlotextPlot)
         plot.plt.title("Squeezing - shot noise")
         plot.plt.xlabel("Trace point")
@@ -245,11 +259,21 @@ class SweepScreen(Page):
             devices,
             [handles[key].lock for key in sweep.requires],
             on_point=self._on_point,
+            on_stage=self._on_stage,
             should_abort=self._should_abort,
             on_save_error=self._report_save_error,
         )
         log = self.query_one("#sweep-log", RichLog)
         log.clear()
+        estimate = estimate_sweep_duration_s(sweep)
+        log.write(
+            f"[dim]Estimated hardware time: {_format_duration(estimate)} "
+            "(excludes communication and save overhead).[/dim]"
+        )
+        log.write(
+            f"[dim]Each trace timeout: {sweep.config.sweep_duration_ms / 1000:g} s × "
+            f"{sweep.config.avg_count} averages, with safety margin.[/dim]"
+        )
         plot = self.query_one("#sweep-plot", PlotextPlot)
         # #sweep-plot is shared with "Capture trace" (a raw power-vs-
         # frequency spectrum, different axes entirely) — draw_series with
@@ -286,8 +310,8 @@ class SweepScreen(Page):
         center = self._read("freq-center", _positive_float, "Laser center")
         channel = self._read("freq-channel", _positive_int, "Wavemeter channel")
         points = self._read("freq-points", _positive_int, "Points", maximum=MAX_POINTS)
-        step_khz = self._read("freq-offset-khz", _positive_float, "Offset step")
-        step_thz = step_khz * 1e-9
+        step_mhz = self._read("freq-offset-mhz", _positive_float, "Offset step")
+        step_thz = step_mhz * 1e-6
         offsets = [(i - (points - 1) / 2) * step_thz for i in range(points)]
         return build_frequency_sweep(
             laser_center_thz=center,
@@ -313,7 +337,13 @@ class SweepScreen(Page):
         except BaseException as exc:  # noqa: BLE001
             self._worker_died(kind, exc)
             return
-        self._ui(self._finish, kind, aborted=outcome.aborted, setup_error=outcome.setup_error)
+        self._ui(
+            self._finish,
+            kind,
+            aborted=outcome.aborted,
+            failed=outcome.failed,
+            setup_error=outcome.setup_error,
+        )
 
     def _worker_died(self, kind: str, exc: BaseException) -> None:
         log.critical("sweep: the worker thread died with %s", type(exc).__name__, exc_info=exc)
@@ -333,6 +363,13 @@ class SweepScreen(Page):
             timeout=10,
             markup=False,
         )
+
+    def _on_stage(self, message: str) -> None:
+        """Show the current blocking hardware operation while a point runs."""
+        self._ui(self._write_stage, message)
+
+    def _write_stage(self, message: str) -> None:
+        self.query_one("#sweep-log", RichLog).write(f"[dim]{escape(message)}[/dim]")
 
     def _on_point(self, index, total, step, result, error) -> None:
         """Per point, from the worker thread, after it has been recorded and saved."""
@@ -444,6 +481,7 @@ class SweepScreen(Page):
         *,
         aborted: bool,
         setup_error: Exception | None,
+        failed: bool = False,
         died: BaseException | None = None,
     ) -> None:
         self.iyzee_app.sweep_running = False
@@ -473,11 +511,11 @@ class SweepScreen(Page):
             )
 
         runner = self._runner
-        if runner is None or not runner.collected:
+        if runner is None:
             log.write("[yellow]No points recorded.[/yellow]")
             return
 
-        if runner.save_path is None:
+        if runner.save_path is None and runner.record is not None:
             # Every per-point save failed; one last attempt now that the run is over (this is
             # the UI thread, which is fine for one write; a failure is reported directly).
             runner.checkpoint(
@@ -490,8 +528,22 @@ class SweepScreen(Page):
             )
         path = runner.save_path
         collected = runner.collected
+        if not collected:
+            if failed:
+                log.write("[red]Sweep failed before any points were recorded.[/red]")
+            else:
+                log.write("[yellow]No points recorded.[/yellow]")
+            return
         self.iyzee_app.last_run = LastRun(kind=kind, results=list(collected), path=path)
-        status = "aborted" if aborted else "stopped early" if died is not None else "finished"
+        status = (
+            "aborted"
+            if aborted
+            else "failed early"
+            if failed
+            else "stopped early"
+            if died is not None
+            else "finished"
+        )
         if path is None:
             log.write(
                 f"[red]Sweep {status}: {len(collected)} point(s) recorded but "

@@ -28,7 +28,7 @@ TRACE_SQZ = 1
 TRACE_SHOT = 2
 
 #: Analyzer sweep time per point; every preset starts here and every caller can override it.
-DEFAULT_SWEEP_DURATION_MS = 10
+DEFAULT_SWEEP_DURATION_MS = 500
 #: Default spacing of a frequency scan: 10 MHz, in THz (the unit the laser is set in).
 FREQUENCY_STEP_THZ = 10e-6
 
@@ -390,6 +390,16 @@ class ConfigOptions(TypedDict, total=False):
 
     sweep_duration_ms: int
     res_bw_hz: float
+
+
+def estimate_sweep_duration_s(sweep: Sweep) -> float:
+    """Estimate instrument acquisition and laser-settling time, excluding overhead."""
+    validate_analyzer_config(sweep.config)
+    one_trace_s = sweep.config.sweep_duration_ms / 1000 * sweep.config.avg_count
+    settle_s = sum(
+        step.relax_time_s for step in sweep.steps if isinstance(step, FrequencyStep)
+    )
+    return len(sweep.steps) * 2 * one_trace_s + settle_s
 
 
 def bandwidth_sweep_steps(rbw_values_hz=None) -> list[BandwidthStep]:
