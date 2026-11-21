@@ -21,7 +21,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .core import ExperimentContext, RunRecord, Step, StepResult, run_sequence
+from .core import ExperimentContext, RunRecord, Step, StepResult, run_sequence, step_label
 from .io import create_dirs, save_step_results
 from .procedures import (
     TRACE_SHOT,

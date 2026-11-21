@@ -176,6 +176,67 @@ def acquire_trace(
                 log.exception("could not disable MXA trace %s updates during error cleanup", trace_num)
 
 
+def _report_stage(on_stage: Callable[[str], None] | None, message: str) -> None:
+    if on_stage is not None:
+        try:
+            on_stage(message)
+        except Exception:
+            log.exception("sweep stage callback failed")
+
+
+def _acquire_trace_with_timeout(mx, trace_num: int, timeout_sec: float | None) -> list[float]:
+    if timeout_sec is None:
+        return acquire_trace(mx, trace_num)
+    return acquire_trace(mx, trace_num, timeout_sec=timeout_sec)
+
+
+def _close_shutter(
+    shutter: Any, on_stage: Callable[[str], None] | None
+) -> None:
+    _report_stage(on_stage, "Closing shutter")
+    try:
+        shutter.close()
+    except Exception as exc:
+        try:
+            shutter.close()
+        except Exception:
+            log.exception("shutter close retry also failed")
+        raise FatalSweepError(f"could not close shutter: {exc}") from exc
+
+
+def _acquire_squeezing_trace(
+    mx: Any,
+    shutter: Any | None,
+    *,
+    timeout_sec: float | None,
+    on_stage: Callable[[str], None] | None,
+) -> list[float]:
+    if shutter is None:
+        return _acquire_trace_with_timeout(mx, TRACE_SQZ, timeout_sec)
+
+    _report_stage(on_stage, "Opening shutter for squeezing trace")
+    try:
+        shutter.open()
+    except Exception as exc:
+        try:
+            _close_shutter(shutter, on_stage)
+        except Exception:
+            log.exception("could not close shutter after a failed shutter-open command")
+        raise FatalSweepError(f"could not open shutter for squeezing trace: {exc}") from exc
+
+    try:
+        squeezing = _acquire_trace_with_timeout(mx, TRACE_SQZ, timeout_sec)
+    except BaseException:
+        try:
+            _close_shutter(shutter, on_stage)
+        except Exception:
+            log.exception("could not close shutter while handling a failed squeezing trace")
+        raise
+
+    _close_shutter(shutter, on_stage)
+    return squeezing
+
+
 def acquire_pair(
     mx: Any,
     shutter: Any | None = None,
@@ -183,63 +244,15 @@ def acquire_pair(
     timeout_sec: float | None = None,
     on_stage: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Acquire the squeezing and shot-noise traces, in that order.
-
-    A ``shutter`` is open only around the squeezing acquisition and is closed again (in a
-    ``finally``) before the shot-noise reference, which must not include the squeezed-light
-    path. Without one both traces are taken as the setup stands.
-    """
-    def stage(message: str) -> None:
-        if on_stage is not None:
-            try:
-                on_stage(message)
-            except Exception:
-                log.exception("sweep stage callback failed")
-
-    def acquire(trace_num: int) -> list[float]:
-        if timeout_sec is None:
-            return acquire_trace(mx, trace_num)
-        return acquire_trace(mx, trace_num, timeout_sec=timeout_sec)
-
-    stage(
-        "Acquiring squeezing trace (Trace 1)"
-        + (f"; maximum wait {timeout_sec:.0f} s" if timeout_sec is not None else "")
+    """Acquire complete squeezing and shot-noise traces, closing the shutter between them."""
+    deadline = f"; maximum wait {timeout_sec:.0f} s" if timeout_sec is not None else ""
+    _report_stage(on_stage, f"Acquiring squeezing trace (Trace 1){deadline}")
+    squeezing = _acquire_squeezing_trace(
+        mx, shutter, timeout_sec=timeout_sec, on_stage=on_stage
     )
-    try:
-        if shutter is not None:
-            stage("Opening shutter for squeezing trace")
-            try:
-                shutter.open()
-            except Exception as exc:
-                raise FatalSweepError(f"could not open shutter for squeezing trace: {exc}") from exc
-        squeezing = acquire(TRACE_SQZ)
-    except BaseException:  # noqa: BLE001 - always attempt to close the optical path on failure
-        if shutter is not None:
-            try:
-                stage("Closing shutter after failed squeezing trace")
-                shutter.close()
-            except Exception:
-                log.exception("could not close shutter while handling a failed squeezing trace")
-        raise
-    else:
-        if shutter is not None:
-            stage("Closing shutter before shot-noise reference")
-            try:
-                shutter.close()
-            except Exception as exc:
-                try:
-                    shutter.close()
-                except Exception:
-                    log.exception("shutter close retry also failed")
-                raise FatalSweepError(
-                    f"could not close shutter before shot-noise acquisition: {exc}"
-                ) from exc
 
-    stage(
-        "Acquiring shot-noise reference (Trace 2)"
-        + (f"; maximum wait {timeout_sec:.0f} s" if timeout_sec is not None else "")
-    )
-    shot_noise = acquire(TRACE_SHOT)
+    _report_stage(on_stage, f"Acquiring shot-noise reference (Trace 2){deadline}")
+    shot_noise = _acquire_trace_with_timeout(mx, TRACE_SHOT, timeout_sec)
     if len(squeezing) != len(shot_noise):
         raise FatalSweepError(
             f"MXA trace lengths differ: squeezing has {len(squeezing)} samples, "

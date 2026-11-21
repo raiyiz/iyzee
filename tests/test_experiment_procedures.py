@@ -7,21 +7,21 @@ from iyzee.experiment.core import ExperimentContext
 from iyzee.experiment.procedures import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
-    AcquisitionTimeoutError,
-    FatalSweepError,
-    acquire_trace,
-    acquisition_timeout_s,
-    estimate_sweep_duration_s,
     SWEEP_KINDS,
+    AcquisitionTimeoutError,
     AnalyzerConfig,
     BandwidthStep,
+    FatalSweepError,
     FrequencyStep,
     Sweep,
     SweepStep,
+    acquire_trace,
+    acquisition_timeout_s,
     bandwidth_sweep_config,
     bandwidth_sweep_steps,
     build_bandwidth_sweep,
     build_frequency_sweep,
+    estimate_sweep_duration_s,
     frequency_sweep_config,
     frequency_sweep_steps,
     run_bandwidth_sweep,
@@ -112,7 +112,7 @@ class _AcquisitionMXA:
 
 def test_trace_acquisition_rejects_timeout_and_invalid_data():
     stalled = _AcquisitionMXA(completed=False)
-    with pytest.raises(AcquisitionTimeoutError, match="trace 1 did not finish within 12.5 s"):
+    with pytest.raises(AcquisitionTimeoutError, match=r"trace 1 did not finish within 12\.5 s"):
         acquire_trace(stalled, 1, timeout_sec=12.5)
     assert stalled.trace_updates == [(1, True), (1, False)]
     assert stalled.timeouts == [12.5]

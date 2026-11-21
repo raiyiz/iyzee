@@ -38,17 +38,17 @@ from ...experiment import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
-    estimate_sweep_duration_s,
     TRACE_SQZ,
     Step,
     StepResult,
     Sweep,
     SweepRunner,
     acquire_trace,
+    acquisition_timeout_s,
     build_bandwidth_sweep,
     build_frequency_sweep,
-    acquisition_timeout_s,
     difference_series,
+    estimate_sweep_duration_s,
 )
 from ..commands import Command
 from ..plotting import draw_series, prepare_series
@@ -273,7 +273,7 @@ class SweepScreen(Page):
         )
         log.write(
             f"[dim]Per-trace timeout: {acquisition_timeout_s(sweep.config):.0f} s "
-            f"({sweep.config.sweep_duration_ms / 1000:g} s × "
+            f"({sweep.config.sweep_duration_ms / 1000:g} s x "
             f"{sweep.config.avg_count} averages plus margin).[/dim]"
         )
         plot = self.query_one("#sweep-plot", PlotextPlot)
