@@ -307,9 +307,7 @@ def acquire_pair(
 
     deadline = f"; maximum wait {timeout_sec:.0f} s" if timeout_sec is not None else ""
     _report_stage(on_stage, f"Acquiring squeezing trace (Trace 1){deadline}")
-    squeezing = _acquire_squeezing_trace(
-        mx, shutter, timeout_sec=timeout_sec, on_stage=on_stage
-    )
+    squeezing = _acquire_squeezing_trace(mx, shutter, timeout_sec=timeout_sec, on_stage=on_stage)
 
     _report_stage(on_stage, f"Acquiring shot-noise reference (Trace 2){deadline}")
     shot_noise = _acquire_trace_with_timeout(
