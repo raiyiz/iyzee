@@ -14,7 +14,7 @@ available in a script or IPython with two lines of code.
 
 import marimo
 
-__generated_with = "0.25.1"
+__generated_with = "0.25.2"
 app = marimo.App(width="full", app_title="iyzee · data workbench")
 
 
@@ -367,7 +367,7 @@ def _(Workset, catalog, catalog_table, mo, pl, preview_facts, read_manifest):
 
 
 @app.cell
-def _(Workset, catalog, get_selection, mo, pl):
+def _(Workset, catalog, get_selection, mo):
     ws = Workset.from_catalog(catalog, get_selection(), strict=False)
     ws_table = mo.ui.table(
         ws.rows.select("ref", "name", "kind", "started", "status", "synthetic", "warnings"),
@@ -455,7 +455,7 @@ def _(
     catalog,
     confirm_delete,
     get_notice,
-    group_store,
+    group_store: dict[str, str],
     mo,
     saved_pick,
     set_group_rev,
@@ -535,7 +535,7 @@ def _(mo, ws):
 
 
 @app.cell
-def _(mo, pl, ws):
+def _(mo, ws):
     mo.stop(
         ws.rows.is_empty(),
         mo.md("## 3 · Overview\nThe working set is empty: add recordings in section 2."),
@@ -630,9 +630,6 @@ def _(chosen_channels, mo, quick_metric, split_channels, trace_budget, ws):
     return
 
 
-# --- Toolbox widgets -----------------------------------------------------------------
-
-
 @app.cell
 def _(mo, ws):
     _inventory = ws.array_inventory()
@@ -698,7 +695,7 @@ def _(delta_kind, delta_metric, delta_reference, mo, ws):
                     mo.ui.table(_delta, selection=None, page_size=10),
                 ]
             )
-    return delta_frame, delta_view
+    return (delta_view,)
 
 
 @app.cell
@@ -894,7 +891,7 @@ def _(
 
 
 @app.cell
-def _(get_group_rev, group_store, mo, pl, ws):
+def _(get_group_rev, group_store: dict[str, str], mo, pl, ws):
     get_group_rev()  # rebuild the editor after Load or "Fill groups"
     _run_by_ref = dict(zip(ws.rows["ref"], ws.rows["run_id"], strict=True))
 
@@ -977,7 +974,7 @@ def _(BAND_CHOICES, SWEEP_METRICS, mo, pl, ws_grouped):
 
 
 @app.cell
-def _(auto_by, group_store, mo, set_group_rev, ws):
+def _(auto_by, group_store: dict[str, str], mo, set_group_rev, ws):
     def _fill():
         for row in ws.rows.iter_rows(named=True):
             label = {
@@ -1002,16 +999,7 @@ def _(auto_by, group_store, mo, set_group_rev, ws):
 
 
 @app.cell
-def _(
-    group_a,
-    group_b,
-    group_band,
-    group_kind,
-    group_metric,
-    mo,
-    pl,
-    ws_grouped,
-):
+def _(group_a, group_b, group_band, group_kind, group_metric, mo, ws_grouped):
     _names = ws_grouped.group_names
     _kind = None if group_kind.value == "(none)" else group_kind.value
     if not _names:
@@ -1213,6 +1201,23 @@ def _(
             ),
         ]
     )
+    return
+
+
+@app.cell
+def _(ws):
+    fs = ws.dataset[0]
+    return (fs,)
+
+
+@app.cell
+def _(fs, mo):
+    mo.ui.data_explorer(fs)
+    return
+
+
+@app.cell
+def _():
     return
 
 
