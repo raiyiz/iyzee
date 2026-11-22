@@ -336,7 +336,7 @@ def test_each_step_drives_the_caller_owned_devices_in_order(monkeypatch):
         "THz"
     ]
     assert [config.center_hz for _, config in prepared][:2] == [1e6, 1.5e6]
-    assert [e[0] for e in events] == ["set", "read"] and shutter.events == ["open", "close"]
+    assert [e[0] for e in events] == ["set", "read"]
     assert frequency[0].meta["measured_frequency_thz"] == 377.1
     assert prepared[0][0] is mx  # the caller's analyzer
     assert shutter.events == ["close", "open", "close"]
