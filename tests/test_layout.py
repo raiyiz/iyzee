@@ -30,7 +30,7 @@ CONTROLS = {
         "#freq-center",
         "#freq-channel",
         "#freq-points",
-        "#freq-offset-khz",
+        "#freq-offset-mhz",
     ],
 }
 ALWAYS = ["#run-sweep", "#abort-sweep", "#capture-trace", "#sweep-progress"]
