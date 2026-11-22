@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import ClassVar
 
 from rich.markup import escape
 from textual import work
@@ -33,7 +34,7 @@ class ConnectScreen(Page):
     """Table of instruments with live connect/disconnect status."""
 
     # Local double-tap sequence: ``c`` remains available for page navigation.
-    BINDINGS = [Binding("c,c", "connect_all", "Connect all")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("c,c", "connect_all", "Connect all")]
 
     def compose(self) -> ComposeResult:
         yield Static("Instruments", classes="panel-title")
