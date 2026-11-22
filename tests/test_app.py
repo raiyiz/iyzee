@@ -12,7 +12,7 @@ from helpers import (
     plain,
     wait_until,
 )
-from textual.widgets import ContentSwitcher, Static
+from textual.widgets import ContentSwitcher, Select, Static
 
 from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.ipython import LabProxy
@@ -98,12 +98,34 @@ async def test_nav_rail_and_sweep_banner_update_the_moment_a_connect_finishes(
     app = connect_app(monkeypatch, FakeHandle(), key="mxa")
     async with app.run_test() as pilot:
         nav = app.query_one("#nav-instruments", Static)
+        sweep = app.query_one(SweepScreen)
+        banner = sweep.query_one("#sweep-status", Static)
+        # Keep this connection-update check on bandwidth mode; frequency is
+        # now the default and additionally needs the shutter and wavemeter.
+        sweep.query_one("#sweep-type", Select).value = "bandwidth"
+        await pilot.pause()
         assert "○ Fk" in plain(nav)
         _, table = await enter_on_first_row(app, pilot)
         await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")
         await pilot.pause()
         assert "● Fk" in plain(nav), plain(nav)  # no page switch in between
-        assert not app.query_one("#sweep-status", Static).display
+        assert not banner.display
+
+        sweep.query_one("#sweep-type", Select).value = "frequency"
+        await pilot.pause()
+        assert banner.display and "shutter" in plain(banner)
+        app.handles["shutter"] = FakeHandle()
+        app.instruments_changed()
+        await pilot.pause()
+        assert banner.display and "wavemeter" in plain(banner)
+        app.handles["wavemeter"] = FakeHandle()
+        app.instruments_changed()
+        await pilot.pause()
+        assert not banner.display
+        del app.handles["mxa"]
+        app.instruments_changed()
+        await pilot.pause()
+        assert banner.display and "MXA" in plain(banner)
 
 
 @async_test
