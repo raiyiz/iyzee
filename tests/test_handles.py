@@ -80,6 +80,7 @@ class _FakeVisaDevice:
         self.ip = ip
         self.connected = False
         self.closed = False
+        self.instrument: object | None = object()
 
     def connect(self) -> None:
         self.connected = True
