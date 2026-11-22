@@ -1,5 +1,5 @@
-import pyvisa
 import pytest
+import pyvisa
 from pyvisa.constants import StatusCode
 
 from iyzee.devices.mxa import KeysightMXA
