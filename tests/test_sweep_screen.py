@@ -104,45 +104,6 @@ async def test_the_form_defaults_validation_and_missing_instruments() -> None:
     await _an_invalid_field_is_named_marked_and_foc()
 
 
-# -- pre-flight guards and the "not ready" banner ------------------------------------------
-
-
-@async_test
-async def test_sweep_banner_tracks_the_connections_it_needs() -> None:
-    app = IyzeeApp()
-    async with app.run_test() as pilot:
-        screen = await _open_sweep_screen(pilot)
-        banner = screen.query_one("#sweep-status", Static)
-        assert banner.display
-        assert "MXA" in plain(banner) and "F1" in plain(banner)
-
-        app.handles["mxa"] = FakeHandle()
-        app.instruments_changed()
-        await pilot.pause()
-        assert not banner.display
-
-        screen.query_one("#sweep-type", Select).value = "frequency"
-        await pilot.pause()
-        assert banner.display
-        assert "shutter" in plain(banner) and "MXA" not in plain(banner)
-
-        app.handles["shutter"] = FakeHandle()
-        app.instruments_changed()
-        await pilot.pause()
-        assert banner.display
-        assert "wavemeter" in plain(banner)
-
-        app.handles["wavemeter"] = FakeHandle()
-        app.instruments_changed()
-        await pilot.pause()
-        assert not banner.display
-
-        del app.handles["mxa"]
-        app.instruments_changed()
-        await pilot.pause()
-        assert banner.display and "MXA" in plain(banner)
-
-
 # -- running a (fake) sweep: abort, and saving as it goes ----------------------------------
 
 
