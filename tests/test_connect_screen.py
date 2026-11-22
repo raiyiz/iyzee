@@ -42,12 +42,11 @@ async def test_connecting_a_row_updates_table_handles_hint_and_detail(
     handle = FakeHandle(probe=idn)
     app = connect_app(monkeypatch, handle)
     async with app.run_test(size=(140, 30)) as pilot:
-        await pilot.press("c")
-        await pilot.pause()
         hint = app.query_one("#connect-hint", Static)
         assert "connect Fake" in plain(hint) and "disconnect" not in plain(hint)
 
-        _, table = await enter_on_first_row(app, pilot)
+        await pilot.press("c", "c")
+        table = app.query_one("#instrument-table", DataTable)
         await _row_is(pilot, table, "connected")
         await pilot.pause()
         assert app.handles["fake"] is handle and handle.connected
