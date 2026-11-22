@@ -174,11 +174,14 @@ def test_each_step_drives_the_caller_owned_devices_in_order(monkeypatch):
         ("set", 377.1, 4),
         ("sleep", 0.5),
         ("read", 4),
+        ("sleep", 0.05),  # the shutter finishes opening ...
         ("acquire", 1),
+        ("sleep", 0.05),  # ... and finishes closing before the reference is taken
         ("acquire", 2),
     ]
     assert shutter.events == ["open", "close"]  # opened only for the squeezing trace
     assert result.meta["measured_frequency_thz"] == pytest.approx(377.100002)
+    assert result.meta["setpoint_error_thz"] == pytest.approx(2e-6)
 
     # -- sweeps run on the caller owned devices and never build their own
     _quiet(monkeypatch)
@@ -215,3 +218,84 @@ def test_each_step_drives_the_caller_owned_devices_in_order(monkeypatch):
 
 
 # -- running a sweep ----------------------------------------------------------------------------
+
+
+# -- the shutter, the laser and aborting, when things go wrong ------------------------------------
+
+
+class _Mx:
+    """Enough of an analyzer for acquire_pair; ``fail_on`` is the trace that raises."""
+
+    def __init__(self, fail_on: int | None = None) -> None:
+        self.fail_on, self.current = fail_on, 0
+
+    def set_trace_update(self, trace, state):
+        self.current = trace
+
+    def single_sweep_wait(self):
+        if self.current == self.fail_on:
+            raise TimeoutError("sweep lagged")
+        return True
+
+    def get_trace_data(self, trace_num, binary=False):
+        return [-70.0, -71.0]
+
+
+def test_the_shutter_is_closed_and_the_failure_reported_whatever_goes_wrong(monkeypatch):
+    from iyzee.devices.power import ShutterError
+    from iyzee.experiment.procedures import acquire_pair
+
+    monkeypatch.setattr("iyzee.experiment.procedures.time.sleep", lambda s: None)
+    shutter = FakeShutterControl()
+    with pytest.raises(TimeoutError):  # the squeezing acquisition fails ...
+        acquire_pair(_Mx(fail_on=1), shutter)
+    assert shutter.events == ["open", "close"]  # ... and the shutter still closes
+
+    class Stubborn(FakeShutterControl):
+        def close(self):
+            self.events.append("close")
+            raise OSError("socket closed")
+
+    stubborn = Stubborn()
+    with pytest.raises(ShutterError, match="could not close"):  # never a quiet shot-noise run
+        acquire_pair(_Mx(), stubborn)
+    assert stubborn.events.count("close") == 3  # tried more than once first
+
+
+def test_a_failed_trace_is_not_data_and_an_abort_between_traces_leaves_the_shutter_closed():
+    from iyzee.experiment.core import RunAborted
+    from iyzee.experiment.procedures import acquire_pair, acquire_trace
+
+    class Unfinished(_Mx):
+        def single_sweep_wait(self):
+            return False
+
+    with pytest.raises(Exception, match="did not finish"):
+        acquire_trace(Unfinished(), 1)
+
+    shutter = FakeShutterControl()
+    ctx = ExperimentContext(mx=_Mx(), run_id="t", should_abort=lambda: "close" in shutter.events)
+    with pytest.raises(RunAborted):
+        acquire_pair(ctx.mx, shutter, ctx=ctx, settle_s=0.0)
+    assert shutter.events == ["open", "close"]
+
+
+def test_the_laser_can_be_required_to_reach_its_setpoint_before_the_point_is_taken(monkeypatch):
+    from iyzee.experiment.procedures import LaserNotSettledError
+
+    monkeypatch.setattr("iyzee.experiment.core.time.sleep", lambda s: None)
+    readings = iter([377.1005, 377.1002, 377.10000001])
+    wavemeter = SimpleNamespace(
+        set_pid_setpoint=lambda f, c: None, read_frequency=lambda c: next(readings)
+    )
+    ctx = ExperimentContext(mx=_Mx(), run_id="t", shutter=FakeShutterControl(), wavemeter=wavemeter)
+    step = FrequencyStep(377.1, 4, relax_time_s=0.0, settle_tolerance_thz=1e-6)
+    meta = step.apply(ctx)
+    assert meta["measured_frequency_thz"] == pytest.approx(377.10000001)
+    assert abs(meta["setpoint_error_thz"]) <= 1e-6
+
+    stuck = SimpleNamespace(set_pid_setpoint=lambda f, c: None, read_frequency=lambda c: 377.2)
+    ctx = ExperimentContext(mx=_Mx(), run_id="t", wavemeter=stuck)
+    step = FrequencyStep(377.1, 4, relax_time_s=0.0, settle_tolerance_thz=1e-6, settle_timeout_s=1)
+    with pytest.raises(LaserNotSettledError, match="from the setpoint"):
+        step.apply(ctx)

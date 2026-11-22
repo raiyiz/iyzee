@@ -11,16 +11,21 @@ runs any of them. A new axis is one subclass, those three functions and an entry
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar, TypedDict, Unpack
 
-from ..devices.mxa import KeysightMXA
-from ..devices.power import ShutterControl
+import numpy as np
+
+from ..devices.mxa import KeysightMXA, MXAProtocolError, MXATimeoutError
+from ..devices.power import ShutterControl, ShutterError
 from ..devices.wavemeter import DEFAULT_CHANNEL, Wavemeter
 from .core import ExperimentContext, StepResult, run_sequence
+
+log = logging.getLogger("iyzee.experiment")
 
 TRACE_SQZ = 1
 TRACE_SHOT = 2
@@ -65,36 +70,117 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
     return mx
 
 
-def acquire_trace(mx, trace_num):
-    """Acquire one trace and return its data."""
+def _checked(trace: Sequence[float], trace_num: int) -> Sequence[float]:
+    """The trace itself, if it is usable: not empty and every sample a finite number."""
+    values = np.asarray(trace, dtype=np.float64)
+    if values.size == 0 or not np.isfinite(values).all():
+        raise MXAProtocolError(f"trace {trace_num} came back empty or with non-finite samples")
+    return trace
+
+
+def acquire_trace(mx, trace_num, *, timeout_s: float | None = None):
+    """Acquire one trace and return its data.
+
+    A sweep that does not finish in time is an error (:class:`MXATimeoutError`; the analyzer
+    has been aborted and its session cleared), never a trace read off an unfinished sweep.
+    ``timeout_s`` defaults to what the analyzer's own settings call for.
+    """
     mx.set_trace_update(trace_num, True)
     try:
-        mx.single_sweep_wait()
-        return mx.get_trace_data(trace_num=trace_num, binary=False)
-    finally:
-        mx.set_trace_update(trace_num, False)
+        finished = (
+            mx.single_sweep_wait()
+            if timeout_s is None
+            else mx.single_sweep_wait(timeout_sec=timeout_s)
+        )
+        if not finished:
+            raise MXATimeoutError(f"trace {trace_num}: the sweep did not finish in time")
+        data = _checked(mx.get_trace_data(trace_num=trace_num, binary=False), trace_num)
+    except BaseException:
+        try:  # the failure in flight is the one to report; this is only tidying up
+            mx.set_trace_update(trace_num, False)
+        except Exception:
+            log.exception("could not freeze trace %s after a failed acquisition", trace_num)
+        raise
+    mx.set_trace_update(trace_num, False)
+    return data
 
 
-def acquire_pair(mx: Any, shutter: Any | None = None) -> dict[str, Any]:
+#: Seconds to let the shutter finish moving after it was told to open or close.
+SHUTTER_SETTLE_S = 0.05
+#: A shutter that will not close is the one failure that spoils the shot-noise reference
+#: without any sign in the data, so closing is tried this many times before giving up.
+SHUTTER_CLOSE_ATTEMPTS = 3
+
+
+def _close_shutter(shutter: Any) -> None:
+    """Close the shutter or raise :class:`ShutterError`; never leave it open quietly."""
+    failure: Exception | None = None
+    for attempt in range(1, SHUTTER_CLOSE_ATTEMPTS + 1):
+        try:
+            shutter.close()
+            return
+        except Exception as exc:
+            failure = exc
+            log.exception("shutter did not close (attempt %d/%d)", attempt, SHUTTER_CLOSE_ATTEMPTS)
+    log.critical("THE SHUTTER MAY STILL BE OPEN: it could not be closed: %s", failure)
+    raise ShutterError(f"could not close the shutter: {failure}") from failure
+
+
+def acquire_pair(
+    mx: Any,
+    shutter: Any | None = None,
+    *,
+    ctx: ExperimentContext | None = None,
+    settle_s: float = SHUTTER_SETTLE_S,
+) -> dict[str, Any]:
     """Acquire the squeezing and shot-noise traces, in that order.
 
     A ``shutter`` is open only around the squeezing acquisition and is closed again (in a
-    ``finally``) before the shot-noise reference, which must not include the squeezed-light
-    path. Without one both traces are taken as the setup stands.
+    ``finally``, retried, and loudly an error if it will not close) before the shot-noise
+    reference, which must not include the squeezed-light path. ``settle_s`` is given to it to
+    finish moving after each change. Without a shutter both traces are taken as the setup
+    stands. With a ``ctx`` the stages are reported (``ctx.phase``) and an abort request is
+    honoured between them, with the shutter closed.
     """
+
+    def say(text: str) -> None:
+        if ctx is not None:
+            ctx.phase(text)
+
+    def pause() -> None:
+        if ctx is not None:
+            ctx.sleep(settle_s)
+        elif settle_s > 0:
+            time.sleep(settle_s)
+
     try:
         if shutter is not None:
+            say("opening the shutter")
             shutter.open()
+            pause()
+        say("acquiring the squeezing trace")
         squeezing = acquire_trace(mx, TRACE_SQZ)
     finally:
         if shutter is not None:
-            shutter.close()
+            say("closing the shutter")
+            _close_shutter(shutter)
+    if shutter is not None:
+        pause()
+    if ctx is not None:
+        ctx.check_abort()
+    say("acquiring the shot-noise trace")
     return {"squeezing": squeezing, "shot_noise": acquire_trace(mx, TRACE_SHOT)}
 
 
 #: Seconds the laser gets to settle on a new PID setpoint before it is read.
 SETTLE_TIME_S = 0.5
 DEFAULT_LASER_CENTER_THZ = 377.1052067
+#: How often the wavemeter is read again while waiting for the laser to reach its setpoint.
+SETTLE_POLL_S = 0.1
+
+
+class LaserNotSettledError(RuntimeError):
+    """The wavemeter never read within the tolerance of the setpoint."""
 
 
 class SweepStep:
@@ -113,6 +199,8 @@ class SweepStep:
     x_field: ClassVar[str]
     label_format: ClassVar[str]
     requires: ClassVar[tuple[str, ...]] = ("mxa",)
+    #: Seconds the shutter gets to move (see :func:`acquire_pair`); a subclass may make it a field.
+    shutter_settle_s: float = SHUTTER_SETTLE_S
 
     @property
     def x_value(self) -> float:
@@ -134,8 +222,14 @@ class SweepStep:
                 f"{type(self).__name__} requires ctx.{', ctx.'.join(missing)} to be set"
             )
         uses_shutter = "shutter" in self.requires
+        ctx.check_abort()
         meta = self.apply(ctx)
-        traces = acquire_pair(ctx.mx, ctx.shutter if uses_shutter else None)
+        traces = acquire_pair(
+            ctx.mx,
+            ctx.shutter if uses_shutter else None,
+            ctx=ctx,
+            settle_s=self.shutter_settle_s,
+        )
         return StepResult(self.label, self.x_value, self.x_unit, traces, meta)
 
 
@@ -173,6 +267,12 @@ class FrequencyStep(SweepStep):
     frequency_thz: float
     wavemeter_channel: int
     relax_time_s: float = SETTLE_TIME_S
+    shutter_settle_s: float = SHUTTER_SETTLE_S
+    #: Opt-in lock check: after ``relax_time_s``, keep reading (every ``SETTLE_POLL_S``, for at
+    #: most ``settle_timeout_s``) until the wavemeter is within this many THz of the setpoint;
+    #: otherwise the point fails with :class:`LaserNotSettledError`. ``None`` records only.
+    settle_tolerance_thz: float | None = None
+    settle_timeout_s: float = 10.0
 
     kind: ClassVar[str] = "frequency"
     x_unit: ClassVar[str] = "THz"
@@ -180,14 +280,38 @@ class FrequencyStep(SweepStep):
     label_format: ClassVar[str] = "freq={:.6f}THz"
     requires: ClassVar[tuple[str, ...]] = ("mxa", "shutter", "wavemeter")
 
-    def apply(self, ctx: ExperimentContext) -> dict[str, Any]:
+    def _read_settled(self, ctx: ExperimentContext) -> float:
+        """The wavemeter reading, after waiting for the setpoint if a tolerance was asked for."""
         wavemeter = ctx.wavemeter
-        wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
-        time.sleep(self.relax_time_s)
+        reading = wavemeter.read_frequency(self.wavemeter_channel)
+        tolerance = self.settle_tolerance_thz
+        if tolerance is None:
+            return reading
+        for _ in range(max(1, round(self.settle_timeout_s / SETTLE_POLL_S))):
+            if abs(reading - self.frequency_thz) <= tolerance:
+                return reading
+            ctx.sleep(SETTLE_POLL_S)
+            reading = wavemeter.read_frequency(self.wavemeter_channel)
+        if abs(reading - self.frequency_thz) <= tolerance:
+            return reading
+        raise LaserNotSettledError(
+            f"the wavemeter reads {reading:.9f} THz, {abs(reading - self.frequency_thz) * 1e6:.2f} MHz "
+            f"from the setpoint {self.frequency_thz:.9f} THz after {self.settle_timeout_s:g} s"
+        )
+
+    def apply(self, ctx: ExperimentContext) -> dict[str, Any]:
+        ctx.phase(f"setting the laser to {self.frequency_thz:.7f} THz")
+        ctx.wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
+        ctx.phase(f"waiting {self.relax_time_s:g} s for the laser to settle")
+        ctx.sleep(self.relax_time_s)
+        ctx.phase("reading the wavemeter")
+        measured = self._read_settled(ctx)
         return {
             "wavemeter_channel": self.wavemeter_channel,
             "relax_time_s": self.relax_time_s,
-            "measured_frequency_thz": wavemeter.read_frequency(self.wavemeter_channel),
+            "shutter_settle_s": self.shutter_settle_s,
+            "measured_frequency_thz": measured,
+            "setpoint_error_thz": measured - self.frequency_thz,
         }
 
 
@@ -228,12 +352,19 @@ def frequency_sweep_steps(
     wavemeter_channel: int = DEFAULT_CHANNEL,
     relax_time_s: float = SETTLE_TIME_S,
     offsets_thz=None,
+    *,
+    settle_tolerance_thz: float | None = None,
 ) -> list[FrequencyStep]:
     """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
         offsets_thz = [i * FREQUENCY_STEP_THZ for i in range(-1, 1)]
     return [
-        FrequencyStep(laser_center_thz + offset, wavemeter_channel, relax_time_s)
+        FrequencyStep(
+            laser_center_thz + offset,
+            wavemeter_channel,
+            relax_time_s,
+            settle_tolerance_thz=settle_tolerance_thz,
+        )
         for offset in offsets_thz
     ]
 
@@ -265,6 +396,7 @@ def build_frequency_sweep(
     offsets_thz=None,
     *,
     relax_time_s: float = SETTLE_TIME_S,
+    settle_tolerance_thz: float | None = None,
     **config: Unpack[ConfigOptions],
 ) -> Sweep:
     """Build a frequency sweep and the analyzer configuration it needs.
@@ -272,7 +404,13 @@ def build_frequency_sweep(
     The settle time is the laser's, not the analyzer's: every acquisition restarts the
     averaging (``INIT:IMM``), so no analyzer-side wait is needed.
     """
-    steps = frequency_sweep_steps(laser_center_thz, wavemeter_channel, relax_time_s, offsets_thz)
+    steps = frequency_sweep_steps(
+        laser_center_thz,
+        wavemeter_channel,
+        relax_time_s,
+        offsets_thz,
+        settle_tolerance_thz=settle_tolerance_thz,
+    )
     return Sweep("frequency", steps, frequency_sweep_config(**config))
 
 

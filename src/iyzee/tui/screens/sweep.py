@@ -24,6 +24,7 @@ from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Grid, Vertical
+from textual.timer import Timer
 from textual.widgets import (
     Button,
     Input,
@@ -118,6 +119,7 @@ class SweepScreen(Page):
             yield Button("Run sweep", id="run-sweep", variant="success")
             yield Button("Abort", id="abort-sweep", variant="error", disabled=True)
             yield Button("Capture trace", id="capture-trace")
+        yield Static("", id="sweep-phase")
         yield ProgressBar(id="sweep-progress", total=1)
         yield PlotextPlot(id="sweep-plot")
         yield RichLog(id="sweep-log", highlight=False, markup=True)
@@ -126,6 +128,9 @@ class SweepScreen(Page):
         self._abort_event = Event()
         self._runner: SweepRunner | None = None  # the current (or last) run
         self._next_live_plot = 0.0
+        self._phase = ""
+        self._phase_since = monotonic()
+        self._phase_timer: Timer | None = None
         self.query_one("#freq-fields").display = False
         plot = self.query_one("#sweep-plot", PlotextPlot)
         plot.plt.title("Squeezing - shot noise")
@@ -202,10 +207,11 @@ class SweepScreen(Page):
             self._start_capture()
 
     def _request_abort(self) -> None:
-        """Abort takes effect at the next step boundary, not instantly — a
-        step is one analyzer averaging run and can't be interrupted. So
-        acknowledge the click visibly, otherwise a silently greyed-out
-        button looks like nothing happened."""
+        """Abort takes effect at the next stage boundary (between setting the
+        laser, the two acquisitions and the next point), not instantly — an
+        analyzer averaging run in flight can't be interrupted. So acknowledge
+        the click visibly, otherwise a silently greyed-out button looks like
+        nothing happened."""
         self._abort_event.set()
         button = self.query_one("#abort-sweep", Button)
         button.disabled = True
@@ -247,6 +253,7 @@ class SweepScreen(Page):
             on_point=self._on_point,
             should_abort=self._should_abort,
             on_save_error=self._report_save_error,
+            on_phase=self._on_phase,
         )
         log = self.query_one("#sweep-log", RichLog)
         log.clear()
@@ -271,6 +278,8 @@ class SweepScreen(Page):
         self.query_one("#capture-trace", Button).disabled = True
         self.iyzee_app.sweep_running = True
         self.iyzee_app.session_note(f"{kind} sweep running ({len(sweep.steps)} points)")
+        self._set_phase("starting")
+        self._phase_timer = self.set_interval(0.5, self._show_phase)
         self._run(self._runner)
 
     def _build_bandwidth_run(self) -> Sweep:
@@ -320,6 +329,30 @@ class SweepScreen(Page):
         if self._runner is not None:  # leave "failed" on disk, not "running"
             self._runner.mark_died()
         self._ui(self._finish, kind, aborted=False, setup_error=None, died=exc)
+
+    def _on_phase(self, text: str) -> None:
+        """What the run is doing now, from the worker thread."""
+        self._ui(self._set_phase, text)
+
+    def _set_phase(self, text: str) -> None:
+        self._phase, self._phase_since = text, monotonic()
+        self._show_phase()
+
+    def _show_phase(self) -> None:
+        """Show the stage and how long it has lasted, so a stall says where it is stalled."""
+        line = (
+            f"{escape(self._phase)} ({monotonic() - self._phase_since:.0f} s)"
+            if self._phase
+            else ""
+        )
+        self.query_one("#sweep-phase", Static).update(line)
+
+    def _stop_phase(self) -> None:
+        if self._phase_timer is not None:
+            self._phase_timer.stop()
+            self._phase_timer = None
+        self._phase = ""
+        self._show_phase()
 
     def _should_abort(self) -> bool:
         return self._abort_event.is_set() or self.iyzee_app.shutdown_requested.is_set()
@@ -446,6 +479,7 @@ class SweepScreen(Page):
         setup_error: Exception | None,
         died: BaseException | None = None,
     ) -> None:
+        self._stop_phase()
         self.iyzee_app.sweep_running = False
         self.iyzee_app.session_note("idle")
         self.query_one("#run-sweep", Button).disabled = False
@@ -455,11 +489,9 @@ class SweepScreen(Page):
         log = self.query_one("#sweep-log", RichLog)
 
         if setup_error is not None:
-            log.write(
-                f"[red]Could not configure the analyzer: {escape(one_line(setup_error))}[/red]"
-            )
+            log.write(f"[red]Could not start the sweep: {escape(one_line(setup_error))}[/red]")
             self.notify(
-                f"Analyzer setup failed: {one_line(setup_error)}", severity="error", markup=False
+                f"Sweep could not start: {one_line(setup_error)}", severity="error", markup=False
             )
             return
 

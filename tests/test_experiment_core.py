@@ -75,3 +75,71 @@ def test_a_run_record_reports_how_the_run_ended_and_can_be_fed_by_run_sequence()
         {"index": 1, "label": "step[1]", "error_type": "ValueError", "error": "wavemeter said no"}
     ]
     assert meta["config"] == {"center_hz": 1e6} and meta["run_id"] == record.run_id
+
+
+# -- abort, retry and progress ----------------------------------------------------------------
+
+
+class _Flaky:
+    """Fails with ``error`` the first ``failures`` times, then measures."""
+
+    label = "flaky"
+
+    def __init__(self, error: Exception, failures: int) -> None:
+        self.error, self.failures, self.calls = error, failures, 0
+
+    def run(self, ctx):
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise self.error
+        return StepResult(self.label, 1.0, "Hz", {})
+
+
+def test_a_step_that_times_out_is_tried_again_and_says_so_but_other_errors_are_not(monkeypatch):
+    monkeypatch.setattr("iyzee.experiment.core.time.sleep", lambda s: None)
+    step = _Flaky(TimeoutError("lagged"), failures=1)
+    (result,) = run_sequence([step], make_ctx(), retries=1)
+    assert step.calls == 2 and result.meta["attempts"] == 2
+
+    always = _Flaky(TimeoutError("lagged"), failures=9)
+    with pytest.raises(TimeoutError):  # out of attempts: the usual on_error policy applies
+        run_sequence([always], make_ctx(), retries=2)
+    assert always.calls == 3
+
+    wrong = _Flaky(ValueError("a bug"), failures=9)
+    assert run_sequence([wrong], make_ctx(), retries=2, on_error="skip") == []
+    assert wrong.calls == 1  # not a transient fault: not repeated
+
+    clean = _Flaky(TimeoutError(), failures=0)
+    assert "attempts" not in run_sequence([clean], make_ctx(), retries=1)[0].meta
+
+
+def test_an_abort_from_inside_a_step_stops_the_run_even_when_failures_are_skipped():
+    from iyzee.experiment.core import RunAborted
+
+    ctx = ExperimentContext(mx=object(), run_id="r", should_abort=lambda: True)
+    steps = [RecordingStep("a", 1), RecordingStep("b", 2)]
+    with pytest.raises(RunAborted):
+        run_sequence(steps, ctx, on_error="skip")
+
+
+def test_a_wait_notices_an_abort_and_the_run_reports_what_it_is_doing(monkeypatch):
+    from iyzee.experiment.core import RunAborted
+
+    slept: list[float] = []
+    monkeypatch.setattr("iyzee.experiment.core.time.sleep", slept.append)
+    seen: list[str] = []
+    stop = {"now": False}
+
+    def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+        stop["now"] = len(slept) == 2  # the request arrives during the second slice
+
+    monkeypatch.setattr("iyzee.experiment.core.time.sleep", fake_sleep)
+    ctx = ExperimentContext(
+        mx=object(), run_id="r", progress=seen.append, should_abort=lambda: stop["now"]
+    )
+    ctx.phase("settling")
+    with pytest.raises(RunAborted):
+        ctx.sleep(10.0)  # would be 20 slices; the abort cuts it to two
+    assert slept == [0.5, 0.5] and seen == ["settling"]

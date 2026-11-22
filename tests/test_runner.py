@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -115,3 +116,91 @@ def test_aborting_a_failed_setup_a_failing_save_and_a_dead_worker_all_end_cleanl
     outcome = SweepRunner(_sweep(_Point("a")), {"mxa": object()}).run()
     assert outcome.record is None and not outcome.collected
     assert isinstance(outcome.setup_error, RuntimeError)
+
+
+# -- an instrument in use, a supply that is off, a point that times out ----------------------------
+
+
+def test_a_run_does_not_wait_for_ever_for_an_instrument_in_use(lab_dir: Path):
+    import threading
+
+    lock = threading.RLock()
+    held, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with lock:
+            held.set()
+            release.wait(5)
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    held.wait(5)
+    try:
+        outcome = SweepRunner(
+            _sweep(_Point("a")), {"mxa": object()}, [lock], lock_timeout_s=0.3
+        ).run()
+        assert isinstance(outcome.setup_error, runner_mod.InstrumentBusyError)
+        assert not outcome.collected and outcome.record is None
+
+        asked = SweepRunner(
+            _sweep(_Point("a")), {"mxa": object()}, [lock], should_abort=lambda: True
+        ).run()
+        assert asked.aborted and asked.setup_error is None  # an abort is heard while waiting
+    finally:
+        release.set()
+        thread.join()
+    assert lock.acquire(timeout=1)  # and the run left nothing locked behind it
+    lock.release()
+
+
+class _Supply:
+    def __init__(self, master_on: bool) -> None:
+        self.master_on, self.closed = master_on, 0
+
+    def retrieve_state(self):
+        return SimpleNamespace(general_output=self.master_on)
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+def _frequency_like(*steps: Any) -> Sweep:
+    return Sweep(kind="frequency", steps=list(steps), config=AnalyzerConfig())
+
+
+def test_a_run_refuses_to_start_with_the_supply_off_and_always_leaves_the_shutter_closed(
+    lab_dir: Path,
+):
+    off = _Supply(master_on=False)
+    outcome = SweepRunner(_frequency_like(_Point("a")), {"mxa": object(), "shutter": off}).run()
+    assert "master output is off" in str(outcome.setup_error) and not outcome.collected
+
+    on = _Supply(master_on=True)
+    outcome = SweepRunner(_frequency_like(_Point("a")), {"mxa": object(), "shutter": on}).run()
+    assert outcome.setup_error is None and len(outcome.collected) == 1
+    assert on.closed == 1  # closed at the end of the run, as a last guarantee
+
+
+def test_a_point_that_times_out_once_is_measured_on_the_second_try(
+    lab_dir: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("iyzee.experiment.core.time.sleep", lambda s: None)
+    monkeypatch.setattr(runner_mod, "RETRY_DELAY_S", 0.0)
+
+    class Lagging(_Point):
+        calls = 0
+
+        def run(self, ctx: Any) -> StepResult:
+            Lagging.calls += 1
+            if Lagging.calls == 1:
+                raise TimeoutError("the analyzer lagged")
+            return super().run(ctx)
+
+    phases: list[str] = []
+    outcome = SweepRunner(
+        _sweep(Lagging("a"), _Point("b")), {"mxa": object()}, on_phase=phases.append
+    ).run()
+    assert [r.label for r in outcome.collected] == ["a", "b"]
+    assert outcome.collected[0].meta["attempts"] == 2
+    assert outcome.record is not None and outcome.record.status == "completed"
+    assert any("trying again" in text for text in phases)

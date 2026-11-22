@@ -140,6 +140,10 @@ class PSU(BaseDevice):
         self.instrument.write("OUTP:GEN 0")
 
 
+class ShutterError(RuntimeError):
+    """The shutter could not be put in the state that was asked for."""
+
+
 class ShutterControl:
     """The optical shutter: one channel of a :class:`PSU`, which it borrows.
 

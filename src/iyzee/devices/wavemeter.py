@@ -8,6 +8,9 @@ The client is used directly from scripts and the console.
 from __future__ import annotations
 
 import logging
+import math
+import time
+from collections.abc import Callable
 
 import requests
 
@@ -17,9 +20,13 @@ log = logging.getLogger("iyzee.wavemeter")
 
 # Every request to the wavemeter server is bounded: a sweep calls it while it
 # holds the instrument locks, so an unanswered request would freeze the run
-# (and make quitting wait for it).
-READ_TIMEOUT_S = 1.0
+# (and make quitting wait for it). Each attempt is bounded by the timeout, a failed attempt
+# is repeated (a slow or briefly busy server is not a failed measurement), and the whole
+# call by ATTEMPTS x timeout. A refusal from the server itself (an HTTP 4xx) is not retried.
+READ_TIMEOUT_S = 2.0
 SETPOINT_TIMEOUT_S = 3.0
+ATTEMPTS = 3
+RETRY_DELAY_S = 0.2
 DEFAULT_CHANNEL = 4
 WAVEMETER_PORT = 8000
 
@@ -69,6 +76,10 @@ Rb_transitions: list[tuple[str, float]] = [
 ]
 
 
+class WavemeterError(OSError):
+    """The wavemeter server gave no usable answer (an ``OSError``: worth retrying)."""
+
+
 class Wavemeter:
     """HTTP client for the wavemeter server.
 
@@ -87,23 +98,57 @@ class Wavemeter:
     def __repr__(self) -> str:
         return f"<Wavemeter {self.base_url}>"
 
+    def _send(
+        self, send: Callable[..., requests.Response], url: str, what: str, **kwargs: object
+    ) -> requests.Response:
+        """One request, repeated up to ``ATTEMPTS`` times if the server cannot be reached,
+        does not answer in time or fails on its side; ``WavemeterError`` if none worked."""
+        failure: Exception | None = None
+        for attempt in range(1, ATTEMPTS + 1):
+            try:
+                response = send(url, **kwargs)
+                response.raise_for_status()
+                return response
+            except requests.HTTPError as exc:
+                failure = exc
+                if exc.response is not None and exc.response.status_code < 500:
+                    break  # the server understood and refused: asking again will not help
+            except requests.RequestException as exc:
+                failure = exc
+            log.warning("[WS-7] %s: attempt %d/%d failed: %s", what, attempt, ATTEMPTS, failure)
+            if attempt < ATTEMPTS:
+                time.sleep(RETRY_DELAY_S)
+        raise WavemeterError(f"{what}: {failure}") from failure
+
     def read_frequency(self, channel: int = DEFAULT_CHANNEL) -> float:
-        """Read the frequency of one wavemeter channel in THz."""
-        response = requests.get(
-            f"{self.base_url}frequency/{channel}/",
-            timeout=READ_TIMEOUT_S,
+        """Read the frequency of one wavemeter channel in THz.
+
+        Raises :class:`WavemeterError` if the server cannot be reached or does not report a
+        frequency. The WS-7 reports "no signal", "over/under-exposed" and the like as
+        zero or negative numbers in place of a frequency; those are refused here, not passed
+        on as measurements.
+        """
+        what = f"read channel {channel}"
+        response = self._send(
+            requests.get, f"{self.base_url}frequency/{channel}/", what, timeout=READ_TIMEOUT_S
         )
-        response.raise_for_status()
-        return float(response.text)
+        try:
+            value = float(response.text)
+        except ValueError:
+            raise WavemeterError(f"{what}: answered {response.text[:40]!r}, not a number") from None
+        if not math.isfinite(value) or value <= 0:
+            raise WavemeterError(f"{what}: no valid reading (the server answered {value:g})")
+        return value
 
     def set_pid_setpoint(self, freq: float, channel: int = DEFAULT_CHANNEL) -> None:
-        """Set the PID lock setpoint of one channel, in THz."""
-        response = requests.post(
+        """Set the PID lock setpoint of one channel, in THz (idempotent, so it is retried)."""
+        self._send(
+            requests.post,
             f"{self.base_url}set_pid/",
+            f"set channel {channel} to {freq} THz",
             data={"freq_thz": freq, "channel": channel},
             timeout=SETPOINT_TIMEOUT_S,
         )
-        response.raise_for_status()
         log.info("[WS-7] set PID setpoint of channel %s to %s THz", channel, freq)
 
 

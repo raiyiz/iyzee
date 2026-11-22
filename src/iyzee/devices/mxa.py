@@ -1,9 +1,42 @@
+import logging
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any
 
 import pyvisa
+from pyvisa.constants import StatusCode
 
 from ..config import IP, address
 from .base import BaseDevice
+
+log = logging.getLogger("iyzee.mxa")
+
+#: A sweep gets this many times its nominal duration (sweep time x averages) before it is
+#: called stuck, and never less than ``MIN_SWEEP_TIMEOUT_S``: the analyzer may also be busy
+#: with something else (an automatic alignment) when the sweep is started.
+SWEEP_TIMEOUT_MARGIN = 3.0
+MIN_SWEEP_TIMEOUT_S = 30.0
+#: ``get_errors`` gives up after this many reads rather than loop on a misbehaving queue.
+MAX_ERROR_QUEUE_READS = 100
+
+
+class MXAError(RuntimeError):
+    """The analyzer did something other than what was asked."""
+
+
+class MXATimeoutError(MXAError, TimeoutError):
+    """The analyzer did not answer in time.
+
+    By the time this is raised the session has been cleared (see
+    :meth:`KeysightMXA._resync`): the late reply that is still on its way can no longer be
+    mistaken for the answer to the next command. It is a ``TimeoutError`` (so an ``OSError``),
+    which the experiment runner treats as worth a retry.
+    """
+
+
+class MXAProtocolError(MXAError):
+    """A reply that cannot be what was asked for (wrong length, not numbers, not finite)."""
 
 
 class KeysightMXA(BaseDevice):
@@ -26,15 +59,57 @@ class KeysightMXA(BaseDevice):
         """Backward-compatible alias for :meth:`close`."""
         self.close()
 
-    def write(self, cmd: str):
-        if self.instrument is None:
+    @contextmanager
+    def _io(self, what: str) -> Iterator[Any]:
+        """One VISA exchange. A timeout leaves the reply queued on the analyzer, so it is
+        cleared here and reported as :class:`MXATimeoutError` instead of being left to
+        answer the next, unrelated, query."""
+        inst = self.instrument
+        if inst is None:
             raise RuntimeError("Instrument not connected")
-        self.instrument.write(cmd)
+        try:
+            yield inst
+        except pyvisa.errors.VisaIOError as exc:
+            if exc.error_code != StatusCode.error_timeout:
+                raise
+            seconds = (getattr(inst, "timeout", None) or 0) / 1000
+            self._resync(what)
+            raise MXATimeoutError(
+                f"{getattr(self, 'ip', 'the MXA')} did not answer {what} within {seconds:g}s"
+            ) from exc
+
+    def _resync(self, what: str) -> None:
+        """Get the session back in step after a missed or malformed reply.
+
+        A reply that arrives after its query timed out stays in the output queue and is
+        returned by the *next* read: every later answer is then one behind, a stale ``*OPC?``
+        ends the wait for a sweep that is still averaging, and trace data comes back
+        half-finished with no error. A device clear empties both buffers and ``ABOR`` stops a
+        sweep still running. If even that fails the link is dropped, so the app shows it as
+        lost and the next run starts from a fresh connection instead of a skewed one.
+        """
+        inst = self.instrument
+        log.warning("MXA: %s failed or was not answered; clearing the session", what)
+        try:
+            inst.clear()
+            inst.write("ABOR")
+        except Exception:  # whatever it was, the session cannot be trusted
+            log.exception("MXA: could not clear the session; dropping the connection")
+            self._drop()
+
+    def _drop(self) -> None:
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001 - best effort after a transport failure
+            self.instrument = None
+
+    def write(self, cmd: str):
+        with self._io(cmd) as inst:
+            inst.write(cmd)
 
     def query(self, cmd: str) -> str:
-        if self.instrument is None:
-            raise RuntimeError("Instrument not connected")
-        return self.instrument.query(cmd)
+        with self._io(cmd) as inst:
+            return inst.query(cmd)
 
     def query_binary(
         self, cmd: str, datatype: str = "f", is_big_endian: bool = True
@@ -43,11 +118,10 @@ class KeysightMXA(BaseDevice):
         Query binary IEEE 488.2 block data.
         datatype='f' (float32) or 'd' (float64).
         """
-        if self.instrument is None:
-            raise RuntimeError("Instrument not connected")
-        return self.instrument.query_binary_values(
-            cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
-        )
+        with self._io(cmd) as inst:
+            return inst.query_binary_values(
+                cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
+            )
 
     # ------------------------------------------------------------------
     # System & Synchronization
@@ -60,29 +134,34 @@ class KeysightMXA(BaseDevice):
         self.write("*RST")
         self.write("*CLS")
 
-    def wait_opc(self, timeout_sec: float = 30.0) -> bool:
-        """Block until *OPC? explicitly returns 1."""
-        if self.instrument is None:
+    def wait_opc(self, timeout_sec: float = MIN_SWEEP_TIMEOUT_S) -> bool:
+        """Block until ``*OPC?`` returns 1; ``False`` if it did not come within ``timeout_sec``.
+
+        On a timeout the session is cleared first (see :meth:`_resync`), so ``False`` also
+        means "the analyzer was aborted and the link is back in step", not just "unknown".
+        """
+        inst = self.instrument
+        if inst is None:
             raise RuntimeError("Instrument not connected")
-        old_timeout = self.instrument.timeout
-        self.instrument.timeout = int(timeout_sec * 1000)
+        previous = inst.timeout
+        inst.timeout = int(timeout_sec * 1000)
         try:
-            response = self.query("*OPC?").strip()
-            return response == "1"
-        except pyvisa.errors.VisaIOError:
+            return self.query("*OPC?").strip() == "1"
+        except MXATimeoutError:
             return False
         finally:
-            self.instrument.timeout = old_timeout
+            if self.instrument is inst:  # not dropped meanwhile
+                inst.timeout = previous
 
-    def get_errors(self) -> list[str]:
-        """Drain the SCPI error queue."""
-        errs = []
-        while True:
+    def get_errors(self, limit: int = MAX_ERROR_QUEUE_READS) -> list[str]:
+        """Drain the SCPI error queue (at most ``limit`` reads)."""
+        errs: list[str] = []
+        for _ in range(limit):
             msg = self.query("SYST:ERR?")
             if msg.startswith(("+0,", "0,")):
-                break
+                return errs
             errs.append(msg)
-        return errs
+        raise MXAProtocolError(f"the error queue still was not empty after {limit} reads")
 
     def set_display_update(self, state: bool):
         """Disable display updates to improve remote measurement speed."""
@@ -160,10 +239,28 @@ class KeysightMXA(BaseDevice):
     def abort_sweep(self):
         self.write("ABOR")
 
-    def single_sweep_wait(self, timeout_sec: float = 30.0) -> bool:
+    def sweep_timeout_s(self) -> float:
+        """How long one single sweep may take before it is called stuck.
+
+        ``SWEEP_TIMEOUT_MARGIN`` times what the analyzer is set to do (sweep time x
+        averages), but never less than ``MIN_SWEEP_TIMEOUT_S``. A fixed limit would fail every
+        point of a long configuration, at the same place each time.
+        """
+        try:
+            nominal = float(self.query("SWE:TIME?")) * max(1, int(float(self.query("AVER:COUN?"))))
+        except ValueError:  # an unreadable reply is not a reason to refuse to measure
+            return MIN_SWEEP_TIMEOUT_S
+        return max(MIN_SWEEP_TIMEOUT_S, SWEEP_TIMEOUT_MARGIN * nominal)
+
+    def single_sweep_wait(self, timeout_sec: float | None = None) -> bool:
         """
         Set single sweep, trigger once, and wait for completion.
+
+        ``timeout_sec`` defaults to :meth:`sweep_timeout_s`. ``False`` means it did not
+        finish in time; the analyzer has then been aborted and the session cleared.
         """
+        if timeout_sec is None:
+            timeout_sec = self.sweep_timeout_s()
         self.set_continuous_sweep(False)
         self.initiate_sweep()
         return self.wait_opc(timeout_sec)
@@ -205,17 +302,34 @@ class KeysightMXA(BaseDevice):
         self.write(f":TRACe{trace_num}:CLEar")
 
     def get_trace_data(self, trace_num: int = 1, binary: bool = True) -> list[float]:
+        """Read one trace; its length must be the analyzer's point count.
+
+        A reply of the wrong length or not made of numbers means the session is out of step
+        (a stale reply from an earlier command); it is cleared and
+        :class:`MXAProtocolError` raised rather than returning data that belongs elsewhere.
+        """
+        expected = self.get_sweep_points()
+        command = f":TRACe:DATA? TRACe{trace_num}"
         if binary:
             self.write("FORMat:DATA REAL,32")
             self.write("FORMat:BORDer NORM")
-            return self.query_binary(
-                f":TRACe:DATA? TRACe{trace_num}",
-                datatype="f",
-                is_big_endian=True,
+            values = self.query_binary(command, datatype="f", is_big_endian=True)
+        else:
+            self.write("FORMat:DATA ASCii")
+            reply = self.query(command)
+            try:
+                values = [float(x) for x in reply.split(",")]
+            except ValueError:
+                self._resync(command)
+                raise MXAProtocolError(f"{command} answered {reply[:60]!r}, not numbers") from None
+        # A trace has several points. Requiring that also catches a session shifted by one
+        # reply, where the length query and the trace query would otherwise agree with each other.
+        if expected < 2 or len(values) != expected:
+            self._resync(command)
+            raise MXAProtocolError(
+                f"{command} returned {len(values)} point(s) but the analyzer has {expected}"
             )
-        self.write("FORMat:DATA ASCii")
-        resp = self.query(f":TRACe:DATA? TRACe{trace_num}")
-        return [float(x) for x in resp.split(",")]
+        return values
 
     # ------------------------------------------------------------------
     # Marker Control
