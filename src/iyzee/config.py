@@ -35,7 +35,7 @@ from platformdirs import user_config_dir, user_data_dir
 class IP(StrEnum):
     """Default IP addresses of the laboratory instruments (see :func:`address`)."""
 
-    POWER_SUPPLY = "10.140.1.15"
+    POWER_SUPPLY = "10.140.1.244"
     NOISE_ANALYZER = "10.140.1.40"
     SCOPE = "10.140.1.220"
     WAVEMETER = "10.140.1.141"
