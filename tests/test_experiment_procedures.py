@@ -290,8 +290,28 @@ def test_each_step_drives_the_caller_owned_devices_in_order(monkeypatch):
         ("acquire", 1),
         ("acquire", 2),
     ]
-    assert shutter.events == ["open", "close"]  # opened only for the squeezing trace
+    assert shutter.events == ["close", "open", "close"]  # shut before moving; open for trace 1 only
     assert result.meta["measured_frequency_thz"] == pytest.approx(377.100002)
+
+    # A failed setpoint must not leave a manually-open shutter exposed.
+    def fail_setpoint(freq, channel):
+        events.append(("set-failed", freq, channel))
+        raise TimeoutError("wavemeter unavailable")
+
+    events = []
+    shutter = FakeShutterControl()
+    ctx = ExperimentContext(
+        mx=FakeMXA(),
+        run_id="t",
+        shutter=shutter,
+        wavemeter=SimpleNamespace(
+            set_pid_setpoint=fail_setpoint,
+            read_frequency=lambda channel: pytest.fail("should not read after setpoint failure"),
+        ),
+    )
+    with pytest.raises(FatalSweepError, match="could not set wavemeter"):
+        FrequencyStep(frequency_thz=377.1, wavemeter_channel=4).run(ctx)
+    assert shutter.events == ["close"]
 
     # -- sweeps run on the caller owned devices and never build their own
     _quiet(monkeypatch)
@@ -319,6 +339,7 @@ def test_each_step_drives_the_caller_owned_devices_in_order(monkeypatch):
     assert [e[0] for e in events] == ["set", "read"] and shutter.events == ["open", "close"]
     assert frequency[0].meta["measured_frequency_thz"] == 377.1
     assert prepared[0][0] is mx  # the caller's analyzer
+    assert shutter.events == ["close", "open", "close"]
 
     monkeypatch.setattr(
         "iyzee.experiment.procedures.bandwidth_sweep_steps", lambda rbw_values_hz=None: [BoomStep()]

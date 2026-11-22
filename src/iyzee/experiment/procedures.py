@@ -429,6 +429,12 @@ class FrequencyStep(SweepStep):
                 f"laser settling time must be finite and non-negative, got {self.relax_time_s!r}"
             )
 
+        # The first point must be safe too: the shutter may have been left open by
+        # manual operation before this run. Close it before moving or settling the laser.
+        _close_shutter(
+            ctx.shutter,
+            on_stage=lambda message: ctx.report_stage(f"{self.label}: {message}"),
+        )
         wavemeter = ctx.wavemeter
         ctx.report_stage(f"{self.label}: setting PID setpoint to {self.frequency_thz:.9f} THz")
         try:
