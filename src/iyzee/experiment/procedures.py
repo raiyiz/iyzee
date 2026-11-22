@@ -514,9 +514,7 @@ def frequency_sweep_steps(
     """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
         midpoint = (DEFAULT_FREQUENCY_POINTS - 1) / 2
-        offsets_thz = [
-            (i - midpoint) * FREQUENCY_STEP_THZ for i in range(DEFAULT_FREQUENCY_POINTS)
-        ]
+        offsets_thz = [(i - midpoint) * FREQUENCY_STEP_THZ for i in range(DEFAULT_FREQUENCY_POINTS)]
     return [
         FrequencyStep(laser_center_thz + offset, wavemeter_channel, relax_time_s)
         for offset in offsets_thz

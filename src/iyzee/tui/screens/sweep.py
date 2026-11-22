@@ -123,9 +123,7 @@ class SweepScreen(Page):
             with Grid(id="freq-fields", classes="field-grid"):
                 yield _field("Laser center (THz)", Input(value="377.1052067", id="freq-center"))
                 yield _field("Wavemeter channel", Input(value="4", id="freq-channel"))
-                yield _field(
-                    "Points", Input(value=str(DEFAULT_FREQUENCY_POINTS), id="freq-points")
-                )
+                yield _field("Points", Input(value=str(DEFAULT_FREQUENCY_POINTS), id="freq-points"))
                 yield _field(
                     "Offset step (MHz)",
                     Input(value=f"{FREQUENCY_STEP_THZ * 1e6:g}", id="freq-offset-mhz"),
