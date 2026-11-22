@@ -5,6 +5,7 @@ import pytest
 
 from iyzee.experiment.core import ExperimentContext
 from iyzee.experiment.procedures import (
+    DEFAULT_FREQUENCY_POINTS,
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
@@ -229,6 +230,10 @@ def test_sweep_builders_and_their_steps_declare_what_they_need():
 
     assert pytest.approx(10) == FREQUENCY_STEP_THZ * 1e6  # 10 MHz steps (THz -> MHz)
     freq_steps = frequency_sweep_steps(laser_center_thz=377.0)
+    assert len(freq_steps) == DEFAULT_FREQUENCY_POINTS == 5
+    assert [step.frequency_thz for step in freq_steps] == pytest.approx(
+        [376.99998, 376.99999, 377.0, 377.00001, 377.00002]
+    )
     gaps = [b.frequency_thz - a.frequency_thz for a, b in itertools.pairwise(freq_steps)]
     assert gaps and all(gap == pytest.approx(10e-6) for gap in gaps)
     assert 377.0 in [pytest.approx(s.frequency_thz) for s in freq_steps]  # still from the centre

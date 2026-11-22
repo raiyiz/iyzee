@@ -1,3 +1,7 @@
+import pyvisa
+import pytest
+from pyvisa.constants import StatusCode
+
 from iyzee.devices.mxa import KeysightMXA
 
 
@@ -93,3 +97,39 @@ def test_scpi_helpers_wait_for_completion_drain_errors_and_send_frequencies():
         "FREQ:SPAN 100000.0",
         "BWID 10000.0",
     ]
+
+
+@pytest.mark.parametrize("operation", ["write", "query", "binary"])
+def test_failed_visa_io_discards_the_session(operation):
+    mxa, instrument = make_mxa()
+
+    def fail(*args, **kwargs):
+        raise pyvisa.errors.VisaIOError(StatusCode.error_timeout)
+
+    with pytest.raises(pyvisa.errors.VisaIOError):
+        if operation == "write":
+            instrument.write = fail
+            mxa.write("ABOR")
+        elif operation == "query":
+            instrument.query = fail
+            mxa.query("*IDN?")
+        else:
+            instrument.query_binary_values = fail
+            mxa.get_trace_data(binary=True)
+
+    assert mxa.instrument is None
+    assert instrument.close_count == 1
+
+
+def test_wait_opc_timeout_aborts_and_discards_the_session():
+    mxa, instrument = make_mxa()
+
+    def timeout(_command):
+        raise pyvisa.errors.VisaIOError(StatusCode.error_timeout)
+
+    instrument.query = timeout
+
+    assert mxa.wait_opc(timeout_sec=0.01) is False
+    assert instrument.commands[-2:] == ["ABOR", "<CLOSE>"]
+    assert mxa.instrument is None
+    assert instrument.close_count == 1

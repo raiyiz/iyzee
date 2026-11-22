@@ -92,6 +92,14 @@ class _FakeVisaDevice:
 
 
 def test_handles_probe_their_instruments(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A discarded VISA resource is no longer advertised as a live connection.
+    device = _FakeVisaDevice(idn="Keysight,MXA,SN1,FW2")
+    device.instrument = object()
+    visa = _VisaHandle(device)
+    assert visa.alive
+    device.instrument = None
+    assert not visa.alive
+
     # -- visa handle probes with idn falls back without it and disconnect closes
     device = _FakeVisaDevice(idn="Keysight,MXA,SN1,FW2")
     visa = _VisaHandle(device)

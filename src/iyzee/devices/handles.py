@@ -126,6 +126,11 @@ class _VisaHandle(_LockedHandle):
     def disconnect(self) -> None:
         self._device.close()
 
+    @property
+    def alive(self) -> bool:
+        """A failed VISA session must no longer be advertised as a live connection."""
+        return getattr(self._device, "instrument", self._device) is not None
+
     def probe(self) -> str:
         idn = getattr(self._device, "idn", None)
         if idn is not None:

@@ -29,6 +29,8 @@ TRACE_SHOT = 2
 
 #: Analyzer sweep time per point; every preset starts here and every caller can override it.
 DEFAULT_SWEEP_DURATION_MS = 500
+#: Default number of laser-frequency points; the scan is centred on the requested frequency.
+DEFAULT_FREQUENCY_POINTS = 5
 #: Default spacing of a frequency scan: 10 MHz, in THz (the unit the laser is set in).
 FREQUENCY_STEP_THZ = 10e-6
 
@@ -129,6 +131,8 @@ def prepare_analyzer(mx: KeysightMXA, traces, config: AnalyzerConfig | None = No
 
 def _abort_mxa(mx) -> None:
     """Best-effort stop after a failed acquisition, preserving the original failure."""
+    if getattr(mx, "instrument", True) is None:
+        return
     try:
         mx.abort_sweep()
     except Exception:
@@ -202,7 +206,7 @@ def acquire_trace(
         _abort_mxa(mx)
         raise FatalSweepError(f"MXA trace {trace_num} acquisition failed: {exc}") from exc
     finally:
-        if trace_enabled:
+        if trace_enabled and getattr(mx, "instrument", True) is not None:
             try:
                 mx.set_trace_update(trace_num, False)
             except Exception as exc:
@@ -509,7 +513,10 @@ def frequency_sweep_steps(
 ) -> list[FrequencyStep]:
     """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
-        offsets_thz = [i * FREQUENCY_STEP_THZ for i in range(-1, 1)]
+        midpoint = (DEFAULT_FREQUENCY_POINTS - 1) / 2
+        offsets_thz = [
+            (i - midpoint) * FREQUENCY_STEP_THZ for i in range(DEFAULT_FREQUENCY_POINTS)
+        ]
     return [
         FrequencyStep(laser_center_thz + offset, wavemeter_channel, relax_time_s)
         for offset in offsets_thz

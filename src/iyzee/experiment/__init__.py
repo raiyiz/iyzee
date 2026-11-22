@@ -30,6 +30,7 @@ from .io import (
     save_step_results,
 )
 from .procedures import (
+    DEFAULT_FREQUENCY_POINTS,
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
@@ -58,6 +59,7 @@ from .procedures import (
 from .runner import SweepAborted, SweepOutcome, SweepRunner
 
 __all__ = [
+    "DEFAULT_FREQUENCY_POINTS",
     "DEFAULT_SWEEP_DURATION_MS",
     "FREQUENCY_STEP_THZ",
     "SWEEP_KINDS",

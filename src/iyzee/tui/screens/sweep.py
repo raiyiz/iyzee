@@ -35,6 +35,7 @@ from textual.widgets import (
 from textual_plotext import PlotextPlot
 
 from ...experiment import (
+    DEFAULT_FREQUENCY_POINTS,
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
     SWEEP_KINDS,
@@ -122,7 +123,9 @@ class SweepScreen(Page):
             with Grid(id="freq-fields", classes="field-grid"):
                 yield _field("Laser center (THz)", Input(value="377.1052067", id="freq-center"))
                 yield _field("Wavemeter channel", Input(value="4", id="freq-channel"))
-                yield _field("Points", Input(value="5", id="freq-points"))
+                yield _field(
+                    "Points", Input(value=str(DEFAULT_FREQUENCY_POINTS), id="freq-points")
+                )
                 yield _field(
                     "Offset step (MHz)",
                     Input(value=f"{FREQUENCY_STEP_THZ * 1e6:g}", id="freq-offset-mhz"),

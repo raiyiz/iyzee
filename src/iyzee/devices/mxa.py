@@ -1,9 +1,14 @@
+import logging
+import math
 import time
 
 import pyvisa
+from pyvisa.constants import StatusCode
 
 from ..config import IP, address
 from .base import BaseDevice
+
+log = logging.getLogger("iyzee.instruments")
 
 
 class KeysightMXA(BaseDevice):
@@ -26,15 +31,34 @@ class KeysightMXA(BaseDevice):
         """Backward-compatible alias for :meth:`close`."""
         self.close()
 
+    def _discard_instrument(self, instrument) -> None:
+        """Forget a failed VISA session rather than reuse a possibly desynchronized stream."""
+        if self.instrument is instrument:
+            self.instrument = None
+        try:
+            instrument.close()
+        except Exception:
+            log.exception("MXA: could not close a failed VISA session")
+
     def write(self, cmd: str):
-        if self.instrument is None:
+        instrument = self.instrument
+        if instrument is None:
             raise RuntimeError("Instrument not connected")
-        self.instrument.write(cmd)
+        try:
+            instrument.write(cmd)
+        except pyvisa.errors.VisaIOError:
+            self._discard_instrument(instrument)
+            raise
 
     def query(self, cmd: str) -> str:
-        if self.instrument is None:
+        instrument = self.instrument
+        if instrument is None:
             raise RuntimeError("Instrument not connected")
-        return self.instrument.query(cmd)
+        try:
+            return instrument.query(cmd)
+        except pyvisa.errors.VisaIOError:
+            self._discard_instrument(instrument)
+            raise
 
     def query_binary(
         self, cmd: str, datatype: str = "f", is_big_endian: bool = True
@@ -43,11 +67,18 @@ class KeysightMXA(BaseDevice):
         Query binary IEEE 488.2 block data.
         datatype='f' (float32) or 'd' (float64).
         """
-        if self.instrument is None:
+        instrument = self.instrument
+        if instrument is None:
             raise RuntimeError("Instrument not connected")
-        return self.instrument.query_binary_values(
-            cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
-        )
+        try:
+            return instrument.query_binary_values(
+                cmd, datatype=datatype, is_big_endian=is_big_endian, container=list
+            )
+        except Exception:
+            # A failed block transfer may leave unread bytes on the stream even if the
+            # backend did not classify the framing error as a VISA I/O error.
+            self._discard_instrument(instrument)
+            raise
 
     # ------------------------------------------------------------------
     # System & Synchronization
@@ -61,18 +92,39 @@ class KeysightMXA(BaseDevice):
         self.write("*CLS")
 
     def wait_opc(self, timeout_sec: float = 30.0) -> bool:
-        """Block until *OPC? explicitly returns 1."""
-        if self.instrument is None:
+        """Wait for *OPC?; discard the session if the query cannot be completed safely."""
+        if not math.isfinite(timeout_sec) or timeout_sec <= 0:
+            raise ValueError(f"timeout must be finite and positive, got {timeout_sec!r}")
+        instrument = self.instrument
+        if instrument is None:
             raise RuntimeError("Instrument not connected")
-        old_timeout = self.instrument.timeout
-        self.instrument.timeout = int(timeout_sec * 1000)
+        old_timeout = instrument.timeout
         try:
-            response = self.query("*OPC?").strip()
+            instrument.timeout = max(1, int(timeout_sec * 1000))
+            response = instrument.query("*OPC?").strip()
             return response == "1"
-        except pyvisa.errors.VisaIOError:
-            return False
+        except Exception as exc:
+            # After a timed-out *OPC? the eventual "1" can remain pending and be read as
+            # the reply to a later, unrelated query. Stop the operation, then discard this
+            # session instead of trying to reuse an ambiguous SCPI response stream.
+            try:
+                instrument.write("ABOR")
+            except Exception:
+                log.exception("MXA: ABOR failed while recovering from a failed *OPC? query")
+            self._discard_instrument(instrument)
+            is_timeout = (
+                isinstance(exc, pyvisa.errors.VisaIOError)
+                and exc.error_code == StatusCode.error_timeout
+            )
+            if is_timeout:
+                log.warning(
+                    "MXA: *OPC? timed out after %.1f s; discarded the VISA session", timeout_sec
+                )
+                return False
+            raise
         finally:
-            self.instrument.timeout = old_timeout
+            if self.instrument is instrument:
+                instrument.timeout = old_timeout
 
     def get_errors(self) -> list[str]:
         """Drain the SCPI error queue."""
