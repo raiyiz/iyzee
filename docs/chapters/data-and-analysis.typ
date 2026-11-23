@@ -202,12 +202,11 @@ be parsed is moved aside as `worksets.json.corrupt` instead of being overwritten
   fill: none,
   [*View*], [*What it provides*],
   [*Sweep comparison*], [One row per sweep point, a scoreboard with the best point per run, and relative-noise and trace-level metrics in tidy Polars tables.],
-  [*Point inspector*], [The raw squeezing and shot-noise traces of one sweep point, for every sweep in the set at once.],
   [*Scope statistics*], [Per-channel sample count, extrema, peak-to-peak amplitude, mean, RMS, standard deviation, and recorded channel settings.],
   [*Scope traces*], [Selected waveforms for overlay and plotting. Plotting uses extrema-preserving decimation for responsiveness; the saved arrays are not modified.],
   [*Groups and statistics*], [Label runs with a group (an editable column, or filled from name, type, status or origin). Each group gets a mean curve with a standard-deviation, standard-error or min-to-max band on one shared x grid, a per-group summary of the best points, and an A minus B difference with a two-standard-error band.],
   [*Raw arrays*], [List every array in every file, then overlay one named array across the runs that have it. One-dimensional arrays and a selected row of a two-dimensional array are supported; higher-dimensional arrays are rejected rather than silently flattened.],
-  [*Plot builder*], [Choose a tidy table, x/y fields, colour and line-style groups, one panel per value, log axes, and line/point/bar marks instead of writing a separate plotting function for each question. Download the figure as PNG, SVG or PDF.],
+  [*Plot builder*], [Plot reduced sweep metrics, full-resolution NPZ sweep samples with paired squeezing and shot-noise values and point metadata, or full-resolution scope samples. Choose x/y fields, colour and line-style groups, panels, log axes, and line/point/bar marks; download PNG, SVG or PDF.],
   [*Integrity and export*], [Verify the NPZ SHA-256 digest against its JSON manifest and download tidy tables as CSV. Missing digests are reported rather than treated as verified.],
 )
 

@@ -444,7 +444,10 @@ FIELD_DOCS: dict[str, dict[str, str]] = {
         "points.vbw_hz": "Bandwidth sweeps: video bandwidth used (twice the RBW).",
         "points.wavemeter_channel": "Frequency sweeps: wavemeter channel that was set and read.",
         "points.relax_time_s": "Frequency sweeps: settling time between setting the PID setpoint and reading.",
+        "points.shutter_settle_s": "Frequency sweeps: seconds the shutter was given to finish opening and closing.",
         "points.measured_frequency_thz": "Frequency sweeps: what the wavemeter read after settling, in THz.",
+        "points.setpoint_error_thz": "Frequency sweeps: measured minus requested frequency, in THz: how far the lock was from its setpoint.",
+        "points.attempts": "Present only on a point that needed more than one try (a timeout was retried): how many.",
     },
     "scope": {
         "format": "Always `iyzee.numeric-recording`.",
@@ -591,7 +594,10 @@ def build_recordings() -> dict[str, Any]:
                 {
                     "wavemeter_channel": 4,
                     "relax_time_s": 0.5,
+                    "shutter_settle_s": 0.05,
                     "measured_frequency_thz": 377.1052071,
+                    "setpoint_error_thz": 1e-7,
+                    "attempts": 2,
                 },
             ),
         ]

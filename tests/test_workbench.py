@@ -122,6 +122,12 @@ def test_workset_sweep_samples_load_npz_values_and_join_point_metadata(demo: Pat
     assert samples["kind"].unique().to_list() == ["frequency"]
     assert samples["point_label"].n_unique() == 1
 
+    metadata = workset.dataset.filter(
+        (pl.col("run_id") == recording["run_id"]) & (pl.col("point") == point)
+    ).row(0, named=True)
+    for column in ("requested", "measured_thz", "x_thz", "offset_mhz", "rbw_khz"):
+        assert samples[column].unique().to_list() == [metadata[column]]
+
 
 def test_group_statistics_recover_a_known_gap_and_flag_only_real_ones():
     points, groups = _synthetic_sweeps()

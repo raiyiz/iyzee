@@ -42,6 +42,11 @@ class BaseDevice:
         if self.write_termination is not None:
             self.instrument.write_termination = self.write_termination
 
+    @property
+    def connected(self) -> bool:
+        """Whether a VISA resource is open (``False`` once closed or dropped after a failure)."""
+        return self.instrument is not None
+
     def close(self) -> None:
         """Close the VISA resource, if it is open."""
         if self.instrument is not None:

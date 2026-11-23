@@ -69,3 +69,50 @@ def test_the_wavemeter_reads_the_right_channel_at_the_configured_host_and_posts_
             "data": {"freq_thz": 377.1052, "channel": wavemeter.DEFAULT_CHANNEL},
         },
     ]
+
+
+# -- a flaky server, and answers that are not frequencies --------------------------------------
+
+
+@pytest.fixture
+def no_delay(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    delays: list[float] = []
+    monkeypatch.setattr(wavemeter.time, "sleep", delays.append)
+    return delays
+
+
+def test_a_transient_failure_is_retried_and_a_dead_server_is_reported_after_the_attempts(
+    monkeypatch: pytest.MonkeyPatch, no_delay: list[float]
+) -> None:
+    outcomes: list[Any] = [requests.ConnectionError("reset"), requests.Timeout("slow"), "377.5"]
+
+    def get(url: str, **kwargs: Any) -> requests.Response:
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return response(outcome)
+
+    monkeypatch.setattr(wavemeter.requests, "get", get)
+    assert Wavemeter().read_frequency(4) == pytest.approx(377.5)
+    assert len(no_delay) == 2  # waited between the attempts
+
+    calls: list[int] = []
+
+    def dead(*a: Any, **k: Any) -> requests.Response:
+        calls.append(1)
+        raise requests.Timeout("dead")
+
+    monkeypatch.setattr(wavemeter.requests, "get", dead)
+    with pytest.raises(wavemeter.WavemeterError, match="read channel 4"):
+        Wavemeter().read_frequency(4)
+    assert len(calls) == wavemeter.ATTEMPTS
+    assert issubclass(wavemeter.WavemeterError, OSError)  # so the runner retries the point
+
+
+@pytest.mark.parametrize("text", ["-3.0", "nan", "no signal"])
+def test_a_wavemeter_status_code_is_not_a_frequency(
+    monkeypatch: pytest.MonkeyPatch, text: str
+) -> None:
+    monkeypatch.setattr(wavemeter.requests, "get", lambda *a, **k: response(text))
+    with pytest.raises(wavemeter.WavemeterError):
+        Wavemeter().read_frequency(4)

@@ -11,7 +11,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -429,8 +429,26 @@ class IyzeeApp(App):
         if threading.get_ident() == self._thread_id:
             self._show_log_entry(entry)
         else:
-            with contextlib.suppress(RuntimeError):
-                self.call_from_thread(self._show_log_entry, entry)
+            self._post_to_ui(self._show_log_entry, entry)
+
+    def _post_to_ui(self, callback: Callable[..., Any], *args: Any) -> None:
+        """Run ``callback`` on the UI thread **without waiting for it**.
+
+        This is what a log handler must use. ``call_from_thread`` blocks the caller until the
+        UI loop has run the callback, and a handler is called with the logging lock held: if
+        the UI thread logs something meanwhile it waits for that lock while the worker waits
+        for the UI loop, and the whole app freezes (a sweep worker logs at every step).
+        """
+        loop = self._loop
+        if loop is None:
+            return
+
+        async def run() -> None:
+            with self._context():
+                callback(*args)
+
+        with contextlib.suppress(RuntimeError):  # the loop is closing
+            asyncio.run_coroutine_threadsafe(run(), loop)
 
     def _show_log_entry(self, entry: LogEntry) -> None:
         for screen in self.query(LogScreen):

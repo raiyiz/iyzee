@@ -10,6 +10,7 @@ machinery rather than hand-written loops.
 
 from .core import (
     ExperimentContext,
+    RunAborted,
     RunRecord,
     Step,
     StepCallback,
@@ -51,7 +52,7 @@ from .procedures import (
     run_frequency_sweep,
     run_sweep,
 )
-from .runner import SweepAborted, SweepOutcome, SweepRunner
+from .runner import InstrumentBusyError, SweepAborted, SweepOutcome, SweepRunner
 
 __all__ = [
     "DEFAULT_SWEEP_DURATION_MS",
@@ -63,7 +64,9 @@ __all__ = [
     "BandwidthStep",
     "ExperimentContext",
     "FrequencyStep",
+    "InstrumentBusyError",
     "Recording",
+    "RunAborted",
     "RunRecord",
     "Step",
     "StepCallback",

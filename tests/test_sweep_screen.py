@@ -173,7 +173,7 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
 ) -> None:
     started, release = threading.Event(), threading.Event()
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(steps, ctx, *, on_error, on_step, **_):
         started.set()
         release.wait(2)
         on_step(0, 3, object(), _result(0), None)
@@ -259,7 +259,7 @@ async def test_a_finished_sweep_records_its_run_id_config_and_outcome(
     """Saved sweeps used to carry run_metadata=null: no run id, no analyzer settings."""
     seen: list[str] = []
 
-    def fake_run_sequence(steps, ctx, *, on_error, on_step):
+    def fake_run_sequence(steps, ctx, *, on_error, on_step, **_):
         seen.append(ctx.run_id)
         on_step(0, 2, object(), _result(0), None)
         # while it is running the file must already say so

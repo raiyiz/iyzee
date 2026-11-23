@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .core import ExperimentContext, RunRecord, Step, StepResult, run_sequence
+from ..devices.mxa import MXAError
+from .core import ExperimentContext, RunAborted, RunRecord, Step, StepResult, run_sequence
 from .io import create_dirs, save_step_results
 from .procedures import TRACE_SHOT, TRACE_SQZ, Sweep, prepare_analyzer
 
@@ -30,8 +32,21 @@ log = logging.getLogger("iyzee.experiment")
 PointCallback = Callable[[int, int, Step, StepResult | None, BaseException | None], None]
 
 
-class SweepAborted(Exception):
-    """Raised from the per-point hook to stop a run cleanly after the current point."""
+#: Seconds a run waits for an instrument that something else (the console, another page)
+#: is using before it gives up and says so, instead of waiting for ever.
+LOCK_WAIT_S = 15.0
+#: A step that fails with a timeout or a lost reply is run once more before it counts as failed.
+STEP_RETRIES = 1
+RETRY_DELAY_S = 1.0
+#: Which failures are worth a second try: network and timeout errors, and the analyzer's.
+RETRYABLE = (OSError, MXAError)
+
+#: Raised from the per-point hook, or from inside a step, to stop a run cleanly.
+SweepAborted = RunAborted
+
+
+class InstrumentBusyError(RuntimeError):
+    """An instrument the run needs stayed in use by something else."""
 
 
 @dataclass
@@ -59,6 +74,9 @@ class SweepRunner:
         should_abort: Callable[[], bool] = lambda: False,
         on_save_error: Callable[[Exception], None] | None = None,
         trace_slots: tuple[int, int] = (TRACE_SQZ, TRACE_SHOT),
+        on_phase: Callable[[str], None] | None = None,
+        step_retries: int = STEP_RETRIES,
+        lock_timeout_s: float = LOCK_WAIT_S,
     ) -> None:
         self.sweep = sweep
         self.devices = devices
@@ -67,6 +85,9 @@ class SweepRunner:
         self.should_abort = should_abort
         self.on_save_error = on_save_error
         self.trace_slots = trace_slots
+        self.on_phase = on_phase
+        self.step_retries = step_retries
+        self.lock_timeout_s = lock_timeout_s
         self.record: RunRecord | None = None
         self.collected: list[StepResult] = []
         self.save_path: Path | None = None
@@ -77,12 +98,15 @@ class SweepRunner:
         """Run the sweep. Anything a step raises is handled per step; this never raises for them."""
         sweep = self.sweep
         with contextlib.ExitStack() as stack:
-            for lock in self.locks:  # one logical operation: nothing may interleave with it
-                stack.enter_context(lock)
             try:
+                for lock in self.locks:  # one logical operation: nothing may interleave with it
+                    self._acquire(stack, lock)
+                self._preflight()
                 prepare_analyzer(self.devices["mxa"], self.trace_slots, sweep.config)
+            except RunAborted:
+                return SweepOutcome(record=None, aborted=True)
             except Exception as exc:
-                log.exception("sweep: failed to configure analyzer")
+                log.exception("sweep: could not start")
                 return SweepOutcome(record=None, setup_error=exc)
 
             record = self.record = RunRecord(config=asdict(sweep.config))
@@ -92,17 +116,85 @@ class SweepRunner:
                 shutter=self.devices.get("shutter"),
                 wavemeter=self.devices.get("wavemeter"),
                 config=record.config,
+                progress=self._progress,
+                should_abort=self.should_abort,
             )
             aborted = failed = False
             try:
-                run_sequence(sweep.steps, ctx, on_error="skip", on_step=self._on_step)
+                run_sequence(
+                    sweep.steps,
+                    ctx,
+                    on_error="skip",
+                    on_step=self._on_step,
+                    retries=self.step_retries,
+                    retry_delay_s=RETRY_DELAY_S,
+                    retry_on=RETRYABLE,
+                )
             except SweepAborted:
                 aborted = True
             except Exception:  # per-step errors are handled by on_error="skip"; this is a net
                 log.exception("sweep: run_sequence raised unexpectedly")
                 failed = True
+            finally:
+                self._secure_shutter()
             self.finish(aborted=aborted, failed=failed)
         return SweepOutcome(record, self.collected, self.save_path, aborted, failed)
+
+    def _progress(self, text: str) -> None:
+        if self.on_phase is not None:
+            try:
+                self.on_phase(text)
+            except Exception:  # a display problem must never stop a measurement
+                log.exception("sweep: the progress display failed")
+
+    def _acquire(self, stack: contextlib.ExitStack, lock: AbstractContextManager[Any]) -> None:
+        """Take ``lock`` for the whole run, waiting at most ``lock_timeout_s`` (and not through an
+        abort request): a console cell or another page holding the instrument must not leave
+        the run waiting for ever with nothing said."""
+        acquire = getattr(lock, "acquire", None)
+        if acquire is None:  # a plain context manager
+            stack.enter_context(lock)
+            return
+        self._progress("waiting for the instruments")
+        deadline = time.monotonic() + self.lock_timeout_s
+        while not acquire(timeout=0.25):
+            if self.should_abort():
+                raise RunAborted
+            if time.monotonic() >= deadline:
+                raise InstrumentBusyError(
+                    f"an instrument is still in use by something else after {self.lock_timeout_s:g} s "
+                    "(a console cell or another page?)"
+                )
+        stack.callback(lock.release)  # type: ignore[attr-defined]
+
+    def _preflight(self) -> None:
+        """Refuse to start a run that cannot be valid: with the supply's master output off the
+        shutter never opens, and 'squeezing' would be recorded as shot noise. Anything that
+        merely cannot be read is logged and does not stop the run."""
+        retrieve = getattr(self.devices.get("shutter"), "retrieve_state", None)
+        if retrieve is None:
+            return
+        self._progress("checking the shutter supply")
+        try:
+            state = retrieve()
+        except Exception:
+            log.warning("sweep: could not read the supply before starting", exc_info=True)
+            return
+        if not getattr(state, "general_output", True):
+            raise RuntimeError(
+                "the power supply's master output is off, so the shutter cannot open "
+                "(switch it on on the Power page)"
+            )
+
+    def _secure_shutter(self) -> None:
+        """However the run ended, leave the shutter closed (and say so if that is not possible)."""
+        close = getattr(self.devices.get("shutter"), "close", None)
+        if close is None:
+            return
+        try:
+            close()
+        except Exception:
+            log.critical("sweep: could not close the shutter at the end of the run", exc_info=True)
 
     def finish(self, *, aborted: bool = False, failed: bool = False) -> None:
         """Rewrite the file with how the run ended (until now it says "running")."""
