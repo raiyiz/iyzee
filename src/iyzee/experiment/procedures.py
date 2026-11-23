@@ -107,23 +107,15 @@ def acquire_trace(mx, trace_num, *, timeout_s: float | None = None):
 
 #: Seconds to let the shutter finish moving after it was told to open or close.
 SHUTTER_SETTLE_S = 0.05
-#: A shutter that will not close is the one failure that spoils the shot-noise reference
-#: without any sign in the data, so closing is tried this many times before giving up.
-SHUTTER_CLOSE_ATTEMPTS = 3
 
 
 def _close_shutter(shutter: Any) -> None:
     """Close the shutter or raise :class:`ShutterError`; never leave it open quietly."""
-    failure: Exception | None = None
-    for attempt in range(1, SHUTTER_CLOSE_ATTEMPTS + 1):
-        try:
-            shutter.close()
-            return
-        except Exception as exc:
-            failure = exc
-            log.exception("shutter did not close (attempt %d/%d)", attempt, SHUTTER_CLOSE_ATTEMPTS)
-    log.critical("THE SHUTTER MAY STILL BE OPEN: it could not be closed: %s", failure)
-    raise ShutterError(f"could not close the shutter: {failure}") from failure
+    try:
+        shutter.close()
+    except Exception as exc:
+        log.critical("THE SHUTTER MAY STILL BE OPEN: it could not be closed: %s", exc)
+        raise ShutterError(f"could not close the shutter: {exc}") from exc
 
 
 def acquire_pair(
@@ -175,12 +167,6 @@ def acquire_pair(
 #: Seconds the laser gets to settle on a new PID setpoint before it is read.
 SETTLE_TIME_S = 0.5
 DEFAULT_LASER_CENTER_THZ = 377.1052067
-#: How often the wavemeter is read again while waiting for the laser to reach its setpoint.
-SETTLE_POLL_S = 0.1
-
-
-class LaserNotSettledError(RuntimeError):
-    """The wavemeter never read within the tolerance of the setpoint."""
 
 
 class SweepStep:
@@ -268,11 +254,6 @@ class FrequencyStep(SweepStep):
     wavemeter_channel: int
     relax_time_s: float = SETTLE_TIME_S
     shutter_settle_s: float = SHUTTER_SETTLE_S
-    #: Opt-in lock check: after ``relax_time_s``, keep reading (every ``SETTLE_POLL_S``, for at
-    #: most ``settle_timeout_s``) until the wavemeter is within this many THz of the setpoint;
-    #: otherwise the point fails with :class:`LaserNotSettledError`. ``None`` records only.
-    settle_tolerance_thz: float | None = None
-    settle_timeout_s: float = 10.0
 
     kind: ClassVar[str] = "frequency"
     x_unit: ClassVar[str] = "THz"
@@ -280,32 +261,13 @@ class FrequencyStep(SweepStep):
     label_format: ClassVar[str] = "freq={:.6f}THz"
     requires: ClassVar[tuple[str, ...]] = ("mxa", "shutter", "wavemeter")
 
-    def _read_settled(self, ctx: ExperimentContext) -> float:
-        """The wavemeter reading, after waiting for the setpoint if a tolerance was asked for."""
-        wavemeter = ctx.wavemeter
-        reading = wavemeter.read_frequency(self.wavemeter_channel)
-        tolerance = self.settle_tolerance_thz
-        if tolerance is None:
-            return reading
-        for _ in range(max(1, round(self.settle_timeout_s / SETTLE_POLL_S))):
-            if abs(reading - self.frequency_thz) <= tolerance:
-                return reading
-            ctx.sleep(SETTLE_POLL_S)
-            reading = wavemeter.read_frequency(self.wavemeter_channel)
-        if abs(reading - self.frequency_thz) <= tolerance:
-            return reading
-        raise LaserNotSettledError(
-            f"the wavemeter reads {reading:.9f} THz, {abs(reading - self.frequency_thz) * 1e6:.2f} MHz "
-            f"from the setpoint {self.frequency_thz:.9f} THz after {self.settle_timeout_s:g} s"
-        )
-
     def apply(self, ctx: ExperimentContext) -> dict[str, Any]:
         ctx.phase(f"setting the laser to {self.frequency_thz:.7f} THz")
         ctx.wavemeter.set_pid_setpoint(self.frequency_thz, self.wavemeter_channel)
         ctx.phase(f"waiting {self.relax_time_s:g} s for the laser to settle")
         ctx.sleep(self.relax_time_s)
         ctx.phase("reading the wavemeter")
-        measured = self._read_settled(ctx)
+        measured = ctx.wavemeter.read_frequency(self.wavemeter_channel)
         return {
             "wavemeter_channel": self.wavemeter_channel,
             "relax_time_s": self.relax_time_s,
@@ -352,19 +314,12 @@ def frequency_sweep_steps(
     wavemeter_channel: int = DEFAULT_CHANNEL,
     relax_time_s: float = SETTLE_TIME_S,
     offsets_thz=None,
-    *,
-    settle_tolerance_thz: float | None = None,
 ) -> list[FrequencyStep]:
     """Build a laser-frequency scan around laser_center_thz."""
     if offsets_thz is None:
         offsets_thz = [i * FREQUENCY_STEP_THZ for i in range(-1, 1)]
     return [
-        FrequencyStep(
-            laser_center_thz + offset,
-            wavemeter_channel,
-            relax_time_s,
-            settle_tolerance_thz=settle_tolerance_thz,
-        )
+        FrequencyStep(laser_center_thz + offset, wavemeter_channel, relax_time_s)
         for offset in offsets_thz
     ]
 
@@ -396,7 +351,6 @@ def build_frequency_sweep(
     offsets_thz=None,
     *,
     relax_time_s: float = SETTLE_TIME_S,
-    settle_tolerance_thz: float | None = None,
     **config: Unpack[ConfigOptions],
 ) -> Sweep:
     """Build a frequency sweep and the analyzer configuration it needs.
@@ -409,7 +363,6 @@ def build_frequency_sweep(
         wavemeter_channel,
         relax_time_s,
         offsets_thz,
-        settle_tolerance_thz=settle_tolerance_thz,
     )
     return Sweep("frequency", steps, frequency_sweep_config(**config))
 

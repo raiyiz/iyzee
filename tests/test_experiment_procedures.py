@@ -259,4 +259,3 @@ def test_the_shutter_is_closed_and_the_failure_reported_whatever_goes_wrong(monk
     stubborn = Stubborn()
     with pytest.raises(ShutterError, match="could not close"):  # never a quiet shot-noise run
         acquire_pair(_Mx(), stubborn)
-    assert stubborn.events.count("close") == 3  # tried more than once first

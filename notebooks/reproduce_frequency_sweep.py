@@ -88,12 +88,19 @@ def _(armed, mo):
 def _(center, channel, duration_ms, mo, points, run_button, step_khz):
     from iyzee.experiment import SweepRunner, build_frequency_sweep
     from iyzee.lab import Lab
+    from iyzee.trace import traced
+
+    # Records the run's log lines; if it is quiet for 20 s it prints where every thread is
+    # (the blocked VISA read or HTTP request), and an exception or interrupt carries the
+    # last events as a note. Use ``with trace:`` instead to cover a block, e.g. connecting.
+    trace = traced(stall_s=20)
 
     mo.stop(
         not run_button.value,
         mo.md("*Nothing has been connected or moved. Tick the box and press the button.*"),
     )
 
+    @trace
     def reproduce_tui_frequency_sweep(lab: Lab):
         # The same runner the TUI's Sweep page uses: whole-run locks, analyzer setup, a save
         # after every point, and the final status written to the file.
@@ -144,14 +151,19 @@ def _(center, channel, duration_ms, mo, points, run_button, step_khz):
     )
     record = outcome.record
     collected, save_path = outcome.collected, outcome.save_path
-    mo.md(
-        f"""
-        **Run `{record.run_id}`: {record.status}**
+    mo.vstack(
+        [
+            mo.md(
+                f"""
+                **Run `{record.run_id}`: {record.status}**
 
-        {len(collected)} of {total} points measured · saved to `{save_path}`
+                {len(collected)} of {total} points measured · saved to `{save_path}`
 
-        Open it in `notebooks/workbench.py` (press *Refresh index* there).
-        """
+                Open it in `notebooks/workbench.py` (press *Refresh index* there).
+                """
+            ),
+            mo.accordion({"What the run did (trace)": mo.md(f"```\n{trace.timeline()}\n```")}),
+        ]
     )
     return
 
