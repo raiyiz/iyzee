@@ -137,6 +137,12 @@ class _VisaHandle(_LockedHandle):
         """The wrapped device (e.g. a live :class:`~iyzee.devices.mxa.KeysightMXA`)."""
         return self._device
 
+    @property
+    def alive(self) -> bool:
+        """``False`` once the driver has dropped its session (e.g. it could not be resynced
+        after a timeout), so the app shows the link as lost instead of staying 'connected'."""
+        return bool(getattr(self._device, "connected", True))
+
 
 class ShutterHandle(_LockedHandle):
     """Adapter for :class:`~iyzee.devices.power.ShutterControl`, a channel of the PSU.

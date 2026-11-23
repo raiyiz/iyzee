@@ -11,6 +11,7 @@ results.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
@@ -42,6 +43,22 @@ class StepResult:
     meta: dict[str, Any] = field(default_factory=dict)
 
 
+log = logging.getLogger("iyzee.experiment")
+
+#: How often a wait looks at the abort request (seconds).
+ABORT_POLL_S = 0.5
+
+
+class RunAborted(Exception):
+    """Stops a run cleanly. Raised from the per-step hook, or from inside a step
+    (:meth:`ExperimentContext.check_abort`) so an abort does not have to wait for the
+    step in flight; whatever the step had open is closed on the way out."""
+
+
+def _never() -> bool:
+    return False
+
+
 @dataclass
 class ExperimentContext:
     """Already-connected hardware handles and run-level metadata shared by
@@ -58,15 +75,37 @@ class ExperimentContext:
     shutter: Any | None = None
     config: dict[str, Any] = field(default_factory=dict)
     wavemeter: Any = None
+    #: Told what the run is doing now ("acquiring the squeezing trace"); a UI shows it, so a
+    #: stalled run says where it stalled. Always logged, callback or not.
+    progress: Callable[[str], None] | None = None
+    #: True when the run should stop. Polled between operations and while waiting.
+    should_abort: Callable[[], bool] = _never
+
+    def phase(self, text: str) -> None:
+        """Say what the run is doing now (logged with the run id, and passed to ``progress``)."""
+        log.info("run %s: %s", self.run_id, text)
+        if self.progress is not None:
+            self.progress(text)
+
+    def check_abort(self) -> None:
+        """Raise :class:`RunAborted` if the run has been asked to stop."""
+        if self.should_abort():
+            raise RunAborted
+
+    def sleep(self, seconds: float) -> None:
+        """Wait ``seconds``, but notice an abort request within ``ABORT_POLL_S``."""
+        remaining = max(0.0, seconds)
+        while remaining > 0:
+            self.check_abort()
+            chunk = min(remaining, ABORT_POLL_S)
+            time.sleep(chunk)
+            remaining -= chunk
 
 
 class Step(Protocol):
     """A single reproducible measurement point in an experiment sequence."""
 
     def run(self, ctx: ExperimentContext) -> StepResult: ...
-
-
-log = logging.getLogger("iyzee.experiment")
 
 
 def step_label(step: object, index: int) -> str:
@@ -150,12 +189,54 @@ class RunRecord:
 StepCallback = Callable[[int, int, Step, "StepResult | None", "BaseException | None"], None]
 
 
+def _run_step(
+    step: Step,
+    ctx: ExperimentContext,
+    name: str,
+    retries: int,
+    retry_delay_s: float,
+    retry_on: tuple[type[BaseException], ...],
+) -> StepResult:
+    """Run one step; a failure of a kind in ``retry_on`` is tried again, up to ``retries`` times.
+
+    A step is one self-contained point (set the parameter, acquire), so doing it again
+    after a timeout is safe, and the instruments are left clean by what they raised.
+    ``meta["attempts"]`` says so on a point that needed more than one.
+    """
+    for attempt in range(1, retries + 2):
+        ctx.check_abort()
+        try:
+            result = step.run(ctx)
+        except retry_on as exc:
+            if attempt > retries:
+                raise
+            log.warning(
+                "run %s: %s failed (%s: %s); trying again (%d/%d)",
+                ctx.run_id,
+                name,
+                type(exc).__name__,
+                exc,
+                attempt + 1,
+                retries + 1,
+            )
+            ctx.phase(f"{name}: {type(exc).__name__}, trying again ({attempt + 1}/{retries + 1})")
+            ctx.sleep(retry_delay_s)
+            continue
+        if attempt > 1:
+            result.meta["attempts"] = attempt
+        return result
+    raise AssertionError("unreachable")  # pragma: no cover - the loop always returns or raises
+
+
 def run_sequence(
     steps: Sequence[Step],
     ctx: ExperimentContext,
     *,
     on_error: str = "raise",
     on_step: StepCallback | None = None,
+    retries: int = 0,
+    retry_delay_s: float = 1.0,
+    retry_on: tuple[type[BaseException], ...] = (OSError,),
 ) -> list[StepResult]:
     """Run ``steps`` in order against ``ctx``, returning their results.
 
@@ -167,6 +248,14 @@ def run_sequence(
     - ``"skip"``: log the failure and continue with the remaining steps.
       Useful for long unattended scans where losing one point is
       preferable to losing the rest of the run.
+
+    ``retries`` (default none) is how many times a step that fails with one of ``retry_on``
+    (by default an ``OSError``: a timeout, a refused or dropped connection) is run again
+    before ``on_error`` applies; ``retry_delay_s`` is the wait between attempts. A transient
+    fault of one instrument then costs a few seconds rather than the point.
+
+    :class:`RunAborted`, raised by a step (``ctx.check_abort()``), stops the sequence
+    whatever ``on_error`` says: an abort is not a failure of that step.
 
     ``on_step``, if given, is called after every step is attempted (see
     :data:`StepCallback`). It is the hook a caller uses for live progress
@@ -187,9 +276,11 @@ def run_sequence(
     results: list[StepResult] = []
     for index, step in enumerate(steps):
         step_name = step_label(step, index)
-        log.info("run %s: starting %s", ctx.run_id, step_name)
+        ctx.phase(f"starting {step_name}")
         try:
-            result = step.run(ctx)
+            result = _run_step(step, ctx, step_name, retries, retry_delay_s, retry_on)
+        except RunAborted:
+            raise
         except Exception as exc:
             log.exception("run %s: %s failed", ctx.run_id, step_name)
             if on_step is not None:

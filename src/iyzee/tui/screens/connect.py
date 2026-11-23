@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import ClassVar
 
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
+from textual.binding import Binding, BindingType
 from textual.widgets import DataTable, Static
 
 from ...lab import INSTRUMENTS, InstrumentSpec
@@ -30,6 +32,15 @@ DETAIL_COL = "detail"
 
 class ConnectScreen(Page):
     """Table of instruments with live connect/disconnect status."""
+
+    # ``cc`` (two presses within ``DOUBLE_TAP_S``) connects everything. Local to this page:
+    # elsewhere ``c`` is navigation or editable input. Textual has no key chords (a comma in
+    # a binding lists alternative keys), so the second press is recognised here.
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("c", "connect_all_tap", "Connect all (cc)", show=False)
+    ]
+    DOUBLE_TAP_S = 0.6
+    _last_c = float("-inf")
 
     def compose(self) -> ComposeResult:
         yield Static("Instruments", classes="panel-title")
@@ -127,6 +138,28 @@ class ConnectScreen(Page):
         if spec is None:
             raise CommandError(f"unknown instrument {key!r}")
         return spec
+
+    def action_connect_all_tap(self) -> None:
+        """A first ``c`` only arms; a second one soon after connects everything."""
+        now = time.monotonic()
+        if now - self._last_c <= self.DOUBLE_TAP_S:
+            self._last_c = float("-inf")
+            self.action_connect_all()
+        else:
+            self._last_c = now
+
+    def action_connect_all(self) -> None:
+        """Start connecting every instrument that is not connected or busy."""
+        pending = [
+            spec
+            for spec in INSTRUMENTS
+            if spec.key not in self.iyzee_app.handles and spec.key not in self._busy
+        ]
+        if not pending:
+            self.notify("All instruments are connected or already connecting.", markup=False)
+            return
+        for spec in pending:
+            self.request_connect(spec.key)
 
     def request_connect(self, key: str) -> str:
         """Connect ``key`` as if Enter were pressed on its row (used by ``:connect``)."""

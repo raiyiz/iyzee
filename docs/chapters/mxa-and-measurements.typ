@@ -134,11 +134,20 @@ The driver separates configuration, arming, acquisition, and readout. The normal
 
 $ "configure" -> "INIT:CONT OFF" -> "INIT:IMM" -> "*OPC?" -> "read trace" $
 
-`single_sweep_wait()` performs that sequence, while `wait_opc()` temporarily applies the requested VISA timeout and restores the previous value afterward. `get_errors()` drains the SCPI error queue with `SYST:ERR?`.
+`single_sweep_wait()` performs that sequence, while `wait_opc()` temporarily applies the requested VISA timeout and restores the previous value afterward. `get_errors()` drains the SCPI error queue with `SYST:ERR?` (at most 100 reads).
+
+#callout(
+  "A timed-out query leaves its reply behind",
+  [
+    A VISA session has one output queue. If `*OPC?` does not answer in time the reply is still on its way, and it is delivered to whatever is read next: every later answer is one behind, a stale `*OPC?` ends the wait for a sweep that is still averaging, and the trace comes back half-finished with no error. So the driver treats a timeout as a loss of synchronization: it clears the session (VXI-11 device clear) and sends `ABOR`, then raises `MXATimeoutError` (`wait_opc()` returns `False`). If the clear itself fails the link is dropped, so the app shows it as lost. `acquire_trace` turns an unfinished sweep into an error, never into data, and refuses a trace that is empty, not finite, or not as long as the analyzer's point count.
+  ],
+)
+
+The wait for a sweep is sized from the analyzer's own settings, `single_sweep_wait(timeout_sec=None)`: three times sweep time x averages, and at least 30 s. A fixed limit would fail every point of a long configuration.
 
 `wait_for_trigger_ready()` uses the Operation Status Register rather than a fixed delay to detect the analyzer's armed state. Trigger readiness and acquisition completion are different states, and neither one proves that an external physical source emitted the intended event.
 
-Fixed `sleep()` calls belong only where they represent characterized physical settling. This matters in #code("FrequencyStep"): the laser frequency setpoint is changed, the procedure waits `relax_time_s` (default #fact("sweeps.settle_time_s") s, #code("SETTLE_TIME_S")), reads the wavemeter and stores that reading with the step, the shutter is opened only for the squeezing acquisition, the shutter is closed in a `finally` block, and the shot-noise reference is acquired afterward.
+Fixed `sleep()` calls belong only where they represent characterized physical settling. This matters in #code("FrequencyStep"): the laser frequency setpoint is changed, the procedure waits `relax_time_s` (default #fact("sweeps.settle_time_s") s, #code("SETTLE_TIME_S")), reads the wavemeter and stores that reading with the step, the shutter is opened only for the squeezing acquisition (with `SHUTTER_SETTLE_S` to finish moving after each change), the shutter is closed in a `finally` block that retries and raises `ShutterError` rather than leave it open quietly, and the shot-noise reference is acquired afterward. Each stage is reported through `ExperimentContext.phase` (logged, and shown on the Sweep page with its elapsed time), and an abort request is honoured between stages, with the shutter closed.
 
 The software ordering is therefore explicit, but its scientific validity still depends on the physical system being sufficiently stationary during the sequence.
 
@@ -187,7 +196,9 @@ shutter, and then acquires the shot-noise reference.
 
 `run_bandwidth_sweep()` runs `build_bandwidth_sweep()`, a sequence of `BandwidthStep` objects. Each step sets RBW, uses `VBW = 2 * RBW`, acquires squeezing and shot-noise traces, and records the RBW/VBW values as metadata. This scan is useful because the measured noise should approximately follow effective bandwidth for a white-noise region; deviations can reveal non-flat DUT noise, analyzer noise, effective-bandwidth differences, or estimator bias.
 
-`run_frequency_sweep()` runs `build_frequency_sweep()`, `FrequencyStep` objects around a laser-frequency center value, 10 MHz apart by default. The wavemeter comes from the run context: the Sweep page passes the connected one (and holds its lock for the run), and `run_frequency_sweep(wavemeter=...)` takes one, defaulting to a client for the configured server. Its settling interval is a fixed #fact("sweeps.settle_time_s") s for the laser to settle on the new setpoint, after which the wavemeter is read and stored with the step. It is independent of sweep duration and average count, because each acquisition restarts the analyzer's averaging (`INIT:IMM`). It is a chosen value, not a measured settling constant; `build_frequency_sweep(relax_time_s=...)` overrides it.
+`run_frequency_sweep()` runs `build_frequency_sweep()`, `FrequencyStep` objects around a laser-frequency center value, 10 MHz apart by default. The wavemeter comes from the run context: the Sweep page passes the connected one (and holds its lock for the run), and `run_frequency_sweep(wavemeter=...)` takes one, defaulting to a client for the configured server. Its settling interval is a fixed #fact("sweeps.settle_time_s") s for the laser to settle on the new setpoint, after which the wavemeter is read and stored with the step. It is independent of sweep duration and average count, because each acquisition restarts the analyzer's averaging (`INIT:IMM`). It is a chosen value, not a measured settling constant; `build_frequency_sweep(relax_time_s=...)` overrides it. Every point records `setpoint_error_thz`, how far the reading was from the setpoint; `settle_tolerance_thz=` makes the step keep reading (up to `settle_timeout_s`) until the laser is within that tolerance, and fail with `LaserNotSettledError` if it never is. The wavemeter client retries a failed request, and refuses the zero or negative numbers a WS-7 reports instead of a frequency (no signal, over- or under-exposed).
+
+The runner (`SweepRunner`) waits at most 15 s for an instrument that something else holds, refuses to start a frequency sweep while the supply's master output is off (the shutter could never open), runs a step that failed with a timeout once more (`meta["attempts"]`), and closes the shutter however the run ended.
 
 The key comparison in that workflow is squeezing versus shot noise. A difference between two dBm traces is a power ratio. A residual power requires linear-domain subtraction. Documentation and downstream analysis should keep those quantities distinct.
 

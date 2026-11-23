@@ -12,7 +12,7 @@ from helpers import (
     plain,
     wait_until,
 )
-from textual.widgets import ContentSwitcher, Static
+from textual.widgets import ContentSwitcher, DataTable, Static
 
 from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.ipython import LabProxy
@@ -40,7 +40,9 @@ async def test_page_navigation_and_footer_contracts() -> None:
         def offered() -> set[str]:
             return set(pilot.app.screen.active_bindings)
 
-        assert "c" not in offered() and {"s", "t", "i"} <= offered()
+        # on Connect, ``c`` is the page's own connect-all key, not navigation to itself
+        assert pilot.app.screen.active_bindings["c"].binding.action == "connect_all_tap"
+        assert {"s", "t", "i"} <= offered()
         binding = pilot.app.screen.active_bindings["ctrl+q"].binding
         assert binding.action == "quit" and binding.show is True
 
@@ -87,6 +89,20 @@ async def test_page_navigation_and_footer_contracts() -> None:
         assert app.is_running
         await pilot.press("q")
         await wait_until(pilot, lambda: not app.is_running)
+
+
+@async_test
+async def test_double_c_connects_all_on_connect_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    handle = FakeHandle()
+    app = connect_app(monkeypatch, handle, key="mxa")
+    async with app.run_test() as pilot:
+        table = app.query_one(ConnectScreen).query_one("#instrument-table", DataTable)
+        await pilot.press("c")  # one press only arms the shortcut (it is also the nav key)
+        await pilot.pause()
+        assert handle.connect_calls == 0
+        await pilot.press("c")
+        await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")
+        assert handle.connect_calls == 1
 
 
 @async_test
@@ -161,3 +177,32 @@ async def test_a_lost_link_is_reported_once_released_and_reconnectable(
         assert app.handles["mxa"] is fresh
         assert "mxa" not in app.lost_links
         assert table.get_cell("mxa", DETAIL_COL) == "back"
+
+
+@async_test
+async def test_logging_from_a_worker_never_waits_for_the_ui_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A log handler runs with the logging lock held. If it waited for the UI loop (as
+    ``call_from_thread`` does) while the UI thread logged and waited for that lock, the app
+    would freeze for good; a sweep worker logs at every step. So it must post and move on."""
+    import logging
+    import threading
+
+    app = IyzeeApp()
+    shown: list[str] = []
+
+    def must_not_wait(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the log handler waited for the UI thread")
+
+    async with app.run_test() as pilot:
+        monkeypatch.setattr(app, "call_from_thread", must_not_wait)
+        monkeypatch.setattr(app, "_show_log_entry", lambda entry: shown.append(entry.message))
+        worker = threading.Thread(
+            target=lambda: logging.getLogger("iyzee.test").warning("from a worker")
+        )
+        worker.start()
+        worker.join(5)
+        assert not worker.is_alive()
+        await wait_until(pilot, lambda: shown)
+        assert "from a worker" in shown[0]
