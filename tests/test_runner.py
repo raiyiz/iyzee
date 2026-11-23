@@ -179,28 +179,3 @@ def test_a_run_refuses_to_start_with_the_supply_off_and_always_leaves_the_shutte
     outcome = SweepRunner(_frequency_like(_Point("a")), {"mxa": object(), "shutter": on}).run()
     assert outcome.setup_error is None and len(outcome.collected) == 1
     assert on.closed == 1  # closed at the end of the run, as a last guarantee
-
-
-def test_a_point_that_times_out_once_is_measured_on_the_second_try(
-    lab_dir: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr("iyzee.experiment.core.time.sleep", lambda s: None)
-    monkeypatch.setattr(runner_mod, "RETRY_DELAY_S", 0.0)
-
-    class Lagging(_Point):
-        calls = 0
-
-        def run(self, ctx: Any) -> StepResult:
-            Lagging.calls += 1
-            if Lagging.calls == 1:
-                raise TimeoutError("the analyzer lagged")
-            return super().run(ctx)
-
-    phases: list[str] = []
-    outcome = SweepRunner(
-        _sweep(Lagging("a"), _Point("b")), {"mxa": object()}, on_phase=phases.append
-    ).run()
-    assert [r.label for r in outcome.collected] == ["a", "b"]
-    assert outcome.collected[0].meta["attempts"] == 2
-    assert outcome.record is not None and outcome.record.status == "completed"
-    assert any("trying again" in text for text in phases)

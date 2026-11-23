@@ -12,7 +12,7 @@ from helpers import (
     plain,
     wait_until,
 )
-from textual.widgets import ContentSwitcher, Static
+from textual.widgets import ContentSwitcher, DataTable, Static
 
 from iyzee.tui.app import IyzeeApp, NavRail
 from iyzee.tui.ipython import LabProxy
@@ -40,7 +40,9 @@ async def test_page_navigation_and_footer_contracts() -> None:
         def offered() -> set[str]:
             return set(pilot.app.screen.active_bindings)
 
-        assert "c" not in offered() and {"s", "t", "i"} <= offered()
+        # on Connect, ``c`` is the page's own connect-all key, not navigation to itself
+        assert pilot.app.screen.active_bindings["c"].binding.action == "connect_all_tap"
+        assert {"s", "t", "i"} <= offered()
         binding = pilot.app.screen.active_bindings["ctrl+q"].binding
         assert binding.action == "quit" and binding.show is True
 
@@ -94,8 +96,11 @@ async def test_double_c_connects_all_on_connect_page(monkeypatch: pytest.MonkeyP
     handle = FakeHandle()
     app = connect_app(monkeypatch, handle, key="mxa")
     async with app.run_test() as pilot:
-        table = app.query_one(ConnectScreen).query_one("#instrument-table")
-        await pilot.press("c", "c")
+        table = app.query_one(ConnectScreen).query_one("#instrument-table", DataTable)
+        await pilot.press("c")  # one press only arms the shortcut (it is also the nav key)
+        await pilot.pause()
+        assert handle.connect_calls == 0
+        await pilot.press("c")
         await wait_until(pilot, lambda: table.get_cell("mxa", STATUS_COL) == "connected")
         assert handle.connect_calls == 1
 

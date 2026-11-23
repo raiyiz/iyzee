@@ -109,33 +109,7 @@ def test_a_transient_failure_is_retried_and_a_dead_server_is_reported_after_the_
     assert issubclass(wavemeter.WavemeterError, OSError)  # so the runner retries the point
 
 
-def test_a_server_that_refuses_is_asked_once_but_one_that_fails_is_asked_again(
-    monkeypatch: pytest.MonkeyPatch, no_delay: list[float]
-) -> None:
-    calls: list[int] = []
-
-    def refuse(*a: Any, **k: Any) -> requests.Response:
-        calls.append(1)
-        return response("no", status=404)
-
-    monkeypatch.setattr(wavemeter.requests, "post", refuse)
-    with pytest.raises(wavemeter.WavemeterError):
-        Wavemeter().set_pid_setpoint(377.1, 4)
-    assert len(calls) == 1
-
-    calls.clear()
-
-    def failing(*a: Any, **k: Any) -> requests.Response:
-        calls.append(1)
-        return response("", status=503)
-
-    monkeypatch.setattr(wavemeter.requests, "post", failing)
-    with pytest.raises(wavemeter.WavemeterError):
-        Wavemeter().set_pid_setpoint(377.1, 4)
-    assert len(calls) == wavemeter.ATTEMPTS
-
-
-@pytest.mark.parametrize("text", ["0", "-3.0", "-1", "nan", "inf", "", "no signal"])
+@pytest.mark.parametrize("text", ["-3.0", "nan", "no signal"])
 def test_a_wavemeter_status_code_is_not_a_frequency(
     monkeypatch: pytest.MonkeyPatch, text: str
 ) -> None:

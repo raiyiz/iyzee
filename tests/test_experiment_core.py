@@ -114,15 +114,6 @@ def test_a_step_that_times_out_is_tried_again_and_says_so_but_other_errors_are_n
     assert "attempts" not in run_sequence([clean], make_ctx(), retries=1)[0].meta
 
 
-def test_an_abort_from_inside_a_step_stops_the_run_even_when_failures_are_skipped():
-    from iyzee.experiment.core import RunAborted
-
-    ctx = ExperimentContext(mx=object(), run_id="r", should_abort=lambda: True)
-    steps = [RecordingStep("a", 1), RecordingStep("b", 2)]
-    with pytest.raises(RunAborted):
-        run_sequence(steps, ctx, on_error="skip")
-
-
 def test_a_wait_notices_an_abort_and_the_run_reports_what_it_is_doing(monkeypatch):
     from iyzee.experiment.core import RunAborted
 

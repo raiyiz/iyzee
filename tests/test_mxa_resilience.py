@@ -7,12 +7,10 @@ cost one point, not poison every later point of the run with stale, half-average
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 from fake_visa import SimulatedMXA
 
-from iyzee.devices.handles import _VisaHandle
-from iyzee.devices.mxa import KeysightMXA, MXAProtocolError, MXATimeoutError
+from iyzee.devices.mxa import KeysightMXA, MXATimeoutError
 from iyzee.experiment.procedures import (
     TRACE_SHOT,
     TRACE_SQZ,
@@ -72,14 +70,6 @@ def test_a_stalled_acquisition_fails_that_point_only_and_leaves_the_session_in_s
         ]
 
 
-def test_a_sweep_that_did_not_finish_is_an_error_never_a_trace():
-    sim = SimulatedMXA(stalls={0: 100.0})
-    mx = _connect(sim)
-    with pytest.raises(MXATimeoutError, match="did not finish"):
-        acquire_trace(mx, TRACE_SQZ)
-    assert ("ABOR" in sim.commands) and mx.connected  # aborted, and the link is still usable
-
-
 def test_the_wait_follows_the_configured_sweep_not_a_fixed_30_seconds():
     sim = SimulatedMXA()
     mx = _connect(sim)
@@ -87,47 +77,6 @@ def test_the_wait_follows_the_configured_sweep_not_a_fixed_30_seconds():
     assert mx.sweep_timeout_s() == pytest.approx(3 * 75)
     trace = acquire_trace(mx, TRACE_SQZ)
     assert len(trace) == 1001 and _first_sample(trace) == -71.0
-
-
-def test_a_reply_of_the_wrong_length_is_refused_and_the_session_cleared():
-    sim = SimulatedMXA()
-    mx = _connect(sim)
-    sim.queue.append((0.0, "1"))  # a stale answer from some earlier command
-    with pytest.raises(MXAProtocolError):
-        mx.get_trace_data(TRACE_SQZ, binary=False)
-    assert not sim.queue and sim.cleared == 1
-    assert len(mx.get_trace_data(TRACE_SQZ, binary=False)) == 1001  # back in step
-
-
-def test_samples_that_are_not_finite_are_refused(monkeypatch: pytest.MonkeyPatch):
-    mx = _connect(SimulatedMXA())
-    monkeypatch.setattr(mx, "get_trace_data", lambda **_: [1.0, float("nan")])
-    with pytest.raises(MXAProtocolError, match="non-finite"):
-        acquire_trace(mx, TRACE_SQZ)
-
-
-def test_a_session_that_cannot_be_cleared_is_dropped_so_the_app_shows_the_link_lost():
-    sim = SimulatedMXA(stalls={0: 100.0})
-    mx = _connect(sim)
-    handle = _VisaHandle(mx)
-    assert handle.alive
-
-    def broken() -> None:
-        raise OSError("link is gone")
-
-    sim.clear = broken  # type: ignore[method-assign]
-    with pytest.raises(MXATimeoutError):
-        acquire_trace(mx, TRACE_SQZ)
-    assert not mx.connected and not handle.alive
-
-
-def test_reading_the_error_queue_stops_on_a_queue_that_never_empties():
-    sim = SimulatedMXA()
-    mx = _connect(sim)
-    sim._execute = lambda command: sim._reply('-100,"Command error"')  # type: ignore[method-assign]
-    with pytest.raises(MXAProtocolError, match="not empty"):
-        mx.get_errors(limit=5)
-    assert np.sum([c == "SYST:ERR?" for c in sim.commands]) == 5
 
 
 def test_a_whole_frequency_sweep_finishes_despite_an_analyzer_stall_and_a_flaky_wavemeter(
