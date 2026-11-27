@@ -276,7 +276,6 @@ async def test_mxa_settings_can_be_read_into_the_bandwidth_form() -> None:
         assert screen.query_one("#mxa-trigger-source", Select).value == "EXT"
 
 
-
 class _FailingMxaSettings:
     def get_center_freq(self) -> float:
         raise RuntimeError("MXA connection lost")
