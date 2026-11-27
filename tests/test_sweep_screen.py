@@ -19,7 +19,7 @@ from textual.pilot import Pilot
 from textual.widgets import Button, Input, RichLog, Select, Static
 
 from iyzee.devices.wavemeter import Rb_transitions
-from iyzee.experiment import runner as runner_mod
+from iyzee.experiment import FrequencyStep, runner as runner_mod
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens.sweep import (
@@ -39,6 +39,15 @@ async def _open_sweep_screen(pilot: Pilot[Any]) -> SweepScreen:
     return pilot.app.query_one(SweepScreen)
 
 
+async def _click_visible(pilot: Pilot[Any], selector: str) -> None:
+    """Scroll an off-screen control into view before exercising its click handler."""
+    widget = pilot.app.query_one(selector)
+    widget.scroll_visible(animate=False)
+    await pilot.pause()
+    await pilot.pause()
+    await pilot.click(selector)
+
+
 @async_test
 async def test_the_form_defaults_validation_and_missing_instruments() -> None:
     async with IyzeeApp().run_test() as pilot:
@@ -53,8 +62,10 @@ async def test_the_form_defaults_validation_and_missing_instruments() -> None:
         frequency = screen._build_frequency_run()
         assert len(frequency.steps) == 5
         assert frequency.config.sweep_duration_ms == 10
-        assert all(step.relax_time_s == pytest.approx(0.5) for step in frequency.steps)
-        gaps = [b.x_value - a.x_value for a, b in itertools.pairwise(frequency.steps)]
+        frequency_steps = [step for step in frequency.steps if isinstance(step, FrequencyStep)]
+        assert len(frequency_steps) == len(frequency.steps)
+        assert all(step.relax_time_s == pytest.approx(0.5) for step in frequency_steps)
+        gaps = [b.x_value - a.x_value for a, b in itertools.pairwise(frequency_steps)]
         assert all(gap == pytest.approx(10e-6) for gap in gaps)
 
         screen.query_one("#mxa-sweep-time", Input).value = "25"
@@ -63,10 +74,10 @@ async def test_the_form_defaults_validation_and_missing_instruments() -> None:
 
         screen.query_one("#freq-settle-time", Input).value = "125"
         await pilot.pause()
-        assert all(
-            step.relax_time_s == pytest.approx(0.125)
-            for step in screen._build_frequency_run().steps
-        )
+        settled = screen._build_frequency_run()
+        settled_steps = [step for step in settled.steps if isinstance(step, FrequencyStep)]
+        assert len(settled_steps) == len(settled.steps)
+        assert all(step.relax_time_s == pytest.approx(0.125) for step in settled_steps)
 
         label, frequency_thz = next(
             (label, value) for label, value in Rb_transitions if label == "D1 - Rb87_F22"
@@ -76,7 +87,9 @@ async def test_the_form_defaults_validation_and_missing_instruments() -> None:
         assert not screen.query_one("#freq-center-field").display
         selected = screen._build_frequency_run()
         expected = [frequency_thz + (i - 2) * 10e-6 for i in range(5)]
-        assert [step.frequency_thz for step in selected.steps] == pytest.approx(expected)
+        selected_steps = [step for step in selected.steps if isinstance(step, FrequencyStep)]
+        assert len(selected_steps) == len(selected.steps)
+        assert [step.frequency_thz for step in selected_steps] == pytest.approx(expected)
 
     async def _an_invalid_field_is_named_marked_and_foc():
         app = IyzeeApp()
@@ -222,7 +235,7 @@ async def test_reading_mxa_settings_is_safe_when_the_analyzer_is_not_connected()
     app = IyzeeApp()
     async with app.run_test() as pilot:
         await _open_sweep_screen(pilot)
-        await pilot.click("#read-mxa-settings")
+        await _click_visible(pilot, "#read-mxa-settings")
         await pilot.pause()
         assert not app.sweep_running
         assert any("Connect the MXA first" in message for message in notifications(app))
@@ -254,7 +267,7 @@ async def test_mxa_settings_can_be_read_into_the_bandwidth_form() -> None:
     app.handles["mxa"] = FakeHandle(device=_FakeMxaSettings())
     async with app.run_test() as pilot:
         screen = await _open_sweep_screen(pilot)
-        await pilot.click("#read-mxa-settings")
+        await _click_visible(pilot, "#read-mxa-settings")
         await wait_until(pilot, lambda: screen.query_one("#mxa-center", Input).value == "3.5")
         assert screen.query_one("#mxa-span", Input).value == "2"
         assert screen.query_one("#mxa-averages", Input).value == "73"
