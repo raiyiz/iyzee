@@ -20,6 +20,7 @@ from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from pyvisa.errors import VisaIOError
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
@@ -135,6 +136,10 @@ class SweepScreen(Page):
                     ),
                     id="sweep-type-field",
                 )
+            with Grid(id="sweep-controls"):
+                yield Button("Run sweep", id="run-sweep", variant="success")
+                yield Button("Abort", id="abort-sweep", variant="error", disabled=True)
+                yield Button("Capture trace", id="capture-trace")
             with Grid(id="bw-fields", classes="field-grid"):
                 yield _field("RBW start (Hz)", Input(value="20000", id="rbw-start"))
                 yield _field("RBW stop (Hz)", Input(value="380000", id="rbw-stop"))
@@ -194,10 +199,6 @@ class SweepScreen(Page):
                     "Offset step (MHz)",
                     Input(value=f"{FREQUENCY_STEP_THZ * 1e6:g}", id="freq-offset-mhz"),
                 )
-        with Grid(id="sweep-controls"):
-            yield Button("Run sweep", id="run-sweep", variant="success")
-            yield Button("Abort", id="abort-sweep", variant="error", disabled=True)
-            yield Button("Capture trace", id="capture-trace")
         yield Static("", id="sweep-phase")
         yield ProgressBar(id="sweep-progress", total=1)
         yield PlotextPlot(id="sweep-plot")
@@ -434,7 +435,7 @@ class SweepScreen(Page):
                     "avg_type": mx.get_average_type(),
                     "trig_source": mx.get_trigger_source(),
                 }
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, VisaIOError) as exc:
             log.warning("sweep: could not read MXA settings: %s", exc)
             self._ui(self._finish_read_mxa_settings, settings=None, error=exc)
             return
