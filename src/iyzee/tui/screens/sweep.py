@@ -36,7 +36,6 @@ from textual.widgets import (
 from textual_plotext import PlotextPlot
 
 from ...devices.wavemeter import Rb_transitions
-from ...experiment.procedures import DEFAULT_LASER_CENTER_THZ
 from ...experiment import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
@@ -51,6 +50,7 @@ from ...experiment import (
     build_frequency_sweep,
     difference_series,
 )
+from ...experiment.procedures import DEFAULT_LASER_CENTER_THZ
 from ..commands import Command
 from ..plotting import draw_series, prepare_series
 from ..text import one_line
