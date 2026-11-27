@@ -17,13 +17,14 @@ from __future__ import annotations
 import logging
 from threading import Event
 from time import monotonic
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from pyvisa.errors import VisaIOError
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Grid, Vertical
+from textual.containers import Grid, Horizontal, Vertical
 from textual.timer import Timer
 from textual.widgets import (
     Button,
@@ -35,6 +36,7 @@ from textual.widgets import (
 )
 from textual_plotext import PlotextPlot
 
+from ...devices.wavemeter import Rb_transitions
 from ...experiment import (
     DEFAULT_SWEEP_DURATION_MS,
     FREQUENCY_STEP_THZ,
@@ -49,6 +51,7 @@ from ...experiment import (
     build_frequency_sweep,
     difference_series,
 )
+from ...experiment.procedures import DEFAULT_LASER_CENTER_THZ
 from ..commands import Command
 from ..plotting import draw_series, prepare_series
 from ..text import one_line
@@ -68,8 +71,42 @@ log = logging.getLogger("iyzee.tui")
 MAX_POINTS = 1000
 LIVE_PLOT_INTERVAL_S = 0.1
 
+_RB_FREQUENCIES_THZ = {
+    label: frequency for label, frequency in Rb_transitions if not label.endswith("_center")
+}
+_RB_FREQUENCY_OPTIONS = [("Manual frequency", "manual")] + [
+    (f"{label} · {frequency:.9f} THz", label)
+    for label, frequency in Rb_transitions
+    if not label.endswith("_center")
+]
+_MXA_AVERAGE_OPTIONS = [
+    ("Log power (LOG)", "LOG"),
+    ("RMS power (RMS)", "RMS"),
+    ("Scalar (SCAL)", "SCAL"),
+]
+_MXA_TRIGGER_OPTIONS = [
+    ("Immediate (IMM)", "IMM"),
+    ("Video (VID)", "VID"),
+    ("External (EXT)", "EXT"),
+    ("RF burst (RFB)", "RFB"),
+    ("Frame (FRAM)", "FRAM"),
+]
+
 # How each instrument key a sweep ``requires`` is named in "connect the ..." messages.
 _INSTRUMENT_NAMES = {"mxa": "MXA", "shutter": "shutter", "wavemeter": "wavemeter"}
+
+
+def _non_negative_float(raw: str, field: str) -> float:
+    """Parse a finite float that may be zero (as an MXA span may be)."""
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be a number") from exc
+    if not np.isfinite(value):
+        raise ValueError(f"{field} must be finite")
+    if value < 0:
+        raise ValueError(f"{field} must be non-negative")
+    return value
 
 
 class SweepScreen(Page):
@@ -99,26 +136,69 @@ class SweepScreen(Page):
                     ),
                     id="sweep-type-field",
                 )
-                yield _field(
-                    "Sweep duration (ms)",
-                    Input(value=str(DEFAULT_SWEEP_DURATION_MS), id="sweep-duration"),
-                )
+            with Grid(id="sweep-controls"):
+                yield Button("Run sweep", id="run-sweep", variant="success")
+                yield Button("Abort", id="abort-sweep", variant="error", disabled=True)
+                yield Button("Capture trace", id="capture-trace")
             with Grid(id="bw-fields", classes="field-grid"):
                 yield _field("RBW start (Hz)", Input(value="20000", id="rbw-start"))
                 yield _field("RBW stop (Hz)", Input(value="380000", id="rbw-stop"))
                 yield _field("Steps", Input(value="19", id="rbw-steps"))
+            with Vertical(id="mxa-fields"):
+                yield Static("MXA settings", classes="panel-title")
+                with Grid(id="mxa-settings", classes="field-grid"):
+                    yield _field("Averages", Input(value="200", id="mxa-averages"))
+                    yield _field(
+                        "Sweep time (ms)",
+                        Input(value=str(DEFAULT_SWEEP_DURATION_MS), id="mxa-sweep-time"),
+                    )
+                    yield _field("Center frequency (MHz)", Input(value="1", id="mxa-center"))
+                    yield _field("Span (MHz)", Input(value="0", id="mxa-span"))
+                    yield _field(
+                        "Averaging type",
+                        Select(
+                            _MXA_AVERAGE_OPTIONS,
+                            value="LOG",
+                            allow_blank=False,
+                            id="mxa-average-type",
+                        ),
+                    )
+                    yield _field(
+                        "Trigger source",
+                        Select(
+                            _MXA_TRIGGER_OPTIONS,
+                            value="IMM",
+                            allow_blank=False,
+                            id="mxa-trigger-source",
+                        ),
+                    )
+                with Horizontal(id="mxa-actions"):
+                    yield Button("Read from MXA", id="read-mxa-settings")
             with Grid(id="freq-fields", classes="field-grid"):
-                yield _field("Laser center (THz)", Input(value="377.1052067", id="freq-center"))
+                yield _field(
+                    "Laser frequency source",
+                    Select(
+                        _RB_FREQUENCY_OPTIONS,
+                        value="manual",
+                        allow_blank=False,
+                        id="freq-reference",
+                    ),
+                )
+                yield _field(
+                    "Laser center (THz)",
+                    Input(value=f"{DEFAULT_LASER_CENTER_THZ:.7f}", id="freq-center"),
+                    id="freq-center-field",
+                )
                 yield _field("Wavemeter channel", Input(value="4", id="freq-channel"))
+                yield _field(
+                    "Laser settling time (ms)",
+                    Input(value="500", id="freq-settle-time"),
+                )
                 yield _field("Points", Input(value="5", id="freq-points"))
                 yield _field(
-                    "Offset step (kHz)",
-                    Input(value=f"{FREQUENCY_STEP_THZ * 1e9:g}", id="freq-offset-khz"),
+                    "Offset step (MHz)",
+                    Input(value=f"{FREQUENCY_STEP_THZ * 1e6:g}", id="freq-offset-mhz"),
                 )
-        with Grid(id="sweep-controls"):
-            yield Button("Run sweep", id="run-sweep", variant="success")
-            yield Button("Abort", id="abort-sweep", variant="error", disabled=True)
-            yield Button("Capture trace", id="capture-trace")
         yield Static("", id="sweep-phase")
         yield ProgressBar(id="sweep-progress", total=1)
         yield PlotextPlot(id="sweep-plot")
@@ -132,6 +212,7 @@ class SweepScreen(Page):
         self._phase_since = monotonic()
         self._phase_timer: Timer | None = None
         self.query_one("#freq-fields").display = False
+        self.query_one("#freq-center-field").display = True
         plot = self.query_one("#sweep-plot", PlotextPlot)
         plot.plt.title("Squeezing - shot noise")
         plot.plt.xlabel("Trace point")
@@ -142,11 +223,14 @@ class SweepScreen(Page):
         self.refresh_readiness()
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id != "sweep-type":
-            return
-        self.query_one("#bw-fields").display = event.value == "bandwidth"
-        self.query_one("#freq-fields").display = event.value == "frequency"
-        self.refresh_readiness()
+        if event.select.id == "sweep-type":
+            is_bandwidth = event.value == "bandwidth"
+            self.query_one("#bw-fields").display = is_bandwidth
+            self.query_one("#mxa-fields").display = is_bandwidth
+            self.query_one("#freq-fields").display = event.value == "frequency"
+            self.refresh_readiness()
+        elif event.select.id == "freq-reference":
+            self.query_one("#freq-center-field").display = event.value == "manual"
 
     # -- readiness ---------------------------------------------------------
 
@@ -205,6 +289,8 @@ class SweepScreen(Page):
             self._request_abort()
         elif event.button.id == "capture-trace":
             self._start_capture()
+        elif event.button.id == "read-mxa-settings":
+            self._start_read_mxa_settings()
 
     def _request_abort(self) -> None:
         """Abort takes effect at the next stage boundary (between setting the
@@ -287,26 +373,98 @@ class SweepScreen(Page):
         stop = self._read("rbw-stop", _positive_float, "RBW stop")
         count = self._read("rbw-steps", _positive_int, "Steps", maximum=MAX_POINTS)
         rbw_values = list(np.linspace(start, stop, count))
+        center_mhz = self._read("mxa-center", _positive_float, "Center frequency")
+        span_mhz = self._read("mxa-span", _non_negative_float, "Span")
         return build_bandwidth_sweep(
-            rbw_values, sweep_duration_ms=self._read_duration(), res_bw_hz=rbw_values[0]
+            rbw_values,
+            avg_count=self._read("mxa-averages", _positive_int, "Averages"),
+            sweep_duration_ms=self._read("mxa-sweep-time", _positive_int, "Sweep time"),
+            center_hz=center_mhz * 1e6,
+            span_hz=span_mhz * 1e6,
+            res_bw_hz=rbw_values[0],
+            avg_type=self._selected("mxa-average-type", "Averaging type"),
+            trig_source=self._selected("mxa-trigger-source", "Trigger source"),
         )
 
     def _build_frequency_run(self) -> Sweep:
-        center = self._read("freq-center", _positive_float, "Laser center")
+        reference = self._selected("freq-reference", "Laser frequency source")
+        if reference == "manual":
+            center = self._read("freq-center", _positive_float, "Laser center")
+        else:
+            center = _RB_FREQUENCIES_THZ[reference]
         channel = self._read("freq-channel", _positive_int, "Wavemeter channel")
         points = self._read("freq-points", _positive_int, "Points", maximum=MAX_POINTS)
-        step_khz = self._read("freq-offset-khz", _positive_float, "Offset step")
-        step_thz = step_khz * 1e-9
+        step_mhz = self._read("freq-offset-mhz", _positive_float, "Offset step")
+        settle_ms = self._read("freq-settle-time", _positive_int, "Laser settling time")
+        step_thz = step_mhz * 1e-6
         offsets = [(i - (points - 1) / 2) * step_thz for i in range(points)]
         return build_frequency_sweep(
             laser_center_thz=center,
             wavemeter_channel=channel,
             offsets_thz=offsets,
-            sweep_duration_ms=self._read_duration(),
+            relax_time_s=settle_ms / 1000,
+            sweep_duration_ms=DEFAULT_SWEEP_DURATION_MS,
         )
 
-    def _read_duration(self) -> int:
-        return self._read("sweep-duration", _positive_int, "Sweep duration")
+    # -- optional MXA read-back ---------------------------------------------
+
+    def _start_read_mxa_settings(self) -> None:
+        handle = self.iyzee_app.handles.get("mxa")
+        if handle is None or handle.device is None:
+            self.notify(
+                "Connect the MXA first — press F1 for the Connect page.",
+                severity="error",
+            )
+            return
+        if self.iyzee_app.sweep_running:
+            self.notify("Cannot read MXA settings during a running operation.", severity="error")
+            return
+        self.query_one("#read-mxa-settings", Button).disabled = True
+        self._read_mxa_settings(handle.device, handle.lock)
+
+    @work(thread=True, exclusive=True, group="mxa-settings", exit_on_error=False)
+    def _read_mxa_settings(self, mx: Any, lock: Any) -> None:
+        """Read MXA settings off the UI thread; disconnects are reported without breaking the page."""
+        try:
+            with lock:
+                settings = {
+                    "center_hz": mx.get_center_freq(),
+                    "span_hz": mx.get_span(),
+                    "avg_count": mx.get_average_count(),
+                    "sweep_time_ms": mx.get_sweep_duration_ms(),
+                    "avg_type": mx.get_average_type(),
+                    "trig_source": mx.get_trigger_source(),
+                }
+        except (OSError, RuntimeError, ValueError, VisaIOError) as exc:
+            log.warning("sweep: could not read MXA settings: %s", exc)
+            self._ui(self._finish_read_mxa_settings, settings=None, error=exc)
+            return
+        self._ui(self._finish_read_mxa_settings, settings=settings, error=None)
+
+    def _finish_read_mxa_settings(
+        self, *, settings: dict[str, Any] | None, error: Exception | None
+    ) -> None:
+        self.query_one("#read-mxa-settings", Button).disabled = False
+        if error is not None:
+            self.notify(
+                f"Could not read settings from the MXA: {one_line(error)}",
+                severity="error",
+                markup=False,
+            )
+            return
+        if settings is None:
+            return
+        self.query_one("#mxa-center", Input).value = f"{settings['center_hz'] / 1e6:g}"
+        self.query_one("#mxa-span", Input).value = f"{settings['span_hz'] / 1e6:g}"
+        self.query_one("#mxa-averages", Input).value = str(settings["avg_count"])
+        self.query_one("#mxa-sweep-time", Input).value = str(settings["sweep_time_ms"])
+        average_type = self.query_one("#mxa-average-type", Select)
+        if settings["avg_type"] in {value for _, value in _MXA_AVERAGE_OPTIONS}:
+            average_type.value = settings["avg_type"]
+        trigger_source = self.query_one("#mxa-trigger-source", Select)
+        if settings["trig_source"] in {value for _, value in _MXA_TRIGGER_OPTIONS}:
+            trigger_source.value = settings["trig_source"]
+        self.notify("Loaded the current MXA settings into the bandwidth form.")
 
     # -- the run itself, off the UI thread -----------------------------------
 

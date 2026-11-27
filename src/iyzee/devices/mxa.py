@@ -173,8 +173,16 @@ class KeysightMXA(BaseDevice):
     def set_center_freq(self, freq_hz: float):
         self.write(f"FREQ:CENT {freq_hz}")
 
+    def get_center_freq(self) -> float:
+        """Read the current center frequency in Hz."""
+        return float(self.query("FREQ:CENT?"))
+
     def set_span(self, span_hz: float):
         self.write(f"FREQ:SPAN {span_hz}")
+
+    def get_span(self) -> float:
+        """Read the current frequency span in Hz."""
+        return float(self.query("FREQ:SPAN?"))
 
     def set_start_stop(self, start_hz: float, stop_hz: float):
         self.write(f"FREQ:STAR {start_hz}")
@@ -222,6 +230,10 @@ class KeysightMXA(BaseDevice):
     # ------------------------------------------------------------------
     def set_sweep_duration(self, time: int):
         self.write(f"SWE:TIME {time}ms")
+
+    def get_sweep_duration_ms(self) -> int:
+        """Read the sweep duration in milliseconds (SCPI reports seconds)."""
+        return round(float(self.query("SWE:TIME?")) * 1_000)
 
     def set_sweep_points(self, points: int):
         self.write(f"SWE:POIN {points}")
@@ -281,12 +293,20 @@ class KeysightMXA(BaseDevice):
     def set_average_count(self, count: int):
         self.write(f"AVER:COUN {count}")
 
+    def get_average_count(self) -> int:
+        """Read the configured trace-average count."""
+        return round(float(self.query("AVER:COUN?")))
+
     def set_average_type(self, avg_type: str):
         """
         avg_type: RMS (power), LOG (log-power), SCAL (voltage).
         Use RMS for true noise power averaging.
         """
         self.write(f"AVER:TYPE {avg_type}")
+
+    def get_average_type(self) -> str:
+        """Read the averaging type (RMS, LOG, or SCAL)."""
+        return self.query("AVER:TYPE?").strip().upper()
 
     # -- Trace Control (suffix syntax) --------------------------------
     def set_trace_mode(self, trace_num: int | str, mode: str):
@@ -386,6 +406,10 @@ class KeysightMXA(BaseDevice):
         use VID or EXT instead.
         """
         self.write(f"TRIG:SOUR {source}")
+
+    def get_trigger_source(self) -> str:
+        """Read the configured trigger source."""
+        return self.query("TRIG:SOUR?").strip().upper()
 
     def set_trigger_level_video(self, level_dbm: float):
         self.write(f"TRIG:LEV:VID {level_dbm}")

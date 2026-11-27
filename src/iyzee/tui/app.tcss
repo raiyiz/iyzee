@@ -223,6 +223,13 @@ Screen {
     padding-top: 1;
 }
 
+/* The MXA settings are a nested panel inside the auto-height form. Keep both
+   containers content-sized so their controls extend the page's scroll range. */
+#mxa-fields,
+#mxa-actions {
+    height: auto;
+}
+
 /* One label + input per cell. Vertical defaults to `height: 1fr`, which
    inside an auto-height form would collapse — so be explicit. */
 .field {
@@ -252,7 +259,7 @@ Screen {
 
 /* Run / Abort / Capture: stacked full-width when narrow, three across
    otherwise — fixed-width buttons on wide terminals so they don't
-   stretch into billboards. */
+   stretch into billboards. The parent form already provides the inset. */
 #sweep-controls {
     layout: grid;
     grid-size: 1;
@@ -260,7 +267,7 @@ Screen {
     grid-rows: auto;
     grid-gutter: 0 1;
     height: auto;
-    margin: 0 2 1 2;
+    margin: 0 0 1 0;
 }
 
 .-medium #sweep-controls {
