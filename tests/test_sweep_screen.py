@@ -276,6 +276,28 @@ async def test_mxa_settings_can_be_read_into_the_bandwidth_form() -> None:
         assert screen.query_one("#mxa-trigger-source", Select).value == "EXT"
 
 
+
+class _FailingMxaSettings:
+    def get_center_freq(self) -> float:
+        raise RuntimeError("MXA connection lost")
+
+
+@async_test
+async def test_mxa_readback_failure_notifies_and_reenables_the_control() -> None:
+    app = IyzeeApp()
+    app.handles["mxa"] = FakeHandle(device=_FailingMxaSettings())
+    async with app.run_test() as pilot:
+        screen = await _open_sweep_screen(pilot)
+        await _click_visible(pilot, "#read-mxa-settings")
+        await wait_until(
+            pilot,
+            lambda: any(
+                "Could not read settings from the MXA" in message for message in notifications(app)
+            ),
+        )
+        assert not screen.query_one("#read-mxa-settings", Button).disabled
+
+
 # -- "Capture trace" ---------------------------------------------------------------------
 
 
