@@ -101,7 +101,6 @@ def test_scpi_helpers_wait_for_completion_drain_errors_and_send_frequencies():
     ]
 
 
-
 def test_current_analyzer_settings_can_be_read_back():
     mxa, _ = make_mxa()
 
