@@ -23,14 +23,27 @@ from iyzee.tui.app import IyzeeApp
 SIZES = [(140, 50), (60, 14)]
 
 CONTROLS = {
-    "bandwidth": ["#sweep-type", "#sweep-duration", "#rbw-start", "#rbw-stop", "#rbw-steps"],
+    "bandwidth": [
+        "#sweep-type",
+        "#rbw-start",
+        "#rbw-stop",
+        "#rbw-steps",
+        "#mxa-averages",
+        "#mxa-sweep-time",
+        "#mxa-center",
+        "#mxa-span",
+        "#mxa-average-type",
+        "#mxa-trigger-source",
+        "#read-mxa-settings",
+    ],
     "frequency": [
         "#sweep-type",
-        "#sweep-duration",
+        "#freq-reference",
         "#freq-center",
         "#freq-channel",
+        "#freq-settle-time",
         "#freq-points",
-        "#freq-offset-khz",
+        "#freq-offset-mhz",
     ],
 }
 ALWAYS = ["#run-sweep", "#abort-sweep", "#capture-trace", "#sweep-progress"]
