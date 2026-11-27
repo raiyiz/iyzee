@@ -336,8 +336,13 @@ class Sweep:
 class ConfigOptions(TypedDict, total=False):
     """The analyzer settings every sweep lets the caller override."""
 
+    center_hz: float
+    span_hz: float
+    avg_count: int
     sweep_duration_ms: int
     res_bw_hz: float
+    avg_type: str
+    trig_source: str
 
 
 def bandwidth_sweep_steps(rbw_values_hz=None) -> list[BandwidthStep]:
@@ -370,17 +375,47 @@ def frequency_sweep_steps(
 
 
 def bandwidth_sweep_config(
-    *, sweep_duration_ms: int = DEFAULT_SWEEP_DURATION_MS, res_bw_hz: float = 24e3
+    *,
+    sweep_duration_ms: int = DEFAULT_SWEEP_DURATION_MS,
+    res_bw_hz: float = 24e3,
+    avg_count: int = 200,
+    center_hz: float = 1e6,
+    span_hz: float = 0,
+    avg_type: str = "LOG",
+    trig_source: str = "IMM",
 ) -> AnalyzerConfig:
     """Return the standard analyzer configuration for an RBW sweep."""
-    return AnalyzerConfig(1e6, 0, 200, sweep_duration_ms, res_bw_hz)
+    return AnalyzerConfig(
+        center_hz=center_hz,
+        span_hz=span_hz,
+        avg_count=avg_count,
+        sweep_duration_ms=sweep_duration_ms,
+        res_bw_hz=res_bw_hz,
+        avg_type=avg_type,
+        trig_source=trig_source,
+    )
 
 
 def frequency_sweep_config(
-    *, sweep_duration_ms: int = DEFAULT_SWEEP_DURATION_MS, res_bw_hz: float = 24e3
+    *,
+    sweep_duration_ms: int = DEFAULT_SWEEP_DURATION_MS,
+    res_bw_hz: float = 24e3,
+    avg_count: int = 150,
+    center_hz: float = 1.5e6,
+    span_hz: float = 0,
+    avg_type: str = "LOG",
+    trig_source: str = "IMM",
 ) -> AnalyzerConfig:
     """Return the standard analyzer configuration for a frequency sweep."""
-    return AnalyzerConfig(1.5e6, 0, 150, sweep_duration_ms, res_bw_hz)
+    return AnalyzerConfig(
+        center_hz=center_hz,
+        span_hz=span_hz,
+        avg_count=avg_count,
+        sweep_duration_ms=sweep_duration_ms,
+        res_bw_hz=res_bw_hz,
+        avg_type=avg_type,
+        trig_source=trig_source,
+    )
 
 
 def build_bandwidth_sweep(rbw_values_hz=None, **config: Unpack[ConfigOptions]) -> Sweep:

@@ -137,6 +137,27 @@ def test_sweep_builders_and_their_steps_declare_what_they_need():
         assert sweep.steps and all(isinstance(s, SWEEP_KINDS[sweep.kind]) for s in sweep.steps)
 
 
+def test_analyzer_configuration_overrides_are_carried_into_a_bandwidth_sweep():
+    sweep = build_bandwidth_sweep(
+        [20e3, 40e3],
+        avg_count=37,
+        sweep_duration_ms=125,
+        center_hz=6e6,
+        span_hz=2e6,
+        avg_type="RMS",
+        trig_source="EXT",
+    )
+    config = sweep.config
+    assert (
+        config.avg_count,
+        config.sweep_duration_ms,
+        config.center_hz,
+        config.span_hz,
+        config.avg_type,
+        config.trig_source,
+    ) == (37, 125, 6e6, 2e6, "RMS", "EXT")
+
+
 # -- steps --------------------------------------------------------------------------------------
 
 

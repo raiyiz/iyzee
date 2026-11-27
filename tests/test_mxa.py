@@ -11,6 +11,12 @@ class FakeInstrument:
         self.responses = {
             "FREQ:STAR?": "100.0",
             "FREQ:STOP?": "200.0",
+            "FREQ:CENT?": "1000000.0",
+            "FREQ:SPAN?": "0.0",
+            "SWE:TIME?": "0.01",
+            "AVER:COUN?": "200",
+            "AVER:TYPE?": "LOG",
+            "TRIG:SOUR?": "IMM",
             "SWE:POIN?": "3",
             "*OPC?": "1",
             ":TRACe:DATA? TRACe1": "1.0,2.0,3.0",
@@ -93,3 +99,15 @@ def test_scpi_helpers_wait_for_completion_drain_errors_and_send_frequencies():
         "FREQ:SPAN 100000.0",
         "BWID 10000.0",
     ]
+
+
+
+def test_current_analyzer_settings_can_be_read_back():
+    mxa, _ = make_mxa()
+
+    assert mxa.get_center_freq() == 1e6
+    assert mxa.get_span() == 0
+    assert mxa.get_sweep_duration_ms() == 10
+    assert mxa.get_average_count() == 200
+    assert mxa.get_average_type() == "LOG"
+    assert mxa.get_trigger_source() == "IMM"
