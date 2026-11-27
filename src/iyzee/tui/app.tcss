@@ -223,6 +223,13 @@ Screen {
     padding-top: 1;
 }
 
+/* The MXA settings are a nested panel inside the auto-height form. Keep both
+   containers content-sized so their controls extend the page's scroll range. */
+#mxa-fields,
+#mxa-actions {
+    height: auto;
+}
+
 /* One label + input per cell. Vertical defaults to `height: 1fr`, which
    inside an auto-height form would collapse — so be explicit. */
 .field {
