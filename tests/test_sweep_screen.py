@@ -18,6 +18,7 @@ from helpers import FakeHandle, async_test, make_result, notifications, plain, w
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, RichLog, Select, Static
 
+from iyzee.devices.wavemeter import Rb_transitions
 from iyzee.experiment import runner as runner_mod
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
@@ -40,28 +41,43 @@ async def _open_sweep_screen(pilot: Pilot[Any]) -> SweepScreen:
 
 @async_test
 async def test_the_form_defaults_validation_and_missing_instruments() -> None:
-    # -- form defaults build the documented runs and the duration applies to both
-    async def _form_defaults_build_the_documented_runs_():
-        async with IyzeeApp().run_test() as pilot:
-            screen = await _open_sweep_screen(pilot)
-            bandwidth = screen._build_bandwidth_run()
-            assert len(bandwidth.steps) == 19
-            assert bandwidth.config.res_bw_hz == pytest.approx(20000.0)
-            frequency = screen._build_frequency_run()
-            assert len(frequency.steps) == 5
-            # The defaults the issue asked for: 10 ms sweeps, 10 MHz between laser points.
-            assert bandwidth.config.sweep_duration_ms == frequency.config.sweep_duration_ms == 10
-            gaps = [b.x_value - a.x_value for a, b in itertools.pairwise(frequency.steps)]
-            assert all(gap == pytest.approx(10e-6) for gap in gaps)  # 10 MHz, in THz
+    async with IyzeeApp().run_test() as pilot:
+        screen = await _open_sweep_screen(pilot)
+        bandwidth = screen._build_bandwidth_run()
+        assert len(bandwidth.steps) == 19
+        assert bandwidth.config.res_bw_hz == pytest.approx(20000.0)
+        assert bandwidth.config.avg_count == 200
+        assert (bandwidth.config.center_hz, bandwidth.config.span_hz) == (1e6, 0)
+        assert bandwidth.config.sweep_duration_ms == 10
 
-            screen.query_one("#sweep-duration", Input).value = "25"
-            await pilot.pause()
-            assert screen._build_bandwidth_run().config.sweep_duration_ms == 25
-            assert screen._build_frequency_run().config.sweep_duration_ms == 25
+        frequency = screen._build_frequency_run()
+        assert len(frequency.steps) == 5
+        assert frequency.config.sweep_duration_ms == 10
+        assert all(step.relax_time_s == pytest.approx(0.5) for step in frequency.steps)
+        gaps = [b.x_value - a.x_value for a, b in itertools.pairwise(frequency.steps)]
+        assert all(gap == pytest.approx(10e-6) for gap in gaps)
 
-    await _form_defaults_build_the_documented_runs_()
+        screen.query_one("#mxa-sweep-time", Input).value = "25"
+        await pilot.pause()
+        assert screen._build_bandwidth_run().config.sweep_duration_ms == 25
 
-    # -- an invalid field is named marked and focused
+        screen.query_one("#freq-settle-time", Input).value = "125"
+        await pilot.pause()
+        assert all(
+            step.relax_time_s == pytest.approx(0.125)
+            for step in screen._build_frequency_run().steps
+        )
+
+        label, frequency_thz = next(
+            (label, value) for label, value in Rb_transitions if label == "D1 - Rb87_F22"
+        )
+        screen.query_one("#freq-reference", Select).value = label
+        await pilot.pause()
+        assert not screen.query_one("#freq-center-field").display
+        selected = screen._build_frequency_run()
+        expected = [frequency_thz + (i - 2) * 10e-6 for i in range(5)]
+        assert [step.frequency_thz for step in selected.steps] == pytest.approx(expected)
+
     async def _an_invalid_field_is_named_marked_and_foc():
         app = IyzeeApp()
         async with app.run_test() as pilot:
@@ -71,8 +87,9 @@ async def test_the_form_defaults_validation_and_missing_instruments() -> None:
             for field_id, label, bad, kind in (
                 ("rbw-stop", "RBW stop", "abc", "bandwidth"),
                 ("rbw-steps", "Steps", "0", "bandwidth"),
+                ("mxa-span", "Span", "-1", "bandwidth"),
                 ("freq-points", "Points", "5000", "frequency"),
-                ("sweep-duration", "Sweep duration", "abc", "frequency"),
+                ("freq-settle-time", "Laser settling time", "abc", "frequency"),
             ):
                 screen.query_one("#sweep-type", Select).value = kind
                 await pilot.pause()
@@ -96,7 +113,7 @@ async def test_the_form_defaults_validation_and_missing_instruments() -> None:
                 assert any(m.startswith("Invalid sweep parameters") for m in notifications(app))
                 assert not app.sweep_running
 
-                field.value = good  # editing clears the marker
+                field.value = good
                 await pilot.pause()
                 assert not field.has_class("-invalid")
 
@@ -198,6 +215,52 @@ async def test_abort_is_acknowledged_and_takes_effect_at_the_next_step(
         await wait_until(pilot, lambda: not app.sweep_running)
         assert str(abort.label) == "Abort"
         assert app.last_run is not None and len(app.last_run.results) == 1
+
+
+@async_test
+async def test_reading_mxa_settings_is_safe_when_the_analyzer_is_not_connected() -> None:
+    app = IyzeeApp()
+    async with app.run_test() as pilot:
+        await _open_sweep_screen(pilot)
+        await pilot.click("#read-mxa-settings")
+        await pilot.pause()
+        assert not app.sweep_running
+        assert any("Connect the MXA first" in message for message in notifications(app))
+
+
+class _FakeMxaSettings:
+    def get_center_freq(self) -> float:
+        return 3.5e6
+
+    def get_span(self) -> float:
+        return 2.0e6
+
+    def get_average_count(self) -> int:
+        return 73
+
+    def get_sweep_duration_ms(self) -> int:
+        return 125
+
+    def get_average_type(self) -> str:
+        return "RMS"
+
+    def get_trigger_source(self) -> str:
+        return "EXT"
+
+
+@async_test
+async def test_mxa_settings_can_be_read_into_the_bandwidth_form() -> None:
+    app = IyzeeApp()
+    app.handles["mxa"] = FakeHandle(device=_FakeMxaSettings())
+    async with app.run_test() as pilot:
+        screen = await _open_sweep_screen(pilot)
+        await pilot.click("#read-mxa-settings")
+        await wait_until(pilot, lambda: screen.query_one("#mxa-center", Input).value == "3.5")
+        assert screen.query_one("#mxa-span", Input).value == "2"
+        assert screen.query_one("#mxa-averages", Input).value == "73"
+        assert screen.query_one("#mxa-sweep-time", Input).value == "125"
+        assert screen.query_one("#mxa-average-type", Select).value == "RMS"
+        assert screen.query_one("#mxa-trigger-source", Select).value == "EXT"
 
 
 # -- "Capture trace" ---------------------------------------------------------------------
