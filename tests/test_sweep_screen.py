@@ -19,7 +19,8 @@ from textual.pilot import Pilot
 from textual.widgets import Button, Input, RichLog, Select, Static
 
 from iyzee.devices.wavemeter import Rb_transitions
-from iyzee.experiment import FrequencyStep, runner as runner_mod
+from iyzee.experiment import FrequencyStep
+from iyzee.experiment import runner as runner_mod
 from iyzee.tui import app as app_mod
 from iyzee.tui.app import IyzeeApp
 from iyzee.tui.screens.sweep import (
